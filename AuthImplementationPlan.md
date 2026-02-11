@@ -13,11 +13,8 @@
 
 ## Proposed Architecture
 ### Storage
-- Use `expo-secure-store` for sensitive values: `absUsername`, `absPassword`, `absServerUrl`, `accessToken`, `refreshToken`, `lastAuthAt`.
-- Store offline-download metadata in the books store (planned `store-books.ts`) and expose a derived `hasOfflineContent` boolean based on `books[*].isDownloaded`.
-
-Notes:
-- `expo-secure-store` provides encrypted, local key-value storage, backed by Android Keystore and iOS Keychain. It is designed for securely storing credentials and tokens. See references section for details.
+- Use `expo-secure-store` for sensitive values: `absUsername`, `absPassword`, `absServerUrl`, `accessToken`, `refreshToken`.
+- Store offline-download metadata in the books store and expose a derived `hasOfflineContent` boolean based on `books[*].isDownloaded`.
 
 ### Auth Store (Zustand)
 - Create a dedicated `authStore` with small, focused scope.
@@ -33,22 +30,23 @@ Suggested State Shape
 - `serverUrl`: string | null
 - `lastAuthError`: string | null
 - `isOnline`: boolean | null
+- `loginRequired`: boolean
 
-Suggested Actions (examples)
+Suggested Actions
 - `hydrateFromStorage()`
 - `setOnlineStatus(isOnline)`
 - `loginWithPassword(username, password, serverUrl)`
 - `refreshSession()`
 - `logout()`
-- `enterOfflineOnlyMode()`
+- `setLoginRequired(required, message?)`
 
 ### Auth Flow (Startup)
 1. `hydrateFromStorage()` runs on app launch.
 2. Read SecureStore for stored credentials/tokens and set `hasStoredCredentials`.
-3. Read `store-books.ts` to set `hasOfflineContent` by checking `books[*].isDownloaded`.
+3. Read `store-books` to set `hasOfflineContent` by checking `books[*].isDownloaded`.
 4. App entry decision:
-   - If `hasStoredCredentials` is true, set `status = authenticated` immediately (even if offline).
-   - If `hasStoredCredentials` is false but `hasOfflineContent` is true, set `status = offlineOnly` and allow app entry.
+   - If tokens or credentials exist, set `status = authenticated` immediately (even if offline).
+   - If no stored session but `hasOfflineContent` is true, set `status = offlineOnly` and allow app entry.
    - If both are false, set `status = anonymous` and route to login.
 5. If online and refresh token exists, attempt `refreshSession()` in background after entry.
 6. If refresh fails and stored username/password exist, attempt `loginWithPassword()`.
@@ -59,7 +57,7 @@ Suggested Actions (examples)
 - Use a single in-flight refresh promise to avoid concurrent refresh calls.
 - Only fall back to password login when refresh fails or refresh token is missing.
 - Persist refresh-token rotation by always storing the latest `refreshToken` returned by `/auth/refresh` or `/login`.
- - Preemptively refresh based on JWT expiry (when expiry is available) instead of waiting for 401s.
+- Preemptively refresh based on JWT expiry (when expiry is available) instead of waiting for 401s.
 
 ### ABS Auth Endpoints (from discussion #4460)
 - `POST /login`
@@ -67,7 +65,7 @@ Suggested Actions (examples)
   - Response: `accessToken` and `refreshToken`.
 - `POST /auth/refresh`
   - Request header: `x-refresh-token: <refreshToken>`.
-  - Response: same as `/login` (accessToken + refreshToken). Only includes refreshToken if header is present.
+  - Response: `accessToken` and `refreshToken` (refresh token may be omitted; reuse the existing one).
 - `POST /logout`
   - Request header: `x-refresh-token: <refreshToken>` to invalidate the active refresh token.
 
@@ -82,13 +80,17 @@ Suggested Actions (examples)
 - When offline, skip refresh attempts and mark auth as `offlineOnly` if no valid token exists.
 - When connectivity returns, trigger a background refresh (and if that fails, attempt password login using stored credentials).
 
-## Implementation Steps
-1. Create `authStorage` module to encapsulate SecureStore reads/writes and key names.
-2. Create `authStore` with the state and actions above following Zustand best practices.
-3. Implement `authService` for login, refresh, and token validation (pure functions used by store actions).
-4. Add an `authFetch` (or API client) that reads `authStore` state and handles graceful exits.
-5. Integrate store hydration into app startup (e.g., app layout) and route based on `status`.
-6. Add offline-content check and a light UI indicator for offline-only mode.
+### Login Required UX
+- If refresh fails, set `loginRequired = true` and surface a login-required bottom sheet (Expo Router modal presentation).
+- Redirect to the login route while keeping the app accessible underneath for offline-only usage.
+- On successful login, clear `loginRequired` and return to the main tabs.
+
+### Debugging
+- Auth logging is enabled in `__DEV__` only and uses tagged logs:
+  - `[auth-storage]` for SecureStore reads/writes
+  - `[auth-store]` for hydrate/login/refresh flows
+  - `[auth-service]` for auth request/response parsing
+- Remove or mute these logs once the flow is stable.
 
 ## Testing Scenarios
 - First launch, no credentials, no downloads -> login screen.
@@ -100,9 +102,3 @@ Suggested Actions (examples)
 
 ## Open Questions
 - None at this time.
-
-## References
-- [Working with Zustand](https://tkdodo.eu/blog/working-with-zustand)
-- [Expo SecureStore](https://docs.expo.dev/versions/latest/sdk/securestore/)
-- [react-native-netinfo](https://github.com/react-native-netinfo/react-native-netinfo)
-- [Audiobookshelf Auth Discussion #4460](https://github.com/advplyr/audiobookshelf/discussions/4460)

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { router, useLocalSearchParams } from "expo-router";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
 
 export default function LoginScreen() {
@@ -7,7 +8,13 @@ export default function LoginScreen() {
   const storedServerUrl = useAuthStore((state) => state.serverUrl);
   const isOnline = useAuthStore((state) => state.isOnline);
   const lastAuthError = useAuthStore((state) => state.lastAuthError);
-  const { loginWithPassword } = useAuthActions();
+  const { loginWithPassword, setLoginRequired } = useAuthActions();
+  const params = useLocalSearchParams<{ mode?: string }>();
+
+  const mode = useMemo(() => {
+    return typeof params.mode === "string" ? params.mode : "required";
+  }, [params.mode]);
+  const isSheet = mode === "sheet";
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -19,6 +26,11 @@ export default function LoginScreen() {
     if (storedUsername) setUsername(storedUsername);
     if (storedServerUrl) setServerUrl(storedServerUrl);
   }, [storedServerUrl, storedUsername]);
+
+  const handleClose = () => {
+    setLoginRequired(false);
+    router.back();
+  };
 
   const handleLogin = async () => {
     setLocalError(null);
@@ -36,6 +48,12 @@ export default function LoginScreen() {
     setIsSubmitting(true);
     try {
       await loginWithPassword(username.trim(), password, serverUrl.trim());
+      if (isSheet) {
+        setLoginRequired(false);
+        router.back();
+      } else {
+        router.replace("/(tabs)");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Login failed";
       setLocalError(message);
@@ -44,12 +62,32 @@ export default function LoginScreen() {
     }
   };
 
-  return (
-    <View className="flex-1 bg-white px-6 pt-24">
-      <Text className="text-3xl font-semibold text-neutral-900">Sign in</Text>
-      <Text className="mt-2 text-neutral-600">Enter your Audiobookshelf server details.</Text>
+  const content = (
+    <View
+      className={
+        isSheet
+          ? "rounded-t-3xl bg-white px-6 pb-8 pt-6"
+          : "flex-1 bg-white px-6 pt-24"
+      }
+    >
+      <View className="flex-row items-center justify-between">
+        <Text className="text-3xl font-semibold text-neutral-900">Sign in</Text>
+        {isSheet ? (
+          <Pressable
+            onPress={handleClose}
+            className="rounded-full bg-neutral-100 px-3 py-1"
+          >
+            <Text className="text-sm text-neutral-700">Close</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <Text className="mt-2 text-neutral-600">
+        {isSheet
+          ? "Login required to stream. Offline downloads remain available."
+          : "Enter your Audiobookshelf server details."}
+      </Text>
 
-      <View className="mt-8 gap-4">
+      <View className="mt-6 gap-4">
         <View>
           <Text className="mb-2 text-sm font-medium text-neutral-700">Server URL</Text>
           <TextInput
@@ -57,7 +95,7 @@ export default function LoginScreen() {
             autoCorrect={false}
             value={serverUrl}
             onChangeText={setServerUrl}
-            placeholder="https://your-server.example.com/api"
+            placeholder="https://your-server.example.com"
             className="rounded-xl border border-neutral-200 px-4 py-3 text-base"
           />
         </View>
@@ -103,6 +141,17 @@ export default function LoginScreen() {
           <Text className="text-center text-base font-semibold text-white">Sign in</Text>
         )}
       </Pressable>
+    </View>
+  );
+
+  if (!isSheet) {
+    return content;
+  }
+
+  return (
+    <View className="flex-1 justify-end bg-black/40">
+      <Pressable className="flex-1" onPress={handleClose} />
+      {content}
     </View>
   );
 }

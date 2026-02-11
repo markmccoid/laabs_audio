@@ -1,5 +1,3 @@
-import { LoginResponse } from "../types/absTypes";
-
 export type AuthTokens = {
   accessToken: string;
   refreshToken: string;
@@ -22,7 +20,16 @@ export class AuthError extends Error {
   }
 }
 
-const normalizeServerUrl = (serverUrl: string) => serverUrl.trim().replace(/\/+$/, "");
+const log = (...args: unknown[]) => {
+  if (__DEV__) {
+    console.log("[auth-service]", ...args);
+  }
+};
+
+const normalizeServerUrl = (serverUrl: string) => {
+  const trimmed = serverUrl.trim().replace(/\/+$/, "");
+  return trimmed.replace(/\/api$/i, "");
+};
 
 const buildUrl = (serverUrl: string, path: string) => {
   const base = normalizeServerUrl(serverUrl);
@@ -30,19 +37,48 @@ const buildUrl = (serverUrl: string, path: string) => {
   return `${base}/${path}`;
 };
 
-const parseTokens = (data: LoginResponse): AuthTokens => {
+const parseTokens = (
+  data: unknown,
+  refreshTokenFallback?: string
+): AuthTokens => {
   if (!data || typeof data !== "object") {
     throw new AuthError("Invalid auth response", "INVALID_RESPONSE");
   }
 
-  const record = data.user;
-  const accessToken = record.accessToken;
-  const refreshToken = record.refreshToken;
+  const record = data as {
+    accessToken?: unknown;
+    refreshToken?: unknown;
+    user?: { accessToken?: unknown; refreshToken?: unknown };
+  };
 
-  if (typeof accessToken !== "string" || typeof refreshToken !== "string") {
+  const accessToken =
+    typeof record.accessToken === "string"
+      ? record.accessToken
+      : typeof record.user?.accessToken === "string"
+        ? record.user.accessToken
+        : null;
+
+  const refreshToken =
+    typeof record.refreshToken === "string"
+      ? record.refreshToken
+      : typeof record.user?.refreshToken === "string"
+        ? record.user.refreshToken
+        : typeof refreshTokenFallback === "string"
+          ? refreshTokenFallback
+          : null;
+
+  if (!accessToken || !refreshToken) {
+    log("parseTokens:missing", {
+      hasAccessToken: Boolean(accessToken),
+      hasRefreshToken: Boolean(refreshToken),
+    });
     throw new AuthError("Missing auth tokens", "MISSING_TOKENS");
   }
 
+  log("parseTokens:ok", {
+    hasAccessToken: Boolean(accessToken),
+    hasRefreshToken: Boolean(refreshToken),
+  });
   return { accessToken, refreshToken };
 };
 
@@ -65,6 +101,7 @@ const fetchJson = async (url: string, options: RequestInit) => {
 export const authService = {
   async login({ username, password, serverUrl }: LoginParams) {
     const url = buildUrl(serverUrl, "/login");
+    log("login:request", { serverUrl: normalizeServerUrl(serverUrl), username });
     const data = await fetchJson(url, {
       method: "POST",
       headers: {
@@ -73,11 +110,13 @@ export const authService = {
       },
       body: JSON.stringify({ username, password }),
     });
+    log("login:response");
     return parseTokens(data);
   },
 
   async refresh(serverUrl: string, refreshToken: string) {
     const url = buildUrl(serverUrl, "/auth/refresh");
+    log("refresh:request", { serverUrl: normalizeServerUrl(serverUrl) });
     const data = await fetchJson(url, {
       method: "POST",
       headers: {
@@ -85,7 +124,8 @@ export const authService = {
       },
     });
 
-    return parseTokens(data);
+    log("refresh:response");
+    return parseTokens(data, refreshToken);
   },
 
   async logout(serverUrl: string, refreshToken: string) {

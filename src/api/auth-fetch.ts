@@ -77,6 +77,9 @@ export const authFetch = async (
     if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
       throw new AuthUnavailableError("Offline", "OFFLINE");
     }
+    authStore
+      .getState()
+      .actions.setLoginRequired(true, "Login required to stream");
     throw new AuthUnavailableError(
       "Unable to refresh session",
       "TOKEN_REFRESH_FAILED"
@@ -84,6 +87,9 @@ export const authFetch = async (
   }
 
   if (!token) {
+    authStore
+      .getState()
+      .actions.setLoginRequired(true, "Login required to stream");
     throw new AuthUnavailableError(
       "Unable to refresh session",
       "TOKEN_REFRESH_FAILED"
@@ -112,6 +118,9 @@ export const authFetch = async (
     );
   }
   if (!refreshed) {
+    authStore
+      .getState()
+      .actions.setLoginRequired(true, "Login required to stream");
     throw new AuthUnavailableError(
       "Unable to refresh session",
       "TOKEN_REFRESH_FAILED"
