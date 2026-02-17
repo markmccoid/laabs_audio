@@ -22,7 +22,6 @@ export class AuthError extends Error {
 
 const log = (...args: unknown[]) => {
   if (__DEV__) {
-    console.log("[auth-service]", ...args);
   }
 };
 

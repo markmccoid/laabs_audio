@@ -5,7 +5,7 @@ export class AbsApiError extends Error {
   constructor(
     message: string,
     public status?: number,
-    public body?: unknown
+    public body?: unknown,
   ) {
     super(message);
     this.name = "AbsApiError";
@@ -26,7 +26,13 @@ export class AbsOfflineError extends AbsApiError {
   }
 }
 
-const parseJson = async <T,>(response: Response): Promise<T> => {
+const log = (...args: unknown[]) => {
+  if (__DEV__) {
+    console.log(...args);
+  }
+};
+
+const parseJson = async <T>(response: Response): Promise<T> => {
   if (response.status === 204) {
     return undefined as T;
   }
@@ -36,7 +42,17 @@ const parseJson = async <T,>(response: Response): Promise<T> => {
     return undefined as T;
   }
 
-  return JSON.parse(text) as T;
+  const contentType = response.headers.get("content-type") ?? "";
+  const isJson = contentType.includes("application/json") || contentType.includes("+json");
+  if (!isJson) {
+    return text as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return text as T;
+  }
 };
 
 const buildError = async (response: Response) => {
@@ -51,9 +67,7 @@ const handleAuthUnavailable = (error: AuthUnavailableError): never => {
   }
 
   if (error.code === "TOKEN_REFRESH_FAILED" || error.code === "UNAUTHENTICATED") {
-    authStore
-      .getState()
-      .actions.setLoginRequired(true, "Login required to stream");
+    authStore.getState().actions.setLoginRequired(true, "Login required to stream");
     throw new AbsAuthRequiredError("Login required");
   }
 
@@ -63,10 +77,11 @@ const handleAuthUnavailable = (error: AuthUnavailableError): never => {
 export const absClient = {
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     let response: Response;
-
+    const method = (options.method ?? "GET").toUpperCase();
     try {
       response = await authFetch(path, options);
     } catch (error) {
+      log("[abs-client] request:error", { method, path, error });
       if (error instanceof AuthUnavailableError) {
         return handleAuthUnavailable(error);
       }
@@ -74,16 +89,22 @@ export const absClient = {
     }
 
     if (response.status === 401) {
-      authStore
-        .getState()
-        .actions.setLoginRequired(true, "Login required to stream");
+      log("[abs-client] response:401", { method, path });
+      authStore.getState().actions.setLoginRequired(true, "Login required to stream");
       throw new AbsAuthRequiredError("Login required");
     }
 
     if (!response.ok) {
-      throw await buildError(response);
+      const error = await buildError(response);
+      log("[abs-client] response:error", {
+        method,
+        path,
+        status: response.status,
+        message: error.message,
+      });
+      throw error;
     }
-
+    log("[abs-client] response:ok", { method, path, status: response.status });
     return parseJson<T>(response);
   },
 

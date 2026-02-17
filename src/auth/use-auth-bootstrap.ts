@@ -1,13 +1,26 @@
 import { useEffect } from "react";
 import NetInfo from "@react-native-community/netinfo";
 import { useAuthActions, useAuthStore } from "./auth-store";
-import { selectHasOfflineContent, useBooksStore } from "../store/store-books";
+import {
+  selectHasOfflineContent,
+  useBooksActions,
+  useBooksStore,
+} from "../store/store-books";
 
 export const useAuthBootstrap = () => {
   const status = useAuthStore((state) => state.status);
   const isOnline = useAuthStore((state) => state.isOnline);
   const refreshToken = useAuthStore((state) => state.refreshToken);
-  const hasOfflineContent = useBooksStore(selectHasOfflineContent);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const storedUsername = useAuthStore((state) => state.storedUsername);
+  const serverUrl = useAuthStore((state) => state.serverUrl);
+  const resolvedUserKey =
+    activeLibraryUserKey ??
+    (storedUsername && serverUrl ? `${storedUsername}::${serverUrl}` : null);
+  const hasOfflineContent = useBooksStore((state) =>
+    selectHasOfflineContent(state, resolvedUserKey),
+  );
+  const { syncPendingBookmarks, syncPendingBookmarkDeletes } = useBooksActions();
   const {
     hydrateFromStorage,
     setOnlineStatus,
@@ -39,6 +52,13 @@ export const useAuthBootstrap = () => {
       refreshSession().catch(() => undefined);
     }
   }, [isOnline, refreshSession, refreshToken, status]);
+
+  useEffect(() => {
+    if (!isOnline) return;
+    if (status !== "authenticated") return;
+    syncPendingBookmarks().catch(() => undefined);
+    syncPendingBookmarkDeletes().catch(() => undefined);
+  }, [isOnline, status, syncPendingBookmarkDeletes, syncPendingBookmarks]);
 
   return { status };
 };

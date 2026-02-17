@@ -1,5 +1,6 @@
 import React from "react";
 import { Pressable, Text, View } from "react-native";
+import { router } from "expo-router";
 import { useAuthActions, useAuthStore } from "../../../auth/auth-store";
 
 const Settings = () => {
@@ -7,6 +8,7 @@ const Settings = () => {
   const isOnline = useAuthStore((state) => state.isOnline);
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const serverUrl = useAuthStore((state) => state.serverUrl);
+  const activeLibraryName = useAuthStore((state) => state.activeLibraryName);
   const { logout } = useAuthActions();
 
   return (
@@ -26,10 +28,24 @@ const Settings = () => {
           Server: {serverUrl}
         </Text>
       ) : null}
+      {activeLibraryName ? (
+        <Text className="mt-2 text-sm text-neutral-600">
+          Active library: {activeLibraryName}
+        </Text>
+      ) : null}
+
+      <Pressable
+        onPress={() => router.push("/library-picker")}
+        className="mt-4 rounded-xl border border-neutral-200 px-4 py-3"
+      >
+        <Text className="text-center text-base font-semibold text-neutral-900">
+          Change library
+        </Text>
+      </Pressable>
 
       <Pressable
         onPress={() => logout().catch(() => undefined)}
-        className="mt-6 rounded-xl bg-neutral-900 px-4 py-3"
+        className="mt-3 rounded-xl bg-neutral-900 px-4 py-3"
       >
         <Text className="text-center text-base font-semibold text-white">
           Log out

@@ -1,6 +1,6 @@
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
 
 export default function LoginScreen() {
@@ -52,7 +52,7 @@ export default function LoginScreen() {
         setLoginRequired(false);
         router.back();
       } else {
-        router.replace("/(tabs)");
+        router.replace("/(tabs)/(home)");
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Login failed";
@@ -64,19 +64,12 @@ export default function LoginScreen() {
 
   const content = (
     <View
-      className={
-        isSheet
-          ? "rounded-t-3xl bg-white px-6 pb-8 pt-6"
-          : "flex-1 bg-white px-6 pt-24"
-      }
+      className={isSheet ? "rounded-t-3xl bg-white px-6 pb-8 pt-6" : "flex-1 bg-white px-6 pt-24"}
     >
       <View className="flex-row items-center justify-between">
         <Text className="text-3xl font-semibold text-neutral-900">Sign in</Text>
         {isSheet ? (
-          <Pressable
-            onPress={handleClose}
-            className="rounded-full bg-neutral-100 px-3 py-1"
-          >
+          <Pressable onPress={handleClose} className="rounded-full bg-neutral-100 px-3 py-1">
             <Text className="text-sm text-neutral-700">Close</Text>
           </Pressable>
         ) : null}

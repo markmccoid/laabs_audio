@@ -1,8 +1,8 @@
-import { absClient } from "./abs-client";
 import { authStore } from "../auth/auth-store";
-import { favoritesApi } from "./favorites-api";
-import { buildCoverUrls } from "./cover-urls";
 import type { GetLibraryItemsResponse, LibraryItem } from "../types/absTypes";
+import { absClient } from "./abs-client";
+import { buildCoverUrls } from "./cover-urls";
+import { favoritesApi } from "./favorites-api";
 
 export type FilterType = "genres" | "tags" | "authors" | "series" | "progress";
 
@@ -134,6 +134,8 @@ export const libraryItemsApi = {
         asin: item.media.metadata.asin,
         isFinished: finishedItemIdSet.has(item.id),
         isFavorite: favoriteItemIdSet.has(item.id),
+        // _searchCore: `${item.media.metadata.title.toLowerCase()} ${item.media.metadata.subtitle?.toLowerCase()} ${item.media.metadata.authorName?.toLowerCase()}`,
+        // _searchDesc: item.media.metadata.description.toLowerCase(), // Only used if toggle is on
       };
     });
   },
@@ -189,10 +191,7 @@ export const libraryItemsApi = {
 
     const resultMap = new Map<string, FavoriteOrFinishedItem>();
 
-    const mergeItem = (
-      item: LibraryItem,
-      type: "isFavorite" | "isRead",
-    ) => {
+    const mergeItem = (item: LibraryItem, type: "isFavorite" | "isRead") => {
       const coverUrls = buildCoverUrls(item.id, { token });
 
       const existing = resultMap.get(item.id);

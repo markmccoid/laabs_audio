@@ -76,7 +76,6 @@ export const downloadsApi = {
           const fileInfo = await FileSystem.getInfoAsync(tempFileUri);
           if (fileInfo.exists) {
             await FileSystem.deleteAsync(tempFileUri);
-            console.log("Temporary file cleaned up:", tempFileUri);
           }
         } catch (cleanupError) {
           console.warn("Failed to clean up temporary file:", cleanupError);

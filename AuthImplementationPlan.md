@@ -31,6 +31,9 @@ Suggested State Shape
 - `lastAuthError`: string | null
 - `isOnline`: boolean | null
 - `loginRequired`: boolean
+- `activeLibraryId`: string | null
+- `activeLibraryName`: string | null (persisted for UI display)
+- `activeLibraryUserKey`: string | null (per-user ownership)
 
 Suggested Actions
 - `hydrateFromStorage()`
@@ -39,6 +42,8 @@ Suggested Actions
 - `refreshSession()`
 - `logout()`
 - `setLoginRequired(required, message?)`
+- `setActiveLibrary({ id, name })`
+- `clearActiveLibrary()`
 
 ### Auth Flow (Startup)
 1. `hydrateFromStorage()` runs on app launch.
@@ -84,6 +89,13 @@ Suggested Actions
 - If refresh fails, set `loginRequired = true` and surface a login-required bottom sheet (Expo Router modal presentation).
 - Redirect to the login route while keeping the app accessible underneath for offline-only usage.
 - On successful login, clear `loginRequired` and return to the main tabs.
+
+### Active Library Selection
+- After a successful login, fetch libraries and auto-select the first one.
+- If multiple libraries are returned, present a bottom sheet picker so the user can choose.
+- Persist both `activeLibraryId` and `activeLibraryName` for quick UI display.
+- If `activeLibraryId` is missing or not found in the returned list, default to the first library.
+- If library fetch fails, allow entry and show a non-blocking retry prompt.
 
 ### Debugging
 - Auth logging is enabled in `__DEV__` only and uses tagged logs:

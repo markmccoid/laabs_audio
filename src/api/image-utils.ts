@@ -17,7 +17,6 @@ export const getCoverUri = async (
     await getImageSize(coverUrl);
     return { coverUrl, type: "passthrough" };
   } catch {
-    console.log("getCoverUri ERROR-No Cover Found");
   }
   return { coverUrl: "", type: "passthrough" };
 };

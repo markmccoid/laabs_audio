@@ -42,7 +42,6 @@ export const shelvesApi = {
     try {
       resp = await librariesApi.getPersonalized(libraryIdToUse, { limit: 16 });
     } catch (error) {
-      console.log("Error getting book shelves", error);
       return null;
     }
 

@@ -3,7 +3,8 @@ const { withUniwindConfig } = require("uniwind/metro");
 
 const config = getDefaultConfig(__dirname);
 
-// your metro modifications
+// Allow importing .m4b audiobook assets
+config.resolver.assetExts = [...config.resolver.assetExts, "m4b"];
 
 module.exports = withUniwindConfig(config, {
   // relative path to your global.css file (from previous step)

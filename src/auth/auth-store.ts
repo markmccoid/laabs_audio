@@ -8,7 +8,6 @@ import { mmkvStorage } from "../store/mmkv-storage";
 
 const log = (...args: unknown[]) => {
   if (__DEV__) {
-    console.log("[auth-store]", ...args);
   }
 };
 
@@ -31,13 +30,15 @@ export type AuthState = {
   lastAuthError: string | null;
   loginRequired: boolean;
   activeLibraryId: string | null;
+  activeLibraryName: string | null;
+  activeLibraryUserKey: string | null;
   actions: {
     hydrateFromStorage: (initialOfflineContent?: boolean) => Promise<void>;
     setOnlineStatus: (isOnline: boolean) => void;
     setHasOfflineContent: (hasOfflineContent: boolean) => void;
     setLoginRequired: (required: boolean, message?: string | null) => void;
-    setActiveLibraryId: (libraryId: string | null) => void;
-    clearActiveLibraryId: () => void;
+    setActiveLibrary: (library: { id: string; name: string }) => void;
+    clearActiveLibrary: () => void;
     loginWithPassword: (
       username: string,
       password: string,
@@ -69,6 +70,11 @@ const getHasStoredSession = (state: {
   refreshToken: string | null;
 }) => Boolean(state.hasStoredCredentials || state.refreshToken || state.accessToken);
 
+const getUserKey = (username: string | null, serverUrl: string | null) => {
+  if (!username || !serverUrl) return null;
+  return `${username}::${serverUrl}`;
+};
+
 let refreshPromise: Promise<string | null> | null = null;
 
 export const authStore = createStore<AuthState>()(
@@ -86,6 +92,8 @@ export const authStore = createStore<AuthState>()(
   lastAuthError: null,
   loginRequired: false,
   activeLibraryId: null,
+  activeLibraryName: null,
+  activeLibraryUserKey: null,
   actions: {
     hydrateFromStorage: async (initialOfflineContent) => {
       log("hydrate:start");
@@ -105,6 +113,9 @@ export const authStore = createStore<AuthState>()(
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
       });
+      const userKey = getUserKey(credentials.username, credentials.serverUrl);
+      const hasMatchingLibrary =
+        Boolean(userKey) && get().activeLibraryUserKey === userKey;
 
       log("hydrate:computed", {
         hasStoredCredentials,
@@ -112,6 +123,7 @@ export const authStore = createStore<AuthState>()(
         hasRefreshToken: Boolean(tokens.refreshToken),
         hasStoredSession,
         hasOfflineContent: offlineContent,
+        hasMatchingLibrary,
       });
 
       set((state) => ({
@@ -125,6 +137,9 @@ export const authStore = createStore<AuthState>()(
         status: computeEntryStatus(hasStoredSession, offlineContent),
         loginRequired: hasStoredSession ? false : state.loginRequired,
         lastAuthError: hasStoredSession ? null : state.lastAuthError,
+        activeLibraryId: hasMatchingLibrary ? state.activeLibraryId : null,
+        activeLibraryName: hasMatchingLibrary ? state.activeLibraryName : null,
+        activeLibraryUserKey: hasMatchingLibrary ? state.activeLibraryUserKey : userKey,
       }));
 
       log("hydrate:done", {
@@ -166,18 +181,31 @@ export const authStore = createStore<AuthState>()(
       }));
     },
 
-    setActiveLibraryId: (libraryId) => {
-      const trimmed = libraryId?.trim() ?? "";
-      set({ activeLibraryId: trimmed ? trimmed : null });
+    setActiveLibrary: (library) => {
+      const trimmedId = library.id.trim();
+      const trimmedName = library.name.trim();
+      const userKey = getUserKey(get().storedUsername, get().serverUrl);
+      set({
+        activeLibraryId: trimmedId,
+        activeLibraryName: trimmedName,
+        activeLibraryUserKey: userKey,
+      });
     },
 
-    clearActiveLibraryId: () => {
-      set({ activeLibraryId: null });
+    clearActiveLibrary: () => {
+      set({
+        activeLibraryId: null,
+        activeLibraryName: null,
+        activeLibraryUserKey: null,
+      });
     },
 
     loginWithPassword: async (username, password, serverUrl) => {
       log("login:start", { username, serverUrl });
       const normalizedServerUrl = authService.normalizeServerUrl(serverUrl);
+      const previousUserKey = getUserKey(get().storedUsername, get().serverUrl);
+      const nextUserKey = getUserKey(username, normalizedServerUrl);
+      const isSameUser = previousUserKey === nextUserKey;
       const tokens = await authService.login({
         username,
         password,
@@ -208,6 +236,9 @@ export const authStore = createStore<AuthState>()(
         status: computeEntryStatus(true, state.hasOfflineContent),
         lastAuthError: null,
         loginRequired: false,
+        activeLibraryId: isSameUser ? state.activeLibraryId : null,
+        activeLibraryName: isSameUser ? state.activeLibraryName : null,
+        activeLibraryUserKey: isSameUser ? state.activeLibraryUserKey : nextUserKey,
       }));
 
       log("login:done", { status: "authenticated" });
@@ -339,6 +370,8 @@ export const authStore = createStore<AuthState>()(
         accessTokenExpiresAt: null,
         hasStoredCredentials: false,
         activeLibraryId: null,
+        activeLibraryName: null,
+        activeLibraryUserKey: null,
         status: computeEntryStatus(false, current.hasOfflineContent),
         lastAuthError: null,
         loginRequired: false,
@@ -350,7 +383,11 @@ export const authStore = createStore<AuthState>()(
     {
       name: "laabs-auth",
       storage: createJSONStorage(() => mmkvStorage),
-      partialize: (state) => ({ activeLibraryId: state.activeLibraryId }),
+      partialize: (state) => ({
+        activeLibraryId: state.activeLibraryId,
+        activeLibraryName: state.activeLibraryName,
+        activeLibraryUserKey: state.activeLibraryUserKey,
+      }),
     },
   ),
 );
