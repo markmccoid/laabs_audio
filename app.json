@@ -15,7 +15,9 @@
         "ITSAppUsesNonExemptEncryption": false,
         "RCTAsyncStorageExcludeFromBackup": false,
         "NSMicrophoneUsageDescription": "While this app does not use the microphone, the APIs used to play audio still have access to the microphone.  The app will not however ever use the microphone on your device.",
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
@@ -51,6 +53,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "79a00c8a-7da4-4da1-a741-4c17c85108ea"
+      }
     }
   }
 }
