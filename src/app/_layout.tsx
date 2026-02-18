@@ -3,6 +3,7 @@ import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client
 import { Stack, router, useSegments } from "expo-router";
 import { useEffect, useMemo, useRef } from "react";
 import { ActivityIndicator, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useAuthStore } from "../auth/auth-store";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
 import "../global.css";
@@ -22,9 +23,7 @@ export default function RootLayout() {
   const { status } = useAuthBootstrap();
   const loginRequired = useAuthStore((state) => state.loginRequired);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore(
-    (state) => state.activeLibraryUserKey,
-  );
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const segments = useSegments();
   const previousStatus = useRef<typeof status | null>(null);
   const previousLibraryId = useRef<string | null>(null);
@@ -75,9 +74,7 @@ export default function RootLayout() {
 
     // Clear persisted query data when switching libraries
     const didSwitchLibrary =
-      Boolean(prevLibraryId) &&
-      Boolean(activeLibraryId) &&
-      prevLibraryId !== activeLibraryId;
+      Boolean(prevLibraryId) && Boolean(activeLibraryId) && prevLibraryId !== activeLibraryId;
     if (didSwitchLibrary) {
       mmkvQueryPersister.removeClient();
       queryClient.clear();
@@ -110,40 +107,39 @@ export default function RootLayout() {
   }
 
   return (
-    <PersistQueryClientProvider
-      client={queryClient}
-      persistOptions={persistOptions}
-    >
-      {/* <LibrarySelectionGate /> */}
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen
-          name="login"
-          options={{
-            presentation: "formSheet",
-            animation: "slide_from_bottom",
-            // sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-            sheetGrabberVisible: true,
-            sheetCornerRadius: 20,
-            contentStyle: {
-              backgroundColor: "white",
-            },
-          }}
-        />
-        <Stack.Screen
-          name="library-picker"
-          options={{
-            presentation: "formSheet",
-            animation: "slide_from_bottom",
-            sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-            sheetGrabberVisible: true,
-            sheetCornerRadius: 20,
-            contentStyle: {
-              backgroundColor: "white",
-            },
-          }}
-        />
-      </Stack>
+    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
+      <GestureHandlerRootView>
+        {/* <LibrarySelectionGate /> */}
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen
+            name="login"
+            options={{
+              presentation: "formSheet",
+              animation: "slide_from_bottom",
+              // sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+              sheetGrabberVisible: true,
+              sheetCornerRadius: 20,
+              contentStyle: {
+                backgroundColor: "white",
+              },
+            }}
+          />
+          <Stack.Screen
+            name="library-picker"
+            options={{
+              presentation: "formSheet",
+              animation: "slide_from_bottom",
+              sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+              sheetGrabberVisible: true,
+              sheetCornerRadius: 20,
+              contentStyle: {
+                backgroundColor: "white",
+              },
+            }}
+          />
+        </Stack>
+      </GestureHandlerRootView>
     </PersistQueryClientProvider>
   );
 }

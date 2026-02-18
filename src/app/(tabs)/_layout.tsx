@@ -4,7 +4,7 @@ import { Image } from "expo-image";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 export default function TabLayout() {
   const currentBook = useCurrentPlaybackBookDetails();
@@ -12,8 +12,8 @@ export default function TabLayout() {
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const isPlaying = playbackState === "playing";
   const currentBookId = usePlaybackStore((state) => state.bookId);
-  const queue = usePlaybackStore((state) => state.queue);
-  const queueLength = queue.length;
+
+  const hasLoadedBook = usePlaybackStore((s) => Boolean(s.bookId) && s.queue.length > 0);
 
   const testMini = () => {
     setShowMini(false);
@@ -47,13 +47,21 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
-      {currentBookId && (
+      {hasLoadedBook && (
         <NativeTabs.BottomAccessory>
-          <View className="flex-row items-center justify-between h-full px-4">
-            <Image source={{ uri: currentBook?.coverFull }} style={{ width: 40, height: 40 }} />
-            <View className="flex-col items-center flex-1 w-[100] border">
-              <Text className="border" style={{ fontSize: 12 }} numberOfLines={1}>
-                {currentBook?.title} akldsfj;ladjfklajl;dsfjlajdfs
+          <View className="flex-row items-center justify-between h-full px-4 gap-2">
+            <Image
+              source={{ uri: currentBook?.coverFull }}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 8,
+                borderWidth: StyleSheet.hairlineWidth,
+              }}
+            />
+            <View className="flex-col items-center flex-1 w-[100]">
+              <Text style={{ fontSize: 12 }} numberOfLines={1}>
+                {currentBook?.title}
               </Text>
               <Text className="" style={{ fontSize: 12 }}>
                 by {currentBook?.author}

@@ -4,8 +4,14 @@ import React from "react";
 const SearchLayout = () => {
   return (
     <Stack>
-      <Stack.Screen name="index" options={{ headerTransparent: true, headerTitle: "" }} />
-      <Stack.Screen name="[libraryItemId]" options={{ headerTransparent: true, headerTitle: "" }} />
+      <Stack.Screen
+        name="index"
+        options={{ headerLargeTitleEnabled: true, headerTransparent: true, headerTitle: "Search" }}
+      />
+      <Stack.Screen
+        name="[libraryItemId]"
+        options={{ headerLargeTitleEnabled: false, headerTransparent: true, headerTitle: "" }}
+      />
     </Stack>
   );
 };
