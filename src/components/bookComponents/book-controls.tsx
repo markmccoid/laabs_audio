@@ -1,7 +1,8 @@
 import { playerService, usePlaybackStore } from "@/player";
 import { SymbolView, type SFSymbol } from "expo-symbols";
+import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
-import PlayPauseAnimation from "./play-pause-animation";
+import PlayPauseAnimation, { type PlaybackControlVisualState } from "./play-pause-animation";
 
 type Props = {
   libraryItemId?: string;
@@ -50,13 +51,45 @@ const BookControls = ({ libraryItemId }: Props) => {
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const currentBookId = usePlaybackStore((state) => state.bookId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
+  const [pendingLoadBookId, setPendingLoadBookId] = useState<string | null>(null);
 
   const hasBookId = Boolean(libraryItemId);
   const isBookActive = hasBookId && currentBookId === libraryItemId;
   const isBookLoaded = isBookActive && queueLength > 0;
-  const isLoading = playbackState === "loading";
-  const canControl = hasBookId && isBookLoaded && !isLoading;
-  const isPlaying = isBookActive && playbackState === "playing";
+  const isPendingForViewedBook = Boolean(libraryItemId && pendingLoadBookId === libraryItemId);
+
+  // Clear pending-load marker once the viewed book has either loaded or playback left loading.
+  useEffect(() => {
+    if (!libraryItemId) return;
+    if (pendingLoadBookId !== libraryItemId) return;
+
+    const isLoadedForViewedBook = isBookActive && isBookLoaded;
+    const canResolvePending =
+      isLoadedForViewedBook ||
+      playbackState === "error" ||
+      playbackState === "ended";
+
+    if (canResolvePending) {
+      setPendingLoadBookId(null);
+    }
+  }, [libraryItemId, pendingLoadBookId, playbackState, isBookActive, isBookLoaded]);
+
+  const viewedBookState: PlaybackControlVisualState = (() => {
+    if (!libraryItemId) return "not-loaded";
+    if (isPendingForViewedBook && (!isBookActive || playbackState === "loading")) return "loading";
+    if (isBookActive && playbackState === "loading") return "loading";
+    if (!isBookActive || !isBookLoaded) return "not-loaded";
+    if (playbackState === "playing") return "playing";
+    if (playbackState === "paused") return "paused";
+    return "loaded-active";
+  })();
+
+  const isLoading = viewedBookState === "loading";
+  const isPlaying = viewedBookState === "playing";
+  const canControl =
+    viewedBookState === "playing" ||
+    viewedBookState === "paused" ||
+    viewedBookState === "loaded-active";
   const canToggle = hasBookId && !isLoading;
 
   const seekBackwardSeconds = 15;
@@ -69,13 +102,26 @@ const BookControls = ({ libraryItemId }: Props) => {
   const baseTintColor = canControl || canToggle ? "#111827" : "#9ca3af";
 
   const handleToggle = async () => {
-    console.log("Book Active?", isBookActive, libraryItemId);
     if (!libraryItemId || isLoading) return;
     if (!isBookActive) {
-      await playerService.loadBook(libraryItemId, { autoPlay: true });
+      // Mark this viewed book as pending immediately so the loading animation starts
+      // before playback store session metadata is fully populated.
+      setPendingLoadBookId(libraryItemId);
+      try {
+        await playerService.loadBook(libraryItemId, { autoPlay: true });
+      } catch {
+        setPendingLoadBookId(null);
+      }
       return;
     }
-    await playerService.togglePlayPause();
+    if (!isBookLoaded) {
+      setPendingLoadBookId(libraryItemId);
+    }
+    try {
+      await playerService.togglePlayPause();
+    } catch {
+      setPendingLoadBookId(null);
+    }
   };
 
   const handleSeekBackward = async () => {
@@ -138,7 +184,7 @@ const BookControls = ({ libraryItemId }: Props) => {
           />
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={isPlaying ? "Pause" : "Play"}
+            accessibilityLabel={isLoading ? "Loading book" : isPlaying ? "Pause" : "Play"}
             onPress={handleToggle}
             disabled={!canToggle}
             style={({ pressed }) => ({
@@ -155,11 +201,9 @@ const BookControls = ({ libraryItemId }: Props) => {
             })}
           >
             <PlayPauseAnimation
-              isPlaying={isPlaying}
+              visualState={viewedBookState}
               size={34}
               duration={600}
-              isBookActive={isBookActive}
-              isBookLoaded={isBookLoaded}
               tintColor="#f8fafc"
             />
           </Pressable>

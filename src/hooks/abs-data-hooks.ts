@@ -10,7 +10,7 @@ import {
 } from "../api/library-items-api";
 import { meApi, type ItemsInProgressSummary } from "../api/me-api";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
-import { useBooksActions } from "../store/store-books";
+import { selectBookPayload, useBooksActions, useBooksStore } from "../store/store-books";
 import {
   useFiltersStore,
   useGenres,
@@ -167,6 +167,7 @@ export const useGetBooks = () => {
   } = useQuery({
     queryKey: ["books", activeLibraryId],
     queryFn: async () => {
+      console.log("Running useGetBooks", activeLibraryId);
       if (!activeLibraryId) return [];
       return libraryItemsApi.getItems({ libraryId: activeLibraryId });
     },
@@ -326,50 +327,81 @@ export const useMoveBookToTopOfInProgress = () => {
 //# ----------------------------------------------
 //# useGetItemDetails - Safe version that handles unauthenticated state
 //# ----------------------------------------------
-export const useGetItemDetails = (itemId?: string) => {
-  const status = useAuthStore((state) => state.status);
+export type ItemDetailsWithSummary = LibraryItemSummary &
+  Partial<ItemDetails> & {
+    coverUri?: string;
+  };
+
+export const useCachedBookSummary = (itemId?: string) => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const queryClient = useQueryClient();
+  const booksQueryKey = ["books", activeLibraryId] as const;
+  const immediateCachedBooks = activeLibraryId
+    ? queryClient.getQueryData<LibraryItemsSummary>(booksQueryKey)
+    : undefined;
 
-  type ItemDetailsWithSummary = LibraryItemSummary &
-    Partial<ItemDetails> & {
-      coverUri?: string;
-    };
+  // Subscribe to the existing books query cache without triggering a fetch.
+  const { data: cachedBooks } = useQuery<LibraryItemsSummary>({
+    queryKey: booksQueryKey,
+    queryFn: async () => immediateCachedBooks ?? [],
+    enabled: false,
+    // Ensure first render can synchronously read already-cached books data.
+    initialData: immediateCachedBooks,
+  });
 
-  // Pull from the books list cache for instant UI while details fetch in background
-  const cachedSummary = useMemo(() => {
-    if (!activeLibraryId || !itemId) return undefined;
-    const cachedBooks = queryClient.getQueryData<LibraryItemsSummary>(["books", activeLibraryId]);
-    return cachedBooks?.find((book) => book.id === itemId);
-  }, [activeLibraryId, itemId, queryClient]);
+  const summaryFromQueryCache = useMemo(() => {
+    if (!itemId) return null;
+    return (cachedBooks ?? immediateCachedBooks)?.find((book) => book.id === itemId) ?? null;
+  }, [cachedBooks, immediateCachedBooks, itemId]);
+
+  const summaryFromBooksStore = useBooksStore((state) => {
+    if (!itemId) return null;
+    return selectBookPayload(state, itemId).summary;
+  });
+
+  return summaryFromQueryCache ?? summaryFromBooksStore ?? null;
+};
+
+export const useGetItemDetails = (itemId?: string) => {
+  const status = useAuthStore((state) => state.status);
+  const cachedSummary = useCachedBookSummary(itemId);
 
   // Always call useQuery, but control when it's enabled
-  const { data, isPending, isError, isLoading, error, ...rest } = useQuery<
-    ItemDetails,
-    Error,
-    ItemDetailsWithSummary
-  >({
+  const {
+    data: details,
+    isPending,
+    isError,
+    isLoading,
+    error,
+    ...rest
+  } = useQuery<ItemDetails, Error>({
     queryKey: ["itemDetails", itemId],
     queryFn: async () => {
       if (!itemId) throw new Error("No item ID provided");
       return itemsApi.getItemDetails(itemId);
     },
     enabled: status === "authenticated" && !!itemId,
-    // Use cached summary data as an immediate placeholder
-    placeholderData: cachedSummary
-      ? { ...cachedSummary, coverUri: cachedSummary.coverFull }
-      : undefined,
-    // Merge summary and detailed data to avoid losing list fields
-    select: (details) =>
-      cachedSummary
+    staleTime: 10000,
+  });
+
+  const data = useMemo<ItemDetailsWithSummary | undefined>(() => {
+    if (details) {
+      return cachedSummary
         ? {
             ...cachedSummary,
             ...details,
             coverUri: details.coverUri ?? cachedSummary.coverFull,
           }
-        : details,
-    staleTime: 10000,
-  });
+        : (details as ItemDetailsWithSummary);
+    }
+
+    if (!cachedSummary) return undefined;
+
+    return {
+      ...cachedSummary,
+      coverUri: cachedSummary.coverFull,
+    };
+  }, [details, cachedSummary]);
 
   // Return appropriate data based on authentication state
   if (status !== "authenticated") {

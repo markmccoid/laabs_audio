@@ -105,6 +105,12 @@ Sync targets:
 - `error`: last playback error
 - `debugMessage` / `debugStatus` / `debugSnapshot`: debug info
 
+Rate ownership:
+
+- Active playback rate lives in `playbackStore.rate`.
+- Per-book persisted rate lives in `booksStore.progressById[bookId].playbackRate`.
+- Default per-book rate is `1.0` when no value is stored.
+
 Note: the store only persists `bookId`, `currentTrackIndex`, `positionMs`, and `rate`. After a reload, the UI must call `loadBook` or `loadLocalFile` to rebuild the queue.
 
 ## Component API (Common Tasks)
@@ -121,6 +127,82 @@ const currentChapterId = usePlaybackStore((state) => state.currentChapterId);
 
 const isPlaying = playbackState === "playing";
 ```
+
+## Book Controls Visual State Machine
+
+`src/components/bookComponents/book-controls.tsx` treats each viewed book as an explicit UI state machine, independent from whatever book may currently be active in the global player.
+
+States used by the control button:
+
+- `not-loaded`
+  - The viewed `libraryItemId` is not the active player book.
+  - Primary icon: `livephoto.play` (static).
+  - Chapter/seek controls are disabled.
+- `loading`
+  - Triggered immediately when play is pressed on a non-active viewed book.
+  - Primary icon: `livephoto.play` (spinning).
+  - Chapter/seek controls are disabled.
+- `loaded-active`
+  - The viewed book is active and queue is loaded, but not currently playing.
+  - Primary icon: `play.fill`.
+  - Chapter/seek controls are enabled.
+- `playing`
+  - The viewed book is active and playback is running.
+  - Primary icon: `pause.fill`.
+  - Chapter/seek controls are enabled.
+- `paused`
+  - The viewed book is active, queue is loaded, and playback is paused.
+  - Primary icon: `play.fill`.
+  - Chapter/seek controls are enabled.
+
+Transition behavior:
+
+1. Pressing play on `not-loaded` sets a local pending marker and calls `playerService.loadBook(itemId, { autoPlay: true })`.
+2. The pending marker drives `loading` immediately so the user sees an in-progress spinner while metadata and queue initialize.
+3. `audio-engine.load()` waits for a ready native state (`PAUSED`/`STOPPED`/`PLAYING`) for the target track before returning control to `playerService`.
+4. `playerService.play()` waits for confirmed native `PLAYING` state on the same target track before setting store playback state to `playing`.
+5. Once `PLAYING` is confirmed, the control transitions to `playing`; if confirmation fails, the service sets an error and returns to `ready`.
+6. Pressing the control while active uses `playerService.togglePlayPause()`.
+7. If `loadBook` fails at any point, `playerService` exits `loading` and sets an actionable playback state (`ready` when queue data exists, otherwise `error`) so the control is never stuck disabled.
+8. Chapter navigation resolves from `positionMs` (not cached chapter id), and `seekTo` immediately updates `currentChapterId` so next/previous chapter actions stay accurate while paused or between progress ticks.
+
+## Per-Book Rate Setter
+
+`src/components/bookComponents/book-rate-setter.tsx` implements the `hare.circle.fill` control.
+
+Behavior:
+
+1. Control is rendered as a left-side accessory on the cover image and only appears when the viewed book is the active loaded book.
+2. Drag vertically on the hare control to adjust speed.
+3. Range is clamped to AudioPro bounds (`0.25` to `2.0`) with `0.05` steps.
+4. Committed rate is applied through `playerService.setRate(rate)` on gesture end.
+5. `playerService.setRate(rate)` updates both:
+   - active `playbackStore.rate`
+   - persisted per-book rate in `booksStore` for the active book.
+6. On next load of that same book, `playerService.loadBook()` restores the stored per-book rate; books without stored rate start at `1.0`.
+
+## Book Time Slider
+
+`src/components/bookComponents/book-time-slider.tsx` renders a per-book scrubber above controls.
+
+Behavior:
+
+1. The slider is chapter-scoped: minimum is `0`, maximum is current chapter duration.
+2. Left label shows live chapter elapsed time; right label shows total chapter duration.
+3. The center label shows absolute book progress (`current position of total duration`).
+4. Before the viewed book is active, chapter + position are derived from local persisted progress (`booksStore.progressById[libraryItemId].currentPosition`) and the loaded item chapters.
+5. During initial `loading`, the slider keeps using local persisted position to avoid a temporary jump to zero while queue/session state initializes.
+6. On first transition into `playing/paused`, the slider waits until live position is plausibly aligned with local resume position (with a short timeout fallback) before switching from local to live progress.
+7. Once that handoff is ready, chapter + position are sourced from live playback state (`playbackStore.chapterIndex`, `positionMs`).
+8. The slider remains disabled until the user has played that viewed book at least once during the current screen session.
+9. Seeking occurs only on `onSlidingComplete`; the chapter-relative slider value is translated back to absolute book position before calling `playerService.seekTo(positionMs)`.
+
+## Resume Position Source
+
+When loading a streamed book with `playerService.loadBook(itemId)`, initial seek is resolved in this order:
+
+1. Local persisted progress from `booksStore` (`currentPosition`).
+2. Fallback to persisted playback-store position if local progress is unavailable.
 
 ### Play / Pause / Toggle
 
@@ -215,4 +297,4 @@ If we ever replace `react-native-audio-pro`, we only update this file. Everythin
 - **Downloads**: extend `PlaybackSource` with local file paths and populate `queue` with `file://` URIs.
 - **Streaming**: add `source.uri` (https) and headers in `source-resolver.ts`.
 - **Chapter UI**: use `playbackStore.currentChapterId` + `chapterIndex` to render chapters.
-- **Playback settings**: edit `src/store/settings-store.ts` and use `playerService.setRate()`.
+- **Playback rate controls**: edit `src/components/bookComponents/book-rate-setter.tsx` and keep `playerService.setRate()` as the only write path.

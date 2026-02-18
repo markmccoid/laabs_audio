@@ -5,6 +5,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import BookControls from "./book-controls";
 import BookDetails from "./book-details";
 import BookImage from "./book-image";
+import BookRateSetter from "./book-rate-setter";
+import BookTimeSlider from "./book-time-slider";
 import DownloadControls from "./download-controls";
 type Props = {
   libraryItemId: string | undefined;
@@ -12,15 +14,24 @@ type Props = {
 const BookContainer = ({ libraryItemId }: Props) => {
   const { data: bookData, isLoading } = useGetItemDetails(libraryItemId);
   const insets = useSafeAreaInsets();
-
   const bookTitle = bookData?.title ?? "Book";
   const metadata = bookData?.media?.metadata;
-  const authorFromList = metadata?.authors?.map((author) => author.name).filter(Boolean).join(", ");
-  const resolvedAuthorName = metadata?.authorName ?? authorFromList ?? "";
+  const authorFromList = metadata?.authors
+    ?.map((author) => author.name)
+    .filter(Boolean)
+    .join(", ");
+  const resolvedAuthorName = metadata?.authorName ?? authorFromList ?? bookData?.author ?? "";
   const authorName = resolvedAuthorName.trim().length > 0 ? resolvedAuthorName : "Unknown author";
-  const description = metadata?.descriptionPlain ?? metadata?.description ?? "";
-  const genres = metadata?.genres ?? [];
-  const tags = bookData?.media?.tags ?? [];
+  const description =
+    metadata?.descriptionPlain ?? metadata?.description ?? bookData?.description ?? "";
+  const genres = metadata?.genres ?? bookData?.genres ?? [];
+  const tags = bookData?.media?.tags ?? bookData?.tags ?? [];
+  const chapters = bookData?.media?.chapters ?? [];
+  const fallbackDurationMs = Math.max(
+    0,
+    Math.round((bookData?.media?.duration ?? bookData?.duration ?? 0) * 1000),
+  );
+  const coverURL = bookData?.coverUri ?? bookData?.coverFull ?? bookData?.cover;
 
   return (
     <ScrollView
@@ -28,23 +39,16 @@ const BookContainer = ({ libraryItemId }: Props) => {
       style={{ flex: 1, backgroundColor: "#f6f4f1" }}
       contentContainerStyle={{
         paddingHorizontal: 20,
-        paddingTop: 16,
+        paddingTop: 0,
         paddingBottom: Math.max(28, insets.bottom + 16),
-        gap: 20,
       }}
     >
-      <Stack.Screen options={{ title: bookTitle }} />
+      <Stack.Screen options={{ headerTitle: bookTitle }} />
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Button onPress={() => console.log("Search Lib button")} icon="cube.box" />
       </Stack.Toolbar>
 
       <View style={{ alignItems: "center", gap: 6 }}>
-        <Text
-          selectable
-          style={{ fontSize: 26, fontWeight: "700", color: "#111827", textAlign: "center" }}
-        >
-          {bookTitle}
-        </Text>
         {isLoading ? (
           <Text selectable style={{ fontSize: 12, color: "#9ca3af" }}>
             Loading details...
@@ -52,8 +56,11 @@ const BookContainer = ({ libraryItemId }: Props) => {
         ) : null}
       </View>
 
-      <BookImage coverURL={bookData?.coverUri} />
-
+      <BookImage
+        coverURL={coverURL}
+        leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
+      />
+      <View className="h-[20]" />
       <View style={{ alignItems: "center" }}>
         <Text
           selectable
@@ -62,8 +69,15 @@ const BookContainer = ({ libraryItemId }: Props) => {
           By {authorName}
         </Text>
       </View>
-
+      <View className="h-[10]" />
+      <BookTimeSlider
+        libraryItemId={libraryItemId}
+        fallbackDurationMs={fallbackDurationMs}
+        chapters={chapters}
+      />
+      <View className="h-[10]" />
       <BookControls libraryItemId={libraryItemId} />
+      <View className="h-[10]" />
 
       <BookDetails description={description} genres={genres} tags={tags} />
 

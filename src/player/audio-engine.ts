@@ -5,10 +5,14 @@ import {
   AudioProEventType,
   AudioProState,
   type AudioProEvent,
-  type AudioProHeaders,
   type AudioProTrack,
 } from "react-native-audio-pro";
 import type { PitchCorrectionQuality, PlaybackQueueItem, PlaybackSource } from "./types";
+
+type AudioHeaders = {
+  audio?: Record<string, string>;
+  artwork?: Record<string, string>;
+};
 
 // Adapter layer that keeps the rest of the app insulated from the underlying player.
 export type AudioEngineEvents = {
@@ -39,6 +43,8 @@ export type AudioEngine = {
   setRate: (rate: number, pitchCorrectionQuality?: PitchCorrectionQuality) => Promise<void>;
   getPositionMs: () => Promise<number>;
   getDurationMs: () => Promise<number>;
+  waitForReady: (options?: { timeoutMs?: number }) => Promise<void>;
+  waitForPlaying: (options?: { timeoutMs?: number }) => Promise<void>;
   // Debug-only snapshot of the underlying engine state.
   getDebugSnapshot: () => Record<string, unknown> | null;
   unload: () => Promise<void>;
@@ -47,6 +53,8 @@ export type AudioEngine = {
 
 // We standardize on 1s progress ticks to reduce CPU churn and keep UI consistent.
 const UPDATE_INTERVAL_MS = 1000;
+const DEFAULT_READY_TIMEOUT_MS = 15000;
+const DEFAULT_PLAYING_TIMEOUT_MS = 15000;
 // AudioPro requires a valid artwork URL/string for each track.
 const DEFAULT_ARTWORK = require("../../assets/images/icon.png");
 
@@ -114,13 +122,24 @@ const toStatus = (
   didJustFinish,
 });
 
+const isReadyState = (state: AudioProState) =>
+  state === AudioProState.PAUSED || state === AudioProState.STOPPED || state === AudioProState.PLAYING;
+
 export const createAudioEngine = (): AudioEngine => {
   let events: AudioEngineEvents = {};
   let subscription: { remove: () => void } | null = null;
   let configured = false;
   let currentState: AudioProState = AudioProState.IDLE;
   let currentTrack: AudioProTrack | null = null;
-  let currentHeaders: AudioProHeaders | undefined;
+  let currentHeaders: AudioHeaders | undefined;
+  type StateWaiter = {
+    label: string;
+    timeoutId: ReturnType<typeof setTimeout>;
+    predicate: (event?: AudioProEvent) => boolean;
+    resolve: () => void;
+    reject: (error: Error) => void;
+  };
+  let stateWaiters: StateWaiter[] = [];
 
   // Configure AudioPro once; options are applied on the next play() call.
   const configure = () => {
@@ -138,16 +157,67 @@ export const createAudioEngine = (): AudioEngine => {
     configured = true;
   };
 
+  const settleStateWaiters = (event?: AudioProEvent) => {
+    const pending: StateWaiter[] = [];
+    for (const waiter of stateWaiters) {
+      if (waiter.predicate(event)) {
+        clearTimeout(waiter.timeoutId);
+        waiter.resolve();
+      } else {
+        pending.push(waiter);
+      }
+    }
+    stateWaiters = pending;
+  };
+
+  const rejectStateWaiters = (error: Error) => {
+    for (const waiter of stateWaiters) {
+      clearTimeout(waiter.timeoutId);
+      waiter.reject(error);
+    }
+    stateWaiters = [];
+  };
+
+  const waitForState = (
+    label: string,
+    predicate: (event?: AudioProEvent) => boolean,
+    timeoutMs: number,
+    options?: { allowImmediate?: boolean },
+  ) => {
+    configure();
+    ensureListener();
+    if (options?.allowImmediate !== false && predicate(undefined)) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        stateWaiters = stateWaiters.filter((waiter) => waiter.timeoutId !== timeoutId);
+        reject(new Error(`Timed out waiting for ${label} (state=${AudioPro.getState()})`));
+      }, timeoutMs);
+
+      stateWaiters.push({
+        label,
+        timeoutId,
+        predicate,
+        resolve,
+        reject,
+      });
+    });
+  };
+
   // Map AudioPro events to the engine's simplified status callbacks.
   const handleEvent = (event: AudioProEvent) => {
     switch (event.type) {
       case AudioProEventType.STATE_CHANGED: {
         const state = event.payload?.state ?? currentState;
         currentState = state;
+        settleStateWaiters(event);
         const position = event.payload?.position ?? AudioPro.getTimings().position;
         const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
         events.onStatus?.(toStatus(position, duration, currentState));
         if (state === AudioProState.ERROR && event.payload?.error) {
+          rejectStateWaiters(new Error(event.payload.error));
           events.onError?.(new Error(event.payload.error));
         }
         break;
@@ -155,6 +225,7 @@ export const createAudioEngine = (): AudioEngine => {
       case AudioProEventType.PROGRESS: {
         const position = event.payload?.position ?? AudioPro.getTimings().position;
         const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
+        settleStateWaiters(event);
         events.onStatus?.(toStatus(position, duration, currentState));
         break;
       }
@@ -167,6 +238,7 @@ export const createAudioEngine = (): AudioEngine => {
       }
       case AudioProEventType.PLAYBACK_ERROR: {
         if (event.payload?.error) {
+          rejectStateWaiters(new Error(event.payload.error));
           events.onError?.(new Error(event.payload.error));
         }
         break;
@@ -218,6 +290,18 @@ export const createAudioEngine = (): AudioEngine => {
       if (typeof options?.rate === "number") {
         AudioPro.setPlaybackSpeed(options.rate);
       }
+
+      const targetTrackId = audioTrack.id;
+      await waitForState(
+        "track to be ready",
+        (event) => {
+          const resolvedTrackId = event?.track?.id ?? AudioPro.getPlayingTrack()?.id;
+          const state = AudioPro.getState();
+          if (!resolvedTrackId || resolvedTrackId !== targetTrackId) return false;
+          return isReadyState(state);
+        },
+        options?.initialPositionMs ? DEFAULT_READY_TIMEOUT_MS + 5000 : DEFAULT_READY_TIMEOUT_MS,
+      );
     },
     async play() {
       configure();
@@ -256,6 +340,30 @@ export const createAudioEngine = (): AudioEngine => {
       const { duration } = AudioPro.getTimings();
       return duration;
     },
+    async waitForReady(options) {
+      await waitForState(
+        "track to be ready",
+        () => {
+          const state = AudioPro.getState();
+          return isReadyState(state);
+        },
+        options?.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
+      );
+    },
+    async waitForPlaying(options) {
+      const targetTrackId = currentTrack?.id;
+      await waitForState(
+        "playback to start",
+        (event) => {
+          const state = AudioPro.getState();
+          if (state !== AudioProState.PLAYING) return false;
+          if (!targetTrackId) return true;
+          const resolvedTrackId = event?.track?.id ?? AudioPro.getPlayingTrack()?.id;
+          return resolvedTrackId === targetTrackId;
+        },
+        options?.timeoutMs ?? DEFAULT_PLAYING_TIMEOUT_MS,
+      );
+    },
     getDebugSnapshot() {
       // Used by the debug panel and console logs only.
       const timings = AudioPro.getTimings();
@@ -271,6 +379,7 @@ export const createAudioEngine = (): AudioEngine => {
       };
     },
     async unload() {
+      rejectStateWaiters(new Error("Audio engine was unloaded"));
       AudioPro.clear();
       currentTrack = null;
       currentHeaders = undefined;

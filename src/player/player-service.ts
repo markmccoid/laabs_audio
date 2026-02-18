@@ -2,7 +2,11 @@ import { AppState, type AppStateStatus } from "react-native";
 import { playbackApi } from "../api/playback-api";
 import { sessionsApi } from "../api/sessions-api";
 import { settingsStore } from "../store/settings-store";
-import { booksStore } from "../store/store-books";
+import {
+  booksStore,
+  DEFAULT_BOOK_PLAYBACK_RATE,
+  selectBookPayload,
+} from "../store/store-books";
 import { createAudioEngine } from "./audio-engine";
 import { buildChapterIndex, findChapterForPosition, findTrackForPosition } from "./chapters";
 import { playbackStore } from "./playback-store";
@@ -14,9 +18,13 @@ const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_LISTEN_DELTA_MS = 5000;
 const DEBUG_PLAYBACK_EVENTS = false;
 const CHAPTER_RESTART_THRESHOLD_MS = 3000;
+const MIN_PLAYBACK_RATE = 0.25;
+const MAX_PLAYBACK_RATE = 2.0;
 
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
+const clampPlaybackRate = (rate: number) =>
+  Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, rate));
 
 // Orchestrates playback between the UI, store, and audio engine.
 class PlayerService {
@@ -53,60 +61,69 @@ class PlayerService {
 
   async loadBook(itemId: string, options?: { autoPlay?: boolean }) {
     playbackStore.getState().actions.setPlaybackState("loading");
+    playbackStore.getState().actions.setError(null);
 
     if (__DEV__) {
       console.log("[player-service] loadBook:start", { itemId });
     }
 
-    // Fetch session metadata, build queue + chapters, and resume if applicable.
-    let session;
     try {
-      session = await playbackApi.getPlayInfo(itemId);
+      // Fetch session metadata, build queue + chapters, and resume if applicable.
+      const session = await playbackApi.getPlayInfo(itemId);
+      console.log("SessionInfo for", session.bookId, session.displayTitle);
+      const { queue, durationMs } = buildPlaybackQueue(session);
+      const chapterIndex = buildChapterIndex(session.chapters, session.audioTracks);
+
+      // Ensure the streamed book is indexed in the local books store
+      booksStore.getState().actions.upsertBookFromLibraryItem(session.libraryItem, {
+        isStreamed: true,
+        lastOpenedAt: Date.now(),
+      });
+
+      // Local progress is the source of truth for resume position in book views.
+      const storedBookPayload = selectBookPayload(booksStore.getState(), itemId);
+      const localBookProgressMs = storedBookPayload.progress?.currentPosition;
+      const storedBookRate = storedBookPayload.progress?.playbackRate ?? DEFAULT_BOOK_PLAYBACK_RATE;
+      // Fallback to persisted playback position for safety when no local progress exists.
+      const persisted = playbackStore.getState();
+      const persistedPositionMs = persisted.bookId === itemId ? persisted.positionMs : 0;
+      const resumePositionMs = localBookProgressMs ?? persistedPositionMs;
+
+      this.listenedMs = 0;
+      this.lastSyncAt = 0;
+      this.lastTrackedPositionMs = 0;
+      this.lastIsPlaying = false;
+
+      playbackStore.getState().actions.setSession({
+        bookId: session.libraryItem.id,
+        sessionId: session.id,
+        queue,
+        durationMs,
+        chapterIndex,
+      });
+      playbackStore.getState().actions.setRate(storedBookRate);
+
+      const targetTrack = findTrackForPosition(queue, resumePositionMs) ?? queue[0];
+      const targetIndex = queue.indexOf(targetTrack);
+      const trackPositionMs = Math.max(0, resumePositionMs - targetTrack.startOffsetMs);
+
+      await this.loadTrack(targetIndex, { initialPositionMs: trackPositionMs });
+      this.logSnapshot("after loadBook");
+
+      if (options?.autoPlay) {
+        await this.play();
+      } else {
+        playbackStore.getState().actions.setPlaybackState("ready");
+      }
     } catch (error) {
       if (__DEV__) {
         console.log("[player-service] loadBook:error", { itemId, error });
       }
+      const message = error instanceof Error ? error.message : "Unable to load book";
+      const hasQueue = playbackStore.getState().queue.length > 0;
+      playbackStore.getState().actions.setPlaybackState(hasQueue ? "ready" : "error");
+      playbackStore.getState().actions.setError(message);
       throw error;
-    }
-    console.log("SessionInfo for", session.bookId, session.displayTitle);
-    const { queue, durationMs } = buildPlaybackQueue(session);
-    const chapterIndex = buildChapterIndex(session.chapters, session.audioTracks);
-
-    // Ensure the streamed book is indexed in the local books store
-    booksStore.getState().actions.upsertBookFromLibraryItem(session.libraryItem, {
-      isStreamed: true,
-      lastOpenedAt: Date.now(),
-    });
-
-    // Resume within the same book if persisted state matches the item.
-    const persisted = playbackStore.getState();
-    const resumePositionMs = persisted.bookId === itemId ? persisted.positionMs : 0;
-
-    this.listenedMs = 0;
-    this.lastSyncAt = 0;
-    this.lastTrackedPositionMs = 0;
-    this.lastIsPlaying = false;
-
-    playbackStore.getState().actions.setSession({
-      bookId: session.libraryItem.id,
-      sessionId: session.id,
-      queue,
-      durationMs,
-      chapterIndex,
-    });
-    playbackStore.getState().actions.setRate(settingsStore.getState().playbackRate);
-
-    const targetTrack = findTrackForPosition(queue, resumePositionMs) ?? queue[0];
-    const targetIndex = queue.indexOf(targetTrack);
-    const trackPositionMs = Math.max(0, resumePositionMs - targetTrack.startOffsetMs);
-
-    await this.loadTrack(targetIndex, { initialPositionMs: trackPositionMs });
-    this.logSnapshot("after loadBook");
-
-    playbackStore.getState().actions.setPlaybackState("ready");
-
-    if (options?.autoPlay) {
-      await this.play();
     }
   }
 
@@ -152,7 +169,10 @@ class PlayerService {
       durationMs,
       chapterIndex: [],
     });
-    playbackStore.getState().actions.setRate(settingsStore.getState().playbackRate);
+    const storedBookRate =
+      selectBookPayload(booksStore.getState(), payload.bookId).progress?.playbackRate ??
+      DEFAULT_BOOK_PLAYBACK_RATE;
+    playbackStore.getState().actions.setRate(storedBookRate);
 
     this.listenedMs = 0;
     this.lastSyncAt = 0;
@@ -161,19 +181,46 @@ class PlayerService {
 
     await this.loadTrack(0, { initialPositionMs: 0 });
     this.logSnapshot("after loadLocalFile");
-    playbackStore.getState().actions.setPlaybackState("ready");
 
     if (payload.autoPlay) {
       await this.play();
+    } else {
+      playbackStore.getState().actions.setPlaybackState("ready");
     }
   }
 
   async play() {
     this.logDebug("play");
-    await this.engine.play();
-    this.logSnapshot("after play");
-    playbackStore.getState().actions.setPlaybackState("playing");
-    this.lastIsPlaying = true;
+    const state = playbackStore.getState();
+    if (!state.queue.length) return;
+
+    try {
+      await this.engine.play();
+
+      try {
+        await this.engine.waitForPlaying({ timeoutMs: 15000 });
+      } catch {
+        // Some devices can settle in PAUSED/STOPPED briefly after load.
+        // Retry play once, then wait again before surfacing an error.
+        await this.engine.play();
+        await this.engine.waitForPlaying({ timeoutMs: 15000 });
+      }
+
+      this.logSnapshot("after play");
+      playbackStore.getState().actions.setPlaybackState("playing");
+      playbackStore.getState().actions.setError(null);
+      this.lastIsPlaying = true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to start playback";
+      const currentState = playbackStore.getState();
+      if (currentState.queue.length > 0) {
+        playbackStore.getState().actions.setPlaybackState("ready");
+      } else {
+        playbackStore.getState().actions.setPlaybackState("error");
+      }
+      playbackStore.getState().actions.setError(message);
+      this.lastIsPlaying = false;
+    }
   }
 
   async pause() {
@@ -238,6 +285,8 @@ class PlayerService {
       positionMs: boundedPosition,
       trackPositionMs,
     });
+    const chapterAtPosition = findChapterForPosition(state.chapterIndex, boundedPosition);
+    playbackStore.getState().actions.setCurrentChapter(chapterAtPosition?.id ?? null);
     this.lastTrackedPositionMs = boundedPosition;
   }
 
@@ -248,10 +297,14 @@ class PlayerService {
   }
 
   async setRate(rate: number) {
-    this.logDebug(`setRate: ${rate}`);
-    playbackStore.getState().actions.setRate(rate);
-    settingsStore.getState().actions.setPlaybackRate(rate);
-    await this.engine.setRate(rate, settingsStore.getState().pitchCorrectionQuality);
+    const normalizedRate = clampPlaybackRate(rate);
+    this.logDebug(`setRate: ${normalizedRate}`);
+    const state = playbackStore.getState();
+    playbackStore.getState().actions.setRate(normalizedRate);
+    if (state.bookId) {
+      booksStore.getState().actions.setBookPlaybackRate(state.bookId, normalizedRate);
+    }
+    await this.engine.setRate(normalizedRate, settingsStore.getState().pitchCorrectionQuality);
   }
 
   async setPitchCorrectionQuality(quality: PitchCorrectionQuality) {
@@ -360,7 +413,7 @@ class PlayerService {
 
     await this.engine.load(track, {
       initialPositionMs: options?.initialPositionMs ?? 0,
-      rate: settingsStore.getState().playbackRate,
+      rate: state.rate,
       pitchCorrectionQuality: settingsStore.getState().pitchCorrectionQuality,
     });
 
@@ -371,6 +424,8 @@ class PlayerService {
       positionMs: bookPositionMs,
       trackPositionMs: options?.initialPositionMs ?? 0,
     });
+    const chapterAtPosition = findChapterForPosition(state.chapterIndex, bookPositionMs);
+    playbackStore.getState().actions.setCurrentChapter(chapterAtPosition?.id ?? null);
 
     this.lastTrackedPositionMs = bookPositionMs;
 
@@ -381,10 +436,8 @@ class PlayerService {
 
   private resolveCurrentChapter(state: PlaybackStoreState) {
     if (!state.chapterIndex.length) return null;
-    const currentFromId = state.currentChapterId
-      ? state.chapterIndex.find((chapter) => chapter.id === state.currentChapterId)
-      : null;
-    return currentFromId ?? findChapterForPosition(state.chapterIndex, state.positionMs);
+    // Position is the most reliable source after seek operations.
+    return findChapterForPosition(state.chapterIndex, state.positionMs);
   }
 
   private handleAppState = (nextState: AppStateStatus) => {

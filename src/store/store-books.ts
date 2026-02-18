@@ -17,6 +17,13 @@ import {
 } from "./fileSystemAccess";
 import { playbackStore, usePlaybackStore } from "../player/playback-store";
 
+export const DEFAULT_BOOK_PLAYBACK_RATE = 1;
+const MIN_BOOK_PLAYBACK_RATE = 0.25;
+const MAX_BOOK_PLAYBACK_RATE = 2.0;
+
+const clampBookPlaybackRate = (value: number) =>
+  Math.max(MIN_BOOK_PLAYBACK_RATE, Math.min(MAX_BOOK_PLAYBACK_RATE, value));
+
 export type BookSummary = LibraryItemSummary & {
   isDownloaded: boolean;
   isStreamed: boolean;
@@ -38,6 +45,7 @@ export type BookBookmark = Bookmark & {
 export type BookProgress = {
   currentPosition: number;
   currentChapterIndex: number;
+  playbackRate?: number;
   bookmarks: Record<string, BookBookmark>;
 };
 
@@ -114,6 +122,11 @@ export type BooksState = {
     setProgress: (
       libraryItemId: string,
       payload: { currentPosition: number; currentChapterIndex: number },
+      options?: { userKey?: string | null },
+    ) => void;
+    setBookPlaybackRate: (
+      libraryItemId: string,
+      playbackRate: number,
       options?: { userKey?: string | null },
     ) => void;
     addBookmark: (
@@ -228,11 +241,17 @@ const mergeBook = (
 });
 
 const ensureProgress = (progressById: Record<string, BookProgress>, bookId: string) =>
-  progressById[bookId] ?? {
-    currentPosition: 0,
-    currentChapterIndex: 0,
-    bookmarks: {},
-  };
+  progressById[bookId]
+    ? {
+        ...progressById[bookId],
+        playbackRate: progressById[bookId].playbackRate ?? DEFAULT_BOOK_PLAYBACK_RATE,
+      }
+    : {
+        currentPosition: 0,
+        currentChapterIndex: 0,
+        playbackRate: DEFAULT_BOOK_PLAYBACK_RATE,
+        bookmarks: {},
+      };
 
 // Root directory for all offline downloads
 const DOWNLOAD_ROOT = getDocumentDirectory()
@@ -418,6 +437,34 @@ export const booksStore = createStore<BooksState>()(
                   progressById: {
                     ...userState.progressById,
                     [libraryItemId]: updatedProgress,
+                  },
+                },
+              },
+            };
+          });
+        },
+
+        setBookPlaybackRate: (libraryItemId, playbackRate, options) => {
+          const normalizedRate = clampBookPlaybackRate(playbackRate);
+          set((state) => {
+            const userKey = resolveUserKey(state, options?.userKey);
+            if (!userKey) return state;
+            const userState = getUserState(state, userKey);
+            const progress = ensureProgress(userState.progressById, libraryItemId);
+
+            return {
+              ...state,
+              lastActiveUserKey: userKey,
+              byUserKey: {
+                ...state.byUserKey,
+                [userKey]: {
+                  ...userState,
+                  progressById: {
+                    ...userState.progressById,
+                    [libraryItemId]: {
+                      ...progress,
+                      playbackRate: normalizedRate,
+                    },
                   },
                 },
               },
@@ -1037,6 +1084,26 @@ export const selectBookPayload = (
     downloadInfo: userState.downloadedBookData[libraryItemId] ?? null,
   };
 };
+
+export const selectBookPlaybackRate = (
+  state: BooksState,
+  libraryItemId: string,
+  userKey?: string | null,
+) => {
+  return (
+    selectBookPayload(state, libraryItemId, userKey).progress?.playbackRate ??
+    DEFAULT_BOOK_PLAYBACK_RATE
+  );
+};
+
+export const useBookPlaybackRate = (
+  libraryItemId?: string,
+  options?: { userKey?: string | null },
+) =>
+  useBooksStore((state) => {
+    if (!libraryItemId) return DEFAULT_BOOK_PLAYBACK_RATE;
+    return selectBookPlaybackRate(state, libraryItemId, options?.userKey);
+  });
 
 export const getCurrentPlaybackBookDetails = (
   options?: { userKey?: string | null },

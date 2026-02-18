@@ -9,48 +9,48 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+export type PlaybackControlVisualState =
+  | "not-loaded"
+  | "loading"
+  | "loaded-active"
+  | "playing"
+  | "paused";
+
 type PlayPauseAnimationProps = {
-  isPlaying: boolean;
+  visualState: PlaybackControlVisualState;
   size?: number;
   playIconName?: SFSymbol;
   pauseIconName?: SFSymbol;
+  resumeIconName?: SFSymbol;
   tintColor?: string;
-  isBookActive: boolean;
-  isBookLoaded: boolean;
   duration?: number;
 };
 
 /**
- * PlayPauseAnimation component
- * Uses Reanimated 4's CSS-like animation properties to create smooth morphing transitions
- * between three states: resume (not active), play (active but paused), and pause (active and playing)
+ * Playback button animation:
+ * - not-loaded: static resume icon
+ * - loading: rotating resume icon
+ * - loaded-active/paused: play icon
+ * - playing: pause icon
  */
 const PlayPauseAnimation = ({
-  isPlaying,
+  visualState,
   size = 32,
   playIconName = "play.fill",
   pauseIconName = "pause.fill",
+  resumeIconName = "livephoto.play",
   tintColor = "#111827",
-  isBookActive,
-  isBookLoaded,
   duration = 300,
 }: PlayPauseAnimationProps) => {
-  const resumeIconName: SFSymbol = "livephoto.play";
-  const isBookActiveAndLoaded = isBookActive && isBookLoaded;
-
-  // Check if we're in the loading state
-  const isLoading = isBookActive && !isBookLoaded;
-
-  // Determine initial state based on props
   const getInitialOpacity = (icon: "resume" | "play" | "pause") => {
-    if (!isBookActiveAndLoaded) return icon === "resume" ? 1 : 0;
-    if (isPlaying) return icon === "pause" ? 1 : 0;
+    if (visualState === "not-loaded" || visualState === "loading") return icon === "resume" ? 1 : 0;
+    if (visualState === "playing") return icon === "pause" ? 1 : 0;
     return icon === "play" ? 1 : 0;
   };
 
   const getInitialScale = (icon: "resume" | "play" | "pause") => {
-    if (!isBookActiveAndLoaded) return icon === "resume" ? 1.1 : 0.5;
-    if (isPlaying) return icon === "pause" ? 1 : 0.5;
+    if (visualState === "not-loaded" || visualState === "loading") return icon === "resume" ? 1.1 : 0.5;
+    if (visualState === "playing") return icon === "pause" ? 1 : 0.5;
     return icon === "play" ? 1 : 0.5;
   };
 
@@ -68,11 +68,13 @@ const PlayPauseAnimation = ({
   const pauseScale = useSharedValue(getInitialScale("pause"));
 
   useEffect(() => {
-    // Morphing easing curve - creates smooth in-out transition
     const morphEasing = Easing.bezier(0.4, 0.0, 0.2, 1);
+    const isLoading = visualState === "loading";
+    const showResume = visualState === "not-loaded" || isLoading;
+    const showPlay = visualState === "loaded-active" || visualState === "paused";
+    const showPause = visualState === "playing";
 
     if (isLoading) {
-      // Loading state: Book is active but NOT loaded - show rotating resume icon
       resumeOpacity.value = withTiming(1, {
         duration: duration * 0.8,
         easing: morphEasing,
@@ -89,132 +91,42 @@ const PlayPauseAnimation = ({
         -1,
         false,
       );
-
-      playOpacity.value = withTiming(0, {
-        duration: duration * 0.6,
-        easing: morphEasing,
-      });
-      playScale.value = withTiming(0.5, {
-        duration,
-        easing: morphEasing,
-      });
-
-      pauseOpacity.value = withTiming(0, {
-        duration: duration * 0.6,
-        easing: morphEasing,
-      });
-      pauseScale.value = withTiming(0.5, {
-        duration,
-        easing: morphEasing,
-      });
-    } else if (!isBookActiveAndLoaded) {
-      // State 1: Book is NOT active - show resume icon (no rotation)
-      cancelAnimation(resumeRotation);
-      resumeRotation.value = withTiming(0, {
-        duration: duration * 0.5,
-        easing: morphEasing,
-      });
-
-      resumeOpacity.value = withTiming(1, {
-        duration: duration * 0.8,
-        easing: morphEasing,
-      });
-      resumeScale.value = withTiming(1, {
-        duration,
-        easing: morphEasing,
-      });
-
-      playOpacity.value = withTiming(0, {
-        duration: duration * 0.6,
-        easing: morphEasing,
-      });
-      playScale.value = withTiming(0.5, {
-        duration,
-        easing: morphEasing,
-      });
-
-      pauseOpacity.value = withTiming(0, {
-        duration: duration * 0.6,
-        easing: morphEasing,
-      });
-      pauseScale.value = withTiming(0.5, {
-        duration,
-        easing: morphEasing,
-      });
-    } else if (isPlaying) {
-      // State 2: Book is active AND playing - show pause icon
-      cancelAnimation(resumeRotation);
-      resumeRotation.value = withTiming(0, {
-        duration: duration * 0.5,
-        easing: morphEasing,
-      });
-
-      resumeOpacity.value = withTiming(0, {
-        duration: duration * 0.6,
-        easing: morphEasing,
-      });
-      resumeScale.value = withTiming(0.5, {
-        duration,
-        easing: morphEasing,
-      });
-
-      playOpacity.value = withTiming(0, {
-        duration: duration * 0.6,
-        easing: morphEasing,
-      });
-      playScale.value = withTiming(0.5, {
-        duration,
-        easing: morphEasing,
-      });
-
-      pauseOpacity.value = withTiming(1, {
-        duration: duration * 0.8,
-        easing: morphEasing,
-      });
-      pauseScale.value = withTiming(1, {
-        duration,
-        easing: morphEasing,
-      });
     } else {
-      // State 3: Book is active BUT paused - show play icon
       cancelAnimation(resumeRotation);
       resumeRotation.value = withTiming(0, {
         duration: duration * 0.5,
-        easing: morphEasing,
-      });
-
-      resumeOpacity.value = withTiming(0, {
-        duration: duration * 0.6,
-        easing: morphEasing,
-      });
-      resumeScale.value = withTiming(0.5, {
-        duration,
-        easing: morphEasing,
-      });
-
-      playOpacity.value = withTiming(1, {
-        duration: duration * 0.8,
-        easing: morphEasing,
-      });
-      playScale.value = withTiming(1, {
-        duration,
-        easing: morphEasing,
-      });
-
-      pauseOpacity.value = withTiming(0, {
-        duration: duration * 0.6,
-        easing: morphEasing,
-      });
-      pauseScale.value = withTiming(0.5, {
-        duration,
         easing: morphEasing,
       });
     }
+
+    resumeOpacity.value = withTiming(showResume ? 1 : 0, {
+      duration: duration * 0.8,
+      easing: morphEasing,
+    });
+    resumeScale.value = withTiming(showResume ? 1 : 0.5, {
+      duration,
+      easing: morphEasing,
+    });
+
+    playOpacity.value = withTiming(showPlay ? 1 : 0, {
+      duration: duration * 0.8,
+      easing: morphEasing,
+    });
+    playScale.value = withTiming(showPlay ? 1 : 0.5, {
+      duration,
+      easing: morphEasing,
+    });
+
+    pauseOpacity.value = withTiming(showPause ? 1 : 0, {
+      duration: duration * 0.8,
+      easing: morphEasing,
+    });
+    pauseScale.value = withTiming(showPause ? 1 : 0.5, {
+      duration,
+      easing: morphEasing,
+    });
   }, [
-    isBookActiveAndLoaded,
-    isBookActive,
-    isBookLoaded,
-    isPlaying,
+    visualState,
     duration,
     resumeOpacity,
     resumeScale,
@@ -248,15 +160,12 @@ const PlayPauseAnimation = ({
 
   return (
     <Animated.View style={{ width: size, height: size, position: "relative" }}>
-      {/* Resume icon - shown when book is not active or loading */}
       <Animated.View style={resumeAnimatedStyle}>
         <SymbolView name={resumeIconName} size={size} tintColor={tintColor} />
       </Animated.View>
-      {/* Play icon - shown when book is active but paused */}
       <Animated.View style={playAnimatedStyle}>
         <SymbolView name={playIconName} size={size} tintColor={tintColor} />
       </Animated.View>
-      {/* Pause icon - shown when book is active and playing */}
       <Animated.View style={pauseAnimatedStyle}>
         <SymbolView name={pauseIconName} size={size} tintColor={tintColor} />
       </Animated.View>

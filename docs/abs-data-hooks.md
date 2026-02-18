@@ -10,6 +10,7 @@ import {
   useGetBooks,
   useGetBooksInProgress,
   useMoveBookToTopOfInProgress,
+  useCachedBookSummary,
   useGetItemDetails,
   useGetFilterData,
   useInvalidateQueries,
@@ -74,6 +75,21 @@ Notes:
 - Uses `useQueryClient()` to update cache without a network call.
 - If `libraryId` is omitted, it uses the active library from auth state.
 
+### useCachedBookSummary
+
+Returns cached summary data for a single book without triggering network fetches.
+
+Parameters:
+- `itemId?: string`
+
+Returns:
+- `BookSummary | null`
+
+Notes:
+- Reads from React Query `["books", activeLibraryId]` cache first.
+- Falls back to `booksStore` (`selectBookPayload(...).summary`).
+- Uses synchronous `initialData` from query cache so first render can immediately show cover/title metadata when available.
+
 ### useGetItemDetails
 
 Fetches full item details for a given library item.
@@ -91,6 +107,7 @@ Returns:
 
 Notes:
 - Uses `itemsApi.getItemDetails(itemId)`.
+- Merges network details with `useCachedBookSummary(itemId)` so UI can render summary fields (including cover URLs) before details fetch completes.
 - When unauthenticated, returns a safe object with `data` undefined.
 
 ### useGetFilterData
