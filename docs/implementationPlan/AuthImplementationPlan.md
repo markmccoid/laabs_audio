@@ -14,7 +14,7 @@
 ## Proposed Architecture
 ### Storage
 - Use `expo-secure-store` for sensitive values: `absUsername`, `absPassword`, `absServerUrl`, `accessToken`, `refreshToken`, `lastAuthAt`.
-- Store offline-download metadata in the books store (planned `store-books.ts`) and expose a derived `hasOfflineContent` boolean based on `books[*].isDownloaded`.
+- Store offline-download metadata in `device-books-store.ts` and expose a derived `hasOfflineContent` boolean via `selectHasOfflineContent`.
 
 Notes:
 - `expo-secure-store` provides encrypted, local key-value storage, backed by Android Keystore and iOS Keychain. It is designed for securely storing credentials and tokens. See references section for details.
@@ -45,7 +45,7 @@ Suggested Actions (examples)
 ### Auth Flow (Startup)
 1. `hydrateFromStorage()` runs on app launch.
 2. Read SecureStore for stored credentials/tokens and set `hasStoredCredentials`.
-3. Read `store-books.ts` to set `hasOfflineContent` by checking `books[*].isDownloaded`.
+3. Read `device-books-store.ts` to set `hasOfflineContent` by checking downloaded device content.
 4. App entry decision:
    - If `hasStoredCredentials` is true, set `status = authenticated` immediately (even if offline).
    - If `hasStoredCredentials` is false but `hasOfflineContent` is true, set `status = offlineOnly` and allow app entry.
@@ -100,6 +100,11 @@ Suggested Actions (examples)
 
 ## Open Questions
 - None at this time.
+
+## Current Implementation Notes
+- `useAuthBootstrap` drives startup hydration, connectivity wiring, and bookmark queue sync.
+- `auth-store` persists `activeLibraryId`, `activeLibraryName`, and `activeLibraryUserKey`.
+- `device-books-store` owns offline queue/bookmark notes/download state and is consulted for `hasOfflineContent`.
 
 ## References
 - [Working with Zustand](https://tkdodo.eu/blog/working-with-zustand)

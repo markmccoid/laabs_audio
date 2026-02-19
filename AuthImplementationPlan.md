@@ -14,7 +14,7 @@
 ## Proposed Architecture
 ### Storage
 - Use `expo-secure-store` for sensitive values: `absUsername`, `absPassword`, `absServerUrl`, `accessToken`, `refreshToken`.
-- Store offline-download metadata in the books store and expose a derived `hasOfflineContent` boolean based on `books[*].isDownloaded`.
+- Store offline-download metadata in `device-books-store.ts` and expose a derived `hasOfflineContent` boolean via `selectHasOfflineContent`.
 
 ### Auth Store (Zustand)
 - Create a dedicated `authStore` with small, focused scope.
@@ -48,7 +48,7 @@ Suggested Actions
 ### Auth Flow (Startup)
 1. `hydrateFromStorage()` runs on app launch.
 2. Read SecureStore for stored credentials/tokens and set `hasStoredCredentials`.
-3. Read `store-books` to set `hasOfflineContent` by checking `books[*].isDownloaded`.
+3. Read `device-books-store` to set `hasOfflineContent` by checking downloaded device content.
 4. App entry decision:
    - If tokens or credentials exist, set `status = authenticated` immediately (even if offline).
    - If no stored session but `hasOfflineContent` is true, set `status = offlineOnly` and allow app entry.
@@ -114,3 +114,8 @@ Suggested Actions
 
 ## Open Questions
 - None at this time.
+
+## Current Implementation Notes
+- `useAuthBootstrap` runs hydration, online/offline wiring, and bookmark queue sync.
+- `auth-store` persists `activeLibraryId`, `activeLibraryName`, and `activeLibraryUserKey`.
+- `device-books-store` is the source for offline book metadata, queue state, and local bookmark notes.

@@ -417,7 +417,9 @@ export interface AudiobookSession {
   id: string;
   userId: string;
   libraryId: string;
+  // Canonical item identifier for books in this app.
   libraryItemId: string;
+  // ABS also returns `bookId`; treat it as a legacy alias of `libraryItemId`.
   bookId: string;
   episodeId: string | null;
   mediaType: string;

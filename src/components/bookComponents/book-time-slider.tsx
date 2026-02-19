@@ -1,10 +1,11 @@
-import Slider from "@react-native-community/slider";
+import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore } from "@/player";
-import { selectBookPayload, useBooksStore } from "@/store/store-books";
 import type { Chapter } from "@/types/absTypes";
 import { formatSeconds } from "@/utils/formatUtils";
+import Slider from "@react-native-community/slider";
+import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 
 type Props = {
   libraryItemId?: string;
@@ -18,6 +19,8 @@ const RESUME_POSITION_TOLERANCE_MS = 5000;
 const PLAYBACK_PROGRESS_HANDOFF_DELAY_MS = 1500;
 
 type ChapterWindow = {
+  id?: number;
+  title?: string;
   startMs: number;
   endMs: number;
 };
@@ -33,17 +36,27 @@ const findChapterForPosition = (chapterWindows: ChapterWindow[], positionMs: num
 };
 
 const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }: Props) => {
+  const { data: userServerState } = useGetUserServerState();
   const playbackState = usePlaybackStore((state) => state.playbackState);
-  const currentBookId = usePlaybackStore((state) => state.bookId);
+  const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const positionMs = usePlaybackStore((state) => state.positionMs);
   const durationMs = usePlaybackStore((state) => state.durationMs);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const chapterIndex = usePlaybackStore((state) => state.chapterIndex);
 
-  const localProgressMs = useBooksStore((state) => {
+  const localProgressMs = useMemo(() => {
     if (!libraryItemId) return 0;
-    return selectBookPayload(state, libraryItemId).progress?.currentPosition ?? 0;
-  });
+    const progressByLibraryItemId =
+      userServerState?.progressByLibraryItemId ??
+      (
+        userServerState as typeof userServerState & {
+          progressByBookId?: Record<string, { currentTime: number }>;
+        }
+      )?.progressByBookId ??
+      {};
+    const currentTimeSeconds = progressByLibraryItemId[libraryItemId]?.currentTime ?? 0;
+    return secondsToMs(currentTimeSeconds);
+  }, [libraryItemId, userServerState]);
   const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
   const [isLiveProgressReady, setIsLiveProgressReady] = useState(false);
   const [isSliding, setIsSliding] = useState(false);
@@ -53,6 +66,8 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
     () =>
       [...chapters]
         .map((chapter) => ({
+          id: chapter.id,
+          title: chapter.title,
           startMs: secondsToMs(chapter.start),
           endMs: secondsToMs(chapter.end),
         }))
@@ -60,12 +75,9 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
     [chapters],
   );
 
-  const isViewedBookActive = Boolean(libraryItemId) && currentBookId === libraryItemId;
+  const isViewedBookActive = Boolean(libraryItemId) && currentLibraryItemId === libraryItemId;
   const isViewedBookLoaded = isViewedBookActive && queueLength > 0;
-  const shouldUsePlaybackProgress =
-    isViewedBookActive &&
-    isViewedBookLoaded &&
-    isLiveProgressReady;
+  const shouldUsePlaybackProgress = isViewedBookActive && isViewedBookLoaded && isLiveProgressReady;
   const resolvedBookDurationMs = isViewedBookActive
     ? Math.max(durationMs, fallbackDurationMs, 0)
     : Math.max(fallbackDurationMs, 0);
@@ -78,12 +90,7 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
   const activeChapterWindow = useMemo(() => {
     if (isViewedBookActive && isViewedBookLoaded && chapterIndex.length) {
       const byPosition = findChapterForPosition(chapterIndex, resolvedBookPositionMs);
-      if (byPosition) {
-        return {
-          startMs: byPosition.startMs,
-          endMs: byPosition.endMs,
-        };
-      }
+      if (byPosition) return byPosition;
     }
     return findChapterForPosition(fallbackChapterWindows, resolvedBookPositionMs);
   }, [
@@ -97,6 +104,7 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
   const chapterStartMs = activeChapterWindow?.startMs ?? 0;
   const rawChapterEndMs = activeChapterWindow?.endMs ?? resolvedBookDurationMs;
   const chapterEndMs = Math.max(chapterStartMs, rawChapterEndMs);
+  const activeChapterTitle = activeChapterWindow?.title?.trim() || "Chapter";
   const chapterDurationMs = Math.max(0, chapterEndMs - chapterStartMs);
   const resolvedChapterPositionMs =
     chapterDurationMs > 0
@@ -170,7 +178,8 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
 
   const chapterElapsedLabel = useMemo(
     () =>
-      formatSeconds(Math.floor(sliderValue / 1000), "compact", chapterDisplayHours, true) ?? "00:00",
+      formatSeconds(Math.floor(sliderValue / 1000), "compact", chapterDisplayHours, true) ??
+      "00:00",
     [sliderValue, chapterDisplayHours],
   );
   const chapterEndLabel = useMemo(
@@ -191,6 +200,13 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
       "00:00",
     [resolvedBookDurationMs, bookDisplayHours],
   );
+  const handleOpenChapterViewer = () => {
+    if (!libraryItemId) return;
+    router.push({
+      pathname: "/chapter-viewer",
+      params: { libraryItemId },
+    });
+  };
 
   return (
     <View
@@ -229,6 +245,28 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
           void playerService.seekTo(boundedBookPositionMs);
         }}
       />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Open chapter list"
+        onPress={handleOpenChapterViewer}
+        disabled={!libraryItemId}
+        style={({ pressed }) => ({
+          borderRadius: 10,
+          borderCurve: "continuous",
+          paddingVertical: 4,
+          paddingHorizontal: 2,
+          opacity: !libraryItemId ? 0.5 : pressed ? 0.7 : 1,
+        })}
+      >
+        <Text
+          numberOfLines={1}
+          ellipsizeMode="tail"
+          selectable
+          style={{ fontSize: 13, color: "#111827", fontWeight: "600" }}
+        >
+          {activeChapterTitle}
+        </Text>
+      </Pressable>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
         <Text selectable style={{ fontSize: 12, color: "#6b7280", fontVariant: ["tabular-nums"] }}>
           {chapterElapsedLabel}

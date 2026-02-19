@@ -6,7 +6,7 @@ import type { PlaybackQueueItem, PlaybackState, ResolvedChapter } from "./types"
 
 export type PlaybackStoreState = {
   playbackState: PlaybackState;
-  bookId: string | null;
+  libraryItemId: string | null;
   sessionId: string | null;
   queue: PlaybackQueueItem[];
   chapterIndex: ResolvedChapter[];
@@ -33,7 +33,7 @@ export type PlaybackStoreState = {
     setPlaybackState: (state: PlaybackState) => void;
     setError: (message: string | null) => void;
     setSession: (payload: {
-      bookId: string;
+      libraryItemId: string;
       sessionId: string;
       queue: PlaybackQueueItem[];
       durationMs: number;
@@ -61,7 +61,7 @@ export type PlaybackStoreState = {
 
 const getBaseState = () => ({
   playbackState: "idle" as PlaybackState,
-  bookId: null,
+  libraryItemId: null,
   sessionId: null,
   queue: [] as PlaybackQueueItem[],
   chapterIndex: [] as ResolvedChapter[],
@@ -87,9 +87,9 @@ export const playbackStore = createStore<PlaybackStoreState>()(
         reset: () => set((state) => ({ ...getBaseState(), actions: state.actions })),
         setPlaybackState: (playbackState) => set({ playbackState }),
         setError: (error) => set({ error }),
-        setSession: ({ bookId, sessionId, queue, durationMs, chapterIndex }) =>
+        setSession: ({ libraryItemId, sessionId, queue, durationMs, chapterIndex }) =>
           set({
-            bookId,
+            libraryItemId,
             sessionId,
             queue,
             durationMs,
@@ -118,13 +118,28 @@ export const playbackStore = createStore<PlaybackStoreState>()(
     {
       name: "playback-store",
       storage: createJSONStorage(() => mmkvStorage),
+      version: 2,
+      migrate: (persistedState) => {
+        if (
+          persistedState &&
+          typeof persistedState === "object" &&
+          "bookId" in persistedState &&
+          !("libraryItemId" in persistedState)
+        ) {
+          const state = persistedState as { bookId?: string | null };
+          return {
+            ...persistedState,
+            libraryItemId: state.bookId ?? null,
+          };
+        }
+        return persistedState as PlaybackStoreState;
+      },
       partialize: (state) => ({
-        bookId: state.bookId,
+        libraryItemId: state.libraryItemId,
         currentTrackIndex: state.currentTrackIndex,
         positionMs: state.positionMs,
         rate: state.rate,
       }),
-      version: 1,
     }
   )
 );

@@ -203,9 +203,7 @@ export const authStore = createStore<AuthState>()(
     loginWithPassword: async (username, password, serverUrl) => {
       log("login:start", { username, serverUrl });
       const normalizedServerUrl = authService.normalizeServerUrl(serverUrl);
-      const previousUserKey = getUserKey(get().storedUsername, get().serverUrl);
       const nextUserKey = getUserKey(username, normalizedServerUrl);
-      const isSameUser = previousUserKey === nextUserKey;
       const tokens = await authService.login({
         username,
         password,
@@ -236,9 +234,9 @@ export const authStore = createStore<AuthState>()(
         status: computeEntryStatus(true, state.hasOfflineContent),
         lastAuthError: null,
         loginRequired: false,
-        activeLibraryId: isSameUser ? state.activeLibraryId : null,
-        activeLibraryName: isSameUser ? state.activeLibraryName : null,
-        activeLibraryUserKey: isSameUser ? state.activeLibraryUserKey : nextUserKey,
+        activeLibraryId: null,
+        activeLibraryName: null,
+        activeLibraryUserKey: nextUserKey,
       }));
 
       log("login:done", { status: "authenticated" });

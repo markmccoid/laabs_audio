@@ -49,12 +49,12 @@ const ControlButton = ({
 
 const BookControls = ({ libraryItemId }: Props) => {
   const playbackState = usePlaybackStore((state) => state.playbackState);
-  const currentBookId = usePlaybackStore((state) => state.bookId);
+  const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const [pendingLoadBookId, setPendingLoadBookId] = useState<string | null>(null);
 
   const hasBookId = Boolean(libraryItemId);
-  const isBookActive = hasBookId && currentBookId === libraryItemId;
+  const isBookActive = hasBookId && currentLibraryItemId === libraryItemId;
   const isBookLoaded = isBookActive && queueLength > 0;
   const isPendingForViewedBook = Boolean(libraryItemId && pendingLoadBookId === libraryItemId);
 

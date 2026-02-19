@@ -32,6 +32,7 @@ export const LibrarySelectionGate = () => {
   const promptRef = useRef<string | null>(null);
   const requestedRef = useRef<string | null>(null);
   const previousUserKeyRef = useRef<string | null>(null);
+  const requiresPickerPromptRef = useRef(false);
 
   useEffect(() => {
     // Reset prompt/request guards whenever auth resets or user changes.
@@ -39,16 +40,28 @@ export const LibrarySelectionGate = () => {
       promptRef.current = null;
       requestedRef.current = null;
       previousUserKeyRef.current = null;
+      requiresPickerPromptRef.current = false;
       return;
     }
 
     if (userKey && previousUserKeyRef.current && previousUserKeyRef.current !== userKey) {
       promptRef.current = null;
       requestedRef.current = null;
+      requiresPickerPromptRef.current = true;
+    } else if (previousUserKeyRef.current === null) {
+      // On fresh authenticated entry, require picker prompt if active library is missing.
+      requiresPickerPromptRef.current = !activeLibraryId;
     }
 
     previousUserKeyRef.current = userKey;
-  }, [status, userKey]);
+  }, [activeLibraryId, status, userKey]);
+
+  useEffect(() => {
+    // If active library is cleared while authenticated, require the picker flow again.
+    if (status === "authenticated" && !loginRequired && !activeLibraryId) {
+      requiresPickerPromptRef.current = true;
+    }
+  }, [activeLibraryId, loginRequired, status]);
 
   useEffect(() => {
     // Fetch libraries once per user when authenticated and not already loaded.
@@ -78,21 +91,17 @@ export const LibrarySelectionGate = () => {
       selectLibrary(active);
     }
 
-    if (libraries.length <= 1) {
-      // Nothing to pick from, so mark prompt as satisfied.
-      promptRef.current = userKey;
-      return;
-    }
-
     if (promptRef.current === userKey) return;
+    if (!requiresPickerPromptRef.current) return;
 
     const rootSegment = segments[0];
     if (rootSegment === "library-picker") return;
     if (rootSegment === "login") return;
 
-    // Open the picker sheet for multi-library accounts.
+    // Open the picker after login/logout so the user confirms library selection.
     router.push("/library-picker");
     promptRef.current = userKey;
+    requiresPickerPromptRef.current = false;
   }, [
     activeLibraryId,
     activeLibraryName,

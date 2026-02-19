@@ -1,3 +1,4 @@
+import { PitchAlgorithm } from "react-native-track-player";
 // import { PitchAlgorithm } from "react-native-track-player";
 
 import { authService } from "../auth/auth-service";

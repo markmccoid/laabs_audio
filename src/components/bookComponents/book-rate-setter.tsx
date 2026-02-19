@@ -1,5 +1,5 @@
 import { playerService, usePlaybackStore } from "@/player";
-import { useBookPlaybackRate } from "@/store/store-books";
+import { useBookPlaybackRate } from "@/store/device-books-store";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useState } from "react";
 import { Text, View } from "react-native";
@@ -32,12 +32,12 @@ const normalizeRateWorklet = (value: number) => {
 };
 
 const BookRateSetter = ({ libraryItemId }: Props) => {
-  const currentBookId = usePlaybackStore((state) => state.bookId);
+  const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const playbackRate = usePlaybackStore((state) => state.rate);
   const storedBookRate = useBookPlaybackRate(libraryItemId);
 
-  const isBookActive = Boolean(libraryItemId) && currentBookId === libraryItemId;
+  const isBookActive = Boolean(libraryItemId) && currentLibraryItemId === libraryItemId;
   const isBookLoaded = isBookActive && queueLength > 0;
 
   const initialRate = normalizeRate(isBookLoaded ? playbackRate : storedBookRate);

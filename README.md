@@ -42,6 +42,14 @@ To learn more about developing your project with Expo, look at the following res
 - [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
 - [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
 
+## Project Docs
+
+- `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/data-state-architecture.md`
+- `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/ReactQueryPersister.md`
+- `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/abs-data-hooks.md`
+- `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/audioPlayerFlow.md`
+- `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/absAuthFlow.md`
+
 ## Join the community
 
 Join our community of developers creating universal apps.

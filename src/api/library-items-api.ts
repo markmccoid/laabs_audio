@@ -35,8 +35,6 @@ export type LibraryItemSummary = {
   genres: string[];
   tags: string[];
   asin?: string | null;
-  isFinished: boolean;
-  isFavorite: boolean;
 };
 
 export type LibraryItemsSummary = LibraryItemSummary[];
@@ -46,7 +44,7 @@ export type FavoriteOrFinishedItem = {
   title: string;
   author: string;
   imageURL: string;
-  type: Array<"isFavorite" | "isRead">;
+  type: ("isFavorite" | "isRead")[];
 };
 
 const resolveLibraryId = (libraryId?: string | null) =>
@@ -62,7 +60,6 @@ export const libraryItemsApi = {
       return [];
     }
 
-    const { favoriteSearchString } = favoritesApi.getUserFavoriteInfo();
     const query = new URLSearchParams();
 
     if (filterType && filterValue) {
@@ -83,28 +80,8 @@ export const libraryItemsApi = {
 
     const suffix = query.toString();
     const url = `/api/libraries/${libraryId}/items${suffix ? `?${suffix}` : ""}`;
-    const finishedUrl = `/api/libraries/${libraryId}/items?filter=progress.ZmluaXNoZWQ=`;
-    const favoriteUrl = `/api/libraries/${libraryId}/items?filter=tags.${favoriteSearchString}`;
 
     const responseData = await absClient.get<GetLibraryItemsResponse>(url);
-
-    const [finishedResult, favoriteResult] = await Promise.allSettled([
-      absClient.get<{ results: LibraryItem[] }>(finishedUrl),
-      absClient.get<{ results: LibraryItem[] }>(favoriteUrl),
-    ]);
-
-    const finishedItemIds =
-      finishedResult.status === "fulfilled"
-        ? finishedResult.value.results.map((item) => item.id)
-        : [];
-
-    const favoriteItemIds =
-      favoriteResult.status === "fulfilled"
-        ? favoriteResult.value.results.map((item) => item.id)
-        : [];
-
-    const finishedItemIdSet = new Set(finishedItemIds);
-    const favoriteItemIdSet = new Set(favoriteItemIds);
 
     const token = authStore.getState().accessToken;
     if (!token) return [];
@@ -132,8 +109,6 @@ export const libraryItemsApi = {
         genres: item.media.metadata.genres,
         tags: item.media.tags,
         asin: item.media.metadata.asin,
-        isFinished: finishedItemIdSet.has(item.id),
-        isFavorite: favoriteItemIdSet.has(item.id),
         // _searchCore: `${item.media.metadata.title.toLowerCase()} ${item.media.metadata.subtitle?.toLowerCase()} ${item.media.metadata.authorName?.toLowerCase()}`,
         // _searchDesc: item.media.metadata.description.toLowerCase(), // Only used if toggle is on
       };

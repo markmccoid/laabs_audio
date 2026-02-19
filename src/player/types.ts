@@ -21,7 +21,7 @@ export type PlaybackSource = {
 
 export type PlaybackQueueItem = {
   id: string;
-  bookId: string;
+  libraryItemId: string;
   sessionId: string;
   trackIndex: number;
   title: string;

@@ -12,13 +12,13 @@ const resolveAuthor = (session: AudiobookSession) =>
 export const buildPlaybackQueue = (session: AudiobookSession) => {
   const title = session.libraryItem.media.metadata.title || "Unknown";
   const author = resolveAuthor(session);
-  const bookId = session.libraryItem.id;
+  const libraryItemId = session.libraryItem.id;
 
   const queue: PlaybackQueueItem[] = session.audioTracks.map((track, index) => {
     const source = resolveTrackSource(session, track, index);
     return {
-      id: `${bookId}-${index}`,
-      bookId,
+      id: `${libraryItemId}-${index}`,
+      libraryItemId,
       sessionId: session.id,
       trackIndex: index,
       title: track.title || title,

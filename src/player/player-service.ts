@@ -1,12 +1,16 @@
-import { AppState, type AppStateStatus } from "react-native";
+import { meApi, type UserServerState } from "../api/me-api";
 import { playbackApi } from "../api/playback-api";
+import { authStore } from "../auth/auth-store";
+import { queryClient } from "../query/query-client";
+import { queryKeys } from "../query/query-keys";
 import { sessionsApi } from "../api/sessions-api";
 import { settingsStore } from "../store/settings-store";
 import {
-  booksStore,
   DEFAULT_BOOK_PLAYBACK_RATE,
-  selectBookPayload,
-} from "../store/store-books";
+  deviceBooksStore,
+  selectBookPlaybackRate,
+  selectBookPlaybackRateIfStored,
+} from "../store/device-books-store";
 import { createAudioEngine } from "./audio-engine";
 import { buildChapterIndex, findChapterForPosition, findTrackForPosition } from "./chapters";
 import { playbackStore } from "./playback-store";
@@ -31,15 +35,13 @@ class PlayerService {
   private engine = createAudioEngine();
   private lastTrackedPositionMs = 0;
   private listenedMs = 0;
+  private lastSyncAttemptAt = 0;
   private lastSyncAt = 0;
-  private lastIsPlaying = false;
-  private appState: AppStateStatus = "active";
-  private appStateSubscription: { remove: () => void } | null = null;
+  private initialized = false;
 
   init() {
-    if (this.appStateSubscription) return;
-    // App state drives background sync; engine events drive store updates.
-    this.appStateSubscription = AppState.addEventListener("change", this.handleAppState);
+    if (this.initialized) return;
+    this.initialized = true;
     this.engine.setEvents({
       onEnded: () => {
         void this.handleTrackEnded();
@@ -55,47 +57,96 @@ class PlayerService {
   }
 
   destroy() {
-    this.appStateSubscription?.remove();
-    this.appStateSubscription = null;
+    this.initialized = false;
   }
 
-  async loadBook(itemId: string, options?: { autoPlay?: boolean }) {
+  async loadBook(libraryItemId: string, options?: { autoPlay?: boolean }) {
     playbackStore.getState().actions.setPlaybackState("loading");
     playbackStore.getState().actions.setError(null);
 
     if (__DEV__) {
-      console.log("[player-service] loadBook:start", { itemId });
+      console.log("[player-service] loadBook:start", { libraryItemId });
     }
 
     try {
       // Fetch session metadata, build queue + chapters, and resume if applicable.
-      const session = await playbackApi.getPlayInfo(itemId);
-      console.log("SessionInfo for", session.bookId, session.displayTitle);
+      const session = await playbackApi.getPlayInfo(libraryItemId);
+      console.log("SessionInfo for", session.libraryItemId, session.displayTitle);
       const { queue, durationMs } = buildPlaybackQueue(session);
       const chapterIndex = buildChapterIndex(session.chapters, session.audioTracks);
 
-      // Ensure the streamed book is indexed in the local books store
-      booksStore.getState().actions.upsertBookFromLibraryItem(session.libraryItem, {
-        isStreamed: true,
-        lastOpenedAt: Date.now(),
-      });
+      const activeLibraryUserKey = authStore.getState().activeLibraryUserKey;
+      const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
+      let cachedUserServerState: UserServerState | undefined;
 
-      // Local progress is the source of truth for resume position in book views.
-      const storedBookPayload = selectBookPayload(booksStore.getState(), itemId);
-      const localBookProgressMs = storedBookPayload.progress?.currentPosition;
-      const storedBookRate = storedBookPayload.progress?.playbackRate ?? DEFAULT_BOOK_PLAYBACK_RATE;
+      if (activeLibraryUserKey) {
+        cachedUserServerState = queryClient.getQueryData<UserServerState>(userServerStateQueryKey);
+        if (!cachedUserServerState) {
+          try {
+            cachedUserServerState = await queryClient.fetchQuery({
+              queryKey: userServerStateQueryKey,
+              queryFn: () => meApi.getUserServerState(),
+              meta: { persist: true },
+            });
+          } catch {
+            cachedUserServerState = undefined;
+          }
+        }
+      }
+
+      const progressByLibraryItemId =
+        cachedUserServerState?.progressByLibraryItemId ??
+        // Compatibility for older persisted query shape.
+        (cachedUserServerState as UserServerState & { progressByBookId?: UserServerState["progressByLibraryItemId"] })
+          ?.progressByBookId ??
+        {};
+      const cachedUserProgress =
+        progressByLibraryItemId[libraryItemId] ??
+        progressByLibraryItemId[session.libraryItemId];
+      let localBookProgressMs =
+        typeof cachedUserProgress?.currentTime === "number"
+          ? secondsToMs(cachedUserProgress.currentTime)
+          : null;
+
+      if (localBookProgressMs == null) {
+        try {
+          const directProgress = await meApi.getProgress(libraryItemId);
+          if (typeof directProgress.currentTime === "number") {
+            localBookProgressMs = secondsToMs(directProgress.currentTime);
+            this.updateUserServerStateCache({
+              libraryItemId,
+              currentTimeSeconds: directProgress.currentTime,
+              durationSeconds: directProgress.duration ?? 0,
+              isFinished: Boolean(directProgress.isFinished),
+            });
+          }
+        } catch {
+          // Treat as "no progress yet" when endpoint has no record for this item.
+        }
+      }
+      const rateCandidateIds = [session.libraryItem.id, libraryItemId, session.libraryItemId]
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .filter((value, index, source) => source.indexOf(value) === index);
+      const deviceBooksState = deviceBooksStore.getState();
+      const storedBookRate =
+        rateCandidateIds
+          .map((candidateId) => selectBookPlaybackRateIfStored(deviceBooksState, candidateId))
+          .find((rate) => rate !== null) ??
+        selectBookPlaybackRate(deviceBooksState, session.libraryItem.id) ??
+        DEFAULT_BOOK_PLAYBACK_RATE;
       // Fallback to persisted playback position for safety when no local progress exists.
       const persisted = playbackStore.getState();
-      const persistedPositionMs = persisted.bookId === itemId ? persisted.positionMs : 0;
+      const persistedPositionMs =
+        persisted.libraryItemId === libraryItemId ? persisted.positionMs : 0;
       const resumePositionMs = localBookProgressMs ?? persistedPositionMs;
 
       this.listenedMs = 0;
+      this.lastSyncAttemptAt = 0;
       this.lastSyncAt = 0;
       this.lastTrackedPositionMs = 0;
-      this.lastIsPlaying = false;
 
       playbackStore.getState().actions.setSession({
-        bookId: session.libraryItem.id,
+        libraryItemId: session.libraryItem.id,
         sessionId: session.id,
         queue,
         durationMs,
@@ -117,7 +168,7 @@ class PlayerService {
       }
     } catch (error) {
       if (__DEV__) {
-        console.log("[player-service] loadBook:error", { itemId, error });
+        console.log("[player-service] loadBook:error", { libraryItemId, error });
       }
       const message = error instanceof Error ? error.message : "Unable to load book";
       const hasQueue = playbackStore.getState().queue.length > 0;
@@ -128,7 +179,7 @@ class PlayerService {
   }
 
   async loadLocalFile(payload: {
-    bookId: string;
+    libraryItemId: string;
     title: string;
     author: string;
     uri?: string;
@@ -137,7 +188,7 @@ class PlayerService {
     autoPlay?: boolean;
   }) {
     this.logDebug(
-      `loadLocalFile: ${payload.bookId} sourceModule=${typeof payload.sourceModule} uri=${payload.uri ?? "none"}`,
+      `loadLocalFile: ${payload.libraryItemId} sourceModule=${typeof payload.sourceModule} uri=${payload.uri ?? "none"}`,
     );
     if (!payload.uri && typeof payload.sourceModule !== "number") {
       throw new Error("loadLocalFile requires a uri or sourceModule");
@@ -146,8 +197,8 @@ class PlayerService {
     // Local-only queue with a single track (used for development/testing).
     const queue: PlaybackQueueItem[] = [
       {
-        id: `${payload.bookId}-local`,
-        bookId: payload.bookId,
+        id: `${payload.libraryItemId}-local`,
+        libraryItemId: payload.libraryItemId,
         sessionId: "local",
         trackIndex: 0,
         title: payload.title,
@@ -163,21 +214,21 @@ class PlayerService {
     ];
 
     playbackStore.getState().actions.setSession({
-      bookId: payload.bookId,
+      libraryItemId: payload.libraryItemId,
       sessionId: "local",
       queue,
       durationMs,
       chapterIndex: [],
     });
     const storedBookRate =
-      selectBookPayload(booksStore.getState(), payload.bookId).progress?.playbackRate ??
+      selectBookPlaybackRate(deviceBooksStore.getState(), payload.libraryItemId) ??
       DEFAULT_BOOK_PLAYBACK_RATE;
     playbackStore.getState().actions.setRate(storedBookRate);
 
     this.listenedMs = 0;
+    this.lastSyncAttemptAt = 0;
     this.lastSyncAt = 0;
     this.lastTrackedPositionMs = 0;
-    this.lastIsPlaying = false;
 
     await this.loadTrack(0, { initialPositionMs: 0 });
     this.logSnapshot("after loadLocalFile");
@@ -209,7 +260,6 @@ class PlayerService {
       this.logSnapshot("after play");
       playbackStore.getState().actions.setPlaybackState("playing");
       playbackStore.getState().actions.setError(null);
-      this.lastIsPlaying = true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start playback";
       const currentState = playbackStore.getState();
@@ -219,7 +269,6 @@ class PlayerService {
         playbackStore.getState().actions.setPlaybackState("error");
       }
       playbackStore.getState().actions.setError(message);
-      this.lastIsPlaying = false;
     }
   }
 
@@ -228,7 +277,6 @@ class PlayerService {
     await this.engine.pause();
     this.logSnapshot("after pause");
     playbackStore.getState().actions.setPlaybackState("paused");
-    this.lastIsPlaying = false;
     await this.syncProgress("pause");
   }
 
@@ -237,9 +285,9 @@ class PlayerService {
     await this.engine.unload();
     playbackStore.getState().actions.reset();
     this.listenedMs = 0;
+    this.lastSyncAttemptAt = 0;
     this.lastSyncAt = 0;
     this.lastTrackedPositionMs = 0;
-    this.lastIsPlaying = false;
   }
 
   async togglePlayPause() {
@@ -250,8 +298,8 @@ class PlayerService {
     }
     if (state.playbackState === "loading") return;
     if (!state.queue.length) {
-      if (state.bookId) {
-        await this.loadBook(state.bookId, { autoPlay: true });
+      if (state.libraryItemId) {
+        await this.loadBook(state.libraryItemId, { autoPlay: true });
       }
       return;
     }
@@ -288,6 +336,7 @@ class PlayerService {
     const chapterAtPosition = findChapterForPosition(state.chapterIndex, boundedPosition);
     playbackStore.getState().actions.setCurrentChapter(chapterAtPosition?.id ?? null);
     this.lastTrackedPositionMs = boundedPosition;
+    await this.syncProgress("seek");
   }
 
   async skipBy(seconds: number) {
@@ -301,8 +350,8 @@ class PlayerService {
     this.logDebug(`setRate: ${normalizedRate}`);
     const state = playbackStore.getState();
     playbackStore.getState().actions.setRate(normalizedRate);
-    if (state.bookId) {
-      booksStore.getState().actions.setBookPlaybackRate(state.bookId, normalizedRate);
+    if (state.libraryItemId) {
+      deviceBooksStore.getState().actions.setBookPlaybackRate(state.libraryItemId, normalizedRate);
     }
     await this.engine.setRate(normalizedRate, settingsStore.getState().pitchCorrectionQuality);
   }
@@ -318,7 +367,6 @@ class PlayerService {
     const nextIndex = state.currentTrackIndex + 1;
     if (nextIndex >= state.queue.length) {
       playbackStore.getState().actions.setPlaybackState("ended");
-      await this.syncProgress("end");
       return;
     }
 
@@ -440,14 +488,6 @@ class PlayerService {
     return findChapterForPosition(state.chapterIndex, state.positionMs);
   }
 
-  private handleAppState = (nextState: AppStateStatus) => {
-    const wasActive = this.appState === "active";
-    this.appState = nextState;
-    if (wasActive && nextState !== "active") {
-      void this.syncProgress("background");
-    }
-  };
-
   private async handleStatus(status: {
     positionMs: number;
     durationMs: number;
@@ -512,16 +552,10 @@ class PlayerService {
       return;
     }
 
-    // Sync to Audiobookshelf/local storage on interval and pauses.
-    if (status.isPlaying && Date.now() - this.lastSyncAt >= SYNC_INTERVAL_MS) {
+    // Sync to Audiobookshelf/local storage on interval.
+    if (status.isPlaying && Date.now() - this.lastSyncAttemptAt >= SYNC_INTERVAL_MS) {
       await this.syncProgress("interval");
     }
-
-    if (this.lastIsPlaying && !status.isPlaying) {
-      await this.syncProgress("pause");
-    }
-
-    this.lastIsPlaying = status.isPlaying;
   }
 
   private async handleTrackEnded() {
@@ -531,17 +565,17 @@ class PlayerService {
     const nextIndex = state.currentTrackIndex + 1;
     if (nextIndex >= state.queue.length) {
       playbackStore.getState().actions.setPlaybackState("ended");
-      await this.syncProgress("end");
       return;
     }
 
     await this.loadTrack(nextIndex, { initialPositionMs: 0, autoPlay: true });
   }
 
-  private async syncProgress(reason: "interval" | "pause" | "background" | "end") {
+  private async syncProgress(reason: "interval" | "pause" | "seek") {
     const state = playbackStore.getState();
-    if (!state.bookId || !state.sessionId) return;
+    if (!state.libraryItemId || !state.sessionId) return;
     this.logDebug(`syncProgress: ${reason}`);
+    this.lastSyncAttemptAt = Date.now();
 
     // Convert values to seconds to match Audiobookshelf API expectations.
     const currentTimeSeconds = msToSeconds(state.positionMs);
@@ -560,20 +594,71 @@ class PlayerService {
         // If playback is from a downloaded item, use updateProgress instead of syncSession.
       }
 
-      const currentChapterIndex = state.currentChapterId
-        ? state.chapterIndex.findIndex((chapter) => chapter.id === state.currentChapterId)
-        : 0;
-
-      booksStore.getState().actions.setProgress(state.bookId, {
-        currentPosition: state.positionMs,
-        currentChapterIndex: Math.max(0, currentChapterIndex),
+      this.updateUserServerStateCache({
+        libraryItemId: state.libraryItemId,
+        currentTimeSeconds,
+        durationSeconds,
+        isFinished,
       });
 
       this.lastSyncAt = Date.now();
       playbackStore.getState().actions.setLastSyncAt(this.lastSyncAt);
-    } catch (error) {
+    } catch {
       playbackStore.getState().actions.setError(`Sync failed (${reason})`);
     }
+  }
+
+  private updateUserServerStateCache(payload: {
+    libraryItemId: string;
+    currentTimeSeconds: number;
+    durationSeconds: number;
+    isFinished: boolean;
+  }) {
+    const activeLibraryUserKey = authStore.getState().activeLibraryUserKey;
+    if (!activeLibraryUserKey) {
+      return;
+    }
+
+    queryClient.setQueryData<UserServerState>(
+      queryKeys.userServerState(activeLibraryUserKey),
+      (previousState) => {
+        const nextState: UserServerState = previousState ?? {
+          userId: activeLibraryUserKey,
+          progressByLibraryItemId: {},
+          bookmarksByLibraryItemId: {},
+        };
+        const previousProgress = nextState.progressByLibraryItemId[payload.libraryItemId];
+        const now = Date.now();
+        const resolvedDuration =
+          payload.durationSeconds > 0
+            ? payload.durationSeconds
+            : previousProgress?.duration ?? 0;
+        const progressPercent =
+          resolvedDuration > 0
+            ? Math.max(0, Math.min(1, payload.currentTimeSeconds / resolvedDuration))
+            : previousProgress?.progressPercent ?? 0;
+
+        return {
+          ...nextState,
+          progressByLibraryItemId: {
+            ...nextState.progressByLibraryItemId,
+            [payload.libraryItemId]: {
+              progressId:
+                previousProgress?.progressId ?? `${payload.libraryItemId}:local`,
+              libraryItemId: payload.libraryItemId,
+              duration: resolvedDuration,
+              progressPercent,
+              currentTime: payload.currentTimeSeconds,
+              isFinished: payload.isFinished,
+              hideFromContinueListening: previousProgress?.hideFromContinueListening ?? false,
+              startedAt: previousProgress?.startedAt ?? now,
+              finishedAt: payload.isFinished ? previousProgress?.finishedAt ?? now : null,
+              lastUpdate: now,
+            },
+          },
+        };
+      },
+    );
   }
 
   private logDebug(message: string) {

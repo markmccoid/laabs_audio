@@ -3,9 +3,9 @@ import NetInfo from "@react-native-community/netinfo";
 import { useAuthActions, useAuthStore } from "./auth-store";
 import {
   selectHasOfflineContent,
-  useBooksActions,
-  useBooksStore,
-} from "../store/store-books";
+  useDeviceBooksActions,
+  useDeviceBooksStore,
+} from "../store/device-books-store";
 
 export const useAuthBootstrap = () => {
   const status = useAuthStore((state) => state.status);
@@ -17,10 +17,10 @@ export const useAuthBootstrap = () => {
   const resolvedUserKey =
     activeLibraryUserKey ??
     (storedUsername && serverUrl ? `${storedUsername}::${serverUrl}` : null);
-  const hasOfflineContent = useBooksStore((state) =>
+  const hasOfflineContent = useDeviceBooksStore((state) =>
     selectHasOfflineContent(state, resolvedUserKey),
   );
-  const { syncPendingBookmarks, syncPendingBookmarkDeletes } = useBooksActions();
+  const { syncPendingBookmarks, syncPendingBookmarkDeletes } = useDeviceBooksActions();
   const {
     hydrateFromStorage,
     setOnlineStatus,

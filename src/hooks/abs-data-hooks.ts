@@ -8,9 +8,10 @@ import {
   type LibraryItemSummary,
   type LibraryItemsSummary,
 } from "../api/library-items-api";
-import { meApi, type ItemsInProgressSummary } from "../api/me-api";
+import { meApi, type ItemsInProgressSummary, type UserBookProgress } from "../api/me-api";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
-import { selectBookPayload, useBooksActions, useBooksStore } from "../store/store-books";
+import { queryKeys } from "../query/query-keys";
+import type { Bookmark } from "../types/absTypes";
 import {
   useFiltersStore,
   useGenres,
@@ -28,7 +29,7 @@ export const useLibraries = () => {
   const { setActiveLibrary } = useAuthActions();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const query = useLibrariesQuery();
-  const libraries = query.data?.libraries ?? [];
+  const libraries = useMemo(() => query.data?.libraries ?? [], [query.data?.libraries]);
 
   const handleSetActiveLibrary = useCallback(
     (libraryId: string) => {
@@ -97,8 +98,8 @@ const createFilterConfig = (filters: Filters) => ({
 //~ - ----------------------------------------------------
 //~ Single pass filter function that applies all filters at once
 //~ - ----------------------------------------------------
-const applyFilters = (
-  books: LibraryItemsSummary,
+const applyFilters = <T extends LibraryItemSummary>(
+  books: T[],
   filterConfig: ReturnType<typeof createFilterConfig>,
 ) => {
   if (!books?.length) return books;
@@ -142,13 +143,25 @@ const applyFilters = (
     return true; // Book passes all filters
   });
 };
+
+export type LibraryItemWithUserState = LibraryItemSummary & {
+  userProgress: UserBookProgress | null;
+  userBookmarks: Bookmark[];
+  currentTime: number;
+  isFinished: boolean;
+};
 //# ----------------------------------------------
 //# useGetBooks Filter Setup
 //# ----------------------------------------------
 export const useGetBooks = () => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const { mergeLibrarySummaries } = useBooksActions();
+  const {
+    data: userServerState,
+    isPending: isUserStatePending,
+    isLoading: isUserStateLoading,
+    isError: isUserStateError,
+  } = useGetUserServerState();
   const sortedBy = useSortedBy();
   const sortDirection = useSortDirection();
   const searchValue = useSearchValue();
@@ -165,30 +178,47 @@ export const useGetBooks = () => {
     isLoading,
     ...rest
   } = useQuery({
-    queryKey: ["books", activeLibraryId],
+    queryKey: queryKeys.libraryBooks(activeLibraryId),
     queryFn: async () => {
-      console.log("Running useGetBooks", activeLibraryId);
       if (!activeLibraryId) return [];
       return libraryItemsApi.getItems({ libraryId: activeLibraryId });
     },
     enabled: status === "authenticated" && !!activeLibraryId,
     // Opt-in to React Query persistence for this query only
     meta: { persist: true },
-    // Keep cache long enough for persistence restores to be useful
-    gcTime: 1000 * 60 * 60 * 24,
-    // staleTime: 1000 * 60 * 5, // Stale Minutes
-    staleTime: (query) => {
-      // If we have no data (or empty array), it's stale immediately
-      if (!query.state.data || query.state.data.length === 0) {
-        return 0;
-      }
-      // Otherwise, trust the cache for 5 minutes
-      return 5 * 60 * 1000;
-    },
   });
+
+  const mergedData = useMemo<LibraryItemWithUserState[] | undefined>(() => {
+    if (!rawData?.length) return rawData as LibraryItemWithUserState[] | undefined;
+
+    const progressByLibraryItemId =
+      userServerState?.progressByLibraryItemId ??
+      // Compatibility for older persisted query shape.
+      (userServerState as typeof userServerState & { progressByBookId?: Record<string, UserBookProgress> })
+        ?.progressByBookId ??
+      {};
+    const bookmarksByLibraryItemId =
+      userServerState?.bookmarksByLibraryItemId ??
+      // Compatibility for older persisted query shape.
+      (userServerState as typeof userServerState & { bookmarksByBookId?: Record<string, Bookmark[]> })
+        ?.bookmarksByBookId ??
+      {};
+
+    return rawData.map((book) => {
+      const userProgress = progressByLibraryItemId[book.id] ?? null;
+      return {
+        ...book,
+        userProgress,
+        userBookmarks: bookmarksByLibraryItemId[book.id] ?? [],
+        currentTime: userProgress?.currentTime ?? 0,
+        isFinished: userProgress?.isFinished ?? false,
+      };
+    });
+  }, [rawData, userServerState]);
+
   // Always call useMemo hooks
   const filteredData = useMemo(() => {
-    if (!rawData?.length) return rawData;
+    if (!mergedData?.length) return mergedData;
 
     const filterConfig = createFilterConfig({
       searchValue,
@@ -200,10 +230,10 @@ export const useGetBooks = () => {
 
     // Early return if no filters are active
     const hasActiveFilters = Object.values(filterConfig).some((filter) => filter.enabled);
-    if (!hasActiveFilters) return rawData;
+    if (!hasActiveFilters) return mergedData;
 
-    return applyFilters(rawData, filterConfig);
-  }, [rawData, searchValue, genres, tags, searchDescription, searchTitleAuthor]);
+    return applyFilters(mergedData, filterConfig);
+  }, [mergedData, searchValue, genres, tags, searchDescription, searchTitleAuthor]);
 
   const sortedData = useMemo(() => {
     if (!filteredData?.length) return filteredData;
@@ -214,12 +244,6 @@ export const useGetBooks = () => {
 
     return sorted;
   }, [filteredData, sortedBy, sortDirection]);
-
-  useEffect(() => {
-    if (!rawData?.length) return;
-    // Keep locally stored streamed/downloaded summaries in sync with server data
-    mergeLibrarySummaries(rawData);
-  }, [mergeLibrarySummaries, rawData]);
 
   // Return appropriate data based on authentication state
   if (status !== "authenticated") {
@@ -232,7 +256,25 @@ export const useGetBooks = () => {
     };
   }
 
-  return { data: sortedData, isPending, isError, isLoading, ...rest };
+  return {
+    data: sortedData,
+    isPending: isPending || isUserStatePending,
+    isError: isError || isUserStateError,
+    isLoading: isLoading || isUserStateLoading,
+    ...rest,
+  };
+};
+
+export const useGetUserServerState = () => {
+  const status = useAuthStore((state) => state.status);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+
+  return useQuery({
+    queryKey: queryKeys.userServerState(activeLibraryUserKey),
+    queryFn: () => meApi.getUserServerState(),
+    enabled: status === "authenticated" && !!activeLibraryUserKey,
+    meta: { persist: true },
+  });
 };
 
 //# ----------------------------------------------
@@ -246,7 +288,7 @@ export const useGetBooksInProgress = (enabled = true) => {
   // const bookActions = useBooksActions();
 
   const { data, isError, ...rest } = useQuery({
-    queryKey: ["booksInProgress", activeLibraryId],
+    queryKey: queryKeys.booksInProgress(activeLibraryId),
     queryFn: async () => {
       if (!activeLibraryId) return [];
       return meApi.getItemsInProgress(activeLibraryId);
@@ -257,7 +299,7 @@ export const useGetBooksInProgress = (enabled = true) => {
       // Build lookup map once
       const progressById = items.reduce<Record<string, ItemsInProgressSummary[number]>>(
         (acc, item) => {
-          acc[item.bookId] = item;
+          acc[item.libraryItemId] = item;
           return acc;
         },
         {},
@@ -289,20 +331,20 @@ export const useMoveBookToTopOfInProgress = () => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
 
   return useCallback(
-    (bookId: string, libraryId?: string | null) => {
+    (libraryItemId: string, libraryId?: string | null) => {
       const resolvedLibraryId = libraryId ?? activeLibraryId ?? null;
       if (!resolvedLibraryId) {
         return;
       }
 
-      const queryKey = ["booksInProgress", resolvedLibraryId];
+      const queryKey = queryKeys.booksInProgress(resolvedLibraryId);
       const currentData = queryClient.getQueryData<ItemsInProgressSummary>(queryKey);
 
       if (!currentData || currentData.length === 0) {
         return;
       }
 
-      const bookIndex = currentData.findIndex((book) => book.bookId === bookId);
+      const bookIndex = currentData.findIndex((book) => book.libraryItemId === libraryItemId);
 
       if (bookIndex === -1) {
         return;
@@ -335,7 +377,7 @@ export type ItemDetailsWithSummary = LibraryItemSummary &
 export const useCachedBookSummary = (itemId?: string) => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const queryClient = useQueryClient();
-  const booksQueryKey = ["books", activeLibraryId] as const;
+  const booksQueryKey = queryKeys.libraryBooks(activeLibraryId);
   const immediateCachedBooks = activeLibraryId
     ? queryClient.getQueryData<LibraryItemsSummary>(booksQueryKey)
     : undefined;
@@ -354,12 +396,7 @@ export const useCachedBookSummary = (itemId?: string) => {
     return (cachedBooks ?? immediateCachedBooks)?.find((book) => book.id === itemId) ?? null;
   }, [cachedBooks, immediateCachedBooks, itemId]);
 
-  const summaryFromBooksStore = useBooksStore((state) => {
-    if (!itemId) return null;
-    return selectBookPayload(state, itemId).summary;
-  });
-
-  return summaryFromQueryCache ?? summaryFromBooksStore ?? null;
+  return summaryFromQueryCache ?? null;
 };
 
 export const useGetItemDetails = (itemId?: string) => {
@@ -375,7 +412,7 @@ export const useGetItemDetails = (itemId?: string) => {
     error,
     ...rest
   } = useQuery<ItemDetails, Error>({
-    queryKey: ["itemDetails", itemId],
+    queryKey: queryKeys.itemDetails(itemId),
     queryFn: async () => {
       if (!itemId) throw new Error("No item ID provided");
       return itemsApi.getItemDetails(itemId);
@@ -427,7 +464,7 @@ export const useGetFilterData = () => {
 
   // Always call useQuery unconditionally (React Rules of Hooks)
   const { data, ...rest } = useQuery({
-    queryKey: ["absfilterdata", activeLibraryId],
+    queryKey: queryKeys.libraryFilterData(activeLibraryId),
     queryFn: async () => {
       if (!activeLibraryId) {
         throw new Error("No active library set");
@@ -435,7 +472,7 @@ export const useGetFilterData = () => {
       return librariesApi.getFilterData(activeLibraryId);
     },
     enabled: status === "authenticated" && !!activeLibraryId,
-    staleTime: 1000 * 60 * 5, // Stale Minutes
+    meta: { persist: true },
   });
 
   // Return unauthenticated state after hooks are called
@@ -462,11 +499,11 @@ export const useInvalidateQueries = () => {
       switch (queryIdentifier) {
         case "booksInProgress":
           queryClient.invalidateQueries({
-            queryKey: ["booksInProgress", activeLibraryId],
+            queryKey: queryKeys.booksInProgress(activeLibraryId),
           });
           break;
         case "books":
-          queryClient.invalidateQueries({ queryKey: ["books", activeLibraryId] });
+          queryClient.invalidateQueries({ queryKey: queryKeys.libraryBooks(activeLibraryId) });
           break;
         default:
           break;
