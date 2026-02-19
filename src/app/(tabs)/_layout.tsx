@@ -1,4 +1,5 @@
 import { playerService, usePlaybackStore } from "@/player";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { useCachedBookSummary } from "@/hooks/abs-data-hooks";
 import { Image } from "expo-image";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
@@ -8,6 +9,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 export default function TabLayout() {
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const currentBook = useCachedBookSummary(currentLibraryItemId ?? undefined);
+  const themeColors = useThemeColors();
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const isPlaying = playbackState === "playing";
 
@@ -23,7 +25,17 @@ export default function TabLayout() {
   };
 
   return (
-    <NativeTabs minimizeBehavior="onScrollDown" disableTransparentOnScrollEdge={true}>
+    <NativeTabs
+      minimizeBehavior="onScrollDown"
+      disableTransparentOnScrollEdge={true}
+      backgroundColor={themeColors.surface}
+      tintColor={themeColors.accent}
+      iconColor={{ default: themeColors.textMuted, selected: themeColors.accent }}
+      labelStyle={{
+        default: { color: themeColors.textMuted },
+        selected: { color: themeColors.accent, fontWeight: "600" },
+      }}
+    >
       <NativeTabs.Trigger name="(home)">
         <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="house.fill" md="home" />
@@ -42,7 +54,7 @@ export default function TabLayout() {
 
       {hasLoadedBook && (
         <NativeTabs.BottomAccessory>
-          <View className="flex-row items-center justify-between h-full px-4 gap-2">
+          <View className="flex-row items-center justify-between h-full px-4 gap-2 bg-surface">
             <Image
               source={{ uri: currentBook?.coverFull }}
               style={{
@@ -50,23 +62,24 @@ export default function TabLayout() {
                 height: 40,
                 borderRadius: 8,
                 borderWidth: StyleSheet.hairlineWidth,
+                borderColor: themeColors.border,
               }}
             />
             <View className="flex-col items-center flex-1 w-[100]">
-              <Text style={{ fontSize: 12 }} numberOfLines={1}>
+              <Text style={{ fontSize: 12, color: themeColors.text }} numberOfLines={1}>
                 {currentBook?.title}
               </Text>
-              <Text className="" style={{ fontSize: 12 }}>
+              <Text style={{ fontSize: 12, color: themeColors.textMuted }}>
                 by {currentBook?.author}
               </Text>
             </View>
             {!isPlaying ? (
               <Pressable onPress={handleToggle}>
-                <SymbolView name="play.fill" tintColor="black" />
+                <SymbolView name="play.fill" tintColor={themeColors.accent} />
               </Pressable>
             ) : (
               <Pressable onPress={handleToggle}>
-                <SymbolView name="pause.fill" tintColor="black" />
+                <SymbolView name="pause.fill" tintColor={themeColors.accent} />
               </Pressable>
             )}
             {/* <CustomTabTrigger name="library">

@@ -1,4 +1,5 @@
 import { playerService, usePlaybackStore } from "@/player";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
@@ -15,6 +16,7 @@ type ControlButtonProps = {
   disabled: boolean;
   iconSize?: number;
   tintColor: string;
+  pressedBackgroundColor: string;
 };
 
 const ControlButton = ({
@@ -24,6 +26,7 @@ const ControlButton = ({
   disabled,
   iconSize = 26,
   tintColor,
+  pressedBackgroundColor,
 }: ControlButtonProps) => {
   return (
     <Pressable
@@ -39,7 +42,7 @@ const ControlButton = ({
         alignItems: "center",
         justifyContent: "center",
         opacity: disabled ? 0.4 : pressed ? 0.7 : 1,
-        backgroundColor: pressed ? "rgba(17, 24, 39, 0.06)" : "transparent",
+        backgroundColor: pressed ? pressedBackgroundColor : "transparent",
       })}
     >
       <SymbolView name={icon} size={iconSize} tintColor={tintColor} />
@@ -48,6 +51,7 @@ const ControlButton = ({
 };
 
 const BookControls = ({ libraryItemId }: Props) => {
+  const themeColors = useThemeColors();
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
@@ -99,7 +103,7 @@ const BookControls = ({ libraryItemId }: Props) => {
   const previousChapterIcon: SFSymbol = "backward.end.fill";
   const nextChapterIcon: SFSymbol = "forward.end.fill";
 
-  const baseTintColor = canControl || canToggle ? "#111827" : "#9ca3af";
+  const baseTintColor = canControl || canToggle ? themeColors.text : themeColors.textMuted;
 
   const handleToggle = async () => {
     if (!libraryItemId || isLoading) return;
@@ -150,12 +154,12 @@ const BookControls = ({ libraryItemId }: Props) => {
         style={{
           borderRadius: 28,
           borderCurve: "continuous",
-          backgroundColor: "#ffffff",
+          backgroundColor: themeColors.surface,
           paddingVertical: 16,
           paddingHorizontal: 12,
           boxShadow: "0 18px 30px rgba(15, 23, 42, 0.12)",
           borderWidth: 1,
-          borderColor: "#e5e7eb",
+          borderColor: themeColors.border,
         }}
       >
         <View
@@ -173,6 +177,7 @@ const BookControls = ({ libraryItemId }: Props) => {
             disabled={!canControl}
             iconSize={24}
             tintColor={baseTintColor}
+            pressedBackgroundColor={themeColors.bg}
           />
           <ControlButton
             accessibilityLabel={`Skip back ${seekBackwardSeconds} seconds`}
@@ -181,6 +186,7 @@ const BookControls = ({ libraryItemId }: Props) => {
             disabled={!canControl}
             iconSize={28}
             tintColor={baseTintColor}
+            pressedBackgroundColor={themeColors.bg}
           />
           <Pressable
             accessibilityRole="button"
@@ -194,7 +200,7 @@ const BookControls = ({ libraryItemId }: Props) => {
               borderCurve: "continuous",
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: canToggle ? "#111827" : "#9ca3af",
+              backgroundColor: canToggle ? themeColors.accent : themeColors.textMuted,
               opacity: pressed ? 0.85 : 1,
               transform: [{ scale: pressed ? 0.98 : 1 }],
               boxShadow: "0 14px 24px rgba(15, 23, 42, 0.25)",
@@ -214,6 +220,7 @@ const BookControls = ({ libraryItemId }: Props) => {
             disabled={!canControl}
             iconSize={28}
             tintColor={baseTintColor}
+            pressedBackgroundColor={themeColors.bg}
           />
           <ControlButton
             accessibilityLabel="Next chapter"
@@ -222,6 +229,7 @@ const BookControls = ({ libraryItemId }: Props) => {
             disabled={!canControl}
             iconSize={24}
             tintColor={baseTintColor}
+            pressedBackgroundColor={themeColors.bg}
           />
         </View>
       </View>

@@ -1,15 +1,17 @@
+import { useThemeColors } from "@/theme/use-app-theme";
 import { Stack, useGlobalSearchParams, useRouter } from "expo-router";
 import React, { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const LibraryItem = () => {
+  const themeColors = useThemeColors();
   const { libraryItemId } = useGlobalSearchParams();
   const { top: topOffset } = useSafeAreaInsets();
   const router = useRouter();
   const [hidden, setHidden] = useState(false);
   return (
-    <View style={{ marginTop: topOffset, flex: 1 }}>
+    <View style={{ marginTop: topOffset, flex: 1, backgroundColor: themeColors.bg }}>
       <Stack.Toolbar placement="left">
         <Stack.Toolbar.Button onPress={router.back}>
           <Stack.Toolbar.Icon sf="chevron.backward" />
@@ -39,11 +41,11 @@ const LibraryItem = () => {
               }
             }
           >
-            <Text> This is a test</Text>
+            <Text style={{ color: themeColors.text }}> This is a test</Text>
           </Pressable>
         </Stack.Toolbar.View>
       </Stack.Toolbar>
-      <Text>LibraryItem</Text>
+      <Text style={{ color: themeColors.text }}>LibraryItem</Text>
     </View>
   );
 };

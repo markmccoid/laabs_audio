@@ -1,5 +1,6 @@
 import { playerService, usePlaybackStore } from "@/player";
 import { useBookPlaybackRate } from "@/store/device-books-store";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useState } from "react";
 import { Text, View } from "react-native";
@@ -32,6 +33,7 @@ const normalizeRateWorklet = (value: number) => {
 };
 
 const BookRateSetter = ({ libraryItemId }: Props) => {
+  const themeColors = useThemeColors();
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const playbackRate = usePlaybackStore((state) => state.rate);
@@ -126,7 +128,7 @@ const BookRateSetter = ({ libraryItemId }: Props) => {
             borderCurve: "continuous",
             paddingHorizontal: 18,
             paddingVertical: 10,
-            backgroundColor: "#3f7c1b",
+            backgroundColor: themeColors.accent,
             minWidth: 118,
             alignItems: "center",
             boxShadow: "0 12px 20px rgba(15, 23, 42, 0.2)",
@@ -158,17 +160,17 @@ const BookRateSetter = ({ libraryItemId }: Props) => {
               borderTopLeftRadius: 22,
               borderBottomLeftRadius: 22,
               borderCurve: "continuous",
-              backgroundColor: "#ffffff",
+              backgroundColor: themeColors.surface,
               alignItems: "center",
               justifyContent: "center",
               borderWidth: 1,
-              borderColor: "#e5e7eb",
+              borderColor: themeColors.border,
               boxShadow: "0 12px 20px rgba(15, 23, 42, 0.12)",
             },
             iconAnimatedStyle,
           ]}
         >
-          <SymbolView name="hare.circle.fill" size={34} tintColor="#3f7c1b" />
+          <SymbolView name="hare.circle.fill" size={34} tintColor={themeColors.accent} />
         </Animated.View>
       </GestureDetector>
     </View>

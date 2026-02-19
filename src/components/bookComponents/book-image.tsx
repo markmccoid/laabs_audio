@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Image } from "expo-image";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { View, useWindowDimensions } from "react-native";
 const fallbackImage = require("../../../assets/images/NoImageFound.png");
 
@@ -9,6 +10,7 @@ type Props = {
 };
 
 const BookImage = ({ coverURL, leftAccessory }: Props) => {
+  const themeColors = useThemeColors();
   const { width } = useWindowDimensions();
   const imageSize = Math.min(360, width - 48);
   const finalCover = coverURL ? { uri: coverURL } : fallbackImage;
@@ -22,7 +24,7 @@ const BookImage = ({ coverURL, leftAccessory }: Props) => {
             width: imageSize,
             height: imageSize,
             borderRadius: 24,
-            backgroundColor: "#f3f4f6",
+            backgroundColor: themeColors.surface,
           }}
           contentFit="cover"
           transition={250}

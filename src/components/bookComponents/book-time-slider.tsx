@@ -1,5 +1,6 @@
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore } from "@/player";
+import { useThemeColors } from "@/theme/use-app-theme";
 import type { Chapter } from "@/types/absTypes";
 import { formatSeconds } from "@/utils/formatUtils";
 import Slider from "@react-native-community/slider";
@@ -37,6 +38,7 @@ const findChapterForPosition = (chapterWindows: ChapterWindow[], positionMs: num
 
 const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }: Props) => {
   const { data: userServerState } = useGetUserServerState();
+  const themeColors = useThemeColors();
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const positionMs = usePlaybackStore((state) => state.positionMs);
@@ -214,9 +216,9 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
         width: "100%",
         borderRadius: 20,
         borderCurve: "continuous",
-        backgroundColor: "#ffffff",
+        backgroundColor: themeColors.surface,
         borderWidth: 1,
-        borderColor: "#e5e7eb",
+        borderColor: themeColors.border,
         paddingHorizontal: 14,
         paddingVertical: 12,
         gap: 6,
@@ -228,9 +230,9 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
         minimumValue={0}
         maximumValue={chapterDurationMs > 0 ? chapterDurationMs : 1}
         disabled={!canSeek}
-        minimumTrackTintColor={canSeek ? "#111827" : "#9ca3af"}
-        maximumTrackTintColor="#d1d5db"
-        thumbTintColor={canSeek ? "#111827" : "#9ca3af"}
+        minimumTrackTintColor={canSeek ? themeColors.accent : themeColors.textMuted}
+        maximumTrackTintColor={themeColors.border}
+        thumbTintColor={canSeek ? themeColors.accent : themeColors.textMuted}
         onSlidingStart={() => setIsSliding(true)}
         onValueChange={(value: number) => setDraftChapterPositionMs(value)}
         onSlidingComplete={(value: number) => {
@@ -262,27 +264,33 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
           numberOfLines={1}
           ellipsizeMode="tail"
           selectable
-          style={{ fontSize: 13, color: "#111827", fontWeight: "600" }}
+          style={{ fontSize: 13, color: themeColors.text, fontWeight: "600" }}
         >
           {activeChapterTitle}
         </Text>
       </Pressable>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-        <Text selectable style={{ fontSize: 12, color: "#6b7280", fontVariant: ["tabular-nums"] }}>
+        <Text
+          selectable
+          style={{ fontSize: 12, color: themeColors.textMuted, fontVariant: ["tabular-nums"] }}
+        >
           {chapterElapsedLabel}
         </Text>
         <Text
           selectable
           style={{
             fontSize: 12,
-            color: "#111827",
+            color: themeColors.text,
             fontWeight: "600",
             fontVariant: ["tabular-nums"],
           }}
         >
           {bookPositionLabel} of {bookDurationLabel}
         </Text>
-        <Text selectable style={{ fontSize: 12, color: "#6b7280", fontVariant: ["tabular-nums"] }}>
+        <Text
+          selectable
+          style={{ fontSize: 12, color: themeColors.textMuted, fontVariant: ["tabular-nums"] }}
+        >
           {chapterEndLabel}
         </Text>
       </View>

@@ -1,8 +1,10 @@
+import { ThemeProvider } from "@react-navigation/native";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { Stack, router, useSegments } from "expo-router";
 import { useEffect, useMemo, useRef } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { Uniwind } from "uniwind";
 import { meApi } from "../api/me-api";
 import { useAuthStore } from "../auth/auth-store";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
@@ -12,9 +14,12 @@ import { playerService } from "../player/player-service";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { mmkvQueryPersister } from "../store/mmkv-query-persister";
+import { useNavigationTheme, useThemeColors } from "../theme/use-app-theme";
 
 export default function RootLayout() {
   const { status } = useAuthBootstrap();
+  const navigationTheme = useNavigationTheme();
+  const themeColors = useThemeColors();
   const loginRequired = useAuthStore((state) => state.loginRequired);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const segments = useSegments();
@@ -32,6 +37,10 @@ export default function RootLayout() {
     }),
     [],
   );
+
+  useEffect(() => {
+    Uniwind.setTheme("system");
+  }, []);
 
   useEffect(() => {
     if (status === "hydrating") return;
@@ -111,59 +120,63 @@ export default function RootLayout() {
 
   if (status === "hydrating") {
     return (
-      <View className="flex-1 items-center justify-center bg-white">
-        <ActivityIndicator size="large" />
+      <View className="flex-1 items-center justify-center bg-bg">
+        <ActivityIndicator size="large" color={themeColors.accent} />
       </View>
     );
   }
 
   return (
     <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
-      <GestureHandlerRootView>
-        <LibrarySelectionGate />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen
-            name="login"
-            options={{
-              presentation: "formSheet",
-              animation: "slide_from_bottom",
-              // sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-              sheetGrabberVisible: true,
-              sheetCornerRadius: 20,
-              contentStyle: {
-                backgroundColor: "white",
-              },
-            }}
-          />
-          <Stack.Screen
-            name="library-picker"
-            options={{
-              presentation: "formSheet",
-              animation: "slide_from_bottom",
-              sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-              sheetGrabberVisible: true,
-              sheetCornerRadius: 20,
-              contentStyle: {
-                backgroundColor: "white",
-              },
-            }}
-          />
-          <Stack.Screen
-            name="chapter-viewer"
-            options={{
-              presentation: "formSheet",
-              animation: "slide_from_bottom",
-              sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-              sheetGrabberVisible: true,
-              sheetCornerRadius: 20,
-              contentStyle: {
-                backgroundColor: "white",
-              },
-            }}
-          />
-        </Stack>
-      </GestureHandlerRootView>
+      <ThemeProvider value={navigationTheme}>
+        <GestureHandlerRootView style={{ flex: 1, backgroundColor: themeColors.bg }}>
+          <LibrarySelectionGate />
+          <Stack
+            screenOptions={{ headerShown: false, contentStyle: { backgroundColor: themeColors.bg } }}
+          >
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen
+              name="login"
+              options={{
+                presentation: "formSheet",
+                animation: "slide_from_bottom",
+                // sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+                sheetGrabberVisible: true,
+                sheetCornerRadius: 20,
+                contentStyle: {
+                  backgroundColor: themeColors.surface,
+                },
+              }}
+            />
+            <Stack.Screen
+              name="library-picker"
+              options={{
+                presentation: "formSheet",
+                animation: "slide_from_bottom",
+                sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+                sheetGrabberVisible: true,
+                sheetCornerRadius: 20,
+                contentStyle: {
+                  backgroundColor: themeColors.surface,
+                },
+              }}
+            />
+            <Stack.Screen
+              name="chapter-viewer"
+              options={{
+                presentation: "formSheet",
+                animation: "slide_from_bottom",
+                sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+                sheetGrabberVisible: true,
+                sheetCornerRadius: 20,
+                contentStyle: {
+                  backgroundColor: themeColors.surface,
+                },
+              }}
+            />
+          </Stack>
+        </GestureHandlerRootView>
+      </ThemeProvider>
     </PersistQueryClientProvider>
   );
 }

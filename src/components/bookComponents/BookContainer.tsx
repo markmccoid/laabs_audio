@@ -1,4 +1,5 @@
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { Stack } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,6 +13,7 @@ type Props = {
   libraryItemId: string | undefined;
 };
 const BookContainer = ({ libraryItemId }: Props) => {
+  const themeColors = useThemeColors();
   const { data: bookData, isLoading } = useGetItemDetails(libraryItemId);
   const insets = useSafeAreaInsets();
   const bookTitle = bookData?.title ?? "Book";
@@ -36,7 +38,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
   return (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
-      style={{ flex: 1, backgroundColor: "#f6f4f1" }}
+      style={{ flex: 1, backgroundColor: themeColors.bg }}
       contentContainerStyle={{
         paddingHorizontal: 20,
         paddingTop: 0,
@@ -50,7 +52,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
 
       <View style={{ alignItems: "center", gap: 6 }}>
         {isLoading ? (
-          <Text selectable style={{ fontSize: 12, color: "#9ca3af" }}>
+          <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
             Loading details...
           </Text>
         ) : null}
@@ -64,7 +66,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
       <View style={{ alignItems: "center" }}>
         <Text
           selectable
-          style={{ fontSize: 16, fontWeight: "600", color: "#1f2937", textAlign: "center" }}
+          style={{ fontSize: 16, fontWeight: "600", color: themeColors.text, textAlign: "center" }}
         >
           By {authorName}
         </Text>

@@ -2,6 +2,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
+import { useThemeColors } from "../theme/use-app-theme";
 
 export default function LoginScreen() {
   const storedUsername = useAuthStore((state) => state.storedUsername);
@@ -9,6 +10,7 @@ export default function LoginScreen() {
   const isOnline = useAuthStore((state) => state.isOnline);
   const lastAuthError = useAuthStore((state) => state.lastAuthError);
   const { loginWithPassword, setLoginRequired } = useAuthActions();
+  const themeColors = useThemeColors();
   const params = useLocalSearchParams<{ mode?: string }>();
 
   const mode = useMemo(() => {
@@ -64,17 +66,19 @@ export default function LoginScreen() {
 
   const content = (
     <View
-      className={isSheet ? "rounded-t-3xl bg-white px-6 pb-8 pt-6" : "flex-1 bg-white px-6 pt-24"}
+      className={
+        isSheet ? "rounded-t-3xl bg-surface px-6 pb-8 pt-6" : "flex-1 bg-bg px-6 pt-24"
+      }
     >
       <View className="flex-row items-center justify-between">
-        <Text className="text-3xl font-semibold text-neutral-900">Sign in</Text>
+        <Text className="text-3xl font-semibold text-text">Sign in</Text>
         {isSheet ? (
-          <Pressable onPress={handleClose} className="rounded-full bg-neutral-100 px-3 py-1">
-            <Text className="text-sm text-neutral-700">Close</Text>
+          <Pressable onPress={handleClose} className="rounded-full border border-border bg-bg px-3 py-1">
+            <Text className="text-sm text-text-muted">Close</Text>
           </Pressable>
         ) : null}
       </View>
-      <Text className="mt-2 text-neutral-600">
+      <Text className="mt-2 text-text-muted">
         {isSheet
           ? "Login required to stream. Offline downloads remain available."
           : "Enter your Audiobookshelf server details."}
@@ -82,37 +86,46 @@ export default function LoginScreen() {
 
       <View className="mt-6 gap-4">
         <View>
-          <Text className="mb-2 text-sm font-medium text-neutral-700">Server URL</Text>
+          <Text className="mb-2 text-sm font-medium text-text-muted">Server URL</Text>
           <TextInput
             autoCapitalize="none"
             autoCorrect={false}
             value={serverUrl}
             onChangeText={setServerUrl}
             placeholder="https://your-server.example.com"
-            className="rounded-xl border border-neutral-200 px-4 py-3 text-base"
+            placeholderTextColor={themeColors.textMuted}
+            selectionColor={themeColors.accent}
+            className="rounded-xl border border-border bg-surface px-4 py-3 text-base text-text"
+            style={{ color: themeColors.text }}
           />
         </View>
 
         <View>
-          <Text className="mb-2 text-sm font-medium text-neutral-700">Username</Text>
+          <Text className="mb-2 text-sm font-medium text-text-muted">Username</Text>
           <TextInput
             autoCapitalize="none"
             autoCorrect={false}
             value={username}
             onChangeText={setUsername}
             placeholder="username"
-            className="rounded-xl border border-neutral-200 px-4 py-3 text-base"
+            placeholderTextColor={themeColors.textMuted}
+            selectionColor={themeColors.accent}
+            className="rounded-xl border border-border bg-surface px-4 py-3 text-base text-text"
+            style={{ color: themeColors.text }}
           />
         </View>
 
         <View>
-          <Text className="mb-2 text-sm font-medium text-neutral-700">Password</Text>
+          <Text className="mb-2 text-sm font-medium text-text-muted">Password</Text>
           <TextInput
             secureTextEntry
             value={password}
             onChangeText={setPassword}
             placeholder="password"
-            className="rounded-xl border border-neutral-200 px-4 py-3 text-base"
+            placeholderTextColor={themeColors.textMuted}
+            selectionColor={themeColors.accent}
+            className="rounded-xl border border-border bg-surface px-4 py-3 text-base text-text"
+            style={{ color: themeColors.text }}
           />
         </View>
       </View>
@@ -125,7 +138,7 @@ export default function LoginScreen() {
 
       <Pressable
         onPress={handleLogin}
-        className="mt-6 rounded-xl bg-neutral-900 px-4 py-3"
+        className="mt-6 rounded-xl bg-accent px-4 py-3"
         disabled={isSubmitting}
       >
         {isSubmitting ? (

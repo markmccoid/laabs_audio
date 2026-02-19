@@ -1,4 +1,5 @@
 import { LibraryItemSummary } from "@/api/library-items-api";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { formatSeconds } from "@/utils/formatUtils";
 import { Image } from "expo-image";
 import { Link } from "expo-router";
@@ -10,8 +11,10 @@ type Props = {
   libraryItem: LibraryItemSummary;
 };
 const LibraryItem = ({ libraryItem }: Props) => {
+  const themeColors = useThemeColors();
+
   return (
-    <View className="border-hairline p-2">
+    <View className="border-hairline border-border bg-surface p-2">
       <Link href={`/(tabs)/search/${libraryItem.id}`}>
         <View className="flex-row items-center gap-2 ">
           <Image
@@ -21,25 +24,26 @@ const LibraryItem = ({ libraryItem }: Props) => {
               height: 100,
               borderRadius: 15,
               borderWidth: StyleSheet.hairlineWidth,
+              borderColor: themeColors.border,
             }}
           />
           <View className="flex-col items-start justify-between flex-1">
-            <Text numberOfLines={1} className="text-base font-semibold" lineBreakMode="tail">
+            <Text numberOfLines={1} className="text-base font-semibold text-text" lineBreakMode="tail">
               {libraryItem.title}
             </Text>
-            <Text numberOfLines={1} className="text-base" lineBreakMode="tail">
+            <Text numberOfLines={1} className="text-base text-text-muted" lineBreakMode="tail">
               by {libraryItem.author}
             </Text>
             <View className="flex-row justify-between items-center w-full mt-1">
               <View className="flex-row gap-1 items-center">
-                <SymbolView name="hourglass" tintColor={"black"} size={16} />
-                <Text numberOfLines={1} className="text-sm" lineBreakMode="tail">
+                <SymbolView name="hourglass" tintColor={themeColors.textMuted} size={16} />
+                <Text numberOfLines={1} className="text-sm text-text-muted" lineBreakMode="tail">
                   {formatSeconds(libraryItem.duration)}
                 </Text>
               </View>
               <View className="flex-row gap-1 items-center">
-                <SymbolView name="calendar" tintColor={"black"} size={16} />
-                <Text>{libraryItem.publishedYear}</Text>
+                <SymbolView name="calendar" tintColor={themeColors.textMuted} size={16} />
+                <Text className="text-text-muted">{libraryItem.publishedYear}</Text>
               </View>
             </View>
           </View>

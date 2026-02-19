@@ -1,5 +1,6 @@
 import { useGetItemDetails, useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore } from "@/player";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { formatSeconds } from "@/utils/formatUtils";
 import { FlashList } from "@shopify/flash-list";
 import { router, useLocalSearchParams } from "expo-router";
@@ -30,6 +31,7 @@ const findChapterForPosition = <T extends { startMs: number; endMs: number }>(
 };
 
 const ChapterViewerRoute = () => {
+  const themeColors = useThemeColors();
   const params = useLocalSearchParams<{ libraryItemId?: string | string[] }>();
   const routeLibraryItemId = Array.isArray(params.libraryItemId)
     ? params.libraryItemId[0]
@@ -152,7 +154,7 @@ const ChapterViewerRoute = () => {
   if (!routeLibraryItemId) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <Text style={{ fontSize: 14, color: "#6b7280", textAlign: "center" }}>
+        <Text style={{ fontSize: 14, color: themeColors.textMuted, textAlign: "center" }}>
           No book selected.
         </Text>
       </View>
@@ -160,21 +162,21 @@ const ChapterViewerRoute = () => {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#f9fafb" }}>
+    <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       <View
         style={{
           paddingHorizontal: 20,
           paddingTop: 18,
           paddingBottom: 14,
           borderBottomWidth: 1,
-          borderBottomColor: "#e5e7eb",
-          backgroundColor: "#ffffff",
+          borderBottomColor: themeColors.border,
+          backgroundColor: themeColors.surface,
         }}
       >
         <View
           style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
         >
-          <Text style={{ fontSize: 24, fontWeight: "700", color: "#111827" }}>Chapters</Text>
+          <Text style={{ fontSize: 24, fontWeight: "700", color: themeColors.text }}>Chapters</Text>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close chapter list"
@@ -182,24 +184,24 @@ const ChapterViewerRoute = () => {
             style={({ pressed }) => ({
               borderRadius: 999,
               borderCurve: "continuous",
-              backgroundColor: "#f3f4f6",
+              backgroundColor: themeColors.bg,
               paddingVertical: 6,
               paddingHorizontal: 12,
               opacity: pressed ? 0.7 : 1,
             })}
           >
-            <Text style={{ fontSize: 13, fontWeight: "600", color: "#374151" }}>Close</Text>
+            <Text style={{ fontSize: 13, fontWeight: "600", color: themeColors.textMuted }}>Close</Text>
           </Pressable>
         </View>
-        <Text numberOfLines={1} style={{ marginTop: 4, fontSize: 13, color: "#6b7280" }}>
+        <Text numberOfLines={1} style={{ marginTop: 4, fontSize: 13, color: themeColors.textMuted }}>
           {bookData?.title ?? "Loading..."}
         </Text>
       </View>
 
       {isLoading && !chapterItems.length ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 8 }}>
-          <ActivityIndicator />
-          <Text style={{ fontSize: 13, color: "#6b7280" }}>Loading chapters...</Text>
+          <ActivityIndicator color={themeColors.accent} />
+          <Text style={{ fontSize: 13, color: themeColors.textMuted }}>Loading chapters...</Text>
         </View>
       ) : null}
 
@@ -216,7 +218,7 @@ const ChapterViewerRoute = () => {
             style={({ pressed }) => ({
               borderRadius: 999,
               borderCurve: "continuous",
-              backgroundColor: "#111827",
+              backgroundColor: themeColors.accent,
               paddingVertical: 8,
               paddingHorizontal: 14,
               opacity: pressed ? 0.8 : 1,
@@ -229,7 +231,7 @@ const ChapterViewerRoute = () => {
 
       {!isLoading && !isError && !chapterItems.length ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
-          <Text style={{ fontSize: 14, color: "#6b7280", textAlign: "center" }}>
+          <Text style={{ fontSize: 14, color: themeColors.textMuted, textAlign: "center" }}>
             No chapter data is available for this book.
           </Text>
         </View>
@@ -256,8 +258,8 @@ const ChapterViewerRoute = () => {
                   borderRadius: 14,
                   borderCurve: "continuous",
                   borderWidth: 1,
-                  borderColor: isActive ? "#111827" : "#e5e7eb",
-                  backgroundColor: isActive ? "#111827" : "#ffffff",
+                  borderColor: isActive ? themeColors.accent : themeColors.border,
+                  backgroundColor: isActive ? themeColors.accent : themeColors.surface,
                   paddingHorizontal: 14,
                   paddingVertical: 12,
                   opacity: pendingChapterId !== null ? 0.7 : pressed ? 0.8 : 1,
@@ -270,7 +272,7 @@ const ChapterViewerRoute = () => {
                         fontSize: 15,
                         letterSpacing: 0.4,
                         fontWeight: "600",
-                        color: isActive ? "#d1d5db" : "#6b7280",
+                        color: isActive ? "#ffffff" : themeColors.textMuted,
                         textTransform: "uppercase",
                       }}
                     >
@@ -284,20 +286,28 @@ const ChapterViewerRoute = () => {
                       style={{
                         fontSize: 15,
                         fontWeight: "600",
-                        color: isActive ? "#f9fafb" : "#111827",
+                        color: isActive ? "#ffffff" : themeColors.text,
                       }}
                     >
                       {item.title}
                     </Text>
                   </View>
                   <View className="flex-col">
-                    <Text>{formatSeconds(item.startMs / 1000)}</Text>
-                    <Text>{formatSeconds(item.endMs / 1000)}</Text>
+                    <Text style={{ color: isActive ? "#ffffff" : themeColors.textMuted }}>
+                      {formatSeconds(item.startMs / 1000)}
+                    </Text>
+                    <Text style={{ color: isActive ? "#ffffff" : themeColors.textMuted }}>
+                      {formatSeconds(item.endMs / 1000)}
+                    </Text>
                   </View>
                 </View>
                 {isPending ? (
                   <Text
-                    style={{ marginTop: 4, fontSize: 12, color: isActive ? "#d1d5db" : "#6b7280" }}
+                    style={{
+                      marginTop: 4,
+                      fontSize: 12,
+                      color: isActive ? "#ffffff" : themeColors.textMuted,
+                    }}
                   >
                     Jumping...
                   </Text>

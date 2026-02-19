@@ -1,4 +1,5 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
+import { useThemeColors } from "@/theme/use-app-theme";
 import {
   selectIsBookDownloaded,
   useDeviceBooksActions,
@@ -17,6 +18,7 @@ type Props = {
 };
 
 const DownloadControls = ({ libraryItemId, summary }: Props) => {
+  const themeColors = useThemeColors();
   const { downloadBook, cancelDownload, deleteDownloadedBookData } = useDeviceBooksActions();
   const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
   const isDownloaded = useDeviceBooksStore((state) => {
@@ -48,20 +50,20 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
         borderRadius: 20,
         borderCurve: "continuous",
         borderWidth: 1,
-        borderColor: "#f4d7b0",
-        backgroundColor: "#fff7ed",
+        borderColor: themeColors.border,
+        backgroundColor: themeColors.surface,
         padding: 16,
         gap: 10,
-        boxShadow: "0 10px 22px rgba(120, 53, 15, 0.12)",
+        boxShadow: "0 10px 22px rgba(15, 23, 42, 0.1)",
       }}
     >
       <Text
         selectable
-        style={{ fontSize: 16, fontWeight: "600", color: "#7c2d12" }}
+        style={{ fontSize: 16, fontWeight: "600", color: themeColors.text }}
       >
         Offline Download
       </Text>
-      <Text selectable style={{ fontSize: 12, color: "#92400e" }}>
+      <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
         {isDownloaded
           ? "Downloaded and ready for offline playback."
           : "Download this book for offline playback."}
@@ -74,27 +76,27 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
               height: 6,
               width: "100%",
               borderRadius: 999,
-              backgroundColor: "#fde8cd",
+              backgroundColor: themeColors.border,
             }}
           >
             <View
               style={{
                 height: 6,
                 borderRadius: 999,
-                backgroundColor: "#f59e0b",
+                backgroundColor: themeColors.accent,
                 width: `${progressValue}%`,
               }}
             />
           </View>
           <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-            <Text selectable style={{ fontSize: 12, color: "#b45309" }}>
+            <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
               {downloadProgress?.currentFileProcessing ?? "Preparing download..."}
             </Text>
-            <Text selectable style={{ fontSize: 12, color: "#b45309" }}>
+            <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
               {formatPercent(progressValue)}
             </Text>
           </View>
-          <Text selectable style={{ fontSize: 12, color: "#b45309" }}>
+          <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
             {downloadProgress?.numberOfFilesDownloaded ?? 0}/{downloadProgress?.numberOfFiles ?? 0}{" "}
             files
           </Text>
@@ -105,15 +107,15 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
               borderRadius: 12,
               borderCurve: "continuous",
               borderWidth: 1,
-              borderColor: "#f59e0b",
+              borderColor: themeColors.border,
               paddingVertical: 8,
               opacity: pressed ? 0.8 : 1,
-              backgroundColor: "#fff7ed",
+              backgroundColor: themeColors.bg,
             })}
           >
             <Text
               selectable
-              style={{ textAlign: "center", fontSize: 13, fontWeight: "600", color: "#7c2d12" }}
+              style={{ textAlign: "center", fontSize: 13, fontWeight: "600", color: themeColors.text }}
             >
               Cancel Download
             </Text>
@@ -127,15 +129,15 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
               borderRadius: 12,
               borderCurve: "continuous",
               borderWidth: 1,
-              borderColor: "#f59e0b",
+              borderColor: themeColors.border,
               paddingVertical: 8,
               opacity: pressed ? 0.8 : 1,
-              backgroundColor: "#fff7ed",
+              backgroundColor: themeColors.bg,
             })}
           >
             <Text
               selectable
-              style={{ textAlign: "center", fontSize: 13, fontWeight: "600", color: "#7c2d12" }}
+              style={{ textAlign: "center", fontSize: 13, fontWeight: "600", color: themeColors.text }}
             >
               Delete Download
             </Text>
@@ -150,13 +152,13 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
               borderRadius: 12,
               borderCurve: "continuous",
               paddingVertical: 10,
-              backgroundColor: isAnotherDownloadActive ? "#fdba74" : "#f97316",
+              backgroundColor: isAnotherDownloadActive ? themeColors.textMuted : themeColors.accent,
               opacity: pressed ? 0.85 : 1,
             })}
           >
             <Text
               selectable
-              style={{ textAlign: "center", fontSize: 13, fontWeight: "600", color: "#fff7ed" }}
+              style={{ textAlign: "center", fontSize: 13, fontWeight: "600", color: "#ffffff" }}
             >
               {isAnotherDownloadActive ? "Download In Progress" : "Download Book"}
             </Text>

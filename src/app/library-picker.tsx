@@ -1,10 +1,12 @@
 import { router } from "expo-router";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { useLibrarySelection } from "../hooks/use-library-selection";
+import { useThemeColors } from "../theme/use-app-theme";
 
 export default function LibraryPickerScreen() {
   const { libraries, isLoading, isError, refetch, activeLibraryId, selectLibrary } =
     useLibrarySelection();
+  const themeColors = useThemeColors();
   const showEmptyState = !libraries.length && !isLoading && !isError;
 
   const handleSelect = (id: string) => {
@@ -20,6 +22,7 @@ export default function LibraryPickerScreen() {
       data={libraries}
       keyExtractor={(library) => library.id}
       contentInsetAdjustmentBehavior="automatic"
+      style={{ backgroundColor: themeColors.bg }}
       contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 12, paddingBottom: 24 }}
       showsVerticalScrollIndicator
       ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
@@ -35,17 +38,14 @@ export default function LibraryPickerScreen() {
             </Pressable>
           </View>
         ) : (
-          <View className="px-6 pt-5 pb-4 border-b border-neutral-100">
+          <View className="border-b border-border px-6 pb-4 pt-5">
             <View className="flex-row items-center justify-between">
-              <Text className="text-2xl font-semibold text-neutral-900">Choose library</Text>
-              <Pressable
-                onPress={() => router.back()}
-                className="rounded-full bg-neutral-100 px-3 py-1"
-              >
-                <Text className="text-sm text-neutral-700">Close</Text>
+              <Text className="text-2xl font-semibold text-text">Choose library</Text>
+              <Pressable onPress={() => router.back()} className="rounded-full bg-surface px-3 py-1">
+                <Text className="text-sm text-text-muted">Close</Text>
               </Pressable>
             </View>
-            <Text className="mt-2 text-sm text-neutral-600">
+            <Text className="mt-2 text-sm text-text-muted">
               Select the library you want to browse.
             </Text>
           </View>
@@ -54,7 +54,7 @@ export default function LibraryPickerScreen() {
       ListHeaderComponentStyle={isError ? { marginBottom: 12 } : undefined}
       ListEmptyComponent={
         showEmptyState ? (
-          <Text className="text-sm text-neutral-600">No libraries available.</Text>
+          <Text className="text-sm text-text-muted">No libraries available.</Text>
         ) : null
       }
       renderItem={({ item }) => {
@@ -64,22 +64,20 @@ export default function LibraryPickerScreen() {
             onPress={() => handleSelect(item.id)}
             className={
               isActive
-                ? "rounded-2xl border border-neutral-900 bg-neutral-900 px-4 py-3"
-                : "rounded-2xl border border-neutral-200 px-4 py-3"
+                ? "rounded-2xl border border-accent bg-accent px-4 py-3"
+                : "rounded-2xl border border-border bg-surface px-4 py-3"
             }
           >
             <Text
               className={
-                isActive
-                  ? "text-base font-semibold text-white"
-                  : "text-base font-semibold text-neutral-900"
+                isActive ? "text-base font-semibold text-white" : "text-base font-semibold text-text"
               }
             >
               {item.name}
             </Text>
             <Text
               className={
-                isActive ? "mt-1 text-xs text-neutral-200" : "mt-1 text-xs text-neutral-500"
+                isActive ? "mt-1 text-xs text-white/85" : "mt-1 text-xs text-text-muted"
               }
             >
               {item.mediaType} • {item.icon || item.provider}

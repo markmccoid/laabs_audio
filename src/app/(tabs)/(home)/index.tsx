@@ -51,10 +51,10 @@ export default function Index() {
   return (
     <View style={{ flex: 1, paddingTop: topInset }}>
       <Link href="/:555">
-        <Text>GO TO 555</Text>
+        <Text className="text-text">GO TO 555</Text>
       </Link>
       <ScrollView
-        className="flex-1 bg-slate-50"
+        className="flex-1 bg-bg"
         // style={{ marginTop: topInset }}
         // contentInset={{ top: topInset }}
         // contentOffset={{ x: 0, y: topInset }}
@@ -63,7 +63,7 @@ export default function Index() {
         stickyHeaderIndices={[0]}
       >
         <View
-          className=" border-slate-200 bg-white px-6 py-3 border"
+          className="border border-border bg-surface px-6 py-3"
           // style={{ paddingTop: topInset }}
         ></View>
       </ScrollView>
