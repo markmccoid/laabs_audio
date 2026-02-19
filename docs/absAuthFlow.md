@@ -18,7 +18,15 @@ This document describes the authentication flow for Audiobookshelf in this app. 
   - `accessToken`, `refreshToken`
 
 **MMKV + Zustand persist (non-sensitive, app state)**
-- `auth-store.ts` persists `activeLibraryId` only.
+- `auth-store.ts` persists:
+  - `activeLibraryId`
+  - `activeLibraryName`
+  - `activeLibraryUserKey`
+- `device-books-store.ts` persists device-only book data:
+  - downloads + local cover URIs
+  - per-user-book playback rates
+  - offline bookmark create/delete queues
+  - local bookmark notes
 
 ## State Model (auth-store)
 
@@ -28,7 +36,7 @@ This document describes the authentication flow for Audiobookshelf in this app. 
 - `storedUsername`, `serverUrl`
 - `accessToken`, `refreshToken`, `accessTokenExpiresAt`
 - `loginRequired`, `lastAuthError`
-- `activeLibraryId` (persisted via MMKV)
+- `activeLibraryId`, `activeLibraryName`, `activeLibraryUserKey` (persisted via MMKV)
 
 ## Login Flow
 
@@ -42,10 +50,19 @@ This document describes the authentication flow for Audiobookshelf in this app. 
 
 1. On app startup, call `authStore.actions.hydrateFromStorage()`.
 2. Credentials and tokens are loaded from SecureStore.
-3. `status` becomes:
+3. `useAuthBootstrap` derives `hasOfflineContent` from `device-books-store`.
+4. `status` becomes:
    - `authenticated` if a session exists
    - `offlineOnly` if there’s offline content but no session
    - `anonymous` otherwise
+
+## Bootstrap Side Effects
+
+`useAuthBootstrap` also:
+
+- Subscribes to `NetInfo` and updates `authStore.isOnline`.
+- Attempts `refreshSession()` when online and a refresh token exists.
+- Flushes pending bookmark queues from `device-books-store` when authenticated and online.
 
 ## Authenticated API Call Flow
 
@@ -97,4 +114,3 @@ These errors can be handled in UI screens for messaging and recovery.
 - Use `absClient` for all authenticated API calls.
 - Set `authStore.actions.setOnlineStatus()` based on `NetInfo`.
 - Read `authStore.getState().loginRequired` to prompt login when needed.
-

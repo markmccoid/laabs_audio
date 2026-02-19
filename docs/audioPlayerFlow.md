@@ -53,7 +53,6 @@ flowchart TD
 
 - The app calls `playerService.init()` in `src/app/_layout.tsx`.
 - `init()` attaches:
-  - App state listener (for background sync)
   - Audio engine event listeners (for status updates)
 
 ## Local Playback Flow (Home Tab Demo)
@@ -86,13 +85,12 @@ Progress updates come from the audio engine **once per second** (configured in `
 
 - **Every 5 minutes** during playback
 - **On pause**
-- **On app background**
-- **On end of book**
+- **On explicit seek**
 
 Sync targets:
 
-- Audiobookshelf session + progress APIs (`sessionsApi`, `meApi`)
-- Local persistence (`updateLocalProgress`)
+- Audiobookshelf session API (`sessionsApi.syncSession`)
+- React Query user cache (`queryKeys.userServerState(...)`) via `setQueryData`
 
 ## Store Fields Used by the UI
 
@@ -108,7 +106,7 @@ Sync targets:
 Rate ownership:
 
 - Active playback rate lives in `playbackStore.rate`.
-- Per-book persisted rate lives in `booksStore.progressById[bookId].playbackRate`.
+- Per-book persisted rate lives in `deviceBooksStore.playbackRatesByUserBook` (scoped by `userKey + libraryItemId`).
 - Default per-book rate is `1.0` when no value is stored.
 
 Note: the store only persists `bookId`, `currentTrackIndex`, `positionMs`, and `rate`. After a reload, the UI must call `loadBook` or `loadLocalFile` to rebuild the queue.
@@ -178,7 +176,7 @@ Behavior:
 4. Committed rate is applied through `playerService.setRate(rate)` on gesture end.
 5. `playerService.setRate(rate)` updates both:
    - active `playbackStore.rate`
-   - persisted per-book rate in `booksStore` for the active book.
+   - persisted per-book rate in `deviceBooksStore` for the active book.
 6. On next load of that same book, `playerService.loadBook()` restores the stored per-book rate; books without stored rate start at `1.0`.
 
 ## Book Time Slider
@@ -190,9 +188,9 @@ Behavior:
 1. The slider is chapter-scoped: minimum is `0`, maximum is current chapter duration.
 2. Left label shows live chapter elapsed time; right label shows total chapter duration.
 3. The center label shows absolute book progress (`current position of total duration`).
-4. Before the viewed book is active, chapter + position are derived from local persisted progress (`booksStore.progressById[libraryItemId].currentPosition`) and the loaded item chapters.
-5. During initial `loading`, the slider keeps using local persisted position to avoid a temporary jump to zero while queue/session state initializes.
-6. On first transition into `playing/paused`, the slider waits until live position is plausibly aligned with local resume position (with a short timeout fallback) before switching from local to live progress.
+4. Before the viewed book is active, chapter + position are derived from user server state (`useGetUserServerState`) and the loaded item chapters.
+5. During initial `loading`, the slider keeps using cached user progress to avoid a temporary jump to zero while queue/session state initializes.
+6. On first transition into `playing/paused`, the slider waits until live position is plausibly aligned with cached resume position (with a short timeout fallback) before switching from cached to live progress.
 7. Once that handoff is ready, chapter + position are sourced from live playback state (`playbackStore.chapterIndex`, `positionMs`).
 8. The slider remains disabled until the user has played that viewed book at least once during the current screen session.
 9. Seeking occurs only on `onSlidingComplete`; the chapter-relative slider value is translated back to absolute book position before calling `playerService.seekTo(positionMs)`.
@@ -201,8 +199,9 @@ Behavior:
 
 When loading a streamed book with `playerService.loadBook(itemId)`, initial seek is resolved in this order:
 
-1. Local persisted progress from `booksStore` (`currentPosition`).
-2. Fallback to persisted playback-store position if local progress is unavailable.
+1. `userServerState` query cache (`progressByBookId[itemId]` or `progressByBookId[session.bookId]`).
+2. Fallback network read `meApi.getProgress(itemId)` if query cache is missing the book.
+3. Fallback to persisted playback-store position if no server progress is available.
 
 ### Play / Pause / Toggle
 

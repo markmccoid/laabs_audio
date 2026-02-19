@@ -1,39 +1,46 @@
 # React Query MMKV Persistence
 
-This app uses TanStack Query (React Query) and persists **only selected queries** to a dedicated MMKV instance. This keeps the Zustand MMKV storage isolated, and avoids persisting sensitive or irrelevant query data.
+This app persists selected React Query cache entries to MMKV and keeps device-only Zustand state in a separate store.
 
-## How It Works
+## Current Behavior
 
-1. A dedicated MMKV instance (`laabs-mmkv-query`) stores a serialized React Query cache snapshot.
-2. The app uses `PersistQueryClientProvider`, which wraps `QueryClientProvider` and:
-   - Restores the cache on startup.
-   - Subscribes to cache updates and persists them.
-3. Queries **opt in** to persistence by setting `meta: { persist: true }`.
-4. The provider filters which queries are dehydrated using `shouldDehydrateQuery`.
-5. The cache is **busted** when `activeLibraryUserKey` changes to prevent cross-account data.
-6. On logout or library switch, the persisted cache is removed and the in-memory cache is cleared.
+1. React Query uses a shared `queryClient` with:
+   - `staleTime: 5 minutes`
+   - `gcTime: Infinity`
+2. `PersistQueryClientProvider` restores/saves cache snapshots through MMKV.
+3. Only queries with `meta: { persist: true }` are dehydrated.
+4. Persisted cache `maxAge` is `Infinity`.
+5. On logout, only global/library query roots are removed (`library`, `libraries`, plus legacy keys). User-scoped data is intentionally retained.
 
-## Opting In a Query
+## Query Key Structure
 
-To persist a query, add:
+- `["libraries"]`
+- `["library", libraryId, "books"]`
+- `["library", libraryId, "filterData"]`
+- `["library", libraryId, "booksInProgress"]`
+- `["user", userKey, "serverState"]`
+- `["itemDetails", itemId]`
 
-```ts
-meta: { persist: true },
-gcTime: 1000 * 60 * 60 * 24,
-```
+## Persisted Queries (today)
 
-`gcTime` is set so the cache survives long enough for restore to be useful.
+- Libraries query (`useLibrariesQuery`)
+- Library books (`useGetBooks`)
+- User server state (`useGetUserServerState`)
+- Library filter data (`useGetFilterData`)
 
-## Files Created
+`booksInProgress` is not currently persisted.
 
+## Startup Hydration
+
+After auth becomes authenticated and a `userKey` exists, app bootstrap prefetches:
+
+- `queryKeys.userServerState(activeLibraryUserKey)` via `meApi.getUserServerState()`
+
+This primes progress/bookmarks for immediate resume and UI merge behavior.
+
+## Files
+
+- `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/query/query-client.ts`
+- `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/query/query-keys.ts`
 - `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/store/mmkv-query-persister.ts`
-  - MMKV-backed persister used by React Query.
-
-## Files Updated
-
 - `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/app/_layout.tsx`
-  - Replaced `QueryClientProvider` with `PersistQueryClientProvider`.
-  - Added persist options and query filtering.
-  - Clears persisted data on logout and library switch.
-- `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/hooks/abs-data-hooks.ts`
-  - `useGetBooks` now opts into persistence.

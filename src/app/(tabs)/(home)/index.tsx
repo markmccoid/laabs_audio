@@ -24,7 +24,7 @@ export default function Index() {
   const playbackError = usePlaybackStore((state) => state.error);
   const debugStatus = usePlaybackStore((state) => state.debugStatus);
   const debugMessage = usePlaybackStore((state) => state.debugMessage);
-  const currentBookId = usePlaybackStore((state) => state.bookId);
+  const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const [isReady, setIsReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);

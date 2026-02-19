@@ -1,24 +1,17 @@
 import { playerService, usePlaybackStore } from "@/player";
-import { useCurrentPlaybackBookDetails } from "@/store/store-books";
+import { useCachedBookSummary } from "@/hooks/abs-data-hooks";
 import { Image } from "expo-image";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
-import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 export default function TabLayout() {
-  const currentBook = useCurrentPlaybackBookDetails();
-  const [showMini, setShowMini] = useState(false);
+  const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const currentBook = useCachedBookSummary(currentLibraryItemId ?? undefined);
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const isPlaying = playbackState === "playing";
-  const currentBookId = usePlaybackStore((state) => state.bookId);
 
-  const hasLoadedBook = usePlaybackStore((s) => Boolean(s.bookId) && s.queue.length > 0);
-
-  const testMini = () => {
-    setShowMini(false);
-    setTimeout(() => setShowMini(true), 2000);
-  };
+  const hasLoadedBook = usePlaybackStore((s) => Boolean(s.libraryItemId) && s.queue.length > 0);
 
   const handleToggle = async () => {
     // if (isLoading) return;

@@ -1,45 +1,36 @@
-import { QueryClient } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { Stack, router, useSegments } from "expo-router";
 import { useEffect, useMemo, useRef } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { meApi } from "../api/me-api";
 import { useAuthStore } from "../auth/auth-store";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
+import { LibrarySelectionGate } from "../components/library-selection-gate";
 import "../global.css";
 import { playerService } from "../player/player-service";
+import { queryClient } from "../query/query-client";
+import { queryKeys } from "../query/query-keys";
 import { mmkvQueryPersister } from "../store/mmkv-query-persister";
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: false,
-      staleTime: 60 * 1000,
-    },
-  },
-});
 
 export default function RootLayout() {
   const { status } = useAuthBootstrap();
   const loginRequired = useAuthStore((state) => state.loginRequired);
-  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const segments = useSegments();
   const previousStatus = useRef<typeof status | null>(null);
-  const previousLibraryId = useRef<string | null>(null);
 
   // Persist only queries that opt-in via `meta.persist`
   const persistOptions = useMemo(
     () => ({
       persister: mmkvQueryPersister,
-      maxAge: 1000 * 60 * 60 * 24, // 24h persistence window
-      // Bust cache when user/server changes to avoid cross-account data
-      buster: activeLibraryUserKey ?? "anon",
+      maxAge: Infinity,
       dehydrateOptions: {
-        shouldDehydrateQuery: (query) => query.meta?.persist === true,
+        shouldDehydrateQuery: (query: { meta?: Record<string, unknown> }) =>
+          query.meta?.persist === true,
       },
     }),
-    [activeLibraryUserKey],
+    [],
   );
 
   useEffect(() => {
@@ -49,12 +40,19 @@ export default function RootLayout() {
     const inLogin = rootSegment === "login";
     const inTabs = rootSegment === "(tabs)";
     const inLibraryPicker = rootSegment === "library-picker";
+    const inChapterViewer = rootSegment === "chapter-viewer";
     if (status === "anonymous" && !inLogin) {
       router.replace({ pathname: "/login", params: { mode: "required" } });
       return;
     }
 
-    if (status !== "anonymous" && !loginRequired && !inTabs && !inLibraryPicker) {
+    if (
+      status !== "anonymous" &&
+      !loginRequired &&
+      !inTabs &&
+      !inLibraryPicker &&
+      !inChapterViewer
+    ) {
       router.replace("/(tabs)/(home)");
     }
   }, [loginRequired, segments, status]);
@@ -63,27 +61,27 @@ export default function RootLayout() {
     if (status === "hydrating") return;
 
     const prevStatus = previousStatus.current;
-    const prevLibraryId = previousLibraryId.current;
 
     // Clear persisted query data on logout transitions
     const didLogout = prevStatus !== null && prevStatus !== "anonymous" && status === "anonymous";
     if (didLogout) {
-      mmkvQueryPersister.removeClient();
-      queryClient.clear();
-    }
-
-    // Clear persisted query data when switching libraries
-    const didSwitchLibrary =
-      Boolean(prevLibraryId) && Boolean(activeLibraryId) && prevLibraryId !== activeLibraryId;
-    if (didSwitchLibrary) {
-      mmkvQueryPersister.removeClient();
-      queryClient.clear();
+      queryClient.removeQueries({
+        predicate: (query) => {
+          const rootKey = query.queryKey[0];
+          return (
+            rootKey === "library" ||
+            rootKey === "libraries" ||
+            // Clean up legacy pre-refactor keys on fresh transitions.
+            rootKey === "books" ||
+            rootKey === "absfilterdata"
+          );
+        },
+      });
     }
 
     // Track current values for the next transition check
     previousStatus.current = status;
-    previousLibraryId.current = activeLibraryId ?? null;
-  }, [activeLibraryId, status]);
+  }, [status]);
 
   useEffect(() => {
     playerService.init();
@@ -98,6 +96,19 @@ export default function RootLayout() {
     router.push({ pathname: "/login", params: { mode: "sheet" } });
   }, [loginRequired, segments, status]);
 
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    if (!activeLibraryUserKey) return;
+
+    queryClient
+      .prefetchQuery({
+        queryKey: queryKeys.userServerState(activeLibraryUserKey),
+        queryFn: () => meApi.getUserServerState(),
+        meta: { persist: true },
+      })
+      .catch(() => undefined);
+  }, [activeLibraryUserKey, status]);
+
   if (status === "hydrating") {
     return (
       <View className="flex-1 items-center justify-center bg-white">
@@ -109,7 +120,7 @@ export default function RootLayout() {
   return (
     <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
       <GestureHandlerRootView>
-        {/* <LibrarySelectionGate /> */}
+        <LibrarySelectionGate />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen
@@ -127,6 +138,19 @@ export default function RootLayout() {
           />
           <Stack.Screen
             name="library-picker"
+            options={{
+              presentation: "formSheet",
+              animation: "slide_from_bottom",
+              sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+              sheetGrabberVisible: true,
+              sheetCornerRadius: 20,
+              contentStyle: {
+                backgroundColor: "white",
+              },
+            }}
+          />
+          <Stack.Screen
+            name="chapter-viewer"
             options={{
               presentation: "formSheet",
               animation: "slide_from_bottom",

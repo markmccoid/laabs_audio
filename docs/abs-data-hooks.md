@@ -8,6 +8,7 @@ These hooks live in `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs
 import {
   useLibraries,
   useGetBooks,
+  useGetUserServerState,
   useGetBooksInProgress,
   useMoveBookToTopOfInProgress,
   useCachedBookSummary,
@@ -34,10 +35,10 @@ Notes:
 
 ### useGetBooks
 
-Fetches the active library items and applies filtering and sorting from `store-filters`.
+Fetches global library items and merges user server state on the fly, then applies filtering/sorting from `store-filters`.
 
 Returns:
-- `data: LibraryItemsSummary | undefined` (sorted and filtered)
+- `data: LibraryItemWithUserState[] | undefined` (sorted and filtered)
 - `isPending: boolean`
 - `isError: boolean`
 - `isLoading: boolean`
@@ -45,10 +46,26 @@ Returns:
 - plus the rest of the React Query result fields
 
 Notes:
-- Uses `libraryItemsApi.getItems({ libraryId })`.
+- Uses `libraryItemsApi.getItems({ libraryId })` with query key `["library", libraryId, "books"]`.
+- Merges user progress/bookmarks from `useGetUserServerState()`.
 - Filters: search term, genres, tags, and "has audio".
 - Sorting uses the `sortedBy` and `sortDirection` filters.
 - When unauthenticated, returns a safe object with `data` undefined.
+
+### useGetUserServerState
+
+Fetches user-owned server state from `/api/me` and normalizes it.
+
+Returns:
+- `data: UserServerState | undefined`
+- standard React Query fields (`isPending`, `isError`, etc.)
+
+Notes:
+- Query key is `["user", activeLibraryUserKey, "serverState"]`.
+- Includes:
+  - `progressByBookId`
+  - `bookmarksByBookId`
+- Marked with `meta: { persist: true }`.
 
 ### useGetBooksInProgress
 
@@ -62,7 +79,7 @@ Returns:
 Notes:
 - Uses `meApi.getItemsInProgress(activeLibraryId)`.
 - The `mapped` shape is keyed by `bookId` for quick lookup.
-- Book store side effects are intentionally commented out.
+- No Zustand side effects are applied.
 
 ### useMoveBookToTopOfInProgress
 
@@ -86,8 +103,7 @@ Returns:
 - `BookSummary | null`
 
 Notes:
-- Reads from React Query `["books", activeLibraryId]` cache first.
-- Falls back to `booksStore` (`selectBookPayload(...).summary`).
+- Reads from React Query `["library", activeLibraryId, "books"]` cache only.
 - Uses synchronous `initialData` from query cache so first render can immediately show cover/title metadata when available.
 
 ### useGetItemDetails
@@ -123,6 +139,7 @@ Returns:
 
 Notes:
 - Uses `librariesApi.getFilterData(activeLibraryId)`.
+- Query key is `["library", activeLibraryId, "filterData"]`.
 - When unauthenticated, returns a safe object with `filterData` undefined.
 
 ### useInvalidateQueries
@@ -134,3 +151,5 @@ Returns:
 
 Notes:
 - Uses `useQueryClient()` and the current `activeLibraryId`.
+- `"books"` maps to `["library", activeLibraryId, "books"]`.
+- `"booksInProgress"` maps to `["library", activeLibraryId, "booksInProgress"]`.

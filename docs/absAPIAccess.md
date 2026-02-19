@@ -54,7 +54,11 @@ const shelves = await librariesApi.getPersonalized(libraryId, { limit: 16 });
 
 ## `src/api/library-items-api.ts`
 
-**Purpose**: Library item lists and derived “summary” data used by screens.
+**Purpose**: Global library item lists and derived metadata summaries used by screens.
+
+Notes:
+- `getItems()` returns global metadata only (title/author/cover/duration/etc.).
+- User state (progress/bookmarks/finished) is fetched separately from `meApi.getUserServerState()` and merged in hooks.
 
 **Key exports**
 - `libraryItemsApi.getItems({ libraryId, filterType, filterValue, sortBy, page, limit })`
@@ -95,7 +99,7 @@ await itemsApi.updateMediaTags(itemId, ["favorite"]);
 
 ## `src/api/me-api.ts`
 
-**Purpose**: User-scoped endpoints and shaped “items-in-progress”.
+**Purpose**: User-scoped endpoints and normalized user server state.
 
 **Key exports**
 - `meApi.getMe()`
@@ -104,6 +108,7 @@ await itemsApi.updateMediaTags(itemId, ["favorite"]);
 - `meApi.saveBookmark(itemId, bookmark)`
 - `meApi.deleteBookmark(itemId, positionSeconds)`
 - `meApi.removeFromContinueListening(progressId)`
+- `meApi.getUserServerState()`
 - `meApi.getItemsInProgress(libraryId?)`
 
 **Usage**
@@ -116,6 +121,7 @@ await meApi.updateProgress(itemId, { currentTime: 120 });
 await meApi.saveBookmark(itemId, { time: 120, title: "Chapter 1" } as Bookmark);
 await meApi.deleteBookmark(itemId, 120);
 await meApi.removeFromContinueListening(progressId);
+const userServerState = await meApi.getUserServerState();
 
 const inProgress = await meApi.getItemsInProgress();
 ```

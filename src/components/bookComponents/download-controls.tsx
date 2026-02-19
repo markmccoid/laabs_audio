@@ -1,10 +1,15 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
-import { useAuthStore } from "@/auth/auth-store";
-import { useBooksActions, useBooksStore } from "@/store/store-books";
+import {
+  selectIsBookDownloaded,
+  useDeviceBooksActions,
+  useDeviceBooksStore,
+} from "@/store/device-books-store";
 import { Pressable, Text, View } from "react-native";
 
-const formatPercent = (value: number | undefined) =>
-  Number.isFinite(value) ? `${Math.max(0, Math.min(100, value))}%` : "0%";
+const formatPercent = (value: number | undefined) => {
+  if (!Number.isFinite(value)) return "0%";
+  return `${Math.max(0, Math.min(100, value as number))}%`;
+};
 
 type Props = {
   libraryItemId?: string;
@@ -12,22 +17,12 @@ type Props = {
 };
 
 const DownloadControls = ({ libraryItemId, summary }: Props) => {
-  const { downloadBook, cancelDownload, deleteDownloadedBookData } = useBooksActions();
-  const downloadProgress = useBooksStore((state) => state.downloadProgress);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const storedUsername = useAuthStore((state) => state.storedUsername);
-  const serverUrl = useAuthStore((state) => state.serverUrl);
-  const resolvedUserKey =
-    activeLibraryUserKey ??
-    (storedUsername && serverUrl ? `${storedUsername}::${serverUrl}` : null);
-  const summaryFromStore = useBooksStore((state) => {
-    if (!libraryItemId) return null;
-    const key = resolvedUserKey ?? state.lastActiveUserKey;
-    if (!key) return null;
-    return state.byUserKey[key]?.books[libraryItemId] ?? null;
+  const { downloadBook, cancelDownload, deleteDownloadedBookData } = useDeviceBooksActions();
+  const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
+  const isDownloaded = useDeviceBooksStore((state) => {
+    if (!libraryItemId) return false;
+    return selectIsBookDownloaded(state, libraryItemId);
   });
-
-  const isDownloaded = summaryFromStore?.isDownloaded ?? false;
   const isDownloading = downloadProgress?.libraryItemId === libraryItemId;
   const isAnotherDownloadActive =
     Boolean(downloadProgress?.libraryItemId) && downloadProgress?.libraryItemId !== libraryItemId;
@@ -35,9 +30,7 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
 
   const handleDownload = () => {
     if (!libraryItemId) return;
-    // Prefer the freshest summary for download metadata
-    const resolvedSummary = summary ?? summaryFromStore ?? undefined;
-    void downloadBook(libraryItemId, { summary: resolvedSummary });
+    void downloadBook(libraryItemId, { summary: summary ?? undefined });
   };
 
   const handleCancel = () => {

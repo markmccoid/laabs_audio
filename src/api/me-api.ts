@@ -10,7 +10,7 @@ import type {
 } from "../types/absTypes";
 
 export type ItemsInProgressSummary = {
-  bookId: string;
+  libraryItemId: string;
   progressId: string | undefined;
   title: string;
   author: string;
@@ -25,8 +25,40 @@ export type ItemsInProgressSummary = {
   lastUpdate: number;
 }[];
 
+export type UserBookProgress = {
+  progressId: string;
+  libraryItemId: string;
+  mediaItemId?: string;
+  duration: number;
+  progressPercent: number;
+  currentTime: number;
+  isFinished: boolean;
+  hideFromContinueListening: boolean;
+  startedAt: number;
+  finishedAt: number | null;
+  lastUpdate: number;
+};
+
+export type UserServerState = {
+  userId: string;
+  progressByLibraryItemId: Record<string, UserBookProgress>;
+  bookmarksByLibraryItemId: Record<string, Bookmark[]>;
+};
+
 const resolveLibraryId = (libraryId?: string | null) =>
   libraryId ?? authStore.getState().activeLibraryId;
+
+const upsertProgress = (
+  target: Record<string, UserBookProgress>,
+  key: string | undefined | null,
+  value: UserBookProgress,
+) => {
+  if (!key) return;
+  const existing = target[key];
+  if (!existing || value.lastUpdate >= existing.lastUpdate) {
+    target[key] = value;
+  }
+};
 
 export const meApi = {
   getMe() {
@@ -54,6 +86,65 @@ export const meApi = {
     return absClient.get<User>(
       `/api/me/progress/${progressId}/remove-from-continue-listening`,
     );
+  },
+
+  async getUserServerState(): Promise<UserServerState> {
+    const userData = await meApi.getMe();
+    const ownedProgress = (userData.mediaProgress ?? []).filter(
+      (progress) => progress.userId === userData.id,
+    );
+    const progressByLibraryItemId = ownedProgress.reduce<Record<string, UserBookProgress>>(
+      (acc, progress) => {
+        const normalizedProgress: UserBookProgress = {
+          progressId: progress.id,
+          libraryItemId: progress.libraryItemId,
+          mediaItemId: progress.mediaItemId,
+          duration: progress.duration,
+          progressPercent: progress.progress,
+          currentTime: progress.currentTime,
+          isFinished: progress.isFinished,
+          hideFromContinueListening: progress.hideFromContinueListening,
+          startedAt: progress.startedAt,
+          finishedAt: progress.finishedAt,
+          lastUpdate: progress.lastUpdate,
+        };
+
+        // Keep lookup resilient: some flows use libraryItemId, others use mediaItemId/bookId.
+        upsertProgress(acc, progress.libraryItemId, normalizedProgress);
+        upsertProgress(acc, progress.mediaItemId, normalizedProgress);
+        return acc;
+      },
+      {},
+    );
+
+    const bookmarksByLibraryItemId = (userData.bookmarks ?? []).reduce<Record<string, Bookmark[]>>(
+      (acc, bookmark) => {
+        const bookmarkRecord = bookmark as Bookmark & { userId?: string };
+        if (bookmarkRecord.userId && bookmarkRecord.userId !== userData.id) {
+          return acc;
+        }
+
+        const libraryItemId = bookmark.libraryItemId;
+        if (!libraryItemId) {
+          return acc;
+        }
+
+        const existing = acc[libraryItemId] ?? [];
+        acc[libraryItemId] = [...existing, bookmark];
+        return acc;
+      },
+      {},
+    );
+
+    Object.values(bookmarksByLibraryItemId).forEach((bookmarks) => {
+      bookmarks.sort((a, b) => b.time - a.time);
+    });
+
+    return {
+      userId: userData.id,
+      progressByLibraryItemId,
+      bookmarksByLibraryItemId,
+    };
   },
 
   async getItemsInProgress(libraryId?: string): Promise<ItemsInProgressSummary> {
@@ -95,7 +186,7 @@ export const meApi = {
 
       itemsInProgress.push({
         progressId: mediaMatch?.id,
-        bookId: book.id,
+        libraryItemId: book.id,
         title: book.media.metadata.title,
         author: book.media.metadata.authorName || "",
         narrator: book.media.metadata.narratorName || "",
