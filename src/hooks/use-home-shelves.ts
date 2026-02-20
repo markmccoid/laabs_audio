@@ -1,37 +1,48 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import type { LibraryItemSummary, LibraryItemsSummary } from "../api/library-items-api";
 import type { UserBookProgress, UserServerState } from "../api/me-api";
 import { useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
 import {
-  DEFAULT_HOME_SHELF_VISIBILITY,
   toHomeShelfScopeKey,
   useDeviceBooksStore,
   type HomeDerivedShelfId,
 } from "../store/device-books-store";
+import {
+  DEFAULT_HOME_SHELF_ITEM_COUNT,
+  type HomeShelfSettings,
+  useSettingsStore,
+} from "../store/settings-store";
 
 type LegacyUserServerState = UserServerState & {
   progressByBookId?: Record<string, UserBookProgress>;
 };
 
 export type HomeDerivedShelf = {
+  kind: "derived";
   id: HomeDerivedShelfId;
   title: string;
   books: LibraryItemSummary[];
+  homeItemCount: number;
   isVisible: boolean;
   emptyMessage: string;
 };
 
 export type HomeCustomShelf = {
+  kind: "custom";
   id: string;
   title: string;
   books: LibraryItemSummary[];
   bookIds: string[];
   createdAt: number;
   updatedAt: number;
+  homeItemCount: number;
+  isVisible: boolean;
   emptyMessage: string;
 };
+
+export type HomeShelf = HomeDerivedShelf | HomeCustomShelf;
 
 const EMPTY_CUSTOM_SHELVES: {
   id: string;
@@ -42,6 +53,29 @@ const EMPTY_CUSTOM_SHELVES: {
 }[] = [];
 const EMPTY_CATALOG: LibraryItemsSummary = [];
 const EMPTY_PROGRESS_BY_BOOK: Record<string, UserBookProgress> = {};
+const EMPTY_ORDER: string[] = [];
+const EMPTY_SHELF_SETTINGS_BY_ID: Record<string, HomeShelfSettings> = {};
+const MAX_DISCOVER_PERSISTED_IDS = 500;
+
+const reorderByIds = <T extends { id: string }>(items: T[], orderedIds: string[]) => {
+  if (!items.length || !orderedIds.length) return items;
+
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const reordered: T[] = [];
+
+  orderedIds.forEach((id) => {
+    const match = itemById.get(id);
+    if (!match) return;
+    reordered.push(match);
+    itemById.delete(id);
+  });
+
+  if (itemById.size > 0) {
+    reordered.push(...itemById.values());
+  }
+
+  return reordered;
+};
 
 const toDailySeedKey = (date = new Date()) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -110,8 +144,17 @@ export const useHomeShelves = () => {
   const customShelvesRaw = useDeviceBooksStore((state) =>
     homeScopeKey ? state.customShelvesByScope[homeScopeKey] ?? EMPTY_CUSTOM_SHELVES : EMPTY_CUSTOM_SHELVES,
   );
-  const storedDerivedVisibility = useDeviceBooksStore((state) =>
-    homeScopeKey ? state.homeShelfVisibilityByScope[homeScopeKey] : undefined,
+  const shelfSettingsById = useSettingsStore((state) =>
+    homeScopeKey
+      ? state.homeShelvesByScope[homeScopeKey]?.shelfSettingsById ?? EMPTY_SHELF_SETTINGS_BY_ID
+      : EMPTY_SHELF_SETTINGS_BY_ID,
+  );
+  const storedDiscoverShelf = useSettingsStore((state) =>
+    homeScopeKey ? state.discoverShelfByScope[homeScopeKey] ?? null : null,
+  );
+  const setDailyDiscoverShelf = useSettingsStore((state) => state.actions.setDailyDiscoverShelf);
+  const storedShelfOrder = useSettingsStore((state) =>
+    homeScopeKey ? state.homeShelvesByScope[homeScopeKey]?.shelfOrder ?? EMPTY_ORDER : EMPTY_ORDER,
   );
 
   const catalog = useMemo(
@@ -119,14 +162,6 @@ export const useHomeShelves = () => {
     [immediateCatalog, subscribedCatalog],
   );
   const userServerState = subscribedUserServerState ?? immediateUserServerState;
-
-  const derivedVisibility = useMemo(
-    () => ({
-      ...DEFAULT_HOME_SHELF_VISIBILITY,
-      ...(storedDerivedVisibility ?? {}),
-    }),
-    [storedDerivedVisibility],
-  );
 
   const catalogById = useMemo(() => {
     const map = new Map<string, LibraryItemSummary>();
@@ -167,26 +202,121 @@ export const useHomeShelves = () => {
       })
       .sort((a, b) => b.lastUpdate - a.lastUpdate);
 
-    return sortedProgress
+    const books = sortedProgress
       .map((progress) => catalogById.get(progress.libraryItemId))
-      .filter((book): book is LibraryItemSummary => Boolean(book))
-      .slice(0, 10);
+      .filter((book): book is LibraryItemSummary => Boolean(book));
+
+    return books;
   }, [catalogById, progressByBookId]);
 
   const recentlyAdded = useMemo(() => {
-    return [...catalog]
-      .sort((a, b) => b.addedAt - a.addedAt)
-      .slice(0, 15);
+    return [...catalog].sort((a, b) => b.addedAt - a.addedAt);
   }, [catalog]);
 
-  const discover = useMemo(() => {
-    const unreadBooks = catalog.filter((book) => !progressByBookId[book.id]);
-    const seedKey = `${homeScopeKey ?? "anonymous"}:${toDailySeedKey()}`;
-    return seededShuffle(unreadBooks, seedKey).slice(0, 10);
-  }, [catalog, homeScopeKey, progressByBookId]);
+  const discoverDateKey = toDailySeedKey();
+  const hasDiscoverSnapshotForToday = storedDiscoverShelf?.dateKey === discoverDateKey;
+  const unreadBooks = useMemo(
+    () => catalog.filter((book) => !progressByBookId[book.id]),
+    [catalog, progressByBookId],
+  );
+  const discoverSeed = hasDiscoverSnapshotForToday
+    ? storedDiscoverShelf.seed
+    : hashSeed(`${homeScopeKey ?? "anonymous"}:${discoverDateKey}`);
 
-  const customShelves = useMemo<HomeCustomShelf[]>(() => {
-    return customShelvesRaw.map((shelf) => ({
+  const discover = useMemo(() => {
+    const unreadById = new Map(unreadBooks.map((book) => [book.id, book]));
+    const shuffledUnread = seededShuffle(unreadBooks, String(discoverSeed));
+
+    if (!hasDiscoverSnapshotForToday || !storedDiscoverShelf) {
+      return shuffledUnread;
+    }
+
+    const preferredDiscover: LibraryItemSummary[] = [];
+    const seen = new Set<string>();
+
+    storedDiscoverShelf.bookIds.forEach((bookId) => {
+      const unreadBook = unreadById.get(bookId);
+      if (!unreadBook || seen.has(unreadBook.id)) return;
+      preferredDiscover.push(unreadBook);
+      seen.add(unreadBook.id);
+    });
+
+    shuffledUnread.forEach((book) => {
+      if (seen.has(book.id)) return;
+      preferredDiscover.push(book);
+    });
+
+    return preferredDiscover;
+  }, [discoverSeed, hasDiscoverSnapshotForToday, storedDiscoverShelf, unreadBooks]);
+
+  useEffect(() => {
+    if (!homeScopeKey) return;
+    if (hasDiscoverSnapshotForToday) return;
+
+    setDailyDiscoverShelf(homeScopeKey, {
+      dateKey: discoverDateKey,
+      seed: discoverSeed,
+      bookIds: discover.slice(0, MAX_DISCOVER_PERSISTED_IDS).map((book) => book.id),
+    });
+  }, [
+    discover,
+    discoverDateKey,
+    discoverSeed,
+    hasDiscoverSnapshotForToday,
+    homeScopeKey,
+    setDailyDiscoverShelf,
+  ]);
+
+  const refreshDiscover = useCallback(() => {
+    if (!homeScopeKey) return;
+
+    const refreshSeed = Date.now();
+    const refreshedBooks = seededShuffle(
+      unreadBooks,
+      `${refreshSeed}:${homeScopeKey}:${discoverDateKey}`,
+    );
+
+    setDailyDiscoverShelf(homeScopeKey, {
+      dateKey: discoverDateKey,
+      seed: refreshSeed,
+      bookIds: refreshedBooks.slice(0, MAX_DISCOVER_PERSISTED_IDS).map((book) => book.id),
+    });
+  }, [discoverDateKey, homeScopeKey, setDailyDiscoverShelf, unreadBooks]);
+
+  const shelves = useMemo<HomeShelf[]>(() => {
+    const derivedShelves: HomeDerivedShelf[] = [
+      {
+        kind: "derived",
+        id: "continueListening",
+        title: "Continue Listening",
+        books: continueListening,
+        homeItemCount:
+          shelfSettingsById.continueListening?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+        isVisible: shelfSettingsById.continueListening?.isVisible ?? true,
+        emptyMessage: "No active progress yet.",
+      },
+      {
+        kind: "derived",
+        id: "recentlyAdded",
+        title: "Recently Added",
+        books: recentlyAdded,
+        homeItemCount: shelfSettingsById.recentlyAdded?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+        isVisible: shelfSettingsById.recentlyAdded?.isVisible ?? true,
+        emptyMessage: "No books found in this library.",
+      },
+      {
+        kind: "derived",
+        id: "discover",
+        title: "Discover",
+        books: discover,
+        homeItemCount: shelfSettingsById.discover?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+        isVisible: shelfSettingsById.discover?.isVisible ?? true,
+        emptyMessage: "No unread books available.",
+      },
+    ];
+
+    const customShelves: HomeCustomShelf[] = customShelvesRaw.map((shelf) => ({
+      kind: "custom",
       id: shelf.id,
       title: shelf.name,
       books: shelf.bookIds
@@ -195,41 +325,48 @@ export const useHomeShelves = () => {
       bookIds: shelf.bookIds,
       createdAt: shelf.createdAt,
       updatedAt: shelf.updatedAt,
+      homeItemCount:
+        shelfSettingsById[shelf.id]?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+      isVisible: shelfSettingsById[shelf.id]?.isVisible ?? true,
       emptyMessage: "No books yet. Use Add Books to fill this shelf.",
     }));
-  }, [catalogById, customShelvesRaw]);
 
-  const derivedShelves = useMemo<HomeDerivedShelf[]>(
+    return [...derivedShelves, ...customShelves];
+  }, [
+    catalogById,
+    continueListening,
+    customShelvesRaw,
+    discover,
+    recentlyAdded,
+    shelfSettingsById,
+  ]);
+
+  const orderedShelves = useMemo(() => {
+    return reorderByIds(shelves, storedShelfOrder);
+  }, [shelves, storedShelfOrder]);
+
+  const visibleShelves = useMemo<HomeShelf[]>(() => {
+    return orderedShelves
+      .filter((shelf) => shelf.isVisible)
+      .map((shelf) => ({
+        ...shelf,
+        books: shelf.books.slice(0, shelf.homeItemCount),
+      }));
+  }, [orderedShelves]);
+
+  const customShelves = useMemo<HomeCustomShelf[]>(
     () => [
-      {
-        id: "continueListening",
-        title: "Continue Listening",
-        books: continueListening,
-        isVisible: derivedVisibility.continueListening,
-        emptyMessage: "No active progress yet.",
-      },
-      {
-        id: "recentlyAdded",
-        title: "Recently Added",
-        books: recentlyAdded,
-        isVisible: derivedVisibility.recentlyAdded,
-        emptyMessage: "No books found in this library.",
-      },
-      {
-        id: "discover",
-        title: "Discover",
-        books: discover,
-        isVisible: derivedVisibility.discover,
-        emptyMessage: "No unread books available.",
-      },
+      ...orderedShelves.filter((shelf): shelf is HomeCustomShelf => shelf.kind === "custom"),
     ],
-    [continueListening, derivedVisibility, discover, recentlyAdded],
+    [orderedShelves],
   );
 
   return {
     homeScopeKey,
     catalog,
-    derivedShelves,
+    shelves: orderedShelves,
+    visibleShelves,
     customShelves,
+    refreshDiscover,
   };
 };
