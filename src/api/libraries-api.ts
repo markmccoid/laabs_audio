@@ -1,6 +1,6 @@
 import { absClient } from "./abs-client";
 import { authStore } from "../auth/auth-store";
-import type { FilterData, Library, PersonalizedViewsResponse } from "../types/absTypes";
+import type { FilterData, Library } from "../types/absTypes";
 
 export type LibrariesResponse = {
   libraries: Library[];
@@ -51,12 +51,5 @@ export const librariesApi = {
     }));
 
     return { id: libraryIdToUse, genres, tags, authors, series };
-  },
-
-  getPersonalized(libraryId: string, options: { limit?: number } = {}) {
-    const limit = options.limit ?? 16;
-    return absClient.get<PersonalizedViewsResponse>(
-      `/api/libraries/${libraryId}/personalized?limit=${limit}`,
-    );
   },
 };

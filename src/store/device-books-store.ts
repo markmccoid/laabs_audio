@@ -58,6 +58,31 @@ type PendingBookmarkDelete = {
   bookmarkTime: number;
 };
 
+export type HomeDerivedShelfId = "continueListening" | "recentlyAdded" | "discover";
+
+export type HomeShelfVisibility = Record<HomeDerivedShelfId, boolean>;
+
+export type HomeCustomShelf = {
+  id: string;
+  name: string;
+  bookIds: string[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+export const DEFAULT_HOME_SHELF_VISIBILITY: HomeShelfVisibility = {
+  continueListening: true,
+  recentlyAdded: true,
+  discover: true,
+};
+
+const EMPTY_HOME_CUSTOM_SHELVES: HomeCustomShelf[] = [];
+
+type HomeShelfScopeOptions = {
+  userKey?: string | null;
+  libraryId?: string | null;
+};
+
 type DeviceBooksPersistedState = {
   downloadedDetailsById: Record<string, ItemDetails>;
   downloadedBookData: Record<string, DownloadInfo>;
@@ -66,6 +91,8 @@ type DeviceBooksPersistedState = {
   bookmarkNotesByUserBookTime: Record<string, string>;
   pendingBookmarkCreatesByUser: Record<string, Record<string, PendingBookmarkCreate>>;
   pendingBookmarkDeletesByUser: Record<string, Record<string, PendingBookmarkDelete>>;
+  customShelvesByScope: Record<string, HomeCustomShelf[]>;
+  homeShelfVisibilityByScope: Record<string, HomeShelfVisibility>;
 };
 
 export type DeviceBooksState = DeviceBooksPersistedState & {
@@ -99,6 +126,34 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
     ) => Promise<void>;
     syncPendingBookmarks: (options?: { userKey?: string | null }) => Promise<void>;
     syncPendingBookmarkDeletes: (options?: { userKey?: string | null }) => Promise<void>;
+    createCustomShelf: (shelfName: string, options?: HomeShelfScopeOptions) => string | null;
+    addBookToCustomShelf: (
+      shelfId: string,
+      libraryItemId: string,
+      options?: HomeShelfScopeOptions,
+    ) => void;
+    removeBookFromCustomShelf: (
+      shelfId: string,
+      libraryItemId: string,
+      options?: HomeShelfScopeOptions,
+    ) => void;
+    renameCustomShelf: (
+      shelfId: string,
+      shelfName: string,
+      options?: HomeShelfScopeOptions,
+    ) => void;
+    deleteCustomShelf: (shelfId: string, options?: HomeShelfScopeOptions) => void;
+    reorderCustomShelves: (orderedShelfIds: string[], options?: HomeShelfScopeOptions) => void;
+    reorderCustomShelfBooks: (
+      shelfId: string,
+      orderedBookIds: string[],
+      options?: HomeShelfScopeOptions,
+    ) => void;
+    setDerivedShelfVisibility: (
+      shelfId: HomeDerivedShelfId,
+      isVisible: boolean,
+      options?: HomeShelfScopeOptions,
+    ) => void;
     setCustomCoverUri: (libraryItemId: string, coverUri: string | null) => void;
     setDownloadedDetails: (
       libraryItemId: string,
@@ -127,6 +182,8 @@ const createDefaultPersistedState = (): DeviceBooksPersistedState => ({
   bookmarkNotesByUserBookTime: {},
   pendingBookmarkCreatesByUser: {},
   pendingBookmarkDeletesByUser: {},
+  customShelvesByScope: {},
+  homeShelfVisibilityByScope: {},
 });
 
 const resolveAuthUserKey = () => {
@@ -137,6 +194,50 @@ const resolveAuthUserKey = () => {
 };
 
 const resolveUserKey = (override?: string | null) => override ?? resolveAuthUserKey();
+const resolveLibraryId = (override?: string | null) => override ?? authStore.getState().activeLibraryId;
+
+const normalizeShelfName = (value: string) => value.trim();
+
+const createShelfId = () => `shelf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const buildHomeScopeKey = (userKey: string | null, libraryId: string | null) => {
+  if (!userKey || !libraryId) return null;
+  const trimmedLibraryId = libraryId.trim();
+  if (!trimmedLibraryId) return null;
+  return `${userKey}::${trimmedLibraryId}`;
+};
+
+const resolveHomeScopeKey = (options?: HomeShelfScopeOptions) => {
+  const userKey = resolveUserKey(options?.userKey);
+  const libraryId = resolveLibraryId(options?.libraryId);
+  return buildHomeScopeKey(userKey, libraryId);
+};
+
+const getShelfVisibility = (
+  state: DeviceBooksState | DeviceBooksPersistedState,
+  scopeKey: string,
+): HomeShelfVisibility => ({
+  ...DEFAULT_HOME_SHELF_VISIBILITY,
+  ...(state.homeShelfVisibilityByScope[scopeKey] ?? {}),
+});
+
+const reorderByIds = <T extends { id: string }>(items: T[], orderedIds: string[]) => {
+  if (!items.length || !orderedIds.length) return items;
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const reordered: T[] = [];
+
+  orderedIds.forEach((id) => {
+    const match = itemById.get(id);
+    if (!match) return;
+    reordered.push(match);
+    itemById.delete(id);
+  });
+
+  if (itemById.size > 0) {
+    reordered.push(...itemById.values());
+  }
+  return reordered;
+};
 
 const toUserBookKey = (userKey: string, libraryItemId: string) => `${userKey}::${libraryItemId}`;
 
@@ -454,6 +555,232 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           });
         },
 
+        createCustomShelf: (shelfName, options) => {
+          const scopeKey = resolveHomeScopeKey(options);
+          const normalizedShelfName = normalizeShelfName(shelfName);
+          if (!scopeKey || !normalizedShelfName) return null;
+
+          const newShelfId = createShelfId();
+          const now = Date.now();
+
+          set((state) => {
+            const currentShelves = state.customShelvesByScope[scopeKey] ?? [];
+            return {
+              ...state,
+              customShelvesByScope: {
+                ...state.customShelvesByScope,
+                [scopeKey]: [
+                  ...currentShelves,
+                  {
+                    id: newShelfId,
+                    name: normalizedShelfName,
+                    bookIds: [],
+                    createdAt: now,
+                    updatedAt: now,
+                  },
+                ],
+              },
+              homeShelfVisibilityByScope: {
+                ...state.homeShelfVisibilityByScope,
+                [scopeKey]: getShelfVisibility(state, scopeKey),
+              },
+            };
+          });
+
+          return newShelfId;
+        },
+
+        addBookToCustomShelf: (shelfId, libraryItemId, options) => {
+          const scopeKey = resolveHomeScopeKey(options);
+          if (!scopeKey || !shelfId || !libraryItemId) return;
+
+          set((state) => {
+            const currentShelves = state.customShelvesByScope[scopeKey] ?? [];
+            let didChange = false;
+
+            const nextShelves = currentShelves.map((shelf) => {
+              if (shelf.id !== shelfId) return shelf;
+              if (shelf.bookIds.includes(libraryItemId)) return shelf;
+              didChange = true;
+              return {
+                ...shelf,
+                bookIds: [...shelf.bookIds, libraryItemId],
+                updatedAt: Date.now(),
+              };
+            });
+
+            if (!didChange) return state;
+
+            return {
+              ...state,
+              customShelvesByScope: {
+                ...state.customShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+            };
+          });
+        },
+
+        removeBookFromCustomShelf: (shelfId, libraryItemId, options) => {
+          const scopeKey = resolveHomeScopeKey(options);
+          if (!scopeKey || !shelfId || !libraryItemId) return;
+
+          set((state) => {
+            const currentShelves = state.customShelvesByScope[scopeKey] ?? [];
+            let didChange = false;
+
+            const nextShelves = currentShelves.map((shelf) => {
+              if (shelf.id !== shelfId) return shelf;
+              if (!shelf.bookIds.includes(libraryItemId)) return shelf;
+              didChange = true;
+              return {
+                ...shelf,
+                bookIds: shelf.bookIds.filter((bookId) => bookId !== libraryItemId),
+                updatedAt: Date.now(),
+              };
+            });
+
+            if (!didChange) return state;
+
+            return {
+              ...state,
+              customShelvesByScope: {
+                ...state.customShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+            };
+          });
+        },
+
+        renameCustomShelf: (shelfId, shelfName, options) => {
+          const scopeKey = resolveHomeScopeKey(options);
+          const normalizedShelfName = normalizeShelfName(shelfName);
+          if (!scopeKey || !shelfId || !normalizedShelfName) return;
+
+          set((state) => {
+            const currentShelves = state.customShelvesByScope[scopeKey] ?? [];
+            let didChange = false;
+
+            const nextShelves = currentShelves.map((shelf) => {
+              if (shelf.id !== shelfId || shelf.name === normalizedShelfName) return shelf;
+              didChange = true;
+              return {
+                ...shelf,
+                name: normalizedShelfName,
+                updatedAt: Date.now(),
+              };
+            });
+
+            if (!didChange) return state;
+
+            return {
+              ...state,
+              customShelvesByScope: {
+                ...state.customShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+            };
+          });
+        },
+
+        deleteCustomShelf: (shelfId, options) => {
+          const scopeKey = resolveHomeScopeKey(options);
+          if (!scopeKey || !shelfId) return;
+
+          set((state) => {
+            const currentShelves = state.customShelvesByScope[scopeKey] ?? [];
+            const nextShelves = currentShelves.filter((shelf) => shelf.id !== shelfId);
+            if (nextShelves.length === currentShelves.length) return state;
+
+            return {
+              ...state,
+              customShelvesByScope: {
+                ...state.customShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+            };
+          });
+        },
+
+        reorderCustomShelves: (orderedShelfIds, options) => {
+          const scopeKey = resolveHomeScopeKey(options);
+          if (!scopeKey || !orderedShelfIds.length) return;
+
+          set((state) => {
+            const currentShelves = state.customShelvesByScope[scopeKey] ?? [];
+            if (currentShelves.length < 2) return state;
+            const nextShelves = reorderByIds(currentShelves, orderedShelfIds);
+            return {
+              ...state,
+              customShelvesByScope: {
+                ...state.customShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+            };
+          });
+        },
+
+        reorderCustomShelfBooks: (shelfId, orderedBookIds, options) => {
+          const scopeKey = resolveHomeScopeKey(options);
+          if (!scopeKey || !shelfId || !orderedBookIds.length) return;
+
+          set((state) => {
+            const currentShelves = state.customShelvesByScope[scopeKey] ?? [];
+            let didChange = false;
+
+            const nextShelves = currentShelves.map((shelf) => {
+              if (shelf.id !== shelfId || shelf.bookIds.length < 2) return shelf;
+
+              const ordered = reorderByIds(
+                shelf.bookIds.map((id) => ({ id })),
+                orderedBookIds,
+              ).map((item) => item.id);
+
+              const unchanged =
+                ordered.length === shelf.bookIds.length &&
+                ordered.every((bookId, index) => bookId === shelf.bookIds[index]);
+              if (unchanged) return shelf;
+
+              didChange = true;
+              return {
+                ...shelf,
+                bookIds: ordered,
+                updatedAt: Date.now(),
+              };
+            });
+
+            if (!didChange) return state;
+
+            return {
+              ...state,
+              customShelvesByScope: {
+                ...state.customShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+            };
+          });
+        },
+
+        setDerivedShelfVisibility: (shelfId, isVisible, options) => {
+          const scopeKey = resolveHomeScopeKey(options);
+          if (!scopeKey) return;
+
+          set((state) => {
+            const currentVisibility = getShelfVisibility(state, scopeKey);
+            if (currentVisibility[shelfId] === isVisible) return state;
+            return {
+              ...state,
+              homeShelfVisibilityByScope: {
+                ...state.homeShelfVisibilityByScope,
+                [scopeKey]: {
+                  ...currentVisibility,
+                  [shelfId]: isVisible,
+                },
+              },
+            };
+          });
+        },
+
         setCustomCoverUri: (libraryItemId, coverUri) => {
           set((state) => ({
             ...state,
@@ -689,8 +1016,36 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         bookmarkNotesByUserBookTime: state.bookmarkNotesByUserBookTime,
         pendingBookmarkCreatesByUser: state.pendingBookmarkCreatesByUser,
         pendingBookmarkDeletesByUser: state.pendingBookmarkDeletesByUser,
+        customShelvesByScope: state.customShelvesByScope,
+        homeShelfVisibilityByScope: state.homeShelfVisibilityByScope,
       }),
-      version: 1,
+      version: 2,
+      migrate: (persistedState, version) => {
+        const base = createDefaultPersistedState();
+        const typedState =
+          (persistedState as Partial<DeviceBooksPersistedState> | undefined) ?? undefined;
+
+        if (!typedState) {
+          return base;
+        }
+
+        // Ensure newly introduced shelf fields always exist after hydration.
+        if (version < 2) {
+          return {
+            ...base,
+            ...typedState,
+            customShelvesByScope: typedState.customShelvesByScope ?? {},
+            homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
+          };
+        }
+
+        return {
+          ...base,
+          ...typedState,
+          customShelvesByScope: typedState.customShelvesByScope ?? {},
+          homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
+        };
+      },
     },
   ),
 );
@@ -750,4 +1105,23 @@ export const selectHasOfflineContent = (state: DeviceBooksState, _userKey?: stri
 
 export const selectIsBookDownloaded = (state: DeviceBooksState, libraryItemId: string) => {
   return Boolean(state.downloadedBookData[libraryItemId] || state.downloadedDetailsById[libraryItemId]);
+};
+
+export const toHomeShelfScopeKey = (userKey: string | null, libraryId: string | null) =>
+  buildHomeScopeKey(userKey, libraryId);
+
+export const selectCustomShelvesByScope = (
+  state: DeviceBooksState,
+  scopeKey: string | null,
+) => {
+  if (!scopeKey) return EMPTY_HOME_CUSTOM_SHELVES;
+  return state.customShelvesByScope[scopeKey] ?? EMPTY_HOME_CUSTOM_SHELVES;
+};
+
+export const selectDerivedShelfVisibilityByScope = (
+  state: DeviceBooksState,
+  scopeKey: string | null,
+) => {
+  if (!scopeKey) return DEFAULT_HOME_SHELF_VISIBILITY;
+  return getShelfVisibility(state, scopeKey);
 };

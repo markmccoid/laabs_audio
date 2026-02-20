@@ -266,6 +266,7 @@ class PlayerService {
       this.logSnapshot("after play");
       playbackStore.getState().actions.setPlaybackState("playing");
       playbackStore.getState().actions.setError(null);
+      this.touchUserServerStateCacheForPlayStart();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start playback";
       const currentState = playbackStore.getState();
@@ -612,6 +613,25 @@ class PlayerService {
     } catch {
       playbackStore.getState().actions.setError(`Sync failed (${reason})`);
     }
+  }
+
+  private touchUserServerStateCacheForPlayStart() {
+    const state = playbackStore.getState();
+    if (!state.libraryItemId) return;
+
+    const currentTimeSeconds = msToSeconds(state.positionMs);
+    const durationSeconds = msToSeconds(state.durationMs);
+    const isFinished =
+      state.durationMs > 0 && state.positionMs >= state.durationMs - secondsToMs(3);
+
+    // Promote the currently playing title in local cache immediately; server sync still
+    // happens on interval/pause/seek.
+    this.updateUserServerStateCache({
+      libraryItemId: state.libraryItemId,
+      currentTimeSeconds,
+      durationSeconds,
+      isFinished,
+    });
   }
 
   private updateUserServerStateCache(payload: {

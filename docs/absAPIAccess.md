@@ -41,7 +41,6 @@ You should not call `authFetch` directly except in `abs-client`. Use `absClient`
 **Key exports**
 - `librariesApi.getAll()`
 - `librariesApi.getFilterData(libraryId?)`
-- `librariesApi.getPersonalized(libraryId, { limit })`
 
 **Usage**
 ```ts
@@ -49,7 +48,6 @@ import { librariesApi } from "../api/libraries-api";
 
 const { libraries } = await librariesApi.getAll();
 const filterData = await librariesApi.getFilterData();
-const shelves = await librariesApi.getPersonalized(libraryId, { limit: 16 });
 ```
 
 ## `src/api/library-items-api.ts`
@@ -243,19 +241,4 @@ await downloadsApi.downloadEbook(itemId, fileIno, "book.epub");
 import { getCoverUri } from "../api/image-utils";
 
 const { coverUrl } = await getCoverUri(urls.coverFull);
-```
-
-## `src/api/shelves-api.ts`
-
-**Purpose**: Personalized shelves builder (book shelves only).
-
-**Key exports**
-- `shelvesApi.getBookShelves(libraryId?)`
-- `buildBookShelf(bookShelfItem)`
-
-**Usage**
-```ts
-import { shelvesApi } from "../api/shelves-api";
-
-const shelves = await shelvesApi.getBookShelves();
 ```
