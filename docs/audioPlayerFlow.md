@@ -65,13 +65,14 @@ flowchart TD
    - Ensures the URL scheme is valid for AudioPro.
    - Creates an `AudioProTrack` and calls `AudioPro.play()` with `autoPlay: false`.
 5. When the user taps **Play**, `playerService.play()` calls `AudioPro.resume()`.
-6. AudioPro emits `STATE_CHANGED` and `PROGRESS` events; the engine forwards these.
-7. `playerService.handleStatus()` updates `playbackStore` and the UI re-renders.
+6. After native playback reaches `PLAYING`, `playerService.play()` re-applies the current rate from `playbackStore.rate` to prevent accidental reset to `1.0x`.
+7. AudioPro emits `STATE_CHANGED` and `PROGRESS` events; the engine forwards these.
+8. `playerService.handleStatus()` updates `playbackStore` and the UI re-renders.
 
 ## Remote Playback Flow (Audiobookshelf)
 
-1. UI calls `playerService.loadBook(itemId)`.
-2. `playbackApi.getPlayInfo(itemId)` fetches session metadata.
+1. UI calls `playerService.loadBook(libraryItemId)`.
+2. `playbackApi.getPlayInfo(libraryItemId)` fetches session metadata.
 3. `buildPlaybackQueue()` creates the per-track queue.
 4. `buildChapterIndex()` maps chapters to track offsets.
 5. `source-resolver.ts` builds track URLs and auth headers.
@@ -108,8 +109,9 @@ Rate ownership:
 - Active playback rate lives in `playbackStore.rate`.
 - Per-book persisted rate lives in `deviceBooksStore.playbackRatesByUserBook` (scoped by `userKey + libraryItemId`).
 - Default per-book rate is `1.0` when no value is stored.
+- On playback start, `playerService.play()` re-applies the current rate to native engine state as a safety step.
 
-Note: the store only persists `bookId`, `currentTrackIndex`, `positionMs`, and `rate`. After a reload, the UI must call `loadBook` or `loadLocalFile` to rebuild the queue.
+Note: the store only persists `libraryItemId`, `currentTrackIndex`, `positionMs`, and `rate`. After a reload, the UI must call `loadBook` or `loadLocalFile` to rebuild the queue.
 
 ## Component API (Common Tasks)
 
@@ -178,6 +180,7 @@ Behavior:
    - active `playbackStore.rate`
    - persisted per-book rate in `deviceBooksStore` for the active book.
 6. On next load of that same book, `playerService.loadBook()` restores the stored per-book rate; books without stored rate start at `1.0`.
+7. `playerService.play()` then re-applies that rate after native playback starts, because some native replay paths can momentarily reset speed to `1.0x`.
 
 ## Book Time Slider
 
@@ -197,10 +200,10 @@ Behavior:
 
 ## Resume Position Source
 
-When loading a streamed book with `playerService.loadBook(itemId)`, initial seek is resolved in this order:
+When loading a streamed book with `playerService.loadBook(libraryItemId)`, initial seek is resolved in this order:
 
-1. `userServerState` query cache (`progressByBookId[itemId]` or `progressByBookId[session.bookId]`).
-2. Fallback network read `meApi.getProgress(itemId)` if query cache is missing the book.
+1. `userServerState` query cache (`progressByLibraryItemId[libraryItemId]`).
+2. Fallback network read `meApi.getProgress(libraryItemId)` if query cache is missing the book.
 3. Fallback to persisted playback-store position if no server progress is available.
 
 ### Play / Pause / Toggle
@@ -215,7 +218,7 @@ const handleToggle = async () => {
 };
 ```
 
-Note: `togglePlayPause()` will attempt to reload the last known `bookId` if the queue is empty (e.g., after a cold start). If you are controlling a specific book UI, call `loadBook(libraryItemId, { autoPlay: true })` when the active book differs from the current store `bookId`.
+Note: `togglePlayPause()` will attempt to reload the last known `libraryItemId` if the queue is empty (e.g., after a cold start). If you are controlling a specific book UI, call `loadBook(libraryItemId, { autoPlay: true })` when the active book differs from the current store `libraryItemId`.
 
 ### Seek (Book Time) + Skip By Seconds
 

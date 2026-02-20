@@ -257,6 +257,12 @@ class PlayerService {
         await this.engine.waitForPlaying({ timeoutMs: 15000 });
       }
 
+      // Ensure speed is reapplied after native playback starts.
+      await this.engine.setRate(
+        playbackStore.getState().rate,
+        settingsStore.getState().pitchCorrectionQuality,
+      );
+
       this.logSnapshot("after play");
       playbackStore.getState().actions.setPlaybackState("playing");
       playbackStore.getState().actions.setError(null);
