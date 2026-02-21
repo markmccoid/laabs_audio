@@ -1,4 +1,4 @@
-import { useGetItemDetails } from "@/hooks/abs-data-hooks";
+import { useGetItemDetails, useReconcileBookProgress } from "@/hooks/abs-data-hooks";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Stack } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
@@ -12,8 +12,28 @@ import DownloadControls from "./download-controls";
 type Props = {
   libraryItemId: string | undefined;
 };
+
+const hasHtmlMarkup = (value?: string | null) =>
+  typeof value === "string" && /<[^>]+>/.test(value);
+
+const resolveBookDescription = (
+  metadataDescription?: string | null,
+  metadataDescriptionPlain?: string | null,
+  summaryDescription?: string | null,
+) => {
+  const htmlCandidates = [metadataDescription, summaryDescription];
+  const firstHtml = htmlCandidates.find((candidate) => hasHtmlMarkup(candidate));
+
+  if (firstHtml) {
+    return firstHtml;
+  }
+
+  return metadataDescription ?? summaryDescription ?? metadataDescriptionPlain ?? "";
+};
+
 const BookContainer = ({ libraryItemId }: Props) => {
   const themeColors = useThemeColors();
+  useReconcileBookProgress(libraryItemId);
   const { data: bookData, isLoading } = useGetItemDetails(libraryItemId);
   const insets = useSafeAreaInsets();
   const bookTitle = bookData?.title ?? "Book";
@@ -24,8 +44,11 @@ const BookContainer = ({ libraryItemId }: Props) => {
     .join(", ");
   const resolvedAuthorName = metadata?.authorName ?? authorFromList ?? bookData?.author ?? "";
   const authorName = resolvedAuthorName.trim().length > 0 ? resolvedAuthorName : "Unknown author";
-  const description =
-    metadata?.descriptionPlain ?? metadata?.description ?? bookData?.description ?? "";
+  const description = resolveBookDescription(
+    metadata?.description,
+    metadata?.descriptionPlain,
+    bookData?.description,
+  );
   const genres = metadata?.genres ?? bookData?.genres ?? [];
   const tags = bookData?.media?.tags ?? bookData?.tags ?? [];
   const chapters = bookData?.media?.chapters ?? [];
