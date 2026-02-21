@@ -1,6 +1,7 @@
 import React from "react";
 import { Pressable, Text, View } from "react-native";
 import { useThemeColors } from "@/theme/use-app-theme";
+import HtmlToMarkdown from "./HtmlToMarkdown";
 
 type Props = {
   description?: string | null;
@@ -44,13 +45,20 @@ const BookDetails = ({ description, genres, tags, maxLines = 4 }: Props) => {
             opacity: pressed ? 0.9 : 1,
           })}
         >
-          <Text
-            selectable
-            style={{ fontSize: 14, lineHeight: 20, color: themeColors.textMuted }}
-            numberOfLines={isExpanded ? undefined : maxLines}
-          >
-            {hasDescription ? trimmedDescription : "No description available yet."}
-          </Text>
+          {hasDescription ? (
+            <View
+              style={{
+                maxHeight: isExpanded ? undefined : maxLines * 20 + 4,
+                overflow: "hidden",
+              }}
+            >
+              <HtmlToMarkdown html={trimmedDescription} textColor={themeColors.textMuted} />
+            </View>
+          ) : (
+            <Text selectable style={{ fontSize: 14, lineHeight: 20, color: themeColors.textMuted }}>
+              No description available yet.
+            </Text>
+          )}
           {hasDescription ? (
             <Text selectable style={{ marginTop: 8, fontSize: 12, color: themeColors.textMuted }}>
               {isExpanded ? "Tap to collapse" : "Tap to expand"}
