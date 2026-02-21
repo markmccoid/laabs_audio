@@ -50,6 +50,11 @@ export default function RootLayout() {
     const inTabs = rootSegment === "(tabs)";
     const inLibraryPicker = rootSegment === "library-picker";
     const inChapterViewer = rootSegment === "chapter-viewer";
+    const inMainPlayer = rootSegment === "main-player";
+    const inPlayerUtilitySheet =
+      rootSegment === "player-rate" ||
+      rootSegment === "player-bookmarks" ||
+      rootSegment === "player-sleep-timer";
     if (status === "anonymous" && !inLogin) {
       router.replace({ pathname: "/login", params: { mode: "required" } });
       return;
@@ -60,7 +65,9 @@ export default function RootLayout() {
       !loginRequired &&
       !inTabs &&
       !inLibraryPicker &&
-      !inChapterViewer
+      !inChapterViewer &&
+      !inMainPlayer &&
+      !inPlayerUtilitySheet
     ) {
       router.replace("/(tabs)/(home)");
     }
@@ -132,7 +139,10 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1, backgroundColor: themeColors.bg }}>
           <LibrarySelectionGate />
           <Stack
-            screenOptions={{ headerShown: false, contentStyle: { backgroundColor: themeColors.bg } }}
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: themeColors.bg },
+            }}
           >
             <Stack.Screen name="(tabs)" />
             <Stack.Screen
@@ -167,6 +177,59 @@ export default function RootLayout() {
                 presentation: "formSheet",
                 animation: "slide_from_bottom",
                 sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+                sheetGrabberVisible: true,
+                sheetCornerRadius: 20,
+                contentStyle: {
+                  backgroundColor: themeColors.surface,
+                },
+              }}
+            />
+            <Stack.Screen
+              name="main-player"
+              options={{
+                presentation: "card",
+                headerShown: false,
+                gestureDirection: "vertical",
+                gestureEnabled: true,
+                contentStyle: {
+                  borderTopLeftRadius: 25,
+                  borderTopRightRadius: 25,
+                  overflow: "hidden",
+                },
+              }}
+            />
+            <Stack.Screen
+              name="player-rate"
+              options={{
+                presentation: "formSheet",
+                animation: "slide_from_bottom",
+                sheetAllowedDetents: [0.45, 0.85],
+                sheetGrabberVisible: true,
+                sheetCornerRadius: 20,
+                contentStyle: {
+                  backgroundColor: themeColors.surface,
+                },
+              }}
+            />
+            <Stack.Screen
+              name="player-bookmarks"
+              options={{
+                presentation: "formSheet",
+                animation: "slide_from_bottom",
+                sheetAllowedDetents: [0.45, 0.85],
+                sheetGrabberVisible: true,
+                sheetCornerRadius: 20,
+                contentStyle: {
+                  backgroundColor: themeColors.surface,
+                },
+              }}
+            />
+            <Stack.Screen
+              name="player-sleep-timer"
+              options={{
+                presentation: "formSheet",
+                animation: "slide_from_bottom",
+                sheetAllowedDetents: [0.45, 0.85],
                 sheetGrabberVisible: true,
                 sheetCornerRadius: 20,
                 contentStyle: {

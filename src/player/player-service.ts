@@ -356,11 +356,23 @@ class PlayerService {
     const normalizedRate = clampPlaybackRate(rate);
     this.logDebug(`setRate: ${normalizedRate}`);
     const state = playbackStore.getState();
+    const previousPlaybackState = state.playbackState;
     playbackStore.getState().actions.setRate(normalizedRate);
     if (state.libraryItemId) {
       deviceBooksStore.getState().actions.setBookPlaybackRate(state.libraryItemId, normalizedRate);
     }
     await this.engine.setRate(normalizedRate, settingsStore.getState().pitchCorrectionQuality);
+
+    // Some native engines may resume when changing playback speed.
+    // Preserve the pre-change playback state explicitly.
+    if (previousPlaybackState !== "playing") {
+      try {
+        await this.engine.pause();
+      } catch {
+        // Ignore pause failures here; state is still preserved in store.
+      }
+      playbackStore.getState().actions.setPlaybackState(previousPlaybackState);
+    }
   }
 
   async setPitchCorrectionQuality(quality: PitchCorrectionQuality) {

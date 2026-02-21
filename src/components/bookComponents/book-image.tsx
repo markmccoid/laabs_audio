@@ -7,12 +7,13 @@ const fallbackImage = require("../../../assets/images/NoImageFound.png");
 type Props = {
   coverURL: string | undefined;
   leftAccessory?: ReactNode;
+  maxSize?: number;
 };
 
-const BookImage = ({ coverURL, leftAccessory }: Props) => {
+const BookImage = ({ coverURL, leftAccessory, maxSize = 360 }: Props) => {
   const themeColors = useThemeColors();
   const { width } = useWindowDimensions();
-  const imageSize = Math.min(360, width - 48);
+  const imageSize = Math.min(maxSize, width - 48);
   const finalCover = coverURL ? { uri: coverURL } : fallbackImage;
 
   return (
