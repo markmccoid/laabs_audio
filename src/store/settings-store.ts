@@ -25,6 +25,8 @@ export type DailyDiscoverShelf = {
   updatedAt: number;
 };
 
+export type BookProgressTimeDisplay = "elapsed" | "remaining";
+
 const DEFAULT_HOME_SHELF_SETTINGS: HomeShelfSettings = {
   isVisible: true,
   homeItemCount: DEFAULT_HOME_SHELF_ITEM_COUNT,
@@ -68,11 +70,13 @@ const resolveScopeSettings = (
 export type SettingsState = {
   playbackRate: number;
   pitchCorrectionQuality: PitchCorrectionQuality;
+  defaultBookProgressTimeDisplay: BookProgressTimeDisplay;
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>;
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
   actions: {
     setPlaybackRate: (rate: number) => void;
     setPitchCorrectionQuality: (quality: PitchCorrectionQuality) => void;
+    setDefaultBookProgressTimeDisplay: (display: BookProgressTimeDisplay) => void;
     setHomeShelfVisibility: (scopeKey: string | null, shelfId: string, isVisible: boolean) => void;
     setHomeShelfItemCount: (scopeKey: string | null, shelfId: string, homeItemCount: number) => void;
     setHomeShelfOrder: (scopeKey: string | null, orderedShelfIds: string[]) => void;
@@ -89,12 +93,15 @@ export const settingsStore = createStore<SettingsState>()(
     (set) => ({
       playbackRate: 1,
       pitchCorrectionQuality: "medium",
+      defaultBookProgressTimeDisplay: "elapsed",
       homeShelvesByScope: {},
       discoverShelfByScope: {},
       actions: {
         setPlaybackRate: (playbackRate) => set({ playbackRate }),
         setPitchCorrectionQuality: (pitchCorrectionQuality) =>
           set({ pitchCorrectionQuality }),
+        setDefaultBookProgressTimeDisplay: (defaultBookProgressTimeDisplay) =>
+          set({ defaultBookProgressTimeDisplay }),
         setHomeShelfVisibility: (scopeKey, shelfId, isVisible) => {
           const normalizedScopeKey = normalizeScopeKey(scopeKey);
           const normalizedShelfId = normalizeShelfId(shelfId);
@@ -261,10 +268,11 @@ export const settingsStore = createStore<SettingsState>()(
       partialize: (state) => ({
         playbackRate: state.playbackRate,
         pitchCorrectionQuality: state.pitchCorrectionQuality,
+        defaultBookProgressTimeDisplay: state.defaultBookProgressTimeDisplay,
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 3,
+      version: 4,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -272,6 +280,7 @@ export const settingsStore = createStore<SettingsState>()(
           return {
             playbackRate: 1,
             pitchCorrectionQuality: "medium",
+            defaultBookProgressTimeDisplay: "elapsed",
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
           };
@@ -281,6 +290,7 @@ export const settingsStore = createStore<SettingsState>()(
           return {
             playbackRate: state.playbackRate ?? 1,
             pitchCorrectionQuality: state.pitchCorrectionQuality ?? "medium",
+            defaultBookProgressTimeDisplay: "elapsed",
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
           };
@@ -290,6 +300,7 @@ export const settingsStore = createStore<SettingsState>()(
           return {
             playbackRate: state.playbackRate ?? 1,
             pitchCorrectionQuality: state.pitchCorrectionQuality ?? "medium",
+            defaultBookProgressTimeDisplay: "elapsed",
             homeShelvesByScope: state.homeShelvesByScope ?? EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
           };
@@ -298,6 +309,7 @@ export const settingsStore = createStore<SettingsState>()(
         return {
           playbackRate: state.playbackRate ?? 1,
           pitchCorrectionQuality: state.pitchCorrectionQuality ?? "medium",
+          defaultBookProgressTimeDisplay: state.defaultBookProgressTimeDisplay ?? "elapsed",
           homeShelvesByScope: state.homeShelvesByScope ?? EMPTY_HOME_SHELVES_BY_SCOPE,
           discoverShelfByScope: state.discoverShelfByScope ?? {},
         };

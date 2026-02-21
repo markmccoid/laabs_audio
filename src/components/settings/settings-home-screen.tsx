@@ -5,7 +5,7 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { useThemeColors } from "@/theme/use-app-theme";
 
 type SettingsRowProps = {
-  href: "/(tabs)/settings/authentication" | "/(tabs)/settings/bookshelves";
+  href: "/(tabs)/settings/authentication" | "/(tabs)/settings/bookshelves" | "/(tabs)/settings/playback";
   title: string;
   subtitle: string;
   icon: string;
@@ -126,6 +126,12 @@ export const SettingsHomeScreen = () => {
             title="Bookshelves"
             subtitle="Visibility, order, names, and home item counts"
             icon="books.vertical"
+          />
+          <SettingsRow
+            href="/(tabs)/settings/playback"
+            title="Playback"
+            subtitle="Defaults for progress display and player behavior"
+            icon="play.circle"
             isLast
           />
         </SettingsGroup>

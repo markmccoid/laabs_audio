@@ -8,13 +8,24 @@ type Props = {
   coverURL: string | undefined;
   leftAccessory?: ReactNode;
   maxSize?: number;
+  progressPercent?: number;
+  showProgressLine?: boolean;
 };
 
-const BookImage = ({ coverURL, leftAccessory, maxSize = 360 }: Props) => {
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const BookImage = ({
+  coverURL,
+  leftAccessory,
+  maxSize = 360,
+  progressPercent = 0,
+  showProgressLine = false,
+}: Props) => {
   const themeColors = useThemeColors();
   const { width } = useWindowDimensions();
   const imageSize = Math.min(maxSize, width - 48);
   const finalCover = coverURL ? { uri: coverURL } : fallbackImage;
+  const resolvedProgressPercent = clamp(progressPercent, 0, 1);
 
   return (
     <View style={{ alignItems: "center" }}>
@@ -42,6 +53,27 @@ const BookImage = ({ coverURL, leftAccessory, maxSize = 360 }: Props) => {
           </View>
         ) : null}
       </View>
+      {showProgressLine ? (
+        <View
+          style={{
+            width: imageSize,
+            height: 4,
+            borderRadius: 999,
+            borderCurve: "continuous",
+            overflow: "hidden",
+            backgroundColor: "rgba(148, 163, 184, 0.35)",
+            marginTop: 8,
+          }}
+        >
+          <View
+            style={{
+              width: `${resolvedProgressPercent * 100}%`,
+              height: "100%",
+              backgroundColor: themeColors.accent,
+            }}
+          />
+        </View>
+      ) : null}
     </View>
   );
 };

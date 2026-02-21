@@ -7,6 +7,7 @@ import PlayPauseAnimation, { type PlaybackControlVisualState } from "./play-paus
 
 type Props = {
   libraryItemId?: string;
+  variant?: "full" | "play-only";
 };
 
 type ControlButtonProps = {
@@ -50,7 +51,7 @@ const ControlButton = ({
   );
 };
 
-const BookControls = ({ libraryItemId }: Props) => {
+const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
   const themeColors = useThemeColors();
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
@@ -69,9 +70,7 @@ const BookControls = ({ libraryItemId }: Props) => {
 
     const isLoadedForViewedBook = isBookActive && isBookLoaded;
     const canResolvePending =
-      isLoadedForViewedBook ||
-      playbackState === "error" ||
-      playbackState === "ended";
+      isLoadedForViewedBook || playbackState === "error" || playbackState === "ended";
 
     if (canResolvePending) {
       setPendingLoadBookId(null);
@@ -90,6 +89,7 @@ const BookControls = ({ libraryItemId }: Props) => {
 
   const isLoading = viewedBookState === "loading";
   const isPlaying = viewedBookState === "playing";
+  const isPlayOnly = variant === "play-only";
   const canControl =
     viewedBookState === "playing" ||
     viewedBookState === "paused" ||
@@ -130,7 +130,7 @@ const BookControls = ({ libraryItemId }: Props) => {
 
   const handleSeekBackward = async () => {
     if (!canControl) return;
-    await playerService.skipBy(-seekBackwardSeconds);
+    await playerService.skipBy(seekBackwardSeconds, true);
   };
 
   const handleSeekForward = async () => {
@@ -147,6 +147,38 @@ const BookControls = ({ libraryItemId }: Props) => {
     if (!canControl) return;
     await playerService.nextChapter();
   };
+
+  if (isPlayOnly) {
+    return (
+      <View style={{ alignItems: "center", justifyContent: "center", paddingBottom: 2 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isLoading ? "Loading book" : isPlaying ? "Pause" : "Play"}
+          onPress={handleToggle}
+          disabled={!canToggle}
+          style={({ pressed }) => ({
+            width: 72,
+            height: 72,
+            borderRadius: 36,
+            borderCurve: "continuous",
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: canToggle ? themeColors.accent : themeColors.textMuted,
+            opacity: pressed ? 0.85 : 1,
+            transform: [{ scale: pressed ? 0.98 : 1 }],
+            boxShadow: "0 14px 24px rgba(15, 23, 42, 0.25)",
+          })}
+        >
+          <PlayPauseAnimation
+            visualState={viewedBookState}
+            size={34}
+            duration={600}
+            tintColor="#f8fafc"
+          />
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <View style={{ width: "100%", gap: 12 }}>

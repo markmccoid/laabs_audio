@@ -1,17 +1,32 @@
-import { useGetItemDetails, useReconcileBookProgress } from "@/hooks/abs-data-hooks";
+import {
+  useGetItemDetails,
+  useGetUserServerState,
+  useReconcileBookProgress,
+} from "@/hooks/abs-data-hooks";
+import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { BlurView } from "expo-blur";
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import { Stack } from "expo-router";
-import { ScrollView, Text, View } from "react-native";
+import { useMemo } from "react";
+import { ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useUniwind } from "uniwind";
 import BookControls from "./book-controls";
 import BookDetails from "./book-details";
 import BookImage from "./book-image";
+import BookKeyDetails from "./book-key-details";
 import BookRateSetter from "./book-rate-setter";
-import BookTimeSlider from "./book-time-slider";
 import DownloadControls from "./download-controls";
+
 type Props = {
   libraryItemId: string | undefined;
 };
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const fallbackImage = require("../../../assets/images/NoImageFound.png");
 
 const hasHtmlMarkup = (value?: string | null) =>
   typeof value === "string" && /<[^>]+>/.test(value);
@@ -33,8 +48,14 @@ const resolveBookDescription = (
 
 const BookContainer = ({ libraryItemId }: Props) => {
   const themeColors = useThemeColors();
+  const { theme } = useUniwind();
+  const colorScheme = useColorScheme();
   useReconcileBookProgress(libraryItemId);
   const { data: bookData, isLoading } = useGetItemDetails(libraryItemId);
+  const { data: userServerState } = useGetUserServerState();
+  const defaultProgressTimeDisplay = useSettingsStore(
+    (state) => state.defaultBookProgressTimeDisplay,
+  );
   const insets = useSafeAreaInsets();
   const bookTitle = bookData?.title ?? "Book";
   const metadata = bookData?.media?.metadata;
@@ -42,8 +63,16 @@ const BookContainer = ({ libraryItemId }: Props) => {
     ?.map((author) => author.name)
     .filter(Boolean)
     .join(", ");
-  const resolvedAuthorName = metadata?.authorName ?? authorFromList ?? bookData?.author ?? "";
-  const authorName = resolvedAuthorName.trim().length > 0 ? resolvedAuthorName : "Unknown author";
+  const author = metadata?.authorName ?? authorFromList ?? bookData?.author ?? null;
+  const narratorFromList = metadata?.narrators?.filter(Boolean).join(", ");
+  const narrator = metadata?.narratorName ?? narratorFromList ?? bookData?.narratedBy ?? null;
+  const publishedYear =
+    metadata?.publishedYear ??
+    bookData?.publishedYear ??
+    metadata?.publishedDate?.split("-")[0] ??
+    null;
+  const seriesFromList = metadata?.series?.map((item) => item.name).filter(Boolean).join(", ");
+  const series = metadata?.seriesName ?? seriesFromList ?? bookData?.series ?? null;
   const description = resolveBookDescription(
     metadata?.description,
     metadata?.descriptionPlain,
@@ -51,63 +80,133 @@ const BookContainer = ({ libraryItemId }: Props) => {
   );
   const genres = metadata?.genres ?? bookData?.genres ?? [];
   const tags = bookData?.media?.tags ?? bookData?.tags ?? [];
-  const chapters = bookData?.media?.chapters ?? [];
-  const fallbackDurationMs = Math.max(
+  const durationSeconds = bookData?.media?.duration ?? bookData?.duration ?? 0;
+  const progressByLibraryItemId =
+    userServerState?.progressByLibraryItemId ??
+    (
+      userServerState as typeof userServerState & {
+        progressByBookId?: Record<
+          string,
+          { currentTime?: number; duration?: number; isFinished?: boolean }
+        >;
+      }
+    )?.progressByBookId ??
+    {};
+  const matchedProgress = (libraryItemId ? progressByLibraryItemId[libraryItemId] : null) ?? null;
+  const fallbackProgress = bookData?.userMediaProgress;
+  const progressDurationSeconds = Math.max(
     0,
-    Math.round((bookData?.media?.duration ?? bookData?.duration ?? 0) * 1000),
+    matchedProgress?.duration ?? fallbackProgress?.duration ?? durationSeconds ?? 0,
   );
+  const resolvedDurationSeconds = Math.max(durationSeconds, progressDurationSeconds);
+  const rawProgressSeconds = Math.max(
+    0,
+    matchedProgress?.currentTime ?? fallbackProgress?.currentTime ?? 0,
+  );
+  const progressSeconds =
+    progressDurationSeconds > 0
+      ? clamp(rawProgressSeconds, 0, progressDurationSeconds)
+      : rawProgressSeconds;
+  const isFinished = Boolean(matchedProgress?.isFinished ?? fallbackProgress?.isFinished);
+  const isInProgress = progressSeconds > 0 && !isFinished;
+  const progressPercent =
+    resolvedDurationSeconds > 0 ? clamp(progressSeconds / resolvedDurationSeconds, 0, 1) : 0;
+  const visualProgressPercent = isFinished ? 1 : progressPercent;
+  const remainingSeconds = Math.max(resolvedDurationSeconds - progressSeconds, 0);
   const coverURL = bookData?.coverUri ?? bookData?.coverFull ?? bookData?.cover;
+  const backgroundSource = coverURL ? { uri: coverURL } : fallbackImage;
+
+  const isDarkTheme = useMemo(() => {
+    if (theme === "dark") return true;
+    if (theme === "light") return false;
+    return colorScheme === "dark";
+  }, [colorScheme, theme]);
+
+  const gradientColors = useMemo(
+    () =>
+      isDarkTheme
+        ? ["rgba(6, 10, 11, 0.16)", "rgba(6, 10, 11, 0.5)", "rgba(6, 10, 11, 0.78)"]
+        : ["rgba(248, 250, 252, 0.12)", "rgba(248, 250, 252, 0.56)", "rgba(248, 250, 252, 0.84)"],
+    [isDarkTheme],
+  );
 
   return (
-    <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      style={{ flex: 1, backgroundColor: themeColors.bg }}
-      contentContainerStyle={{
-        paddingHorizontal: 20,
-        paddingTop: 0,
-        paddingBottom: Math.max(28, insets.bottom + 16),
-      }}
-    >
-      <Stack.Screen options={{ headerTitle: bookTitle }} />
-      <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Button onPress={() => console.log("Search Lib button")} icon="cube.box" />
-      </Stack.Toolbar>
-
-      <View style={{ alignItems: "center", gap: 6 }}>
-        {isLoading ? (
-          <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
-            Loading details...
-          </Text>
-        ) : null}
+    <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <Image
+          source={backgroundSource}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          transition={280}
+        />
+        <BlurView
+          tint={isDarkTheme ? "dark" : "light"}
+          intensity={95}
+          experimentalBlurMethod="dimezisBlurView"
+          style={StyleSheet.absoluteFill}
+        />
+        <LinearGradient
+          colors={gradientColors}
+          locations={[0, 0.5, 1]}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
       </View>
 
-      <BookImage
-        coverURL={coverURL}
-        leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
-      />
-      <View className="h-[20]" />
-      <View style={{ alignItems: "center" }}>
-        <Text
-          selectable
-          style={{ fontSize: 16, fontWeight: "600", color: themeColors.text, textAlign: "center" }}
-        >
-          By {authorName}
-        </Text>
-      </View>
-      <View className="h-[10]" />
-      <BookTimeSlider
-        libraryItemId={libraryItemId}
-        fallbackDurationMs={fallbackDurationMs}
-        chapters={chapters}
-      />
-      <View className="h-[10]" />
-      <BookControls libraryItemId={libraryItemId} />
-      <View className="h-[10]" />
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        style={{ flex: 1, backgroundColor: "transparent" }}
+        contentContainerStyle={{
+          paddingHorizontal: 20,
+          paddingTop: 0,
+          paddingBottom: Math.max(28, insets.bottom + 16),
+        }}
+      >
+        <Stack.Screen options={{ headerTitle: bookTitle }} />
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Button onPress={() => console.log("Search Lib button")} icon="cube.box" />
+        </Stack.Toolbar>
 
-      <BookDetails description={description} genres={genres} tags={tags} />
+        <View style={{ alignItems: "center", gap: 6 }}>
+          {isLoading ? (
+            <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
+              Loading details...
+            </Text>
+          ) : null}
+        </View>
 
-      <DownloadControls libraryItemId={libraryItemId} summary={bookData ?? null} />
-    </ScrollView>
+        <BookImage
+          coverURL={coverURL}
+          leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
+          showProgressLine={progressSeconds > 0 || isFinished}
+          progressPercent={visualProgressPercent}
+        />
+        <View className="h-[12]" />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <BookKeyDetails
+              author={author}
+              narrator={narrator}
+              publishedYear={publishedYear}
+              series={series}
+              durationSeconds={resolvedDurationSeconds}
+              progressSeconds={progressSeconds}
+              remainingSeconds={remainingSeconds}
+              isInProgress={isInProgress}
+              defaultProgressTimeDisplay={defaultProgressTimeDisplay}
+              progressResetKey={libraryItemId}
+            />
+          </View>
+          <BookControls libraryItemId={libraryItemId} variant="play-only" />
+        </View>
+        <View className="h-[10]" />
+
+        <BookDetails description={description} genres={genres} tags={tags} />
+
+        <DownloadControls libraryItemId={libraryItemId} summary={bookData ?? null} />
+      </ScrollView>
+    </View>
   );
 };
 
