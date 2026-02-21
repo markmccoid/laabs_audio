@@ -5,6 +5,7 @@ import type { Chapter } from "@/types/absTypes";
 import { formatSeconds } from "@/utils/formatUtils";
 import Slider from "@react-native-community/slider";
 import { router } from "expo-router";
+import { SymbolView } from "expo-symbols";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 
@@ -252,6 +253,7 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
         accessibilityLabel="Open chapter list"
         onPress={handleOpenChapterViewer}
         disabled={!libraryItemId}
+        className="flex-row gap-1 items-center"
         style={({ pressed }) => ({
           borderRadius: 10,
           borderCurve: "continuous",
@@ -260,6 +262,7 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
           opacity: !libraryItemId ? 0.5 : pressed ? 0.7 : 1,
         })}
       >
+        <SymbolView name="line.3.horizontal" tintColor={themeColors.text} size={30} />
         <Text
           numberOfLines={1}
           ellipsizeMode="tail"

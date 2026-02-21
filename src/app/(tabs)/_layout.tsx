@@ -1,12 +1,14 @@
+import { useCachedBookSummary } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { useCachedBookSummary } from "@/hooks/abs-data-hooks";
 import { Image } from "expo-image";
+import { Link, useRouter } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 export default function TabLayout() {
+  const router = useRouter();
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const currentBook = useCachedBookSummary(currentLibraryItemId ?? undefined);
   const themeColors = useThemeColors();
@@ -55,24 +57,28 @@ export default function TabLayout() {
       {hasLoadedBook && (
         <NativeTabs.BottomAccessory>
           <View className="flex-row items-center justify-between h-full px-4 gap-2 bg-surface">
-            <Image
-              source={{ uri: currentBook?.coverFull }}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 8,
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: themeColors.border,
-              }}
-            />
-            <View className="flex-col items-center flex-1 w-[100]">
-              <Text style={{ fontSize: 12, color: themeColors.text }} numberOfLines={1}>
-                {currentBook?.title}
-              </Text>
-              <Text style={{ fontSize: 12, color: themeColors.textMuted }}>
-                by {currentBook?.author}
-              </Text>
-            </View>
+            <Link href="/main-player" asChild>
+              <Pressable className="flex-row items-center justify-between flex-1 gap-2">
+                <Image
+                  source={{ uri: currentBook?.coverFull }}
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 8,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: themeColors.border,
+                  }}
+                />
+                <View className="flex-col items-center flex-1 w-[100]">
+                  <Text style={{ fontSize: 12, color: themeColors.text }} numberOfLines={1}>
+                    {currentBook?.title}
+                  </Text>
+                  {/* <Text style={{ fontSize: 12, color: themeColors.textMuted }} numberOfLines={1}>
+                    by {currentBook?.duration}
+                  </Text> */}
+                </View>
+              </Pressable>
+            </Link>
             {!isPlaying ? (
               <Pressable onPress={handleToggle}>
                 <SymbolView name="play.fill" tintColor={themeColors.accent} />

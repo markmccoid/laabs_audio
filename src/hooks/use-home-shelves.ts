@@ -55,7 +55,6 @@ const EMPTY_CATALOG: LibraryItemsSummary = [];
 const EMPTY_PROGRESS_BY_BOOK: Record<string, UserBookProgress> = {};
 const EMPTY_ORDER: string[] = [];
 const EMPTY_SHELF_SETTINGS_BY_ID: Record<string, HomeShelfSettings> = {};
-const MAX_DISCOVER_PERSISTED_IDS = 500;
 
 const reorderByIds = <T extends { id: string }>(items: T[], orderedIds: string[]) => {
   if (!items.length || !orderedIds.length) return items;
@@ -219,6 +218,8 @@ export const useHomeShelves = () => {
     () => catalog.filter((book) => !progressByBookId[book.id]),
     [catalog, progressByBookId],
   );
+  const discoverHomeItemCount =
+    shelfSettingsById.discover?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT;
   const discoverSeed = hasDiscoverSnapshotForToday
     ? storedDiscoverShelf.seed
     : hashSeed(`${homeScopeKey ?? "anonymous"}:${discoverDateKey}`);
@@ -228,7 +229,7 @@ export const useHomeShelves = () => {
     const shuffledUnread = seededShuffle(unreadBooks, String(discoverSeed));
 
     if (!hasDiscoverSnapshotForToday || !storedDiscoverShelf) {
-      return shuffledUnread;
+      return shuffledUnread.slice(0, discoverHomeItemCount);
     }
 
     const preferredDiscover: LibraryItemSummary[] = [];
@@ -246,8 +247,8 @@ export const useHomeShelves = () => {
       preferredDiscover.push(book);
     });
 
-    return preferredDiscover;
-  }, [discoverSeed, hasDiscoverSnapshotForToday, storedDiscoverShelf, unreadBooks]);
+    return preferredDiscover.slice(0, discoverHomeItemCount);
+  }, [discoverHomeItemCount, discoverSeed, hasDiscoverSnapshotForToday, storedDiscoverShelf, unreadBooks]);
 
   useEffect(() => {
     if (!homeScopeKey) return;
@@ -256,7 +257,7 @@ export const useHomeShelves = () => {
     setDailyDiscoverShelf(homeScopeKey, {
       dateKey: discoverDateKey,
       seed: discoverSeed,
-      bookIds: discover.slice(0, MAX_DISCOVER_PERSISTED_IDS).map((book) => book.id),
+      bookIds: discover.map((book) => book.id),
     });
   }, [
     discover,
@@ -279,9 +280,9 @@ export const useHomeShelves = () => {
     setDailyDiscoverShelf(homeScopeKey, {
       dateKey: discoverDateKey,
       seed: refreshSeed,
-      bookIds: refreshedBooks.slice(0, MAX_DISCOVER_PERSISTED_IDS).map((book) => book.id),
+      bookIds: refreshedBooks.slice(0, discoverHomeItemCount).map((book) => book.id),
     });
-  }, [discoverDateKey, homeScopeKey, setDailyDiscoverShelf, unreadBooks]);
+  }, [discoverDateKey, discoverHomeItemCount, homeScopeKey, setDailyDiscoverShelf, unreadBooks]);
 
   const shelves = useMemo<HomeShelf[]>(() => {
     const derivedShelves: HomeDerivedShelf[] = [

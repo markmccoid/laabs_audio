@@ -8,7 +8,7 @@
     "scheme": "laabsaudio",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
+      "icon": "./assets/laabs-abs.icon",
       "bundleIdentifier": "com.markmccoid.laabs-audio",
       "infoPlist": {
         "UIViewControllerBasedStatusBarAppearance": false,
