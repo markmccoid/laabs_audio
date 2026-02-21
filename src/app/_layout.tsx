@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Uniwind } from "uniwind";
+import { libraryItemsApi } from "../api/library-items-api";
 import { meApi } from "../api/me-api";
 import { useAuthStore } from "../auth/auth-store";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
@@ -21,6 +22,7 @@ export default function RootLayout() {
   const navigationTheme = useNavigationTheme();
   const themeColors = useThemeColors();
   const loginRequired = useAuthStore((state) => state.loginRequired);
+  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const segments = useSegments();
   const previousStatus = useRef<typeof status | null>(null);
@@ -114,16 +116,32 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (status !== "authenticated") return;
-    if (!activeLibraryUserKey) return;
+    const prefetches: Promise<unknown>[] = [];
 
-    queryClient
-      .prefetchQuery({
-        queryKey: queryKeys.userServerState(activeLibraryUserKey),
-        queryFn: () => meApi.getUserServerState(),
-        meta: { persist: true },
-      })
-      .catch(() => undefined);
-  }, [activeLibraryUserKey, status]);
+    // Warm the catalog cache for Home/Search. Prefetch is stale-aware (5 minute query staleTime).
+    if (activeLibraryId) {
+      prefetches.push(
+        queryClient.prefetchQuery({
+          queryKey: queryKeys.libraryBooks(activeLibraryId),
+          queryFn: () => libraryItemsApi.getItems({ libraryId: activeLibraryId }),
+          meta: { persist: true },
+        }),
+      );
+    }
+
+    if (activeLibraryUserKey) {
+      prefetches.push(
+        queryClient.prefetchQuery({
+          queryKey: queryKeys.userServerState(activeLibraryUserKey),
+          queryFn: () => meApi.getUserServerState(),
+          meta: { persist: true },
+        }),
+      );
+    }
+
+    if (!prefetches.length) return;
+    Promise.all(prefetches).catch(() => undefined);
+  }, [activeLibraryId, activeLibraryUserKey, status]);
 
   if (status === "hydrating") {
     return (

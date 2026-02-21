@@ -55,6 +55,7 @@ const EMPTY_CATALOG: LibraryItemsSummary = [];
 const EMPTY_PROGRESS_BY_BOOK: Record<string, UserBookProgress> = {};
 const EMPTY_ORDER: string[] = [];
 const EMPTY_SHELF_SETTINGS_BY_ID: Record<string, HomeShelfSettings> = {};
+const PERSIST_META = { persist: true } as const;
 
 const reorderByIds = <T extends { id: string }>(items: T[], orderedIds: string[]) => {
   if (!items.length || !orderedIds.length) return items;
@@ -131,6 +132,8 @@ export const useHomeShelves = () => {
     queryFn: async () => immediateCatalog,
     enabled: false,
     initialData: immediateCatalog,
+    // Keep persistence metadata on shared query options for this key.
+    meta: PERSIST_META,
   });
 
   const { data: subscribedUserServerState } = useQuery<UserServerState | undefined>({
@@ -138,6 +141,8 @@ export const useHomeShelves = () => {
     queryFn: async () => immediateUserServerState,
     enabled: false,
     initialData: immediateUserServerState,
+    // Keep persistence metadata on shared query options for this key.
+    meta: PERSIST_META,
   });
 
   const customShelvesRaw = useDeviceBooksStore((state) =>

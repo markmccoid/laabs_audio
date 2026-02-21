@@ -12,6 +12,7 @@ import {
   useGetBooksInProgress,
   useMoveBookToTopOfInProgress,
   useCachedBookSummary,
+  useReconcileBookProgress,
   useGetItemDetails,
   useGetFilterData,
   useInvalidateQueries,
@@ -125,6 +126,22 @@ Notes:
 - Uses `itemsApi.getItemDetails(itemId)`.
 - Merges network details with `useCachedBookSummary(itemId)` so UI can render summary fields (including cover URLs) before details fetch completes.
 - When unauthenticated, returns a safe object with `data` undefined.
+
+### useReconcileBookProgress
+
+Fetches latest server progress for a single book and merges it into the persisted user server-state cache.
+
+Parameters:
+- `libraryItemId?: string`
+
+Returns:
+- `void` (side-effect hook)
+
+Notes:
+- Uses `/api/me/progress/:libraryItemId` in the background.
+- Keeps UI optimistic by rendering cached progress first, then reconciling cache with server response.
+- Writes into `["user", activeLibraryUserKey, "serverState"]` via `queryClient.setQueryData(...)`.
+- Skips updates when existing cached progress has a newer `lastUpdate`.
 
 ### useGetFilterData
 

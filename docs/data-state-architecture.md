@@ -36,6 +36,37 @@ This document defines where audiobook data lives after the data restructure.
 - `staleTime: 5 minutes`
 - `gcTime: Infinity`
 - Persisted query cache `maxAge: Infinity`
+- Persisted queries require `meta: { persist: true }`
+
+## Data Acquisition Triggers
+
+### App startup (authenticated)
+
+1. UI renders from restored MMKV React Query cache immediately when available.
+2. Startup warmup prefetches:
+   - `["library", libraryId, "books"]`
+   - `["user", userKey, "serverState"]`
+3. Prefetch is stale-aware and only hits server when cache is stale (5 minute staleTime).
+
+### Home pull-to-refresh
+
+Manual refresh on Home explicitly refetches:
+- library catalog (`["library", libraryId, "books"]`)
+- user progress/bookmarks (`["user", userKey, "serverState"]`)
+
+Behavior:
+- Invalidates both keys first, then fetches both from server.
+- Updates React Query cache + MMKV persisted snapshot.
+- Shows a visible offline message if user is offline.
+
+### Book navigation (single-book progress reconciliation)
+
+When a book detail route opens, the UI:
+1. Uses cached progress immediately (optimistic).
+2. Fetches fresh server progress for that book in the background.
+3. Merges the result into `["user", userKey, "serverState"]` cache.
+
+This keeps startup and route transitions fast while still reconciling to current server position.
 
 ## Merge Boundary
 
@@ -55,5 +86,6 @@ Playback loop behavior:
 2. On sync points (`interval`, `pause`, `seek`), `playerService` syncs ABS session state.
 3. `playerService` immediately mirrors progress into React Query using `queryClient.setQueryData(...)` for `["user", userKey, "serverState"]`.
 4. Persisted React Query cache is updated without requiring an extra fetch.
+5. `loadBook` uses cached progress for resume immediately, and now also reconciles server progress in background.
 
 This keeps library UI and player progress aligned while minimizing duplicated state.

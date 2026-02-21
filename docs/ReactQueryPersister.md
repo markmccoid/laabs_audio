@@ -12,6 +12,15 @@ This app persists selected React Query cache entries to MMKV and keeps device-on
 4. Persisted cache `maxAge` is `Infinity`.
 5. On logout, only global/library query roots are removed (`library`, `libraries`, plus legacy keys). User-scoped data is intentionally retained.
 
+### Important invariant for shared query keys
+
+React Query options are shared per `queryKey`. If any observer for a persisted key omits
+`meta: { persist: true }`, it can overwrite query options and cause that query to be skipped by
+the persister on the next save cycle.
+
+To prevent startup cache misses, all observers of persisted keys must carry the same
+`meta.persist` opt-in, including read-only/disabled subscription hooks.
+
 ## Query Key Structure
 
 - `["libraries"]`
@@ -32,11 +41,21 @@ This app persists selected React Query cache entries to MMKV and keeps device-on
 
 ## Startup Hydration
 
-After auth becomes authenticated and a `userKey` exists, app bootstrap prefetches:
+After auth becomes authenticated and an active library context exists, app bootstrap prefetches:
 
+- `queryKeys.libraryBooks(activeLibraryId)` via `libraryItemsApi.getItems(...)`
 - `queryKeys.userServerState(activeLibraryUserKey)` via `meApi.getUserServerState()`
 
-This primes progress/bookmarks for immediate resume and UI merge behavior.
+Prefetch is stale-aware (5 minute `staleTime`), so it only fetches when cached data is stale.
+
+## Home Manual Refresh
+
+Home pull-to-refresh invalidates and refetches both persisted keys:
+
+- `queryKeys.libraryBooks(activeLibraryId)`
+- `queryKeys.userServerState(activeLibraryUserKey)`
+
+This guarantees users can fetch newly added books and latest progress on demand.
 
 ## Files
 

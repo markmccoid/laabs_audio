@@ -103,27 +103,10 @@ class PlayerService {
       const cachedUserProgress =
         progressByLibraryItemId[libraryItemId] ??
         progressByLibraryItemId[session.libraryItemId];
-      let localBookProgressMs =
+      const localBookProgressMs =
         typeof cachedUserProgress?.currentTime === "number"
           ? secondsToMs(cachedUserProgress.currentTime)
           : null;
-
-      if (localBookProgressMs == null) {
-        try {
-          const directProgress = await meApi.getProgress(libraryItemId);
-          if (typeof directProgress.currentTime === "number") {
-            localBookProgressMs = secondsToMs(directProgress.currentTime);
-            this.updateUserServerStateCache({
-              libraryItemId,
-              currentTimeSeconds: directProgress.currentTime,
-              durationSeconds: directProgress.duration ?? 0,
-              isFinished: Boolean(directProgress.isFinished),
-            });
-          }
-        } catch {
-          // Treat as "no progress yet" when endpoint has no record for this item.
-        }
-      }
       const rateCandidateIds = [session.libraryItem.id, libraryItemId, session.libraryItemId]
         .filter((value): value is string => typeof value === "string" && value.length > 0)
         .filter((value, index, source) => source.indexOf(value) === index);
@@ -139,6 +122,8 @@ class PlayerService {
       const persistedPositionMs =
         persisted.libraryItemId === libraryItemId ? persisted.positionMs : 0;
       const resumePositionMs = localBookProgressMs ?? persistedPositionMs;
+      // Always reconcile this book's progress from server in the background.
+      this.reconcileBookProgressFromServer(libraryItemId);
 
       this.listenedMs = 0;
       this.lastSyncAttemptAt = 0;
@@ -644,6 +629,21 @@ class PlayerService {
       durationSeconds,
       isFinished,
     });
+  }
+
+  private reconcileBookProgressFromServer(libraryItemId: string) {
+    meApi
+      .getProgress(libraryItemId)
+      .then((serverProgress) => {
+        if (typeof serverProgress.currentTime !== "number") return;
+        this.updateUserServerStateCache({
+          libraryItemId: serverProgress.libraryItemId || libraryItemId,
+          currentTimeSeconds: serverProgress.currentTime,
+          durationSeconds: serverProgress.duration ?? 0,
+          isFinished: Boolean(serverProgress.isFinished),
+        });
+      })
+      .catch(() => undefined);
   }
 
   private updateUserServerStateCache(payload: {

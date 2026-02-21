@@ -8,7 +8,12 @@ import {
   type LibraryItemSummary,
   type LibraryItemsSummary,
 } from "../api/library-items-api";
-import { meApi, type ItemsInProgressSummary, type UserBookProgress } from "../api/me-api";
+import {
+  meApi,
+  type ItemsInProgressSummary,
+  type UserBookProgress,
+  type UserServerState,
+} from "../api/me-api";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
 import type { Bookmark } from "../types/absTypes";
@@ -277,6 +282,94 @@ export const useGetUserServerState = () => {
   });
 };
 
+export const useReconcileBookProgress = (libraryItemId?: string) => {
+  const status = useAuthStore((state) => state.status);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    if (!activeLibraryUserKey || !libraryItemId) return;
+
+    let cancelled = false;
+
+    meApi
+      .getProgress(libraryItemId)
+      .then((progress) => {
+        if (cancelled) return;
+        if (typeof progress.currentTime !== "number") return;
+
+        const resolvedLibraryItemId = progress.libraryItemId || libraryItemId;
+        const serverLastUpdate =
+          typeof progress.lastUpdate === "number" ? progress.lastUpdate : Date.now();
+
+        queryClient.setQueryData<UserServerState>(
+          queryKeys.userServerState(activeLibraryUserKey),
+          (previousState) => {
+            const nextState: UserServerState = previousState ?? {
+              userId: activeLibraryUserKey,
+              progressByLibraryItemId: {},
+              bookmarksByLibraryItemId: {},
+            };
+            const previousProgress =
+              nextState.progressByLibraryItemId[resolvedLibraryItemId];
+            if (previousProgress && previousProgress.lastUpdate > serverLastUpdate) {
+              return nextState;
+            }
+
+            const resolvedDuration =
+              progress.duration > 0
+                ? progress.duration
+                : previousProgress?.duration ?? 0;
+            const resolvedProgressPercent =
+              typeof progress.progress === "number"
+                ? progress.progress
+                : resolvedDuration > 0
+                  ? Math.max(
+                      0,
+                      Math.min(1, progress.currentTime / resolvedDuration),
+                    )
+                  : previousProgress?.progressPercent ?? 0;
+
+            return {
+              ...nextState,
+              progressByLibraryItemId: {
+                ...nextState.progressByLibraryItemId,
+                [resolvedLibraryItemId]: {
+                  progressId:
+                    progress.id ??
+                    previousProgress?.progressId ??
+                    `${resolvedLibraryItemId}:server`,
+                  libraryItemId: resolvedLibraryItemId,
+                  mediaItemId: progress.mediaItemId || previousProgress?.mediaItemId,
+                  duration: resolvedDuration,
+                  progressPercent: resolvedProgressPercent,
+                  currentTime: progress.currentTime,
+                  isFinished: Boolean(progress.isFinished),
+                  hideFromContinueListening: Boolean(
+                    progress.hideFromContinueListening,
+                  ),
+                  startedAt: progress.startedAt ?? previousProgress?.startedAt ?? serverLastUpdate,
+                  finishedAt:
+                    progress.finishedAt ??
+                    (progress.isFinished
+                      ? previousProgress?.finishedAt ?? serverLastUpdate
+                      : null),
+                  lastUpdate: serverLastUpdate,
+                },
+              },
+            };
+          },
+        );
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLibraryUserKey, libraryItemId, queryClient, status]);
+};
+
 //# ----------------------------------------------
 //# useGetBooksInProgress
 //# Returns data as { libraryItemId: {bookinfo}, ...}
@@ -389,6 +482,8 @@ export const useCachedBookSummary = (itemId?: string) => {
     enabled: false,
     // Ensure first render can synchronously read already-cached books data.
     initialData: immediateCachedBooks,
+    // Preserve persist opt-in for the shared library-books query key.
+    meta: { persist: true },
   });
 
   const summaryFromQueryCache = useMemo(() => {

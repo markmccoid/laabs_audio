@@ -42,6 +42,9 @@ Stored in device Zustand store as arrays of `libraryItemId` and mapped to catalo
 
 Used read-only by `useHomeShelves()` with synchronous cache access + disabled `useQuery` subscriptions.
 
+Implementation note: those disabled subscription queries still include `meta: { persist: true }`
+so they do not clear persistence metadata on shared query options.
+
 ### Device store (`device-books-store`) for custom shelves
 Custom shelf CRUD lives in:
 - `createCustomShelf`
@@ -137,6 +140,8 @@ Home screen consumes `visibleShelves` only.
 - Section row + chevron/refresh: `src/components/Home/home-shelf-section.tsx`
 
 Behavior:
+- Pull-to-refresh refetches catalog + user server state and re-derives shelves.
+- If offline, Home shows a visible refresh message instead of silently failing.
 - Chevron hidden for empty shelves.
 - Discover row shows refresh icon.
 - Clicking chevron routes to shelf detail: `/(tabs)/(home)/bookshelf/[shelfId]`
