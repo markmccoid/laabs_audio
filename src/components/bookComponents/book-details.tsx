@@ -4,15 +4,17 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import HtmlToMarkdown from "./HtmlToMarkdown";
 
 type Props = {
+  title?: string | null;
   description?: string | null;
   genres?: string[];
   tags?: string[];
   maxLines?: number;
 };
 
-const BookDetails = ({ description, genres, tags, maxLines = 4 }: Props) => {
+const BookDetails = ({ title, description, genres, tags, maxLines = 4 }: Props) => {
   const themeColors = useThemeColors();
   const [isExpanded, setIsExpanded] = React.useState(false);
+  const headingTitle = title?.trim() || "Description";
   const trimmedDescription = description?.trim() ?? "";
   const hasDescription = trimmedDescription.length > 0;
   const resolvedGenres = genres ?? [];
@@ -29,7 +31,7 @@ const BookDetails = ({ description, genres, tags, maxLines = 4 }: Props) => {
     <View style={{ gap: 16 }}>
       <View style={{ gap: 10 }}>
         <Text selectable style={{ fontSize: 18, fontWeight: "600", color: themeColors.text }}>
-          Description
+          {headingTitle}
         </Text>
         <Pressable
           onPress={handleToggle}
