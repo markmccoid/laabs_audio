@@ -10,6 +10,7 @@
       --color-text-muted: #5a695f;
       --color-border: #d5ded8;
       --color-accent: #1f6f43;
+      --color-accent-foreground: #f4fbf7;
     }
 
     @variant dark {
@@ -19,6 +20,7 @@
       --color-text-muted: #9bb0a2;
       --color-border: #2a3a31;
       --color-accent: #3ea56d;
+      --color-accent-foreground: #0b1a11;
     }
   }
 }

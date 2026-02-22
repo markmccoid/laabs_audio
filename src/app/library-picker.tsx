@@ -70,14 +70,16 @@ export default function LibraryPickerScreen() {
           >
             <Text
               className={
-                isActive ? "text-base font-semibold text-white" : "text-base font-semibold text-text"
+                isActive
+                  ? "text-base font-semibold text-accent-foreground"
+                  : "text-base font-semibold text-text"
               }
             >
               {item.name}
             </Text>
             <Text
               className={
-                isActive ? "mt-1 text-xs text-white/85" : "mt-1 text-xs text-text-muted"
+                isActive ? "mt-1 text-xs text-accent-foreground/85" : "mt-1 text-xs text-text-muted"
               }
             >
               {item.mediaType} • {item.icon || item.provider}

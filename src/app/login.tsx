@@ -142,9 +142,9 @@ export default function LoginScreen() {
         disabled={isSubmitting}
       >
         {isSubmitting ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={themeColors.accentForeground} />
         ) : (
-          <Text className="text-center text-base font-semibold text-white">Sign in</Text>
+          <Text className="text-center text-base font-semibold text-accent-foreground">Sign in</Text>
         )}
       </Pressable>
     </View>
