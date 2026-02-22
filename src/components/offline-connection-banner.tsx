@@ -4,6 +4,7 @@ import { useSegments } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useState } from "react";
 import { Pressable, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { librariesApi } from "../api/libraries-api";
 import { libraryItemsApi } from "../api/library-items-api";
 import { meApi } from "../api/me-api";
@@ -13,6 +14,7 @@ import { useThemeColors } from "../theme/use-app-theme";
 
 export const OfflineConnectionBanner = () => {
   const themeColors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const segments = useSegments();
   const rootSegment = segments[0];
@@ -92,6 +94,7 @@ export const OfflineConnectionBanner = () => {
         borderBottomColor: themeColors.border,
         backgroundColor: themeColors.surface,
         paddingHorizontal: 16,
+        paddingTop: Math.max(10, insets.top + 4),
         paddingVertical: 10,
         flexDirection: "row",
         alignItems: "center",
