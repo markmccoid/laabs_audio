@@ -57,7 +57,7 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
           opacity: !libraryItemId ? 0.45 : pressed ? 0.82 : 1,
         })}
       >
-        <SymbolView name="books.vertical" tintColor={themeColors.text} size={20} />
+        <SymbolView name="books.vertical" tintColor={themeColors.text} size={23} />
       </Pressable>
 
       <Pressable
@@ -79,16 +79,21 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
         })}
       >
         <SymbolView
-          name={isDownloaded ? "checkmark.circle.fill" : "arrow.down.circle"}
+          name={isDownloaded ? "icloud.fill" : "icloud.and.arrow.down"}
           tintColor={isDownloaded ? themeColors.accent : themeColors.text}
-          size={22}
+          size={25}
         />
       </Pressable>
 
       {isDownloading ? (
         <Text
           selectable
-          style={{ color: themeColors.textMuted, fontSize: 11, fontWeight: "600", fontVariant: ["tabular-nums"] }}
+          style={{
+            color: themeColors.textMuted,
+            fontSize: 11,
+            fontWeight: "600",
+            fontVariant: ["tabular-nums"],
+          }}
         >
           {progressPercent}%
         </Text>

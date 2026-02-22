@@ -49,6 +49,7 @@ To learn more about developing your project with Expo, look at the following res
 - `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/abs-data-hooks.md`
 - `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/audioPlayerFlow.md`
 - `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/absAuthFlow.md`
+- `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/offline-handling.md`
 
 ## Join the community
 

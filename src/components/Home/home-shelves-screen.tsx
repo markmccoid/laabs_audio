@@ -106,6 +106,7 @@ const HomeShelvesScreen = () => {
             key={shelf.id}
             title={shelf.title}
             books={shelf.books}
+            isOffline={isOnline === false}
             emptyMessage={shelf.emptyMessage}
             shelfHref={{
               pathname: "/(tabs)/(home)/bookshelf/[shelfId]",

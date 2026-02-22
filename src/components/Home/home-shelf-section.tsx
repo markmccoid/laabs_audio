@@ -9,6 +9,7 @@ import { ShelfBookCard } from "./shelf-book-card";
 type HomeShelfSectionProps = {
   title: string;
   books: LibraryItemSummary[];
+  isOffline: boolean;
   emptyMessage: string;
   shelfHref: Href;
   onRefresh?: () => void;
@@ -17,6 +18,7 @@ type HomeShelfSectionProps = {
 export const HomeShelfSection = ({
   title,
   books,
+  isOffline,
   emptyMessage,
   shelfHref,
   onRefresh,
@@ -94,7 +96,7 @@ export const HomeShelfSection = ({
           data={books}
           horizontal
           keyExtractor={(book) => book.id}
-          renderItem={({ item }) => <ShelfBookCard book={item} />}
+          renderItem={({ item }) => <ShelfBookCard book={item} isOffline={isOffline} />}
           contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 2 }}
           ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
           showsHorizontalScrollIndicator={false}

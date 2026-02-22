@@ -25,6 +25,7 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
   const insets = useSafeAreaInsets();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const isOffline = useAuthStore((state) => state.isOnline === false);
   const { reorderCustomShelfBooks, reorderDownloadedShelfBooks } = useDeviceBooksActions();
   const { shelves, refreshDiscover } = useHomeShelves();
   const scrollableRef = useAnimatedRef<ScrollView>();
@@ -89,8 +90,8 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
   );
 
   const renderItem = useCallback<SortableGridRenderItem<LibraryItemSummary>>(
-    ({ item }) => <BookshelfGridItem book={item} />,
-    [],
+    ({ item }) => <BookshelfGridItem book={item} isOffline={isOffline} />,
+    [isOffline],
   );
 
   return (
@@ -148,6 +149,7 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
       {isRouteContentReady && shelf && !isSortableGridShelf ? (
         <BookshelfBuiltInList
           books={shelf.books}
+          isOffline={isOffline}
           contentTopPadding={contentTopPadding}
           emptyMessage={shelf.emptyMessage}
         />

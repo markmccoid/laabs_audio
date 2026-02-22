@@ -3,6 +3,7 @@ import {
   useGetUserServerState,
   useReconcileBookProgress,
 } from "@/hooks/abs-data-hooks";
+import { useAuthStore } from "@/auth/auth-store";
 import { usePlaybackStore } from "@/player";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
@@ -11,6 +12,7 @@ import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack } from "expo-router";
+import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
 import { ScrollView, StyleSheet, Text, View, useColorScheme, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -56,6 +58,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
   useReconcileBookProgress(libraryItemId);
   const { data: bookData, isLoading } = useGetItemDetails(libraryItemId);
   const { data: userServerState } = useGetUserServerState();
+  const isOffline = useAuthStore((state) => state.isOnline === false);
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const currentTrackIndex = usePlaybackStore((state) => state.currentTrackIndex);
   const queue = usePlaybackStore((state) => state.queue);
@@ -201,6 +204,31 @@ const BookContainer = ({ libraryItemId }: Props) => {
             </Text>
           ) : null}
         </View>
+        {isOffline ? (
+          <View
+            style={{
+              marginTop: 10,
+              marginBottom: 12,
+              borderWidth: 1,
+              borderColor: themeColors.border,
+              borderRadius: 12,
+              borderCurve: "continuous",
+              backgroundColor: themeColors.surface,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <SymbolView name="wifi.slash" size={14} tintColor={themeColors.textMuted} />
+            <Text style={{ color: themeColors.textMuted, fontSize: 12, flexShrink: 1 }}>
+              {hasPlayableLocalDownload
+                ? "Offline. Downloaded audio can still play."
+                : "Offline. Streaming is unavailable until connection returns."}
+            </Text>
+          </View>
+        ) : null}
 
         <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "flex-start", gap: 12 }}>
           <BookImage
