@@ -1,4 +1,6 @@
 import { playerService, usePlaybackStore } from "@/player";
+import { useAuthStore } from "@/auth/auth-store";
+import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useEffect, useState } from "react";
@@ -53,9 +55,14 @@ const ControlButton = ({
 
 const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
   const themeColors = useThemeColors();
+  const isOnline = useAuthStore((state) => state.isOnline);
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
+  const isDownloaded = useDeviceBooksStore((state) => {
+    if (!libraryItemId) return false;
+    return selectHasPlayableBookDownload(state, libraryItemId);
+  });
   const [pendingLoadBookId, setPendingLoadBookId] = useState<string | null>(null);
 
   const hasBookId = Boolean(libraryItemId);
@@ -94,7 +101,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
     viewedBookState === "playing" ||
     viewedBookState === "paused" ||
     viewedBookState === "loaded-active";
-  const canToggle = hasBookId && !isLoading;
+  const canToggle = hasBookId && !isLoading && (isOnline !== false || isDownloaded);
 
   const seekBackwardSeconds = 15;
   const seekForwardSeconds = 30;

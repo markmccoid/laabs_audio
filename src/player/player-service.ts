@@ -1,20 +1,23 @@
 import { meApi, type UserServerState } from "../api/me-api";
 import { playbackApi } from "../api/playback-api";
+import { sessionsApi } from "../api/sessions-api";
 import { authStore } from "../auth/auth-store";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
-import { sessionsApi } from "../api/sessions-api";
-import { settingsStore } from "../store/settings-store";
 import {
   DEFAULT_BOOK_PLAYBACK_RATE,
   deviceBooksStore,
   selectBookPlaybackRate,
   selectBookPlaybackRateIfStored,
+  selectIsBookDownloaded,
+  type DownloadTrack,
 } from "../store/device-books-store";
+import { settingsStore } from "../store/settings-store";
+import type { AudioTrack } from "../types/absTypes";
 import { createAudioEngine } from "./audio-engine";
 import { buildChapterIndex, findChapterForPosition, findTrackForPosition } from "./chapters";
-import { playbackStore } from "./playback-store";
 import type { PlaybackStoreState } from "./playback-store";
+import { playbackStore } from "./playback-store";
 import { buildPlaybackQueue } from "./queue";
 import type { PitchCorrectionQuality, PlaybackQueueItem } from "./types";
 
@@ -24,11 +27,27 @@ const DEBUG_PLAYBACK_EVENTS = false;
 const CHAPTER_RESTART_THRESHOLD_MS = 3000;
 const MIN_PLAYBACK_RATE = 0.25;
 const MAX_PLAYBACK_RATE = 2.0;
+const LOCAL_SESSION_ID = "local";
 
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
 const clampPlaybackRate = (rate: number) =>
   Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, rate));
+const truncateForLog = (value: string, max = 140) =>
+  value.length > max ? `${value.slice(0, max)}...` : value;
+const toQueueLogEntry = (track: PlaybackQueueItem, index: number) => ({
+  index,
+  id: track.id,
+  sessionId: track.sessionId,
+  trackIndex: track.trackIndex,
+  title: track.title,
+  isLocal: Boolean(track.source.isLocal),
+  uri: track.source.uri ? truncateForLog(track.source.uri) : null,
+  sourceModule:
+    typeof track.source.sourceModule === "number" ? track.source.sourceModule : undefined,
+  startOffsetMs: track.startOffsetMs,
+  durationMs: track.durationMs,
+});
 
 // Orchestrates playback between the UI, store, and audio engine.
 class PlayerService {
@@ -38,6 +57,7 @@ class PlayerService {
   private lastSyncAttemptAt = 0;
   private lastSyncAt = 0;
   private initialized = false;
+  private localStreamFallbackInFlight = false;
 
   init() {
     if (this.initialized) return;
@@ -60,70 +80,84 @@ class PlayerService {
     this.initialized = false;
   }
 
-  async loadBook(libraryItemId: string, options?: { autoPlay?: boolean }) {
+  private logQueue(context: string, queue: PlaybackQueueItem[]) {
+    if (!__DEV__) return;
+    console.log(`[player-service] queue:${context}`, {
+      trackCount: queue.length,
+      tracks: queue.map((track, index) => toQueueLogEntry(track, index)),
+    });
+  }
+
+  private logPlaybackResult(event: "started" | "failed", details?: Record<string, unknown>) {
+    if (!__DEV__) return;
+    const state = playbackStore.getState();
+    const activeTrack = state.queue[state.currentTrackIndex];
+    const mode = activeTrack?.source.isLocal ? "downloaded" : "streaming";
+    console.log("[player-service] playback:result", {
+      event,
+      mode,
+      libraryItemId: state.libraryItemId,
+      sessionId: state.sessionId,
+      currentTrackIndex: state.currentTrackIndex,
+      track: activeTrack ? toQueueLogEntry(activeTrack, state.currentTrackIndex) : null,
+      ...details,
+    });
+  }
+
+  async loadBook(
+    libraryItemId: string,
+    options?: { autoPlay?: boolean },
+    internalOptions?: { preferDownloaded?: boolean },
+  ) {
     playbackStore.getState().actions.setPlaybackState("loading");
     playbackStore.getState().actions.setError(null);
+    const preferDownloaded = internalOptions?.preferDownloaded ?? true;
+    let attemptedDownloadedAudio = false;
 
     if (__DEV__) {
       console.log("[player-service] loadBook:start", { libraryItemId });
     }
 
     try {
-      // Fetch session metadata, build queue + chapters, and resume if applicable.
-      const session = await playbackApi.getPlayInfo(libraryItemId);
-      console.log("SessionInfo for", session.libraryItemId, session.displayTitle);
-      const { queue, durationMs } = buildPlaybackQueue(session);
-      const chapterIndex = buildChapterIndex(session.chapters, session.audioTracks);
+      const downloadedSession = preferDownloaded ? this.resolveDownloadedSession(libraryItemId) : null;
+      const shouldUseDownloadedAudio = Boolean(downloadedSession);
+      attemptedDownloadedAudio = shouldUseDownloadedAudio;
+      let resolvedLibraryItemId = libraryItemId;
+      let resolvedSessionId = LOCAL_SESSION_ID;
+      let queue: PlaybackQueueItem[] = [];
+      let durationMs = 0;
+      let chapterIndex: ReturnType<typeof buildChapterIndex> = [];
 
-      const activeLibraryUserKey = authStore.getState().activeLibraryUserKey;
-      const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
-      let cachedUserServerState: UserServerState | undefined;
-
-      if (activeLibraryUserKey) {
-        cachedUserServerState = queryClient.getQueryData<UserServerState>(userServerStateQueryKey);
-        if (!cachedUserServerState) {
-          try {
-            cachedUserServerState = await queryClient.fetchQuery({
-              queryKey: userServerStateQueryKey,
-              queryFn: () => meApi.getUserServerState(),
-              meta: { persist: true },
-            });
-          } catch {
-            cachedUserServerState = undefined;
-          }
-        }
+      if (downloadedSession) {
+        resolvedLibraryItemId = downloadedSession.libraryItemId;
+        resolvedSessionId = downloadedSession.sessionId;
+        queue = downloadedSession.queue;
+        durationMs = downloadedSession.durationMs;
+        chapterIndex = downloadedSession.chapterIndex;
+        this.logQueue("downloaded", queue);
+      } else {
+        // Fallback to streamed playback when no valid local download metadata is available.
+        const session = await playbackApi.getPlayInfo(libraryItemId);
+        console.log("SessionInfo for", session.libraryItemId, session.displayTitle);
+        resolvedLibraryItemId = session.libraryItem.id;
+        resolvedSessionId = session.id;
+        const builtQueue = buildPlaybackQueue(session);
+        queue = builtQueue.queue;
+        durationMs = builtQueue.durationMs;
+        chapterIndex = buildChapterIndex(session.chapters, session.audioTracks);
+        this.logQueue("streaming", queue);
       }
 
-      const progressByLibraryItemId =
-        cachedUserServerState?.progressByLibraryItemId ??
-        // Compatibility for older persisted query shape.
-        (cachedUserServerState as UserServerState & { progressByBookId?: UserServerState["progressByLibraryItemId"] })
-          ?.progressByBookId ??
-        {};
-      const cachedUserProgress =
-        progressByLibraryItemId[libraryItemId] ??
-        progressByLibraryItemId[session.libraryItemId];
-      const localBookProgressMs =
-        typeof cachedUserProgress?.currentTime === "number"
-          ? secondsToMs(cachedUserProgress.currentTime)
-          : null;
-      const rateCandidateIds = [session.libraryItem.id, libraryItemId, session.libraryItemId]
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
-        .filter((value, index, source) => source.indexOf(value) === index);
-      const deviceBooksState = deviceBooksStore.getState();
-      const storedBookRate =
-        rateCandidateIds
-          .map((candidateId) => selectBookPlaybackRateIfStored(deviceBooksState, candidateId))
-          .find((rate) => rate !== null) ??
-        selectBookPlaybackRate(deviceBooksState, session.libraryItem.id) ??
-        DEFAULT_BOOK_PLAYBACK_RATE;
-      // Fallback to persisted playback position for safety when no local progress exists.
-      const persisted = playbackStore.getState();
-      const persistedPositionMs =
-        persisted.libraryItemId === libraryItemId ? persisted.positionMs : 0;
-      const resumePositionMs = localBookProgressMs ?? persistedPositionMs;
-      // Always reconcile this book's progress from server in the background.
-      this.reconcileBookProgressFromServer(libraryItemId);
+      const rateCandidateIds = this.buildCandidateIds(resolvedLibraryItemId, libraryItemId);
+      const storedBookRate = this.resolveStoredBookRate(rateCandidateIds);
+      const cachedUserServerState = await this.getCachedUserServerState({
+        fetchIfMissing: !shouldUseDownloadedAudio,
+      });
+      const resumePositionMs = this.resolveResumePositionMs(rateCandidateIds, cachedUserServerState);
+      if (!shouldUseDownloadedAudio) {
+        // Keep remote progress cache fresh for streamed sessions.
+        this.reconcileBookProgressFromServer(resolvedLibraryItemId);
+      }
 
       this.listenedMs = 0;
       this.lastSyncAttemptAt = 0;
@@ -131,12 +165,21 @@ class PlayerService {
       this.lastTrackedPositionMs = 0;
 
       playbackStore.getState().actions.setSession({
-        libraryItemId: session.libraryItem.id,
-        sessionId: session.id,
+        libraryItemId: resolvedLibraryItemId,
+        sessionId: resolvedSessionId,
         queue,
         durationMs,
         chapterIndex,
       });
+      if (__DEV__) {
+        console.log("[player-service] session:set", {
+          libraryItemId: resolvedLibraryItemId,
+          sessionId: resolvedSessionId,
+          durationMs,
+          chapterCount: chapterIndex.length,
+          trackCount: queue.length,
+        });
+      }
       playbackStore.getState().actions.setRate(storedBookRate);
 
       const targetTrack = findTrackForPosition(queue, resumePositionMs) ?? queue[0];
@@ -148,10 +191,25 @@ class PlayerService {
 
       if (options?.autoPlay) {
         await this.play();
+        if (shouldUseDownloadedAudio) {
+          const postPlayState = playbackStore.getState();
+          if (postPlayState.playbackState !== "playing") {
+            await this.loadBook(libraryItemId, options, { preferDownloaded: false });
+            return;
+          }
+        }
       } else {
         playbackStore.getState().actions.setPlaybackState("ready");
       }
     } catch (error) {
+      if (preferDownloaded && attemptedDownloadedAudio) {
+        try {
+          await this.loadBook(libraryItemId, options, { preferDownloaded: false });
+          return;
+        } catch {
+          // Fall through to existing error handling.
+        }
+      }
       if (__DEV__) {
         console.log("[player-service] loadBook:error", { libraryItemId, error });
       }
@@ -184,7 +242,7 @@ class PlayerService {
       {
         id: `${payload.libraryItemId}-local`,
         libraryItemId: payload.libraryItemId,
-        sessionId: "local",
+        sessionId: LOCAL_SESSION_ID,
         trackIndex: 0,
         title: payload.title,
         author: payload.author,
@@ -200,7 +258,7 @@ class PlayerService {
 
     playbackStore.getState().actions.setSession({
       libraryItemId: payload.libraryItemId,
-      sessionId: "local",
+      sessionId: LOCAL_SESSION_ID,
       queue,
       durationMs,
       chapterIndex: [],
@@ -223,6 +281,234 @@ class PlayerService {
     } else {
       playbackStore.getState().actions.setPlaybackState("ready");
     }
+  }
+
+  private buildCandidateIds(...ids: (string | null | undefined)[]) {
+    return ids
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .filter((value, index, source) => source.indexOf(value) === index);
+  }
+
+  private resolveStoredBookRate(rateCandidateIds: string[]) {
+    if (!rateCandidateIds.length) {
+      return DEFAULT_BOOK_PLAYBACK_RATE;
+    }
+    const deviceBooksState = deviceBooksStore.getState();
+    return (
+      rateCandidateIds
+        .map((candidateId) => selectBookPlaybackRateIfStored(deviceBooksState, candidateId))
+        .find((rate) => rate !== null) ??
+      selectBookPlaybackRate(deviceBooksState, rateCandidateIds[0]) ??
+      DEFAULT_BOOK_PLAYBACK_RATE
+    );
+  }
+
+  private async getCachedUserServerState(options?: { fetchIfMissing?: boolean }) {
+    const { fetchIfMissing = false } = options ?? {};
+    const activeLibraryUserKey = authStore.getState().activeLibraryUserKey;
+    if (!activeLibraryUserKey) {
+      return undefined;
+    }
+
+    const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
+    let cachedUserServerState = queryClient.getQueryData<UserServerState>(userServerStateQueryKey);
+    if (cachedUserServerState || !fetchIfMissing) {
+      return cachedUserServerState;
+    }
+
+    try {
+      cachedUserServerState = await queryClient.fetchQuery({
+        queryKey: userServerStateQueryKey,
+        queryFn: () => meApi.getUserServerState(),
+        meta: { persist: true },
+      });
+    } catch {
+      cachedUserServerState = undefined;
+    }
+
+    return cachedUserServerState;
+  }
+
+  private resolveResumePositionMs(candidateIds: string[], cachedUserServerState?: UserServerState) {
+    const progressByLibraryItemId =
+      cachedUserServerState?.progressByLibraryItemId ??
+      // Compatibility for older persisted query shape.
+      (
+        cachedUserServerState as UserServerState & {
+          progressByBookId?: UserServerState["progressByLibraryItemId"];
+        }
+      )?.progressByBookId ??
+      {};
+
+    const cachedUserProgress = candidateIds
+      .map((candidateId) => progressByLibraryItemId[candidateId])
+      .find((progress) => typeof progress?.currentTime === "number");
+    const localBookProgressMs =
+      typeof cachedUserProgress?.currentTime === "number"
+        ? secondsToMs(cachedUserProgress.currentTime)
+        : null;
+
+    // Fallback to persisted playback position for safety when no local progress exists.
+    const persisted = playbackStore.getState();
+    const persistedPositionMs =
+      candidateIds.some((candidateId) => persisted.libraryItemId === candidateId)
+        ? persisted.positionMs
+        : 0;
+
+    return localBookProgressMs ?? persistedPositionMs;
+  }
+
+  private resolveDownloadedSession(libraryItemId: string): {
+    libraryItemId: string;
+    sessionId: string;
+    queue: PlaybackQueueItem[];
+    durationMs: number;
+    chapterIndex: ReturnType<typeof buildChapterIndex>;
+  } | null {
+    const state = deviceBooksStore.getState();
+    const details = state.downloadedDetailsById[libraryItemId];
+    const downloadInfo = state.downloadedBookData[libraryItemId];
+    if (!details || !downloadInfo?.audioTracks?.length) {
+      if (__DEV__) {
+        console.log("[player-service] downloaded:missing-or-empty", {
+          libraryItemId,
+          hasDetails: Boolean(details),
+          downloadedTrackCount: downloadInfo?.audioTracks?.length ?? 0,
+        });
+      }
+      return null;
+    }
+
+    const downloadTrackByIno = new Map(
+      downloadInfo.audioTracks.map((downloadTrack) => [downloadTrack.ino, downloadTrack] as const),
+    );
+    const orderedTracksFromDetails = details.media.audioFiles
+      .map((audioFile) => downloadTrackByIno.get(audioFile.ino))
+      .filter((track): track is DownloadTrack => Boolean(track));
+    const remainingTracks = downloadInfo.audioTracks.filter(
+      (track) => !details.media.audioFiles.some((audioFile) => audioFile.ino === track.ino),
+    );
+    const orderedTracks = [...orderedTracksFromDetails, ...remainingTracks];
+    const detailsTrackByIno = new Map(
+      details.media.audioFiles.map((audioFile) => [audioFile.ino, audioFile] as const),
+    );
+    const normalizedTracks: (DownloadTrack & {
+      normalizedStartOffset: number;
+      normalizedDuration: number;
+    })[] = [];
+    let rollingStartOffset = 0;
+    orderedTracks.forEach((track) => {
+      const detailsTrack = detailsTrackByIno.get(track.ino);
+      const normalizedDuration =
+        Number.isFinite(track.duration) && track.duration > 0
+          ? track.duration
+          : Number.isFinite(detailsTrack?.duration) && (detailsTrack?.duration ?? 0) > 0
+            ? (detailsTrack?.duration ?? 0)
+            : 0;
+      const preferredStartOffset =
+        Number.isFinite(track.startOffset) && track.startOffset >= 0
+          ? track.startOffset
+          : rollingStartOffset;
+      const normalizedStartOffset = Math.max(rollingStartOffset, preferredStartOffset);
+      normalizedTracks.push({
+        ...track,
+        normalizedStartOffset,
+        normalizedDuration,
+      });
+      rollingStartOffset = normalizedStartOffset + normalizedDuration;
+    });
+
+    const author =
+      details.media.metadata.authors?.map((value) => value.name).join(", ") ||
+      details.media.metadata.authorName ||
+      "Unknown";
+    const fallbackTitle = details.media.metadata.title || "Unknown";
+    const queue: PlaybackQueueItem[] = normalizedTracks
+      .filter((track) => typeof track.fileUri === "string" && track.fileUri.length > 0)
+      .map((track, trackIndex) =>
+        this.toDownloadedQueueItem({
+          libraryItemId,
+          author,
+          fallbackTitle,
+          track,
+          trackIndex,
+          detailsTrack: detailsTrackByIno.get(track.ino),
+        }),
+      );
+    if (!queue.length) {
+      if (__DEV__) {
+        console.log("[player-service] downloaded:no-playable-tracks", {
+          libraryItemId,
+          downloadedTrackCount: downloadInfo.audioTracks.length,
+          normalizedTrackCount: normalizedTracks.length,
+        });
+      }
+      return null;
+    }
+
+    const audioTracks: AudioTrack[] = normalizedTracks.map((track, trackIndex) => {
+      const detailsTrack = detailsTrackByIno.get(track.ino);
+      return {
+        index: trackIndex,
+        startOffset: track.normalizedStartOffset,
+        duration: track.normalizedDuration,
+        title: detailsTrack?.title || track.filename || fallbackTitle,
+        contentUrl: "",
+        mimeType: detailsTrack?.mimeType || "audio/mpeg",
+        codec: detailsTrack?.codec ?? null,
+        metadata: null,
+      };
+    });
+
+    const chapterIndex = buildChapterIndex(details.media.chapters, audioTracks);
+    const fallbackDurationMs = queue.reduce((total, track) => total + track.durationMs, 0);
+    const durationMs = secondsToMs(details.media.duration) || fallbackDurationMs;
+    if (__DEV__) {
+      console.log("[player-service] downloaded:resolved", {
+        libraryItemId,
+        detailsAudioFileCount: details.media.audioFiles.length,
+        downloadedTrackCount: downloadInfo.audioTracks.length,
+        normalizedTrackCount: normalizedTracks.length,
+        queueTrackCount: queue.length,
+        durationMs,
+      });
+    }
+
+    return {
+      libraryItemId,
+      sessionId: LOCAL_SESSION_ID,
+      queue,
+      durationMs,
+      chapterIndex,
+    };
+  }
+
+  private toDownloadedQueueItem(payload: {
+    libraryItemId: string;
+    author: string;
+    fallbackTitle: string;
+    track: DownloadTrack & { normalizedStartOffset?: number; normalizedDuration?: number };
+    trackIndex: number;
+    detailsTrack?: {
+      title?: string;
+      mimeType?: string;
+    };
+  }): PlaybackQueueItem {
+    return {
+      id: `${payload.libraryItemId}-download-${payload.trackIndex}`,
+      libraryItemId: payload.libraryItemId,
+      sessionId: LOCAL_SESSION_ID,
+      trackIndex: payload.trackIndex,
+      title: payload.detailsTrack?.title || payload.track.filename || payload.fallbackTitle,
+      author: payload.author,
+      durationMs: secondsToMs(payload.track.normalizedDuration ?? payload.track.duration),
+      startOffsetMs: secondsToMs(payload.track.normalizedStartOffset ?? payload.track.startOffset),
+      source: {
+        uri: payload.track.fileUri,
+        mimeType: payload.detailsTrack?.mimeType,
+        isLocal: true,
+      },
+    };
   }
 
   async play() {
@@ -252,15 +538,50 @@ class PlayerService {
       playbackStore.getState().actions.setPlaybackState("playing");
       playbackStore.getState().actions.setError(null);
       this.touchUserServerStateCacheForPlayStart();
+      this.logPlaybackResult("started");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start playback";
       const currentState = playbackStore.getState();
-      if (currentState.queue.length > 0) {
+      const shouldFallbackToStreaming =
+        currentState.sessionId === LOCAL_SESSION_ID &&
+        Boolean(currentState.libraryItemId) &&
+        !this.localStreamFallbackInFlight &&
+        authStore.getState().status === "authenticated" &&
+        authStore.getState().isOnline !== false;
+
+      if (shouldFallbackToStreaming) {
+        this.localStreamFallbackInFlight = true;
+        try {
+          if (__DEV__) {
+            console.log("[player-service] play:fallback-to-streaming", {
+              libraryItemId: currentState.libraryItemId,
+              reason: message,
+            });
+          }
+          await this.loadBook(currentState.libraryItemId as string, { autoPlay: true }, {
+            preferDownloaded: false,
+          });
+          return;
+        } catch (fallbackError) {
+          if (__DEV__) {
+            console.log("[player-service] play:fallback-failed", {
+              libraryItemId: currentState.libraryItemId,
+              error: fallbackError,
+            });
+          }
+        } finally {
+          this.localStreamFallbackInFlight = false;
+        }
+      }
+
+      const finalState = playbackStore.getState();
+      if (finalState.queue.length > 0) {
         playbackStore.getState().actions.setPlaybackState("ready");
       } else {
         playbackStore.getState().actions.setPlaybackState("error");
       }
       playbackStore.getState().actions.setError(message);
+      this.logPlaybackResult("failed", { reason: message });
     }
   }
 
@@ -331,10 +652,14 @@ class PlayerService {
     await this.syncProgress("seek");
   }
 
-  async skipBy(seconds: number) {
+  async skipBy(seconds: number, goBackwards: boolean = false) {
     const state = playbackStore.getState();
     if (!state.queue.length) return;
-    await this.seekTo(state.positionMs + secondsToMs(seconds));
+    let skipMs = secondsToMs(seconds);
+    if (goBackwards) {
+      skipMs = -skipMs;
+    }
+    await this.seekTo(state.positionMs + skipMs);
   }
 
   async setRate(rate: number) {
@@ -462,6 +787,15 @@ class PlayerService {
         track.source.uri ?? track.source.sourceModule ?? "unknown"
       }`,
     );
+    if (__DEV__) {
+      console.log("[player-service] loadTrack", {
+        index,
+        initialPositionMs: options?.initialPositionMs ?? 0,
+        autoPlay: Boolean(options?.autoPlay),
+        sessionId: state.sessionId,
+        track: toQueueLogEntry(track, index),
+      });
+    }
 
     await this.engine.load(track, {
       initialPositionMs: options?.initialPositionMs ?? 0,
@@ -589,13 +923,21 @@ class PlayerService {
       state.durationMs > 0 && state.positionMs >= state.durationMs - secondsToMs(3);
 
     try {
-      if (state.sessionId !== "local") {
+      if (state.sessionId !== LOCAL_SESSION_ID) {
         await sessionsApi.syncSession(state.sessionId, {
           timeListened: timeListenedSeconds,
           currentTime: currentTimeSeconds,
           duration: durationSeconds || undefined,
         });
-        // If playback is from a downloaded item, use updateProgress instead of syncSession.
+      } else if (
+        this.isDownloadedBook(state.libraryItemId) &&
+        authStore.getState().status === "authenticated" &&
+        authStore.getState().isOnline !== false
+      ) {
+        await meApi.updateProgress(state.libraryItemId, {
+          currentTime: currentTimeSeconds,
+          isFinished,
+        });
       }
 
       this.updateUserServerStateCache({
@@ -610,6 +952,10 @@ class PlayerService {
     } catch {
       playbackStore.getState().actions.setError(`Sync failed (${reason})`);
     }
+  }
+
+  private isDownloadedBook(libraryItemId: string) {
+    return selectIsBookDownloaded(deviceBooksStore.getState(), libraryItemId);
   }
 
   private touchUserServerStateCacheForPlayStart() {
@@ -668,21 +1014,18 @@ class PlayerService {
         const previousProgress = nextState.progressByLibraryItemId[payload.libraryItemId];
         const now = Date.now();
         const resolvedDuration =
-          payload.durationSeconds > 0
-            ? payload.durationSeconds
-            : previousProgress?.duration ?? 0;
+          payload.durationSeconds > 0 ? payload.durationSeconds : (previousProgress?.duration ?? 0);
         const progressPercent =
           resolvedDuration > 0
             ? Math.max(0, Math.min(1, payload.currentTimeSeconds / resolvedDuration))
-            : previousProgress?.progressPercent ?? 0;
+            : (previousProgress?.progressPercent ?? 0);
 
         return {
           ...nextState,
           progressByLibraryItemId: {
             ...nextState.progressByLibraryItemId,
             [payload.libraryItemId]: {
-              progressId:
-                previousProgress?.progressId ?? `${payload.libraryItemId}:local`,
+              progressId: previousProgress?.progressId ?? `${payload.libraryItemId}:local`,
               libraryItemId: payload.libraryItemId,
               duration: resolvedDuration,
               progressPercent,
@@ -690,7 +1033,7 @@ class PlayerService {
               isFinished: payload.isFinished,
               hideFromContinueListening: previousProgress?.hideFromContinueListening ?? false,
               startedAt: previousProgress?.startedAt ?? now,
-              finishedAt: payload.isFinished ? previousProgress?.finishedAt ?? now : null,
+              finishedAt: payload.isFinished ? (previousProgress?.finishedAt ?? now) : null,
               lastUpdate: now,
             },
           },

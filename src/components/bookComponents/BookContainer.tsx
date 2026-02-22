@@ -3,6 +3,8 @@ import {
   useGetUserServerState,
   useReconcileBookProgress,
 } from "@/hooks/abs-data-hooks";
+import { usePlaybackStore } from "@/player";
+import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
@@ -10,13 +12,14 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack } from "expo-router";
 import { useMemo } from "react";
-import { ScrollView, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { ScrollView, StyleSheet, Text, View, useColorScheme, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUniwind } from "uniwind";
 import BookControls from "./book-controls";
 import BookDetails from "./book-details";
 import BookImage from "./book-image";
 import BookKeyDetails from "./book-key-details";
+import { BookQuickActions } from "./book-quick-actions";
 import BookRateSetter from "./book-rate-setter";
 import DownloadControls from "./download-controls";
 
@@ -53,9 +56,17 @@ const BookContainer = ({ libraryItemId }: Props) => {
   useReconcileBookProgress(libraryItemId);
   const { data: bookData, isLoading } = useGetItemDetails(libraryItemId);
   const { data: userServerState } = useGetUserServerState();
+  const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const currentTrackIndex = usePlaybackStore((state) => state.currentTrackIndex);
+  const queue = usePlaybackStore((state) => state.queue);
+  const hasPlayableLocalDownload = useDeviceBooksStore((state) => {
+    if (!libraryItemId) return false;
+    return selectHasPlayableBookDownload(state, libraryItemId);
+  });
   const defaultProgressTimeDisplay = useSettingsStore(
     (state) => state.defaultBookProgressTimeDisplay,
   );
+  const { width: viewportWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const bookTitle = bookData?.title ?? "Book";
   const metadata = bookData?.media?.metadata;
@@ -122,13 +133,28 @@ const BookContainer = ({ libraryItemId }: Props) => {
     return colorScheme === "dark";
   }, [colorScheme, theme]);
 
-  const gradientColors = useMemo(
+  const gradientColors = useMemo<[string, string, string]>(
     () =>
       isDarkTheme
         ? ["rgba(6, 10, 11, 0.16)", "rgba(6, 10, 11, 0.5)", "rgba(6, 10, 11, 0.78)"]
         : ["rgba(248, 250, 252, 0.12)", "rgba(248, 250, 252, 0.56)", "rgba(248, 250, 252, 0.84)"],
     [isDarkTheme],
   );
+  const coverMaxSize = useMemo(() => {
+    const availableWidth = viewportWidth - 40;
+    const reservedActionRailWidth = 76;
+    return Math.max(180, Math.min(320, availableWidth - reservedActionRailWidth));
+  }, [viewportWidth]);
+  const playbackSourceLabel = useMemo(() => {
+    const isViewedBookActive = Boolean(libraryItemId) && activeLibraryItemId === libraryItemId;
+    if (isViewedBookActive) {
+      const activeTrack = queue[currentTrackIndex];
+      if (activeTrack) {
+        return activeTrack.source.isLocal ? "local" : "Streaming";
+      }
+    }
+    return hasPlayableLocalDownload ? "local" : "Streaming";
+  }, [activeLibraryItemId, currentTrackIndex, hasPlayableLocalDownload, libraryItemId, queue]);
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
@@ -176,12 +202,16 @@ const BookContainer = ({ libraryItemId }: Props) => {
           ) : null}
         </View>
 
-        <BookImage
-          coverURL={coverURL}
-          leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
-          showProgressLine={progressSeconds > 0 || isFinished}
-          progressPercent={visualProgressPercent}
-        />
+        <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "flex-start", gap: 12 }}>
+          <BookImage
+            coverURL={coverURL}
+            leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
+            showProgressLine={progressSeconds > 0 || isFinished}
+            progressPercent={visualProgressPercent}
+            maxSize={coverMaxSize}
+          />
+          <BookQuickActions libraryItemId={libraryItemId} />
+        </View>
         <View className="h-[12]" />
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <View style={{ flex: 1 }}>
@@ -198,11 +228,16 @@ const BookContainer = ({ libraryItemId }: Props) => {
               progressResetKey={libraryItemId}
             />
           </View>
-          <BookControls libraryItemId={libraryItemId} variant="play-only" />
+          <View style={{ alignItems: "center", gap: 6 }}>
+            <BookControls libraryItemId={libraryItemId} variant="play-only" />
+            <Text selectable style={{ color: themeColors.textMuted, fontSize: 11, fontWeight: "500" }}>
+              {playbackSourceLabel}
+            </Text>
+          </View>
         </View>
         <View className="h-[10]" />
 
-        <BookDetails description={description} genres={genres} tags={tags} />
+        <BookDetails title={bookTitle} description={description} genres={genres} tags={tags} />
 
         <DownloadControls libraryItemId={libraryItemId} summary={bookData ?? null} />
       </ScrollView>

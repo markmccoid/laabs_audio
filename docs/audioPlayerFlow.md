@@ -7,11 +7,12 @@ This document explains how audio playback flows through the app. It's intended f
 We use a small wrapper around **react-native-audio-pro** so most of the app talks to a stable interface. The app flow is:
 
 1. UI requests playback via `playerService`.
-2. `playerService` prepares a queue item and calls the `audio-engine` wrapper.
-3. The `audio-engine` resolves asset paths and talks to `AudioPro`.
-4. `AudioPro` emits progress/state events.
-5. `playerService` updates the `playbackStore` (Zustand) and syncs progress.
-6. UI subscribes to the store for updates.
+2. `playerService` first checks for a downloaded book payload in `deviceBooksStore`; if found, it builds a local `file://` queue and skips network playback session calls.
+3. If no valid download exists, `playerService` fetches a remote playback session and builds the streamed queue.
+4. The `audio-engine` resolves asset paths and talks to `AudioPro`.
+5. `AudioPro` emits progress/state events.
+6. `playerService` updates the `playbackStore` (Zustand) and syncs progress.
+7. UI subscribes to the store for updates.
 
 ## Key Files (Read in This Order)
 
@@ -72,11 +73,27 @@ flowchart TD
 ## Remote Playback Flow (Audiobookshelf)
 
 1. UI calls `playerService.loadBook(libraryItemId)`.
-2. `playbackApi.getPlayInfo(libraryItemId)` fetches session metadata.
+2. If no local download is available, `playbackApi.getPlayInfo(libraryItemId)` fetches session metadata.
 3. `buildPlaybackQueue()` creates the per-track queue.
 4. `buildChapterIndex()` maps chapters to track offsets.
 5. `source-resolver.ts` builds track URLs and auth headers.
 6. `playerService` loads the correct track and seeks to the resume position.
+
+## Downloaded Playback Flow (Offline-First)
+
+When a book is downloaded, playback is resolved from local files before any remote session work:
+
+1. `playerService.loadBook(libraryItemId)` checks `deviceBooksStore.downloadedBookData[libraryItemId]` and `downloadedDetailsById[libraryItemId]`.
+2. If both exist and contain playable tracks, `playerService` builds queue items with `source.uri = <local file URI>` and `source.isLocal = true`.
+3. Chapter index is built from downloaded metadata (`details.media.chapters`) plus downloaded track offsets/durations.
+4. Session is marked `sessionId: "local"`, so streaming session sync is skipped.
+5. If local playback fails to start, `playerService` falls back to streamed playback automatically (when online).
+6. The same play/pause/seek API is used by UI; controls do not need a separate offline code path.
+
+Result:
+- Offline + downloaded: play stays available and uses local files.
+- Offline + not downloaded: play is disabled in book controls.
+- Online + downloaded: downloaded files are still preferred for playback source.
 
 ## Progress + Sync Rules
 
@@ -91,6 +108,7 @@ Progress updates come from the audio engine **once per second** (configured in `
 Sync targets:
 
 - Audiobookshelf session API (`sessionsApi.syncSession`)
+- Audiobookshelf media progress API (`meApi.updateProgress`) for downloaded/local sessions when authenticated and online
 - React Query user cache (`queryKeys.userServerState(...)`) via `setQueryData`
 
 ## Store Fields Used by the UI
@@ -157,7 +175,7 @@ States used by the control button:
 
 Transition behavior:
 
-1. Pressing play on `not-loaded` sets a local pending marker and calls `playerService.loadBook(itemId, { autoPlay: true })`.
+1. Pressing play on `not-loaded` sets a local pending marker and calls `playerService.loadBook(itemId, { autoPlay: true })` (downloaded-first resolution).
 2. The pending marker drives `loading` immediately so the user sees an in-progress spinner while metadata and queue initialize.
 3. `audio-engine.load()` waits for a ready native state (`PAUSED`/`STOPPED`/`PLAYING`) for the target track before returning control to `playerService`.
 4. `playerService.play()` waits for confirmed native `PLAYING` state on the same target track before setting store playback state to `playing`.
@@ -200,10 +218,10 @@ Behavior:
 
 ## Resume Position Source
 
-When loading a streamed book with `playerService.loadBook(libraryItemId)`, initial seek is resolved in this order:
+When loading a book with `playerService.loadBook(libraryItemId)`, initial seek is resolved in this order:
 
 1. `userServerState` query cache (`progressByLibraryItemId[libraryItemId]`).
-2. Fallback network read `meApi.getProgress(libraryItemId)` if query cache is missing the book.
+2. For streamed playback only, fallback network read `meApi.getProgress(libraryItemId)` if query cache is missing the book.
 3. Fallback to persisted playback-store position if no server progress is available.
 
 ### Play / Pause / Toggle
@@ -223,11 +241,11 @@ Note: `togglePlayPause()` will attempt to reload the last known `libraryItemId` 
 ### Seek (Book Time) + Skip By Seconds
 
 - `playerService.seekTo(positionMs)` seeks to **absolute book time**.
-- `playerService.skipBy(seconds)` seeks relative to current position.
+- `playerService.skipBy(seconds, goBackwards)` seeks relative to current position.
 
 ```tsx
 const handleSkipBack = async () => {
-  await playerService.skipBy(-15);
+  await playerService.skipBy(15, true);
 };
 
 const handleSkipForward = async () => {
