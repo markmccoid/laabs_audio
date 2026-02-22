@@ -14,7 +14,12 @@ export const SettingsPlaybackScreen = () => {
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 24, gap: 14 }}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingTop: 16,
+          paddingBottom: 24,
+          gap: 14,
+        }}
       >
         <View
           style={{
@@ -67,7 +72,7 @@ export const SettingsPlaybackScreen = () => {
                       : themeColors.text,
                 }}
               >
-                Elapsed
+                Time Read
               </Text>
             </Pressable>
             <Pressable
@@ -102,7 +107,7 @@ export const SettingsPlaybackScreen = () => {
                       : themeColors.text,
                 }}
               >
-                Remaining
+                Time Left
               </Text>
             </Pressable>
           </View>

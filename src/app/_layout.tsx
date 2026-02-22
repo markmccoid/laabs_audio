@@ -4,6 +4,7 @@ import { Stack, router, useSegments } from "expo-router";
 import { useEffect, useMemo, useRef } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { Toaster } from "react-native-sonner";
 import { Uniwind } from "uniwind";
 import { libraryItemsApi } from "../api/library-items-api";
 import { meApi } from "../api/me-api";
@@ -293,6 +294,7 @@ export default function RootLayout() {
               />
             </Stack>
           </View>
+          <Toaster />
         </GestureHandlerRootView>
       </ThemeProvider>
     </PersistQueryClientProvider>

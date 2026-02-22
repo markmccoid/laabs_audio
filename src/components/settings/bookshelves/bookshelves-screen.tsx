@@ -9,7 +9,8 @@ import {
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
+import Animated, { useAnimatedRef } from "react-native-reanimated";
 import Sortable, { type SortableFlexDragEndParams } from "react-native-sortables";
 import { BookshelfListItem } from "./bookshelf-list-item";
 
@@ -28,6 +29,7 @@ export const BookshelvesScreen = () => {
   const { createCustomShelf } = useDeviceBooksActions();
   const { setHomeShelfOrder } = useSettingsActions();
   const { homeScopeKey, shelves } = useHomeShelves();
+  const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
   const [orderedShelfIds, setOrderedShelfIds] = useState<string[]>([]);
   const [listWidth, setListWidth] = useState(0);
@@ -75,7 +77,8 @@ export const BookshelvesScreen = () => {
 
   return (
     <View className="flex-1" style={{ backgroundColor: themeColors.bg }}>
-      <ScrollView
+      <Animated.ScrollView
+        ref={scrollRef}
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{
           paddingHorizontal: 16,
@@ -151,6 +154,7 @@ export const BookshelvesScreen = () => {
             width="fill"
             flexDirection="column"
             flexWrap="nowrap"
+            scrollableRef={scrollRef}
             alignItems="stretch"
             rowGap={10}
             onDragEnd={handleSortDragEnd}
@@ -165,7 +169,7 @@ export const BookshelvesScreen = () => {
             ))}
           </Sortable.Flex>
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
     </View>
   );
 };

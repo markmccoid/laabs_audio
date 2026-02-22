@@ -1,4 +1,4 @@
-import { selectIsBookDownloaded, useDeviceBooksStore } from "@/store/device-books-store";
+import { selectIsBookFullyDownloaded, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -15,7 +15,7 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
   const isDownloaded = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
-    return selectIsBookDownloaded(state, libraryItemId);
+    return selectIsBookFullyDownloaded(state, libraryItemId);
   });
 
   const isDownloading = downloadProgress?.libraryItemId === libraryItemId;

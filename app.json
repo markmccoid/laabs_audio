@@ -2,7 +2,7 @@
   "expo": {
     "name": "laabs_audio",
     "slug": "laabs_audio",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "scheme": "laabsaudio",
     "userInterfaceStyle": "automatic",
