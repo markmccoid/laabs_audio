@@ -83,7 +83,7 @@ export const BookDownloadsSheet = () => {
           )}
         </View>
 
-        <DownloadControls libraryItemId={libraryItemId} summary={summary} />
+        <DownloadControls libraryItemId={libraryItemId} summary={summary} context="sheet" />
       </ScrollView>
     </View>
   );

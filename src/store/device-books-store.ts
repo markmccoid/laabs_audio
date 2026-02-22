@@ -22,6 +22,10 @@ const MAX_BOOK_PLAYBACK_RATE = 2.0;
 
 const clampBookPlaybackRate = (value: number) =>
   Math.max(MIN_BOOK_PLAYBACK_RATE, Math.min(MAX_BOOK_PLAYBACK_RATE, value));
+const logDownload = (event: string, payload?: Record<string, unknown>) => {
+  if (!__DEV__) return;
+  console.log(`[device-books-store] download:${event}`, payload ?? {});
+};
 
 export type DownloadTrack = {
   ino: string;
@@ -884,30 +888,87 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           get().actions.clearDownloadedData(libraryItemId);
         },
 
-        downloadBook: async (libraryItemId) => {
-          // Increment token to invalidate any in-flight download session
-          const myToken = get().actions.incrementDownloadToken();
+        downloadBook: async (libraryItemId, options) => {
           if (!libraryItemId) return;
 
+          const activeProgress = get().downloadProgress;
+          if (activeProgress?.libraryItemId === libraryItemId) {
+            logDownload("start:ignored-already-downloading", {
+              libraryItemId,
+              currentFile: activeProgress.currentFileProcessing,
+              progress: activeProgress.progress,
+            });
+            return;
+          }
+
+          logDownload("start:requested", {
+            libraryItemId,
+            hasSummary: Boolean(options?.summary),
+            activeDownloadLibraryItemId: activeProgress?.libraryItemId ?? null,
+          });
+
+          // Increment token to invalidate any in-flight download session
+          const myToken = get().actions.incrementDownloadToken();
+          logDownload("start:token-assigned", { libraryItemId, token: myToken });
+
+          const isTokenActive = () => get().downloadToken === myToken;
+
           const details = await itemsApi.getItemDetails(libraryItemId);
-          if (get().downloadToken !== myToken) return;
+          if (!isTokenActive()) {
+            logDownload("token:stale-after-details", { libraryItemId, token: myToken });
+            return;
+          }
 
           const downloadDir = await ensureDownloadDir(libraryItemId);
-          if (get().downloadToken !== myToken) return;
+          if (!isTokenActive()) {
+            logDownload("token:stale-after-dir", { libraryItemId, token: myToken });
+            return;
+          }
 
           const audioTracks: DownloadTrack[] = [];
           const filesToCleanUp: string[] = [];
           const totalFiles = details.audioFiles.length;
+          logDownload("details:fetched", {
+            libraryItemId,
+            token: myToken,
+            totalFiles,
+            downloadDir,
+          });
 
           for (let i = 0; i < details.audioFiles.length; i += 1) {
             const audioFile = details.audioFiles[i];
-            if (get().downloadToken !== myToken) return;
+            if (!isTokenActive()) {
+              logDownload("token:stale-before-file", {
+                libraryItemId,
+                token: myToken,
+                fileIndex: i + 1,
+                totalFiles,
+              });
+              return;
+            }
+
+            logDownload("file:start", {
+              libraryItemId,
+              token: myToken,
+              fileIndex: i + 1,
+              totalFiles,
+              ino: audioFile.ino,
+              filename: audioFile.metadata.filename,
+            });
 
             const { url, authHeader } = await downloadsApi.getDownloadSpec(
               libraryItemId,
               audioFile.ino,
             );
-            if (get().downloadToken !== myToken) return;
+            if (!isTokenActive()) {
+              logDownload("token:stale-after-spec", {
+                libraryItemId,
+                token: myToken,
+                fileIndex: i + 1,
+                totalFiles,
+              });
+              return;
+            }
 
             const startOffset = audioFile.startOffset ?? 0;
 
@@ -919,18 +980,35 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               received: 0,
               total: audioFile.metadata.size ?? 0,
               numberOfFiles: totalFiles,
-              numberOfFilesDownloaded: i,
+              numberOfFilesDownloaded: i + 1,
               downloadCompleted: false,
             });
 
+            let lastLoggedPercent = -1;
             try {
               const { task, cancelDownload, cleanFileName, fileUri } = downloadFileBlob(
                 url,
                 audioFile.metadata.filename,
                 (received, total) => {
-                  if (get().downloadToken !== myToken) return;
+                  if (!isTokenActive()) return;
                   // Track per-file progress for UI
                   const percent = total > 0 ? Math.round((received / total) * 100) : 0;
+                  if (
+                    percent === 100 ||
+                    lastLoggedPercent === -1 ||
+                    percent >= lastLoggedPercent + 10
+                  ) {
+                    lastLoggedPercent = percent;
+                    logDownload("file:progress", {
+                      libraryItemId,
+                      token: myToken,
+                      fileIndex: i + 1,
+                      totalFiles,
+                      progress: percent,
+                      received,
+                      total,
+                    });
+                  }
                   get().actions.setDownloadProgress({
                     libraryItemId,
                     currentFileProcessing: audioFile.metadata.filename,
@@ -938,7 +1016,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                     received,
                     total,
                     numberOfFiles: totalFiles,
-                    numberOfFilesDownloaded: i,
+                    numberOfFilesDownloaded: i + 1,
                     downloadCompleted: false,
                   });
                 },
@@ -966,13 +1044,37 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 startOffset,
                 fileUri,
               });
-            } catch {
-              if (get().downloadToken !== myToken) return;
+              logDownload("file:complete", {
+                libraryItemId,
+                token: myToken,
+                fileIndex: i + 1,
+                totalFiles,
+                ino: audioFile.ino,
+              });
+            } catch (error) {
+              if (!isTokenActive()) {
+                logDownload("token:stale-on-file-error", {
+                  libraryItemId,
+                  token: myToken,
+                  fileIndex: i + 1,
+                  totalFiles,
+                });
+                return;
+              }
               for (const file of filesToCleanUp) {
                 await deleteFileIfExists(file);
               }
               get().actions.clearDownloadedData(libraryItemId);
+              const finalizedToken = get().actions.incrementDownloadToken();
               set({ activeCancelFn: undefined, downloadProgress: undefined });
+              logDownload("file:error", {
+                libraryItemId,
+                token: myToken,
+                finalizedToken,
+                fileIndex: i + 1,
+                totalFiles,
+                error: error instanceof Error ? error.message : "unknown",
+              });
               throw new Error("Download failed");
             }
 
@@ -990,24 +1092,45 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             });
           }
 
-          if (get().downloadToken !== myToken) return;
+          if (!isTokenActive()) {
+            logDownload("token:stale-before-cover", { libraryItemId, token: myToken });
+            return;
+          }
 
+          logDownload("cover:start", { libraryItemId, token: myToken });
           const coverLocalUri = await downloadCoverImage(libraryItemId);
-          if (get().downloadToken !== myToken) return;
+          if (!isTokenActive()) {
+            logDownload("token:stale-after-cover", { libraryItemId, token: myToken });
+            return;
+          }
 
           get().actions.setDownloadedBookData(libraryItemId, { audioTracks, coverLocalUri });
           get().actions.setDownloadedDetails(libraryItemId, details, {
             coverLocalUri,
           });
 
-          if (get().downloadToken === myToken) {
-            set({ activeCancelFn: undefined, downloadProgress: undefined });
+          if (!isTokenActive()) {
+            logDownload("token:stale-before-finalize", { libraryItemId, token: myToken });
+            return;
           }
+          const finalizedToken = get().actions.incrementDownloadToken();
+          set({ activeCancelFn: undefined, downloadProgress: undefined });
+          logDownload("complete", {
+            libraryItemId,
+            token: myToken,
+            finalizedToken,
+            totalFiles,
+            hasCover: Boolean(coverLocalUri),
+          });
         },
 
         cancelDownload: async () => {
           const cancelledLibraryItemId = get().downloadProgress?.libraryItemId;
-          get().actions.incrementDownloadToken();
+          const nextToken = get().actions.incrementDownloadToken();
+          logDownload("cancel:requested", {
+            libraryItemId: cancelledLibraryItemId ?? null,
+            nextToken,
+          });
 
           try {
             await get().activeCancelFn?.();
@@ -1020,6 +1143,10 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           if (cancelledLibraryItemId) {
             await get().actions.deleteDownloadedBookData(cancelledLibraryItemId);
           }
+          logDownload("cancel:complete", {
+            libraryItemId: cancelledLibraryItemId ?? null,
+            nextToken,
+          });
         },
 
         setDownloadProgress: (progress) => {
@@ -1151,6 +1278,14 @@ export const selectHasOfflineContent = (state: DeviceBooksState, _userKey?: stri
 
 export const selectIsBookDownloaded = (state: DeviceBooksState, libraryItemId: string) => {
   return Boolean(state.downloadedBookData[libraryItemId] || state.downloadedDetailsById[libraryItemId]);
+};
+
+export const selectIsBookFullyDownloaded = (state: DeviceBooksState, libraryItemId: string) => {
+  const details = state.downloadedDetailsById[libraryItemId];
+  const downloadData = state.downloadedBookData[libraryItemId];
+  if (!details || !downloadData?.audioTracks?.length) return false;
+  const expectedTracks = details.audioFiles?.length ?? 0;
+  return expectedTracks === 0 || downloadData.audioTracks.length >= expectedTracks;
 };
 
 export const selectHasPlayableBookDownload = (state: DeviceBooksState, libraryItemId: string) => {

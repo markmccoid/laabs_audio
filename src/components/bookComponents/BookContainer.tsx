@@ -267,7 +267,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
 
         <BookDetails title={bookTitle} description={description} genres={genres} tags={tags} />
 
-        <DownloadControls libraryItemId={libraryItemId} summary={bookData ?? null} />
+        <DownloadControls libraryItemId={libraryItemId} summary={bookData ?? null} context="inline" />
       </ScrollView>
     </View>
   );

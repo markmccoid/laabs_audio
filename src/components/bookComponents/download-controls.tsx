@@ -1,11 +1,20 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import {
-  selectIsBookDownloaded,
+  selectIsBookFullyDownloaded,
   useDeviceBooksActions,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { router, usePathname } from "expo-router";
+import { useEffect, useRef } from "react";
+import { toast } from "react-native-sonner";
 import { Pressable, Text, View } from "react-native";
+
+const completionToastHandledByLibraryItemId = new Set<string>();
+const logDownloadControls = (event: string, payload?: Record<string, unknown>) => {
+  if (!__DEV__) return;
+  console.log(`[download-controls] ${event}`, payload ?? {});
+};
 
 const formatPercent = (value: number | undefined) => {
   if (!Number.isFinite(value)) return "0%";
@@ -15,33 +24,80 @@ const formatPercent = (value: number | undefined) => {
 type Props = {
   libraryItemId?: string;
   summary?: LibraryItemSummary | null;
+  context?: "inline" | "sheet";
 };
 
-const DownloadControls = ({ libraryItemId, summary }: Props) => {
+const DownloadControls = ({ libraryItemId, summary, context = "inline" }: Props) => {
   const themeColors = useThemeColors();
+  const pathname = usePathname();
   const { downloadBook, cancelDownload, deleteDownloadedBookData } = useDeviceBooksActions();
   const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
   const isDownloaded = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
-    return selectIsBookDownloaded(state, libraryItemId);
+    return selectIsBookFullyDownloaded(state, libraryItemId);
   });
   const isDownloading = downloadProgress?.libraryItemId === libraryItemId;
+  const showDownloadingState = isDownloading && !isDownloaded;
+  const isBookDownloadsSheet = context === "sheet";
   const isAnotherDownloadActive =
     Boolean(downloadProgress?.libraryItemId) && downloadProgress?.libraryItemId !== libraryItemId;
-  const progressValue = isDownloading ? (downloadProgress?.progress ?? 0) : 0;
+  const progressValue = showDownloadingState ? (downloadProgress?.progress ?? 0) : 0;
+  const previousIsDownloadingRef = useRef(isDownloading);
+
+  useEffect(() => {
+    if (libraryItemId && isDownloading) {
+      completionToastHandledByLibraryItemId.delete(libraryItemId);
+    }
+    const wasDownloading = previousIsDownloadingRef.current;
+    if (wasDownloading && !isDownloading && isDownloaded && libraryItemId) {
+      if (!isBookDownloadsSheet) {
+        previousIsDownloadingRef.current = isDownloading;
+        return;
+      }
+      if (completionToastHandledByLibraryItemId.has(libraryItemId)) {
+        previousIsDownloadingRef.current = isDownloading;
+        return;
+      }
+      completionToastHandledByLibraryItemId.add(libraryItemId);
+      logDownloadControls("complete", { libraryItemId, pathname, context });
+      toast.success("Download complete", {
+        description: summary?.title ?? "This book is ready for offline playback.",
+        duration: 5_000,
+      });
+
+      router.back();
+    }
+    previousIsDownloadingRef.current = isDownloading;
+  }, [context, isBookDownloadsSheet, isDownloaded, isDownloading, libraryItemId, pathname, summary?.title]);
 
   const handleDownload = () => {
     if (!libraryItemId) return;
+    logDownloadControls("start:pressed", {
+      libraryItemId,
+      pathname,
+      context,
+      activeDownloadLibraryItemId: downloadProgress?.libraryItemId ?? null,
+    });
     void downloadBook(libraryItemId, { summary: summary ?? undefined });
   };
 
   const handleCancel = () => {
+    logDownloadControls("cancel:pressed", {
+      libraryItemId: libraryItemId ?? null,
+      pathname,
+      context,
+      activeDownloadLibraryItemId: downloadProgress?.libraryItemId ?? null,
+    });
     void cancelDownload();
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!libraryItemId) return;
-    void deleteDownloadedBookData(libraryItemId);
+    logDownloadControls("remove:pressed", { libraryItemId, pathname, context });
+    await deleteDownloadedBookData(libraryItemId);
+    if (isBookDownloadsSheet) {
+      router.back();
+    }
   };
 
   return (
@@ -67,7 +123,7 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
           : "Download this book for offline playback."}
       </Text>
 
-      {isDownloading ? (
+      {showDownloadingState ? (
         <View style={{ gap: 8 }}>
           <View
             style={{
@@ -127,7 +183,9 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
       ) : isDownloaded ? (
         <View style={{ gap: 8 }}>
           <Pressable
-            onPress={handleDelete}
+            onPress={() => {
+              void handleDelete();
+            }}
             style={({ pressed }) => ({
               borderRadius: 12,
               borderCurve: "continuous",
@@ -147,7 +205,7 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
                 color: themeColors.text,
               }}
             >
-              Delete Download
+              Remove Download
             </Text>
           </Pressable>
         </View>
