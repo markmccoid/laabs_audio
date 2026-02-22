@@ -1,9 +1,9 @@
+import { useAuthStore } from "@/auth/auth-store";
 import {
   useGetItemDetails,
   useGetUserServerState,
   useReconcileBookProgress,
 } from "@/hooks/abs-data-hooks";
-import { useAuthStore } from "@/auth/auth-store";
 import { usePlaybackStore } from "@/player";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
@@ -14,7 +14,14 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
-import { ScrollView, StyleSheet, Text, View, useColorScheme, useWindowDimensions } from "react-native";
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useColorScheme,
+  useWindowDimensions,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUniwind } from "uniwind";
 import BookControls from "./book-controls";
@@ -33,8 +40,7 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
 
 const fallbackImage = require("../../../assets/images/NoImageFound.png");
 
-const hasHtmlMarkup = (value?: string | null) =>
-  typeof value === "string" && /<[^>]+>/.test(value);
+const hasHtmlMarkup = (value?: string | null) => typeof value === "string" && /<[^>]+>/.test(value);
 
 const resolveBookDescription = (
   metadataDescription?: string | null,
@@ -85,7 +91,10 @@ const BookContainer = ({ libraryItemId }: Props) => {
     bookData?.publishedYear ??
     metadata?.publishedDate?.split("-")[0] ??
     null;
-  const seriesFromList = metadata?.series?.map((item) => item.name).filter(Boolean).join(", ");
+  const seriesFromList = metadata?.series
+    ?.map((item) => item.name)
+    .filter(Boolean)
+    .join(", ");
   const series = metadata?.seriesName ?? seriesFromList ?? bookData?.series ?? null;
   const description = resolveBookDescription(
     metadata?.description,
@@ -149,15 +158,18 @@ const BookContainer = ({ libraryItemId }: Props) => {
     return Math.max(180, Math.min(320, availableWidth - reservedActionRailWidth));
   }, [viewportWidth]);
   const playbackSourceLabel = useMemo(() => {
+    if (isOffline && !hasPlayableLocalDownload) {
+      return "Offline";
+    }
     const isViewedBookActive = Boolean(libraryItemId) && activeLibraryItemId === libraryItemId;
     if (isViewedBookActive) {
       const activeTrack = queue[currentTrackIndex];
       if (activeTrack) {
-        return activeTrack.source.isLocal ? "local" : "Streaming";
+        return activeTrack.source.isLocal ? "Local" : "Stream";
       }
     }
-    return hasPlayableLocalDownload ? "local" : "Streaming";
-  }, [activeLibraryItemId, currentTrackIndex, hasPlayableLocalDownload, libraryItemId, queue]);
+    return hasPlayableLocalDownload ? "Local" : "Stream";
+  }, [activeLibraryItemId, currentTrackIndex, hasPlayableLocalDownload, isOffline, libraryItemId, queue]);
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
@@ -230,7 +242,14 @@ const BookContainer = ({ libraryItemId }: Props) => {
           </View>
         ) : null}
 
-        <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "flex-start", gap: 12 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "center",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
           <BookImage
             coverURL={coverURL}
             leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
@@ -258,7 +277,10 @@ const BookContainer = ({ libraryItemId }: Props) => {
           </View>
           <View style={{ alignItems: "center", gap: 6 }}>
             <BookControls libraryItemId={libraryItemId} variant="play-only" />
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 11, fontWeight: "500" }}>
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 11, fontWeight: "500" }}
+            >
               {playbackSourceLabel}
             </Text>
           </View>
@@ -267,7 +289,11 @@ const BookContainer = ({ libraryItemId }: Props) => {
 
         <BookDetails title={bookTitle} description={description} genres={genres} tags={tags} />
 
-        <DownloadControls libraryItemId={libraryItemId} summary={bookData ?? null} context="inline" />
+        <DownloadControls
+          libraryItemId={libraryItemId}
+          summary={bookData ?? null}
+          context="inline"
+        />
       </ScrollView>
     </View>
   );
