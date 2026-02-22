@@ -1,11 +1,15 @@
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { usePlaybackStore } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { BlurView } from "expo-blur";
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
-import { Pressable, Text, View, useWindowDimensions } from "react-native";
+import { Pressable, StyleSheet, Text, View, useColorScheme, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useUniwind } from "uniwind";
 import BookControls from "../bookComponents/book-controls";
 import BookImage from "../bookComponents/book-image";
 import BookTimeSlider from "../bookComponents/book-time-slider";
@@ -21,9 +25,12 @@ const actions: UtilityAction[] = [
   { href: "/player-bookmarks", icon: "bookmark.fill", label: "Bookmarks" },
   { href: "/player-sleep-timer", icon: "powersleep", label: "Sleep timer" },
 ];
+const fallbackImage = require("../../../assets/images/NoImageFound.png");
 
 const MainPlayerScreen = () => {
   const themeColors = useThemeColors();
+  const { theme } = useUniwind();
+  const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId ?? undefined);
@@ -41,11 +48,17 @@ const MainPlayerScreen = () => {
   const authorName = resolvedAuthorName.trim().length > 0 ? resolvedAuthorName : "Unknown author";
   const title = bookData?.title ?? "No book selected";
   const coverURL = bookData?.coverUri ?? bookData?.coverFull ?? bookData?.cover;
+  const backgroundSource = coverURL ? { uri: coverURL } : fallbackImage;
   const chapters = bookData?.media?.chapters ?? [];
   const fallbackDurationMs = Math.max(
     0,
     Math.round((bookData?.media?.duration ?? bookData?.duration ?? 0) * 1000),
   );
+  const isDarkTheme = useMemo(() => {
+    if (theme === "dark") return true;
+    if (theme === "light") return false;
+    return colorScheme === "dark";
+  }, [colorScheme, theme]);
 
   const artworkSize = useMemo(() => {
     const usableHeight = height - insets.top - insets.bottom;
@@ -53,8 +66,45 @@ const MainPlayerScreen = () => {
     return Math.min(width - 72, Math.max(170, Math.min(300, maxByHeight)));
   }, [height, insets.bottom, insets.top, width]);
 
+  const gradientColors = useMemo(
+    () =>
+      isDarkTheme
+        ? [
+            "rgba(6, 10, 11, 0.18)",
+            "rgba(6, 10, 11, 0.52)",
+            "rgba(6, 10, 11, 0.82)",
+          ]
+        : [
+            "rgba(248, 250, 252, 0.14)",
+            "rgba(248, 250, 252, 0.62)",
+            "rgba(248, 250, 252, 0.86)",
+          ],
+    [isDarkTheme],
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <Image
+          source={backgroundSource}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          transition={300}
+        />
+        <BlurView
+          tint={isDarkTheme ? "dark" : "light"}
+          intensity={100}
+          experimentalBlurMethod="dimezisBlurView"
+          style={StyleSheet.absoluteFill}
+        />
+        <LinearGradient
+          colors={gradientColors}
+          locations={[0, 0.5, 1]}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+      </View>
       <View
         style={{
           flex: 1,

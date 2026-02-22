@@ -9,7 +9,18 @@ import {
 } from "@/store/settings-store";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CountStepper } from "./count-stepper";
 
 type EditorMode = "create" | "edit";
@@ -73,6 +84,7 @@ const Row = ({
 
 export const BookshelfEditorSheet = () => {
   const themeColors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const { shelfId: shelfIdParamRaw, mode: modeParamRaw } =
     useLocalSearchParams<{ shelfId?: string | string[]; mode?: string | string[] }>();
   const shelfId = resolveParam(shelfIdParamRaw) ?? null;
@@ -179,7 +191,10 @@ export const BookshelfEditorSheet = () => {
   const title = isCreateMode ? "New Bookshelf" : "Bookshelf";
 
   return (
-    <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: themeColors.bg }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
       <Stack.Screen
         options={{
           title,
@@ -216,8 +231,16 @@ export const BookshelfEditorSheet = () => {
         </View>
       ) : (
         <ScrollView
-          contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 26, gap: 14 }}
+          style={{ flex: 1 }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingTop: 14,
+            paddingBottom: Math.max(26, insets.bottom + 16),
+            gap: 14,
+          }}
         >
           <Section>
             <Row
@@ -323,6 +346,6 @@ export const BookshelfEditorSheet = () => {
           ) : null}
         </ScrollView>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 };

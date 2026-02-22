@@ -56,7 +56,10 @@ export default function TabLayout() {
 
       {hasLoadedBook && (
         <NativeTabs.BottomAccessory>
-          <View className="flex-row items-center justify-between h-full px-4 gap-2 bg-surface">
+          <View
+            className="flex-row items-center justify-between h-full px-4 gap-2 bg-surface border-hairline border-gray-400 rounded-full"
+            // style={{ borderRadius:  }}
+          >
             <Link href="/main-player" asChild>
               <Pressable className="flex-row items-center justify-between flex-1 gap-2">
                 <Image

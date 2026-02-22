@@ -4,7 +4,6 @@
     "slug": "laabs_audio",
     "version": "1.0.2",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
     "scheme": "laabsaudio",
     "userInterfaceStyle": "automatic",
     "ios": {

@@ -57,6 +57,8 @@ export default function RootLayout() {
       rootSegment === "player-rate" ||
       rootSegment === "player-bookmarks" ||
       rootSegment === "player-sleep-timer";
+    const inBookUtilitySheet =
+      rootSegment === "book-bookshelves" || rootSegment === "book-downloads";
     if (status === "anonymous" && !inLogin) {
       router.replace({ pathname: "/login", params: { mode: "required" } });
       return;
@@ -69,7 +71,8 @@ export default function RootLayout() {
       !inLibraryPicker &&
       !inChapterViewer &&
       !inMainPlayer &&
-      !inPlayerUtilitySheet
+      !inPlayerUtilitySheet &&
+      !inBookUtilitySheet
     ) {
       router.replace("/(tabs)/(home)");
     }
@@ -248,6 +251,36 @@ export default function RootLayout() {
                 presentation: "formSheet",
                 animation: "slide_from_bottom",
                 sheetAllowedDetents: [0.45, 0.85],
+                sheetGrabberVisible: true,
+                sheetCornerRadius: 20,
+                contentStyle: {
+                  backgroundColor: themeColors.surface,
+                },
+              }}
+            />
+            <Stack.Screen
+              name="book-bookshelves"
+              options={{
+                headerShown: false,
+                presentation: "modal",
+                animation: "slide_from_bottom",
+                sheetAllowedDetents: [0.5],
+                sheetExpandsWhenScrolledToEdge: false,
+                sheetGrabberVisible: true,
+                sheetCornerRadius: 20,
+                contentStyle: {
+                  backgroundColor: themeColors.surface,
+                },
+              }}
+            />
+            <Stack.Screen
+              name="book-downloads"
+              options={{
+                headerShown: true,
+                presentation: "formSheet",
+                animation: "slide_from_bottom",
+                sheetAllowedDetents: [0.45, 0.9],
+                sheetExpandsWhenScrolledToEdge: false,
                 sheetGrabberVisible: true,
                 sheetCornerRadius: 20,
                 contentStyle: {

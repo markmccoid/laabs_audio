@@ -1,10 +1,10 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
-import { useThemeColors } from "@/theme/use-app-theme";
 import {
   selectIsBookDownloaded,
   useDeviceBooksActions,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { Pressable, Text, View } from "react-native";
 
 const formatPercent = (value: number | undefined) => {
@@ -46,6 +46,7 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
 
   return (
     <View
+      className="z-10"
       style={{
         borderRadius: 20,
         borderCurve: "continuous",
@@ -57,10 +58,7 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
         boxShadow: "0 10px 22px rgba(15, 23, 42, 0.1)",
       }}
     >
-      <Text
-        selectable
-        style={{ fontSize: 16, fontWeight: "600", color: themeColors.text }}
-      >
+      <Text selectable style={{ fontSize: 16, fontWeight: "600", color: themeColors.text }}>
         Offline Download
       </Text>
       <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
@@ -115,7 +113,12 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
           >
             <Text
               selectable
-              style={{ textAlign: "center", fontSize: 13, fontWeight: "600", color: themeColors.text }}
+              style={{
+                textAlign: "center",
+                fontSize: 13,
+                fontWeight: "600",
+                color: themeColors.text,
+              }}
             >
               Cancel Download
             </Text>
@@ -137,7 +140,12 @@ const DownloadControls = ({ libraryItemId, summary }: Props) => {
           >
             <Text
               selectable
-              style={{ textAlign: "center", fontSize: 13, fontWeight: "600", color: themeColors.text }}
+              style={{
+                textAlign: "center",
+                fontSize: 13,
+                fontWeight: "600",
+                color: themeColors.text,
+              }}
             >
               Delete Download
             </Text>
