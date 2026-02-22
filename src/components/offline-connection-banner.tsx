@@ -1,0 +1,133 @@
+import NetInfo from "@react-native-community/netinfo";
+import { useQueryClient } from "@tanstack/react-query";
+import { useSegments } from "expo-router";
+import { SymbolView } from "expo-symbols";
+import { useCallback, useState } from "react";
+import { Pressable, Text, View } from "react-native";
+import { librariesApi } from "../api/libraries-api";
+import { libraryItemsApi } from "../api/library-items-api";
+import { meApi } from "../api/me-api";
+import { useAuthActions, useAuthStore } from "../auth/auth-store";
+import { queryKeys } from "../query/query-keys";
+import { useThemeColors } from "../theme/use-app-theme";
+
+export const OfflineConnectionBanner = () => {
+  const themeColors = useThemeColors();
+  const queryClient = useQueryClient();
+  const segments = useSegments();
+  const rootSegment = segments[0];
+  const isOnline = useAuthStore((state) => state.isOnline);
+  const status = useAuthStore((state) => state.status);
+  const loginRequired = useAuthStore((state) => state.loginRequired);
+  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const { refreshSession, setOnlineStatus } = useAuthActions();
+  const [isRetrying, setIsRetrying] = useState(false);
+
+  const handleRetry = useCallback(async () => {
+    if (isRetrying) return;
+    setIsRetrying(true);
+
+    try {
+      const networkState = await NetInfo.fetch();
+      const online = networkState.isConnected ?? true;
+      setOnlineStatus(online);
+
+      if (!online) return;
+      if (status === "anonymous" || loginRequired) return;
+
+      const refreshes: Promise<unknown>[] = [];
+
+      refreshes.push(refreshSession({ force: true }).catch(() => undefined));
+
+      refreshes.push(
+        queryClient.fetchQuery({
+          queryKey: queryKeys.libraries,
+          queryFn: () => librariesApi.getAll(),
+          meta: { persist: true },
+        }),
+      );
+
+      if (activeLibraryId) {
+        refreshes.push(
+          queryClient.fetchQuery({
+            queryKey: queryKeys.libraryBooks(activeLibraryId),
+            queryFn: () => libraryItemsApi.getItems({ libraryId: activeLibraryId }),
+            meta: { persist: true },
+          }),
+        );
+      }
+
+      if (activeLibraryUserKey) {
+        refreshes.push(
+          queryClient.fetchQuery({
+            queryKey: queryKeys.userServerState(activeLibraryUserKey),
+            queryFn: () => meApi.getUserServerState(),
+            meta: { persist: true },
+          }),
+        );
+      }
+
+      await Promise.allSettled(refreshes);
+    } finally {
+      setIsRetrying(false);
+    }
+  }, [
+    activeLibraryId,
+    activeLibraryUserKey,
+    isRetrying,
+    loginRequired,
+    queryClient,
+    refreshSession,
+    setOnlineStatus,
+    status,
+  ]);
+
+  if (isOnline !== false || rootSegment === "main-player") return null;
+
+  return (
+    <View
+      style={{
+        borderBottomWidth: 1,
+        borderBottomColor: themeColors.border,
+        backgroundColor: themeColors.surface,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 }}>
+        <SymbolView name="wifi.slash" size={15} tintColor={themeColors.textMuted} />
+        <Text numberOfLines={2} style={{ color: themeColors.textMuted, fontSize: 13, flexShrink: 1 }}>
+          Offline. Connect to refresh.
+        </Text>
+      </View>
+
+      <Pressable
+        onPress={() => {
+          void handleRetry();
+        }}
+        disabled={isRetrying}
+        accessibilityRole="button"
+        accessibilityLabel="Retry connection"
+        style={({ pressed }) => ({
+          borderWidth: 1,
+          borderColor: themeColors.border,
+          borderRadius: 999,
+          borderCurve: "continuous",
+          paddingHorizontal: 12,
+          paddingVertical: 6,
+          backgroundColor: themeColors.bg,
+          opacity: isRetrying ? 0.6 : pressed ? 0.8 : 1,
+        })}
+      >
+        <Text style={{ color: themeColors.text, fontSize: 12, fontWeight: "600" }}>
+          {isRetrying ? "Retrying..." : "Retry"}
+        </Text>
+      </Pressable>
+    </View>
+  );
+};

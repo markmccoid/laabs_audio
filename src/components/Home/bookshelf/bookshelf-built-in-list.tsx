@@ -6,18 +6,24 @@ import { BookshelfBuiltInItem } from "./bookshelf-built-in-item";
 
 type BookshelfBuiltInListProps = {
   books: LibraryItemSummary[];
+  isOffline: boolean;
   contentTopPadding: number;
   emptyMessage: string;
 };
 
-export const BookshelfBuiltInList = ({ books, contentTopPadding, emptyMessage }: BookshelfBuiltInListProps) => {
+export const BookshelfBuiltInList = ({
+  books,
+  isOffline,
+  contentTopPadding,
+  emptyMessage,
+}: BookshelfBuiltInListProps) => {
   const themeColors = useThemeColors();
 
   return (
     <FlashList
       data={books}
       keyExtractor={(book) => book.id}
-      renderItem={({ item }) => <BookshelfBuiltInItem book={item} />}
+      renderItem={({ item }) => <BookshelfBuiltInItem book={item} isOffline={isOffline} />}
       ListEmptyComponent={
         <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
           {emptyMessage}

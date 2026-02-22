@@ -10,6 +10,7 @@ import { meApi } from "../api/me-api";
 import { useAuthStore } from "../auth/auth-store";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
 import { LibrarySelectionGate } from "../components/library-selection-gate";
+import { OfflineConnectionBanner } from "../components/offline-connection-banner";
 import "../global.css";
 import { playerService } from "../player/player-service";
 import { queryClient } from "../query/query-client";
@@ -159,136 +160,139 @@ export default function RootLayout() {
       <ThemeProvider value={navigationTheme}>
         <GestureHandlerRootView style={{ flex: 1, backgroundColor: themeColors.bg }}>
           <LibrarySelectionGate />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: themeColors.bg },
-            }}
-          >
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen
-              name="login"
-              options={{
-                presentation: "formSheet",
-                animation: "slide_from_bottom",
-                // sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-                sheetGrabberVisible: true,
-                sheetCornerRadius: 20,
-                contentStyle: {
-                  backgroundColor: themeColors.surface,
-                },
-              }}
-            />
-            <Stack.Screen
-              name="library-picker"
-              options={{
-                presentation: "formSheet",
-                animation: "slide_from_bottom",
-                sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-                sheetGrabberVisible: true,
-                sheetCornerRadius: 20,
-                contentStyle: {
-                  backgroundColor: themeColors.surface,
-                },
-              }}
-            />
-            <Stack.Screen
-              name="chapter-viewer"
-              options={{
-                presentation: "formSheet",
-                animation: "slide_from_bottom",
-                sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-                sheetGrabberVisible: true,
-                sheetCornerRadius: 20,
-                contentStyle: {
-                  backgroundColor: themeColors.surface,
-                },
-              }}
-            />
-            <Stack.Screen
-              name="main-player"
-              options={{
-                presentation: "card",
+          <OfflineConnectionBanner />
+          <View style={{ flex: 1 }}>
+            <Stack
+              screenOptions={{
                 headerShown: false,
-                gestureDirection: "vertical",
-                gestureEnabled: true,
-                contentStyle: {
-                  borderTopLeftRadius: 25,
-                  borderTopRightRadius: 25,
-                  overflow: "hidden",
-                },
+                contentStyle: { backgroundColor: themeColors.bg },
               }}
-            />
-            <Stack.Screen
-              name="player-rate"
-              options={{
-                presentation: "formSheet",
-                animation: "slide_from_bottom",
-                sheetAllowedDetents: [0.45, 0.85],
-                sheetGrabberVisible: true,
-                sheetCornerRadius: 20,
-                contentStyle: {
-                  backgroundColor: themeColors.surface,
-                },
-              }}
-            />
-            <Stack.Screen
-              name="player-bookmarks"
-              options={{
-                presentation: "formSheet",
-                animation: "slide_from_bottom",
-                sheetAllowedDetents: [0.45, 0.85],
-                sheetGrabberVisible: true,
-                sheetCornerRadius: 20,
-                contentStyle: {
-                  backgroundColor: themeColors.surface,
-                },
-              }}
-            />
-            <Stack.Screen
-              name="player-sleep-timer"
-              options={{
-                presentation: "formSheet",
-                animation: "slide_from_bottom",
-                sheetAllowedDetents: [0.45, 0.85],
-                sheetGrabberVisible: true,
-                sheetCornerRadius: 20,
-                contentStyle: {
-                  backgroundColor: themeColors.surface,
-                },
-              }}
-            />
-            <Stack.Screen
-              name="book-bookshelves"
-              options={{
-                headerShown: false,
-                presentation: "modal",
-                animation: "slide_from_bottom",
-                sheetAllowedDetents: [0.5],
-                sheetExpandsWhenScrolledToEdge: false,
-                sheetGrabberVisible: true,
-                sheetCornerRadius: 20,
-                contentStyle: {
-                  backgroundColor: themeColors.surface,
-                },
-              }}
-            />
-            <Stack.Screen
-              name="book-downloads"
-              options={{
-                headerShown: true,
-                presentation: "formSheet",
-                animation: "slide_from_bottom",
-                sheetAllowedDetents: [0.45, 0.9],
-                sheetExpandsWhenScrolledToEdge: false,
-                sheetGrabberVisible: true,
-                sheetCornerRadius: 20,
-                contentStyle: {
-                  backgroundColor: themeColors.surface,
-                },
-              }}
-            />
-          </Stack>
+            >
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen
+                name="login"
+                options={{
+                  presentation: "formSheet",
+                  animation: "slide_from_bottom",
+                  // sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="library-picker"
+                options={{
+                  presentation: "formSheet",
+                  animation: "slide_from_bottom",
+                  sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="chapter-viewer"
+                options={{
+                  presentation: "formSheet",
+                  animation: "slide_from_bottom",
+                  sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="main-player"
+                options={{
+                  presentation: "card",
+                  headerShown: false,
+                  gestureDirection: "vertical",
+                  gestureEnabled: true,
+                  contentStyle: {
+                    borderTopLeftRadius: 25,
+                    borderTopRightRadius: 25,
+                    overflow: "hidden",
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="player-rate"
+                options={{
+                  presentation: "formSheet",
+                  animation: "slide_from_bottom",
+                  sheetAllowedDetents: [0.45, 0.85],
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="player-bookmarks"
+                options={{
+                  presentation: "formSheet",
+                  animation: "slide_from_bottom",
+                  sheetAllowedDetents: [0.45, 0.85],
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="player-sleep-timer"
+                options={{
+                  presentation: "formSheet",
+                  animation: "slide_from_bottom",
+                  sheetAllowedDetents: [0.45, 0.85],
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="book-bookshelves"
+                options={{
+                  headerShown: false,
+                  presentation: "modal",
+                  animation: "slide_from_bottom",
+                  sheetAllowedDetents: [0.5],
+                  sheetExpandsWhenScrolledToEdge: false,
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="book-downloads"
+                options={{
+                  headerShown: true,
+                  presentation: "formSheet",
+                  animation: "slide_from_bottom",
+                  sheetAllowedDetents: [0.45, 0.9],
+                  sheetExpandsWhenScrolledToEdge: false,
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+            </Stack>
+          </View>
         </GestureHandlerRootView>
       </ThemeProvider>
     </PersistQueryClientProvider>
