@@ -7,9 +7,12 @@ import { Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
-import Sortable, { type SortableGridDragEndParams, type SortableGridRenderItem } from "react-native-sortables";
-import { useAnimatedRef } from "react-native-reanimated";
+import Animated, { useAnimatedRef } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Sortable, {
+  type SortableGridDragEndParams,
+  type SortableGridRenderItem,
+} from "react-native-sortables";
 import { BookshelfBuiltInList } from "./bookshelf-built-in-list";
 import { BookshelfGridItem } from "./bookshelf-grid-item";
 
@@ -22,7 +25,7 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
   const insets = useSafeAreaInsets();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const { reorderCustomShelfBooks } = useDeviceBooksActions();
+  const { reorderCustomShelfBooks, reorderDownloadedShelfBooks } = useDeviceBooksActions();
   const { shelves, refreshDiscover } = useHomeShelves();
   const scrollableRef = useAnimatedRef<ScrollView>();
   const [isRouteContentReady, setIsRouteContentReady] = useState(false);
@@ -32,12 +35,16 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
   const shelf = useMemo(
     () =>
       shelves.find((candidateShelf) => candidateShelf.id === normalizedShelfId) ??
-      shelves.find((candidateShelf) => candidateShelf.id.toLowerCase() === normalizedShelfIdLowercase) ??
+      shelves.find(
+        (candidateShelf) => candidateShelf.id.toLowerCase() === normalizedShelfIdLowercase,
+      ) ??
       null,
     [normalizedShelfId, normalizedShelfIdLowercase, shelves],
   );
   const isCustomShelf = shelf?.kind === "custom";
   const isDiscoverShelf = shelf?.kind === "derived" && shelf.id === "discover";
+  const isDownloadedShelf = shelf?.kind === "derived" && shelf.id === "downloaded";
+  const isSortableGridShelf = isCustomShelf || isDownloadedShelf;
   const contentTopPadding = Math.max(84, insets.top + 56);
 
   useEffect(() => {
@@ -53,17 +60,32 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
 
   const handleDragEnd = useCallback(
     ({ data }: SortableGridDragEndParams<LibraryItemSummary>) => {
-      if (!shelf || !isCustomShelf) return;
-      reorderCustomShelfBooks(
-        shelf.id,
-        data.map((book) => book.id),
-        {
-          userKey: activeLibraryUserKey,
-          libraryId: activeLibraryId,
-        },
-      );
+      if (!shelf || !isSortableGridShelf) return;
+      const orderedBookIds = data.map((book) => book.id);
+      const scopeOptions = {
+        userKey: activeLibraryUserKey,
+        libraryId: activeLibraryId,
+      };
+
+      if (isCustomShelf) {
+        reorderCustomShelfBooks(shelf.id, orderedBookIds, scopeOptions);
+        return;
+      }
+
+      if (isDownloadedShelf) {
+        reorderDownloadedShelfBooks(orderedBookIds, scopeOptions);
+      }
     },
-    [activeLibraryId, activeLibraryUserKey, isCustomShelf, reorderCustomShelfBooks, shelf],
+    [
+      activeLibraryId,
+      activeLibraryUserKey,
+      isCustomShelf,
+      isDownloadedShelf,
+      isSortableGridShelf,
+      reorderCustomShelfBooks,
+      reorderDownloadedShelfBooks,
+      shelf,
+    ],
   );
 
   const renderItem = useCallback<SortableGridRenderItem<LibraryItemSummary>>(
@@ -109,14 +131,21 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
       ) : null}
 
       {isRouteContentReady && !shelf ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingTop: contentTopPadding }}>
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingTop: contentTopPadding,
+          }}
+        >
           <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
             Shelf not found.
           </Text>
         </View>
       ) : null}
 
-      {isRouteContentReady && shelf && !isCustomShelf ? (
+      {isRouteContentReady && shelf && !isSortableGridShelf ? (
         <BookshelfBuiltInList
           books={shelf.books}
           contentTopPadding={contentTopPadding}
@@ -124,13 +153,13 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
         />
       ) : null}
 
-      {isRouteContentReady && shelf && isCustomShelf ? (
-        <ScrollView
+      {isRouteContentReady && shelf && isSortableGridShelf ? (
+        <Animated.ScrollView
           ref={scrollableRef}
           contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={{
             paddingHorizontal: 16,
-            paddingTop: contentTopPadding,
+            // paddingTop: contentTopPadding,
             paddingBottom: 24,
             gap: 14,
           }}
@@ -152,7 +181,7 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
               sortEnabled
             />
           )}
-        </ScrollView>
+        </Animated.ScrollView>
       ) : null}
     </View>
   );

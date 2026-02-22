@@ -148,6 +148,10 @@ export const useHomeShelves = () => {
   const customShelvesRaw = useDeviceBooksStore((state) =>
     homeScopeKey ? state.customShelvesByScope[homeScopeKey] ?? EMPTY_CUSTOM_SHELVES : EMPTY_CUSTOM_SHELVES,
   );
+  const downloadedDetailsById = useDeviceBooksStore((state) => state.downloadedDetailsById);
+  const downloadedShelfOrder = useDeviceBooksStore((state) =>
+    homeScopeKey ? state.downloadedShelfOrderByScope[homeScopeKey] ?? EMPTY_ORDER : EMPTY_ORDER,
+  );
   const shelfSettingsById = useSettingsStore((state) =>
     homeScopeKey
       ? state.homeShelvesByScope[homeScopeKey]?.shelfSettingsById ?? EMPTY_SHELF_SETTINGS_BY_ID
@@ -216,6 +220,11 @@ export const useHomeShelves = () => {
   const recentlyAdded = useMemo(() => {
     return [...catalog].sort((a, b) => b.addedAt - a.addedAt);
   }, [catalog]);
+
+  const downloaded = useMemo(() => {
+    const downloadedBooks = recentlyAdded.filter((book) => Boolean(downloadedDetailsById[book.id]));
+    return reorderByIds(downloadedBooks, downloadedShelfOrder);
+  }, [downloadedDetailsById, downloadedShelfOrder, recentlyAdded]);
 
   const discoverDateKey = toDailySeedKey();
   const hasDiscoverSnapshotForToday = storedDiscoverShelf?.dateKey === discoverDateKey;
@@ -319,6 +328,15 @@ export const useHomeShelves = () => {
         isVisible: shelfSettingsById.discover?.isVisible ?? true,
         emptyMessage: "No unread books available.",
       },
+      {
+        kind: "derived",
+        id: "downloaded",
+        title: "Downloaded",
+        books: downloaded,
+        homeItemCount: shelfSettingsById.downloaded?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+        isVisible: shelfSettingsById.downloaded?.isVisible ?? true,
+        emptyMessage: "No downloaded books yet.",
+      },
     ];
 
     const customShelves: HomeCustomShelf[] = customShelvesRaw.map((shelf) => ({
@@ -342,6 +360,7 @@ export const useHomeShelves = () => {
     catalogById,
     continueListening,
     customShelvesRaw,
+    downloaded,
     discover,
     recentlyAdded,
     shelfSettingsById,

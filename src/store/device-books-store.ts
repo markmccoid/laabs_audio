@@ -58,7 +58,7 @@ type PendingBookmarkDelete = {
   bookmarkTime: number;
 };
 
-export type HomeDerivedShelfId = "continueListening" | "recentlyAdded" | "discover";
+export type HomeDerivedShelfId = "continueListening" | "recentlyAdded" | "discover" | "downloaded";
 
 export type HomeShelfVisibility = Record<HomeDerivedShelfId, boolean>;
 
@@ -74,6 +74,7 @@ export const DEFAULT_HOME_SHELF_VISIBILITY: HomeShelfVisibility = {
   continueListening: true,
   recentlyAdded: true,
   discover: true,
+  downloaded: true,
 };
 
 const EMPTY_HOME_CUSTOM_SHELVES: HomeCustomShelf[] = [];
@@ -86,6 +87,7 @@ type HomeShelfScopeOptions = {
 type DeviceBooksPersistedState = {
   downloadedDetailsById: Record<string, ItemDetails>;
   downloadedBookData: Record<string, DownloadInfo>;
+  downloadedShelfOrderByScope: Record<string, string[]>;
   customCoversById: Record<string, string | null>;
   playbackRatesByUserBook: Record<string, number>;
   bookmarkNotesByUserBookTime: Record<string, string>;
@@ -149,6 +151,10 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
       orderedBookIds: string[],
       options?: HomeShelfScopeOptions,
     ) => void;
+    reorderDownloadedShelfBooks: (
+      orderedBookIds: string[],
+      options?: HomeShelfScopeOptions,
+    ) => void;
     setDerivedShelfVisibility: (
       shelfId: HomeDerivedShelfId,
       isVisible: boolean,
@@ -177,6 +183,7 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
 const createDefaultPersistedState = (): DeviceBooksPersistedState => ({
   downloadedDetailsById: {},
   downloadedBookData: {},
+  downloadedShelfOrderByScope: {},
   customCoversById: {},
   playbackRatesByUserBook: {},
   bookmarkNotesByUserBookTime: {},
@@ -761,6 +768,32 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           });
         },
 
+        reorderDownloadedShelfBooks: (orderedBookIds, options) => {
+          const scopeKey = resolveHomeScopeKey(options);
+          if (!scopeKey || !orderedBookIds.length) return;
+
+          const dedupedOrder = reorderByIds(
+            orderedBookIds.map((id) => ({ id })),
+            orderedBookIds,
+          ).map((item) => item.id);
+
+          set((state) => {
+            const currentOrder = state.downloadedShelfOrderByScope[scopeKey] ?? [];
+            const unchanged =
+              currentOrder.length === dedupedOrder.length &&
+              currentOrder.every((bookId, index) => bookId === dedupedOrder[index]);
+            if (unchanged) return state;
+
+            return {
+              ...state,
+              downloadedShelfOrderByScope: {
+                ...state.downloadedShelfOrderByScope,
+                [scopeKey]: dedupedOrder,
+              },
+            };
+          });
+        },
+
         setDerivedShelfVisibility: (shelfId, isVisible, options) => {
           const scopeKey = resolveHomeScopeKey(options);
           if (!scopeKey) return;
@@ -1011,6 +1044,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
       partialize: (state) => ({
         downloadedDetailsById: state.downloadedDetailsById,
         downloadedBookData: state.downloadedBookData,
+        downloadedShelfOrderByScope: state.downloadedShelfOrderByScope,
         customCoversById: state.customCoversById,
         playbackRatesByUserBook: state.playbackRatesByUserBook,
         bookmarkNotesByUserBookTime: state.bookmarkNotesByUserBookTime,
@@ -1019,7 +1053,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         customShelvesByScope: state.customShelvesByScope,
         homeShelfVisibilityByScope: state.homeShelfVisibilityByScope,
       }),
-      version: 2,
+      version: 3,
       migrate: (persistedState, version) => {
         const base = createDefaultPersistedState();
         const typedState =
@@ -1036,6 +1070,17 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             ...typedState,
             customShelvesByScope: typedState.customShelvesByScope ?? {},
             homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
+            downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
+          };
+        }
+
+        if (version < 3) {
+          return {
+            ...base,
+            ...typedState,
+            customShelvesByScope: typedState.customShelvesByScope ?? {},
+            homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
+            downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
           };
         }
 
@@ -1044,6 +1089,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           ...typedState,
           customShelvesByScope: typedState.customShelvesByScope ?? {},
           homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
+          downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
         };
       },
     },
@@ -1105,6 +1151,10 @@ export const selectHasOfflineContent = (state: DeviceBooksState, _userKey?: stri
 
 export const selectIsBookDownloaded = (state: DeviceBooksState, libraryItemId: string) => {
   return Boolean(state.downloadedBookData[libraryItemId] || state.downloadedDetailsById[libraryItemId]);
+};
+
+export const selectHasPlayableBookDownload = (state: DeviceBooksState, libraryItemId: string) => {
+  return Boolean(state.downloadedBookData[libraryItemId]?.audioTracks?.length);
 };
 
 export const toHomeShelfScopeKey = (userKey: string | null, libraryId: string | null) =>
