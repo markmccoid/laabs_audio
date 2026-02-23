@@ -96,9 +96,7 @@ export default function TabLayout() {
                 <Link.MenuAction icon="book.closed.fill" onPress={() => playerService.stop()}>
                   Close Book
                 </Link.MenuAction>
-                <Link.MenuAction icon="book.closed.fill" onPress={() => playerService.stop()}>
-                  Close Book
-                </Link.MenuAction>
+
                 <Link.Menu title="Speed" icon="hare.fill">
                   <Link.MenuAction onPress={() => handleSetRate(0.75)} isOn={playbackRate === 0.75}>
                     .75x
