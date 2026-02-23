@@ -31,12 +31,11 @@ import BookKeyDetails from "./book-key-details";
 import { BookQuickActions } from "./book-quick-actions";
 import BookRateSetter from "./book-rate-setter";
 import DownloadControls from "./download-controls";
+import { useBookProgressDisplay } from "./use-book-progress-display";
 
 type Props = {
   libraryItemId: string | undefined;
 };
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 const fallbackImage = require("../../../assets/images/NoImageFound.png");
 
@@ -66,6 +65,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
   const { data: userServerState } = useGetUserServerState();
   const isOffline = useAuthStore((state) => state.isOnline === false);
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const playbackState = usePlaybackStore((state) => state.playbackState);
   const currentTrackIndex = usePlaybackStore((state) => state.currentTrackIndex);
   const queue = usePlaybackStore((state) => state.queue);
   const hasPlayableLocalDownload = useDeviceBooksStore((state) => {
@@ -117,25 +117,22 @@ const BookContainer = ({ libraryItemId }: Props) => {
     {};
   const matchedProgress = (libraryItemId ? progressByLibraryItemId[libraryItemId] : null) ?? null;
   const fallbackProgress = bookData?.userMediaProgress;
-  const progressDurationSeconds = Math.max(
-    0,
-    matchedProgress?.duration ?? fallbackProgress?.duration ?? durationSeconds ?? 0,
-  );
-  const resolvedDurationSeconds = Math.max(durationSeconds, progressDurationSeconds);
-  const rawProgressSeconds = Math.max(
-    0,
-    matchedProgress?.currentTime ?? fallbackProgress?.currentTime ?? 0,
-  );
-  const progressSeconds =
-    progressDurationSeconds > 0
-      ? clamp(rawProgressSeconds, 0, progressDurationSeconds)
-      : rawProgressSeconds;
-  const isFinished = Boolean(matchedProgress?.isFinished ?? fallbackProgress?.isFinished);
-  const isInProgress = progressSeconds > 0 && !isFinished;
-  const progressPercent =
-    resolvedDurationSeconds > 0 ? clamp(progressSeconds / resolvedDurationSeconds, 0, 1) : 0;
-  const visualProgressPercent = isFinished ? 1 : progressPercent;
-  const remainingSeconds = Math.max(resolvedDurationSeconds - progressSeconds, 0);
+  const isViewedBookActive = Boolean(libraryItemId) && activeLibraryItemId === libraryItemId;
+  const {
+    progressSeconds,
+    remainingSeconds,
+    visualProgressPercent,
+    resolvedDurationSeconds,
+    isFinished,
+    isInProgress,
+  } = useBookProgressDisplay({
+    libraryItemId,
+    matchedProgress,
+    fallbackProgress,
+    durationSeconds,
+    isViewedBookActive,
+    playbackState,
+  });
   const coverURL = bookData?.coverUri ?? bookData?.coverFull ?? bookData?.cover;
   const backgroundSource = coverURL ? { uri: coverURL } : fallbackImage;
 
@@ -161,7 +158,6 @@ const BookContainer = ({ libraryItemId }: Props) => {
     if (isOffline && !hasPlayableLocalDownload) {
       return "Offline";
     }
-    const isViewedBookActive = Boolean(libraryItemId) && activeLibraryItemId === libraryItemId;
     if (isViewedBookActive) {
       const activeTrack = queue[currentTrackIndex];
       if (activeTrack) {
@@ -169,7 +165,13 @@ const BookContainer = ({ libraryItemId }: Props) => {
       }
     }
     return hasPlayableLocalDownload ? "Local" : "Stream";
-  }, [activeLibraryItemId, currentTrackIndex, hasPlayableLocalDownload, isOffline, libraryItemId, queue]);
+  }, [
+    currentTrackIndex,
+    hasPlayableLocalDownload,
+    isOffline,
+    isViewedBookActive,
+    queue,
+  ]);
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
