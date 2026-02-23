@@ -1,6 +1,7 @@
 import { meApi, type UserServerState } from "../api/me-api";
 import { playbackApi } from "../api/playback-api";
 import { sessionsApi } from "../api/sessions-api";
+import { buildCoverUrls } from "../api/cover-urls";
 import { authStore } from "../auth/auth-store";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
@@ -41,6 +42,7 @@ const toQueueLogEntry = (track: PlaybackQueueItem, index: number) => ({
   sessionId: track.sessionId,
   trackIndex: track.trackIndex,
   title: track.title,
+  artworkUri: track.artworkUri ? truncateForLog(track.artworkUri) : null,
   isLocal: Boolean(track.source.isLocal),
   uri: track.source.uri ? truncateForLog(track.source.uri) : null,
   sourceModule:
@@ -423,6 +425,14 @@ class PlayerService {
       details.media.metadata.authorName ||
       "Unknown";
     const fallbackTitle = details.media.metadata.title || "Unknown";
+    const fallbackArtworkUri = (() => {
+      try {
+        return buildCoverUrls(libraryItemId).coverFullWithToken;
+      } catch {
+        return undefined;
+      }
+    })();
+    const artworkUri = downloadInfo.coverLocalUri ?? fallbackArtworkUri;
     const queue: PlaybackQueueItem[] = normalizedTracks
       .filter((track) => typeof track.fileUri === "string" && track.fileUri.length > 0)
       .map((track, trackIndex) =>
@@ -430,6 +440,7 @@ class PlayerService {
           libraryItemId,
           author,
           fallbackTitle,
+          artworkUri,
           track,
           trackIndex,
           detailsTrack: detailsTrackByIno.get(track.ino),
@@ -487,6 +498,7 @@ class PlayerService {
     libraryItemId: string;
     author: string;
     fallbackTitle: string;
+    artworkUri?: string;
     track: DownloadTrack & { normalizedStartOffset?: number; normalizedDuration?: number };
     trackIndex: number;
     detailsTrack?: {
@@ -501,6 +513,7 @@ class PlayerService {
       trackIndex: payload.trackIndex,
       title: payload.detailsTrack?.title || payload.track.filename || payload.fallbackTitle,
       author: payload.author,
+      artworkUri: payload.artworkUri,
       durationMs: secondsToMs(payload.track.normalizedDuration ?? payload.track.duration),
       startOffsetMs: secondsToMs(payload.track.normalizedStartOffset ?? payload.track.startOffset),
       source: {

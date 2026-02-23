@@ -1,4 +1,5 @@
 import type { AudiobookSession } from "../types/absTypes";
+import { buildCoverUrls } from "../api/cover-urls";
 import { resolveTrackSource } from "./source-resolver";
 import type { PlaybackQueueItem } from "./types";
 
@@ -13,6 +14,7 @@ export const buildPlaybackQueue = (session: AudiobookSession) => {
   const title = session.libraryItem.media.metadata.title || "Unknown";
   const author = resolveAuthor(session);
   const libraryItemId = session.libraryItem.id;
+  const artworkUri = buildCoverUrls(libraryItemId).coverFullWithToken;
 
   const queue: PlaybackQueueItem[] = session.audioTracks.map((track, index) => {
     const source = resolveTrackSource(session, track, index);
@@ -23,6 +25,7 @@ export const buildPlaybackQueue = (session: AudiobookSession) => {
       trackIndex: index,
       title: track.title || title,
       author,
+      artworkUri,
       durationMs: secondsToMs(track.duration),
       startOffsetMs: secondsToMs(track.startOffset),
       source,
