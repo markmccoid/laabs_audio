@@ -65,15 +65,15 @@ export default function TabLayout() {
 
       {hasLoadedBook && (
         <NativeTabs.BottomAccessory>
-          <View className="gap-1 flex-row items-center justify-between h-full px-4 bg-surface border-hairline border-gray-400 rounded-full">
+          <View className="gap-1 flex-row items-center justify-between h-full px-4 border-hairline border-gray-400 rounded-full bg-transparent">
             <Link href="/main-player" className="flex-1 items-center flex-row  mt-[4]">
               <Link.Trigger>
                 <View className="flex-row items-center h-full flex-1 ">
                   <Image
                     source={{ uri: currentBook?.coverFull }}
                     style={{
-                      width: 40,
-                      height: 40,
+                      width: 35,
+                      height: 35,
                       marginRight: 8,
                       borderRadius: 8,
 
@@ -82,13 +82,13 @@ export default function TabLayout() {
                     }}
                   />
 
-                  <View className="flex-row flex-1 items-center h-full">
+                  <View className="flex-col justify-center flex-1 items-start h-full">
                     <Text style={{ fontSize: 12, color: themeColors.text }} numberOfLines={1}>
                       {currentBook?.title}
                     </Text>
-                    {/* <Text style={{ fontSize: 12, color: themeColors.textMuted }} numberOfLines={1}>
-                    by {currentBook?.duration}
-                  </Text> */}
+                    <Text style={{ fontSize: 10, color: themeColors.textMuted }} numberOfLines={1}>
+                      by {currentBook?.author}
+                    </Text>
                   </View>
                 </View>
               </Link.Trigger>
