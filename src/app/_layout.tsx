@@ -62,7 +62,8 @@ export default function RootLayout() {
     const inBookUtilitySheet =
       rootSegment === "book-bookshelves" ||
       rootSegment === "book-downloads" ||
-      rootSegment === "book-bookmarks";
+      rootSegment === "book-bookmarks" ||
+      rootSegment === "book-addbookmark";
     if (status === "anonymous" && !inLogin) {
       router.replace({ pathname: "/login", params: { mode: "required" } });
       return;
@@ -294,6 +295,20 @@ export default function RootLayout() {
               />
               <Stack.Screen
                 name="book-bookmarks"
+                options={{
+                  headerShown: false,
+                  presentation: "formSheet",
+                  animation: "slide_from_bottom",
+                  sheetAllowedDetents: [0.45, 0.85],
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="book-addbookmark"
                 options={{
                   headerShown: false,
                   presentation: "formSheet",

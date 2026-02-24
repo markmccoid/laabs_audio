@@ -5,8 +5,10 @@ import type { LibraryItemSummary } from "../api/library-items-api";
 import { buildCoverUrls } from "../api/cover-urls";
 import { downloadsApi } from "../api/downloads-api";
 import { itemsApi, type ItemDetails } from "../api/items-api";
-import { meApi } from "../api/me-api";
+import { meApi, type UserServerState } from "../api/me-api";
 import { authStore } from "../auth/auth-store";
+import { queryClient } from "../query/query-client";
+import { queryKeys } from "../query/query-keys";
 import type { Bookmark } from "../types/absTypes";
 import { mmkvStorage } from "./mmkv-storage";
 import {
@@ -258,6 +260,69 @@ const toUserBookmarkKey = (userKey: string, libraryItemId: string, bookmarkTime:
 const toPendingBookmarkId = (libraryItemId: string, bookmarkTime: number | string) =>
   `${libraryItemId}::${bookmarkTime}`;
 
+const buildEmptyUserServerState = (userKey: string): UserServerState => ({
+  userId: userKey,
+  progressByLibraryItemId: {},
+  bookmarksByLibraryItemId: {},
+});
+
+const ensureUserServerStateIsPersisted = (userKey: string) => {
+  queryClient.setQueryDefaults(queryKeys.userServerState(userKey), {
+    meta: { persist: true },
+  });
+};
+
+const upsertBookmarkInUserServerStateCache = (
+  userKey: string,
+  libraryItemId: string,
+  bookmark: Bookmark,
+) => {
+  ensureUserServerStateIsPersisted(userKey);
+  queryClient.setQueryData<UserServerState>(
+    queryKeys.userServerState(userKey),
+    (previousState) => {
+      const nextState = previousState ?? buildEmptyUserServerState(userKey);
+      const previousBookmarks = nextState.bookmarksByLibraryItemId[libraryItemId] ?? [];
+      const withoutSameTimestamp = previousBookmarks.filter(
+        (existingBookmark) => existingBookmark.time !== bookmark.time,
+      );
+      const nextBookmarks = [...withoutSameTimestamp, bookmark].sort((a, b) => b.time - a.time);
+      return {
+        ...nextState,
+        bookmarksByLibraryItemId: {
+          ...nextState.bookmarksByLibraryItemId,
+          [libraryItemId]: nextBookmarks,
+        },
+      };
+    },
+  );
+};
+
+const removeBookmarkFromUserServerStateCache = (
+  userKey: string,
+  libraryItemId: string,
+  bookmarkTime: number,
+) => {
+  ensureUserServerStateIsPersisted(userKey);
+  queryClient.setQueryData<UserServerState>(
+    queryKeys.userServerState(userKey),
+    (previousState) => {
+      if (!previousState) return previousState;
+      const previousBookmarks = previousState.bookmarksByLibraryItemId[libraryItemId] ?? [];
+      const nextBookmarks = previousBookmarks.filter(
+        (existingBookmark) => existingBookmark.time !== bookmarkTime,
+      );
+      return {
+        ...previousState,
+        bookmarksByLibraryItemId: {
+          ...previousState.bookmarksByLibraryItemId,
+          [libraryItemId]: nextBookmarks,
+        },
+      };
+    },
+  );
+};
+
 // Root directory for all offline downloads
 const DOWNLOAD_ROOT = getDocumentDirectory()
   ? `${getDocumentDirectory()}laabs-downloads/`
@@ -351,6 +416,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               userKey,
             });
           }
+          upsertBookmarkInUserServerStateCache(userKey, libraryItemId, bookmark);
 
           const pendingId = toPendingBookmarkId(libraryItemId, bookmark.time);
           const authState = authStore.getState();
@@ -420,6 +486,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
 
           const pendingId = toPendingBookmarkId(libraryItemId, bookmarkTime);
           get().actions.setBookmarkLocalNote(libraryItemId, bookmarkTime, null, { userKey });
+          removeBookmarkFromUserServerStateCache(userKey, libraryItemId, bookmarkTime);
 
           const authState = authStore.getState();
           const online = authState.isOnline ?? true;

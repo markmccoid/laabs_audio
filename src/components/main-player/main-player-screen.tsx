@@ -4,27 +4,14 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Link } from "expo-router";
-import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
-import { Pressable, StyleSheet, Text, View, useColorScheme, useWindowDimensions } from "react-native";
+import { StyleSheet, Text, View, useColorScheme, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUniwind } from "uniwind";
 import BookControls from "../bookComponents/book-controls";
 import BookImage from "../bookComponents/book-image";
 import BookTimeSlider from "../bookComponents/book-time-slider";
-
-type UtilityAction = {
-  href: "/player-rate" | "/player-bookmarks" | "/player-sleep-timer";
-  icon: string;
-  label: string;
-};
-
-const actions: UtilityAction[] = [
-  { href: "/player-rate", icon: "hare.fill", label: "Rate" },
-  { href: "/player-bookmarks", icon: "bookmark.fill", label: "Bookmarks" },
-  { href: "/player-sleep-timer", icon: "powersleep", label: "Sleep timer" },
-];
+import MainPlayerActionsBar from "./main-player-actions-bar";
 const fallbackImage = require("../../../assets/images/NoImageFound.png");
 
 const MainPlayerScreen = () => {
@@ -69,16 +56,8 @@ const MainPlayerScreen = () => {
   const gradientColors = useMemo(
     () =>
       isDarkTheme
-        ? [
-            "rgba(6, 10, 11, 0.18)",
-            "rgba(6, 10, 11, 0.52)",
-            "rgba(6, 10, 11, 0.82)",
-          ]
-        : [
-            "rgba(248, 250, 252, 0.14)",
-            "rgba(248, 250, 252, 0.62)",
-            "rgba(248, 250, 252, 0.86)",
-          ],
+        ? ["rgba(6, 10, 11, 0.18)", "rgba(6, 10, 11, 0.52)", "rgba(6, 10, 11, 0.82)"]
+        : ["rgba(248, 250, 252, 0.14)", "rgba(248, 250, 252, 0.62)", "rgba(248, 250, 252, 0.86)"],
     [isDarkTheme],
   );
 
@@ -160,54 +139,7 @@ const MainPlayerScreen = () => {
           <BookControls libraryItemId={currentLibraryItemId} />
         </View>
 
-        <View
-          style={{
-            paddingVertical: 8,
-            paddingHorizontal: 12,
-            borderRadius: 18,
-            borderCurve: "continuous",
-            backgroundColor: themeColors.surface,
-            borderWidth: 1,
-            borderColor: themeColors.border,
-            boxShadow: "0 10px 18px rgba(15, 23, 42, 0.08)",
-          }}
-        >
-          <View className="flex-row justify-between items-center">
-            {actions.map((action) => (
-              <Link key={action.href} href={action.href} asChild>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={action.label}
-                  style={({ pressed }) => ({
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 4,
-                    minWidth: 86,
-                    paddingVertical: 4,
-                    opacity: pressed ? 0.7 : 1,
-                  })}
-                >
-                  <View
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 20,
-                      borderCurve: "continuous",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      backgroundColor: themeColors.bg,
-                    }}
-                  >
-                    <SymbolView name={action.icon} size={35} tintColor={themeColors.accent} />
-                  </View>
-                  {/* <Text selectable style={{ fontSize: 10, color: themeColors.text }}>
-                    {action.label}
-                  </Text> */}
-                </Pressable>
-              </Link>
-            ))}
-          </View>
-        </View>
+        <MainPlayerActionsBar libraryItemId={currentLibraryItemId} />
       </View>
     </View>
   );

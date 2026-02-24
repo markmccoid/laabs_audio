@@ -35,6 +35,8 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
 
   const isDownloading = downloadProgress?.libraryItemId === libraryItemId;
   const progressPercent = isDownloading ? clampPercent(downloadProgress?.progress ?? 0) : 0;
+  const bookmarkCount = bookmarks.length;
+  const bookmarkBadgeLabel = bookmarkCount > 99 ? "99+" : String(bookmarkCount);
 
   const openBookshelves = () => {
     if (!libraryItemId) return;
@@ -113,8 +115,8 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
         disabled={!libraryItemId}
         accessibilityRole="button"
         accessibilityLabel={
-          bookmarks.length > 0
-            ? `Open bookmarks, ${bookmarks.length} available`
+          bookmarkCount > 0
+            ? `Open bookmarks, ${bookmarkCount} available`
             : "Open bookmarks"
         }
         style={({ pressed }) => ({
@@ -130,11 +132,44 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
           opacity: !libraryItemId ? 0.45 : pressed ? 0.82 : 1,
         })}
       >
-        <SymbolView
-          name="bookmark"
-          tintColor={bookmarks.length > 0 ? themeColors.accent : themeColors.text}
-          size={22}
-        />
+        <View style={{ position: "relative" }}>
+          <SymbolView
+            name="bookmark"
+            tintColor={bookmarkCount > 0 ? themeColors.accent : themeColors.text}
+            size={22}
+          />
+          {bookmarkCount > 0 ? (
+            <View
+              style={{
+                position: "absolute",
+                top: -6,
+                right: -12,
+                minWidth: 18,
+                height: 18,
+                borderRadius: 9,
+                borderCurve: "continuous",
+                paddingHorizontal: 4,
+                backgroundColor: themeColors.accent,
+                borderWidth: 1,
+                borderColor: themeColors.surface,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text
+                selectable
+                style={{
+                  color: themeColors.accentForeground,
+                  fontSize: 10,
+                  fontWeight: "700",
+                  fontVariant: ["tabular-nums"],
+                }}
+              >
+                {bookmarkBadgeLabel}
+              </Text>
+            </View>
+          ) : null}
+        </View>
       </Pressable>
 
       {isDownloading ? (

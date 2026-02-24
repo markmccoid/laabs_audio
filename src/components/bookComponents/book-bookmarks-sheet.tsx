@@ -64,7 +64,7 @@ export const BookBookmarksSheet = () => {
   const bookmarkNotesByUserBookTime = useDeviceBooksStore(
     (state) => state.bookmarkNotesByUserBookTime,
   );
-  const { addBookmark, setBookmarkLocalNote } = useDeviceBooksActions();
+  const { addBookmark, deleteBookmark, setBookmarkLocalNote } = useDeviceBooksActions();
   const { data: userServerState } = useGetUserServerState();
   const { libraryItemId: libraryItemIdParam } = useLocalSearchParams<{
     libraryItemId?: string | string[];
@@ -79,6 +79,7 @@ export const BookBookmarksSheet = () => {
   const [editingNote, setEditingNote] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [pendingDeleteTime, setPendingDeleteTime] = useState<number | null>(null);
 
   const bookmarks = useMemo(() => {
     const bookmarksByLibraryItemId =
@@ -303,6 +304,41 @@ export const BookBookmarksSheet = () => {
     }
   };
 
+  const handleDeleteBookmark = async (bookmark: Bookmark) => {
+    if (!libraryItemId || pendingDeleteTime !== null) return;
+
+    setPendingDeleteTime(bookmark.time);
+    try {
+      await deleteBookmark(libraryItemId, bookmark.time);
+      toast.success("Bookmark deleted");
+      if (editingBookmark?.time === bookmark.time) {
+        resetEditState();
+      }
+    } catch (error) {
+      console.warn("[BookBookmarksSheet] Failed to delete bookmark", error);
+      toast.error("Unable to delete bookmark");
+    } finally {
+      setPendingDeleteTime(null);
+    }
+  };
+
+  const openDeleteConfirm = (bookmark: Bookmark) => {
+    if (pendingDeleteTime !== null) return;
+    const timeLabel = getBookmarkTimeLabel(bookmark.time);
+    const title = getBookmarkDisplayTitle(bookmark);
+
+    Alert.alert("Delete bookmark?", `Delete "${title}" at ${timeLabel}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => {
+          void handleDeleteBookmark(bookmark);
+        },
+      },
+    ]);
+  };
+
   return (
     <>
       <View className="px-8 pt-8" collapsable={false}>
@@ -353,6 +389,8 @@ export const BookBookmarksSheet = () => {
           const title = getBookmarkDisplayTitle(bookmark);
           const hasLocalNote = Boolean(localNotesByBookmarkTime[String(bookmark.time)]?.length);
           const isPending = pendingBookmarkTime === bookmark.time;
+          const isDeleting = pendingDeleteTime === bookmark.time;
+          const isActionDisabled = isPending || isDeleting;
 
           return (
             <View style={{ flexDirection: "row", alignItems: "stretch", gap: 8 }}>
@@ -362,7 +400,7 @@ export const BookBookmarksSheet = () => {
                 onPress={() => {
                   void handleBookmarkPress(bookmark);
                 }}
-                disabled={isPending}
+                disabled={isActionDisabled}
                 style={({ pressed }) => ({
                   flex: 1,
                   borderRadius: 14,
@@ -375,7 +413,7 @@ export const BookBookmarksSheet = () => {
                   flexDirection: "row",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  opacity: pressed || isPending ? 0.8 : 1,
+                  opacity: pressed || isActionDisabled ? 0.8 : 1,
                 })}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
@@ -447,31 +485,53 @@ export const BookBookmarksSheet = () => {
                   </View>
                 </View>
                 <SymbolView
-                  name={isPending ? "hourglass" : "play.fill"}
+                  name={isPending || isDeleting ? "hourglass" : "play.fill"}
                   tintColor={themeColors.textMuted}
                   size={14}
                 />
               </Pressable>
 
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Edit bookmark at ${timeLabel}`}
-                onPress={() => openEditModal(bookmark)}
-                disabled={isPending}
-                style={({ pressed }) => ({
-                  width: 44,
-                  borderRadius: 14,
-                  borderCurve: "continuous",
-                  borderWidth: 1,
-                  borderColor: themeColors.border,
-                  backgroundColor: themeColors.surface,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  opacity: pressed || isPending ? 0.8 : 1,
-                })}
-              >
-                <SymbolView name="square.and.pencil" tintColor={themeColors.textMuted} size={16} />
-              </Pressable>
+              <View style={{ width: 44, gap: 8 }}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit bookmark at ${timeLabel}`}
+                  onPress={() => openEditModal(bookmark)}
+                  disabled={isActionDisabled}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    borderRadius: 10,
+                    borderCurve: "continuous",
+                    borderWidth: 1,
+                    borderColor: themeColors.border,
+                    backgroundColor: themeColors.surface,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: pressed || isActionDisabled ? 0.8 : 1,
+                  })}
+                >
+                  <SymbolView name="square.and.pencil" tintColor={themeColors.textMuted} size={15} />
+                </Pressable>
+
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete bookmark at ${timeLabel}`}
+                  onPress={() => openDeleteConfirm(bookmark)}
+                  disabled={isActionDisabled}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    borderRadius: 10,
+                    borderCurve: "continuous",
+                    borderWidth: 1,
+                    borderColor: themeColors.border,
+                    backgroundColor: themeColors.surface,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: pressed || isActionDisabled ? 0.8 : 1,
+                  })}
+                >
+                  <SymbolView name={isDeleting ? "hourglass" : "trash"} tintColor="#dc2626" size={15} />
+                </Pressable>
+              </View>
             </View>
           );
         }}
