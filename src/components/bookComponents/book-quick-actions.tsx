@@ -1,7 +1,10 @@
 import { selectIsBookFullyDownloaded, useDeviceBooksStore } from "@/store/device-books-store";
+import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { useThemeColors } from "@/theme/use-app-theme";
+import type { Bookmark } from "@/types/absTypes";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
+import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 
 type BookQuickActionsProps = {
@@ -13,10 +16,22 @@ const clampPercent = (value: number) => Math.max(0, Math.min(100, Math.round(val
 export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   const themeColors = useThemeColors();
   const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
+  const { data: userServerState } = useGetUserServerState();
   const isDownloaded = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
     return selectIsBookFullyDownloaded(state, libraryItemId);
   });
+  const bookmarks = useMemo(() => {
+    const bookmarksByLibraryItemId =
+      userServerState?.bookmarksByLibraryItemId ??
+      (
+        userServerState as typeof userServerState & {
+          bookmarksByBookId?: Record<string, Bookmark[]>;
+        }
+      )?.bookmarksByBookId ??
+      {};
+    return libraryItemId ? bookmarksByLibraryItemId[libraryItemId] ?? [] : [];
+  }, [libraryItemId, userServerState]);
 
   const isDownloading = downloadProgress?.libraryItemId === libraryItemId;
   const progressPercent = isDownloading ? clampPercent(downloadProgress?.progress ?? 0) : 0;
@@ -33,6 +48,14 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
     if (!libraryItemId) return;
     router.push({
       pathname: "/book-downloads",
+      params: { libraryItemId },
+    });
+  };
+
+  const openBookmarks = () => {
+    if (!libraryItemId) return;
+    router.push({
+      pathname: "/book-bookmarks",
       params: { libraryItemId },
     });
   };
@@ -82,6 +105,35 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
           name={isDownloaded ? "icloud.fill" : "icloud.and.arrow.down"}
           tintColor={isDownloaded ? themeColors.accent : themeColors.text}
           size={25}
+        />
+      </Pressable>
+
+      <Pressable
+        onPress={openBookmarks}
+        disabled={!libraryItemId}
+        accessibilityRole="button"
+        accessibilityLabel={
+          bookmarks.length > 0
+            ? `Open bookmarks, ${bookmarks.length} available`
+            : "Open bookmarks"
+        }
+        style={({ pressed }) => ({
+          width: 48,
+          height: 48,
+          borderRadius: 999,
+          borderCurve: "continuous",
+          borderWidth: 1,
+          borderColor: themeColors.border,
+          backgroundColor: themeColors.surface,
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: !libraryItemId ? 0.45 : pressed ? 0.82 : 1,
+        })}
+      >
+        <SymbolView
+          name="bookmark"
+          tintColor={bookmarks.length > 0 ? themeColors.accent : themeColors.text}
+          size={22}
         />
       </Pressable>
 

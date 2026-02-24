@@ -1,6 +1,7 @@
 import { playerService, usePlaybackStore } from "@/player";
 import { useAuthStore } from "@/auth/auth-store";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
+import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useEffect, useState } from "react";
@@ -53,9 +54,45 @@ const ControlButton = ({
   );
 };
 
+const resolveSeekBackwardIcon = (seconds: number): SFSymbol => {
+  switch (Math.round(seconds)) {
+    case 10:
+      return "gobackward.10";
+    case 15:
+      return "gobackward.15";
+    case 30:
+      return "gobackward.30";
+    case 45:
+      return "gobackward.45";
+    case 60:
+      return "gobackward.60";
+    default:
+      return "gobackward";
+  }
+};
+
+const resolveSeekForwardIcon = (seconds: number): SFSymbol => {
+  switch (Math.round(seconds)) {
+    case 10:
+      return "goforward.10";
+    case 15:
+      return "goforward.15";
+    case 30:
+      return "goforward.30";
+    case 45:
+      return "goforward.45";
+    case 60:
+      return "goforward.60";
+    default:
+      return "goforward";
+  }
+};
+
 const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
   const themeColors = useThemeColors();
   const isOnline = useAuthStore((state) => state.isOnline);
+  const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
+  const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
@@ -103,10 +140,8 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
     viewedBookState === "loaded-active";
   const canToggle = hasBookId && !isLoading && (isOnline !== false || isDownloaded);
 
-  const seekBackwardSeconds = 15;
-  const seekForwardSeconds = 30;
-  const seekBackwardIcon: SFSymbol = "gobackward.15";
-  const seekForwardIcon: SFSymbol = "goforward.30";
+  const seekBackwardIcon = resolveSeekBackwardIcon(seekBackwardSeconds);
+  const seekForwardIcon = resolveSeekForwardIcon(seekForwardSeconds);
   const previousChapterIcon: SFSymbol = "backward.end.fill";
   const nextChapterIcon: SFSymbol = "forward.end.fill";
 

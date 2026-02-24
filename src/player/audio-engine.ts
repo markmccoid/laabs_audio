@@ -7,6 +7,7 @@ import {
   type AudioProEvent,
   type AudioProTrack,
 } from "react-native-audio-pro";
+import { settingsStore } from "../store/settings-store";
 import type { PitchCorrectionQuality, PlaybackQueueItem, PlaybackSource } from "./types";
 
 type AudioHeaders = {
@@ -146,14 +147,18 @@ export const createAudioEngine = (): AudioEngine => {
   // Configure AudioPro once; options are applied on the next play() call.
   const configure = () => {
     if (configured) return;
+    // AudioPro exposes one skip interval for lock controls, so use the forward value as source.
+    const skipIntervalMs = Math.max(
+      1000,
+      Math.round(settingsStore.getState().seekForwardSeconds * 1000),
+    );
     AudioPro.configure({
       // Speech keeps pitch aligned for audiobook-style speed changes.
       contentType: AudioProContentType.SPEECH,
       progressIntervalMs: UPDATE_INTERVAL_MS,
       showNextPrevControls: false,
       showSkipControls: true,
-      //!! TODO -> dynamic changing of skipInterval
-      skipIntervalMs: 15000,
+      skipIntervalMs,
     });
     AudioPro.setProgressInterval(UPDATE_INTERVAL_MS);
     configured = true;

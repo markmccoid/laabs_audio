@@ -5,7 +5,7 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
-import { FlatList, ListRenderItem, Pressable, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const resolveParam = (value: string | string[] | undefined) =>
@@ -48,11 +48,12 @@ export const BookBookshelvesSheet = () => {
     addBookToCustomShelf(shelfId, libraryItemId, scopeOptions);
   };
 
-  const renderShelf: ListRenderItem<(typeof customShelves)[number]> = ({ item: shelf }) => {
+  const renderShelf = (shelf: (typeof customShelves)[number]) => {
     const isSelected = Boolean(libraryItemId && shelf.bookIds.includes(libraryItemId));
 
     return (
       <Pressable
+        key={shelf.id}
         onPress={() => toggleMembership(shelf.id, isSelected)}
         disabled={!canMutate}
         style={({ pressed }) => ({
@@ -91,87 +92,79 @@ export const BookBookshelvesSheet = () => {
     );
   };
 
-  return (
-    <View
-      style={{ flexDirection: "column", flex: 1, backgroundColor: themeColors.bg }}
-      className="pt-5"
-    >
-      <Stack.Screen options={{ title: "Bookshelves" }} />
+  const shelves = libraryItemId ? customShelves : [];
 
-      <FlatList
-        data={libraryItemId ? customShelves : []}
-        keyExtractor={(shelf) => shelf.id}
-        renderItem={renderShelf}
-        keyboardShouldPersistTaps="handled"
-        style={{ flex: 1 }}
-        contentContainerStyle={{
-          // flexGrow: 1,
-          paddingHorizontal: 16,
-          paddingTop: 12,
-          paddingBottom: Math.max(24, insets.bottom + 12),
-        }}
-        ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-        ListHeaderComponent={
-          <View style={{ marginBottom: 12, gap: 10 }}>
-            <View className="p-[14] gap-[8]">
-              <Text selectable style={{ color: themeColors.text, fontSize: 16, fontWeight: "700" }}>
-                Add to custom bookshelves
-              </Text>
-              <Text
-                selectable
-                style={{ color: themeColors.textMuted, fontSize: 13, lineHeight: 18 }}
-              >
-                Tap a shelf to add or remove this book.
-              </Text>
-              <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
-                Selected: {selectedShelfCount}
-              </Text>
-            </View>
-          </View>
-        }
-        ListEmptyComponent={
-          <View
-            style={{
-              borderRadius: 16,
+  return (
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      keyboardShouldPersistTaps="handled"
+      style={{ flex: 1, backgroundColor: themeColors.bg }}
+      contentContainerStyle={{
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: Math.max(24, insets.bottom + 12),
+      }}
+    >
+      <Stack.Screen options={{ headerTitle: "Add To Bookshelves" }} />
+
+      {/* <View style={{ marginBottom: 12, gap: 10 }}>
+        <View className="p-[14] gap-[8]">
+          <Text selectable style={{ color: themeColors.text, fontSize: 16, fontWeight: "700" }}>
+            Add to custom bookshelves
+          </Text>
+          <Text selectable style={{ color: themeColors.textMuted, fontSize: 13, lineHeight: 18 }}>
+            Tap a shelf to add or remove this book.
+          </Text>
+          <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
+            Selected: {selectedShelfCount}
+          </Text>
+        </View>
+      </View> */}
+
+      {shelves.length > 0 ? (
+        <View style={{ gap: 10 }}>{shelves.map((shelf) => renderShelf(shelf))}</View>
+      ) : (
+        <View
+          style={{
+            borderRadius: 16,
+            borderCurve: "continuous",
+            borderWidth: 1,
+            borderColor: themeColors.border,
+            backgroundColor: themeColors.surface,
+            padding: 14,
+            gap: 8,
+          }}
+        >
+          {!libraryItemId ? (
+            <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+              Book ID is missing. Close this sheet and open the book again.
+            </Text>
+          ) : (
+            <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+              No custom shelves yet. Use Settings to create your first shelf.
+            </Text>
+          )}
+          <Pressable
+            onPress={openBookshelfSettings}
+            accessibilityRole="button"
+            accessibilityLabel="Open bookshelf settings"
+            style={({ pressed }) => ({
+              borderRadius: 12,
               borderCurve: "continuous",
               borderWidth: 1,
-              borderColor: themeColors.border,
-              backgroundColor: themeColors.surface,
-              padding: 14,
-              gap: 8,
-            }}
+              borderColor: themeColors.accent,
+              backgroundColor: themeColors.accent,
+              paddingVertical: 10,
+              alignItems: "center",
+              opacity: pressed ? 0.82 : 1,
+            })}
           >
-            {!libraryItemId ? (
-              <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-                Book ID is missing. Close this sheet and open the book again.
-              </Text>
-            ) : (
-              <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-                No custom shelves yet. Use Settings to create your first shelf.
-              </Text>
-            )}
-            <Pressable
-              onPress={openBookshelfSettings}
-              accessibilityRole="button"
-              accessibilityLabel="Open bookshelf settings"
-              style={({ pressed }) => ({
-                borderRadius: 12,
-                borderCurve: "continuous",
-                borderWidth: 1,
-                borderColor: themeColors.accent,
-                backgroundColor: themeColors.accent,
-                paddingVertical: 10,
-                alignItems: "center",
-                opacity: pressed ? 0.82 : 1,
-              })}
-            >
-              <Text selectable style={{ color: "#ffffff", fontSize: 14, fontWeight: "700" }}>
-                Open Bookshelf Settings
-              </Text>
-            </Pressable>
-          </View>
-        }
-      />
-    </View>
+            <Text selectable style={{ color: "#ffffff", fontSize: 14, fontWeight: "700" }}>
+              Open Bookshelf Settings
+            </Text>
+          </Pressable>
+        </View>
+      )}
+    </ScrollView>
   );
 };

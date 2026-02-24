@@ -28,21 +28,23 @@ export const HomeShelfSection = ({
 
   return (
     <View style={{ gap: 12 }}>
-      <View
-        style={{
-          paddingHorizontal: 18,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 10,
-        }}
-      >
-        <Text
-          numberOfLines={1}
-          style={{ color: themeColors.text, fontSize: 20, fontWeight: "700", flex: 1 }}
-        >
-          {title}
-        </Text>
+      <View className="flex-row items-center justify-between px-[18] py-[1]">
+        <View className="pl-4 pr-10 rounded-xl overflow-hidden border-hairline border-accent border-t-0 border-l-0 border-r-0">
+          {/* <LinearGradient
+            colors={[`${themeColors.accent}77`, "rgba(255, 255, 255, 0)"]} // 2. Fading to transparent white
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            locations={[0.1, 1]}
+            style={StyleSheet.absoluteFill} // 3. This is the magic fix (top:0, left:0, right:0, bottom:0)
+          /> */}
+          <Text
+            numberOfLines={1}
+            style={{ color: themeColors.text, fontSize: 20, fontWeight: "700", flex: 1 }}
+          >
+            {title}
+          </Text>
+        </View>
+
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           {onRefresh ? (
             <Pressable
@@ -97,7 +99,11 @@ export const HomeShelfSection = ({
           horizontal
           keyExtractor={(book) => book.id}
           renderItem={({ item }) => <ShelfBookCard book={item} isOffline={isOffline} />}
-          contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 2 }}
+          contentContainerStyle={{
+            paddingHorizontal: 18,
+            paddingBottom: 2,
+            // backgroundColor: "#ffccaa",
+          }}
           ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
           showsHorizontalScrollIndicator={false}
         />

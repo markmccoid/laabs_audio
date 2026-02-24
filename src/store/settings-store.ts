@@ -7,6 +7,10 @@ import type { PitchCorrectionQuality } from "../player/types";
 export const DEFAULT_HOME_SHELF_ITEM_COUNT = 15;
 export const MIN_HOME_SHELF_ITEM_COUNT = 5;
 export const MAX_HOME_SHELF_ITEM_COUNT = 25;
+export const DEFAULT_SEEK_BACKWARD_SECONDS = 15;
+export const DEFAULT_SEEK_FORWARD_SECONDS = 30;
+export const MIN_SKIP_SECONDS = 5;
+export const MAX_SKIP_SECONDS = 120;
 
 export type HomeShelfSettings = {
   isVisible: boolean;
@@ -62,6 +66,9 @@ const dedupeShelfOrder = (ids: string[]) => {
 export const clampHomeShelfItemCount = (value: number) =>
   Math.max(MIN_HOME_SHELF_ITEM_COUNT, Math.min(MAX_HOME_SHELF_ITEM_COUNT, Math.round(value)));
 
+export const clampSkipSeconds = (value: number) =>
+  Math.max(MIN_SKIP_SECONDS, Math.min(MAX_SKIP_SECONDS, Math.round(value)));
+
 const resolveScopeSettings = (
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>,
   scopeKey: string,
@@ -70,12 +77,17 @@ const resolveScopeSettings = (
 export type SettingsState = {
   playbackRate: number;
   pitchCorrectionQuality: PitchCorrectionQuality;
+  seekBackwardSeconds: number;
+  seekForwardSeconds: number;
   defaultBookProgressTimeDisplay: BookProgressTimeDisplay;
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>;
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
   actions: {
     setPlaybackRate: (rate: number) => void;
     setPitchCorrectionQuality: (quality: PitchCorrectionQuality) => void;
+    setSeekBackwardSeconds: (seconds: number) => void;
+    setSeekForwardSeconds: (seconds: number) => void;
+    setSkipSeconds: (seconds: number) => void;
     setDefaultBookProgressTimeDisplay: (display: BookProgressTimeDisplay) => void;
     setHomeShelfVisibility: (scopeKey: string | null, shelfId: string, isVisible: boolean) => void;
     setHomeShelfItemCount: (scopeKey: string | null, shelfId: string, homeItemCount: number) => void;
@@ -93,6 +105,8 @@ export const settingsStore = createStore<SettingsState>()(
     (set) => ({
       playbackRate: 1,
       pitchCorrectionQuality: "medium",
+      seekBackwardSeconds: DEFAULT_SEEK_BACKWARD_SECONDS,
+      seekForwardSeconds: DEFAULT_SEEK_FORWARD_SECONDS,
       defaultBookProgressTimeDisplay: "elapsed",
       homeShelvesByScope: {},
       discoverShelfByScope: {},
@@ -100,6 +114,17 @@ export const settingsStore = createStore<SettingsState>()(
         setPlaybackRate: (playbackRate) => set({ playbackRate }),
         setPitchCorrectionQuality: (pitchCorrectionQuality) =>
           set({ pitchCorrectionQuality }),
+        setSeekBackwardSeconds: (seekBackwardSeconds) =>
+          set({ seekBackwardSeconds: clampSkipSeconds(seekBackwardSeconds) }),
+        setSeekForwardSeconds: (seekForwardSeconds) =>
+          set({ seekForwardSeconds: clampSkipSeconds(seekForwardSeconds) }),
+        setSkipSeconds: (seconds) => {
+          const clampedSeconds = clampSkipSeconds(seconds);
+          set({
+            seekBackwardSeconds: clampedSeconds,
+            seekForwardSeconds: clampedSeconds,
+          });
+        },
         setDefaultBookProgressTimeDisplay: (defaultBookProgressTimeDisplay) =>
           set({ defaultBookProgressTimeDisplay }),
         setHomeShelfVisibility: (scopeKey, shelfId, isVisible) => {
@@ -268,11 +293,13 @@ export const settingsStore = createStore<SettingsState>()(
       partialize: (state) => ({
         playbackRate: state.playbackRate,
         pitchCorrectionQuality: state.pitchCorrectionQuality,
+        seekBackwardSeconds: state.seekBackwardSeconds,
+        seekForwardSeconds: state.seekForwardSeconds,
         defaultBookProgressTimeDisplay: state.defaultBookProgressTimeDisplay,
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 4,
+      version: 5,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -280,28 +307,10 @@ export const settingsStore = createStore<SettingsState>()(
           return {
             playbackRate: 1,
             pitchCorrectionQuality: "medium",
+            seekBackwardSeconds: DEFAULT_SEEK_BACKWARD_SECONDS,
+            seekForwardSeconds: DEFAULT_SEEK_FORWARD_SECONDS,
             defaultBookProgressTimeDisplay: "elapsed",
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
-            discoverShelfByScope: {},
-          };
-        }
-
-        if (version < 2) {
-          return {
-            playbackRate: state.playbackRate ?? 1,
-            pitchCorrectionQuality: state.pitchCorrectionQuality ?? "medium",
-            defaultBookProgressTimeDisplay: "elapsed",
-            homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
-            discoverShelfByScope: {},
-          };
-        }
-
-        if (version < 3) {
-          return {
-            playbackRate: state.playbackRate ?? 1,
-            pitchCorrectionQuality: state.pitchCorrectionQuality ?? "medium",
-            defaultBookProgressTimeDisplay: "elapsed",
-            homeShelvesByScope: state.homeShelvesByScope ?? EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
           };
         }
@@ -309,9 +318,28 @@ export const settingsStore = createStore<SettingsState>()(
         return {
           playbackRate: state.playbackRate ?? 1,
           pitchCorrectionQuality: state.pitchCorrectionQuality ?? "medium",
-          defaultBookProgressTimeDisplay: state.defaultBookProgressTimeDisplay ?? "elapsed",
-          homeShelvesByScope: state.homeShelvesByScope ?? EMPTY_HOME_SHELVES_BY_SCOPE,
-          discoverShelfByScope: state.discoverShelfByScope ?? {},
+          seekBackwardSeconds:
+            version >= 5
+              ? clampSkipSeconds(
+                  state.seekBackwardSeconds ?? DEFAULT_SEEK_BACKWARD_SECONDS,
+                )
+              : DEFAULT_SEEK_BACKWARD_SECONDS,
+          seekForwardSeconds:
+            version >= 5
+              ? clampSkipSeconds(state.seekForwardSeconds ?? DEFAULT_SEEK_FORWARD_SECONDS)
+              : DEFAULT_SEEK_FORWARD_SECONDS,
+          defaultBookProgressTimeDisplay:
+            version >= 4
+              ? state.defaultBookProgressTimeDisplay ?? "elapsed"
+              : "elapsed",
+          homeShelvesByScope:
+            version >= 3
+              ? state.homeShelvesByScope ?? EMPTY_HOME_SHELVES_BY_SCOPE
+              : EMPTY_HOME_SHELVES_BY_SCOPE,
+          discoverShelfByScope:
+            version >= 4
+              ? state.discoverShelfByScope ?? {}
+              : {},
         };
       },
     }
