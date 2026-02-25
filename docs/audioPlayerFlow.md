@@ -104,12 +104,22 @@ Progress updates come from the audio engine **once per second** (configured in `
 - **Every 5 minutes** during playback
 - **On pause**
 - **On explicit seek**
+- **On app background/termination path** via queued snapshot in `useAuthBootstrap`
 
-Sync targets:
+Sync behavior:
 
-- Audiobookshelf session API (`sessionsApi.syncSession`)
-- Audiobookshelf media progress API (`meApi.updateProgress`) for downloaded/local sessions when authenticated and online
-- React Query user cache (`queryKeys.userServerState(...)`) via `setQueryData`
+1. If online + authenticated and playback is local (`sessionId === "local"`), sync with `meApi.updateProgress`.
+2. If online + authenticated and playback is streamed:
+   - If any pending progress exists in queue, sync with `meApi.updateProgress` (simplified mode while backlog exists).
+   - Otherwise sync with `sessionsApi.syncSession`.
+   - If session sync reports closed session, fallback to `meApi.updateProgress`.
+3. If offline/not authenticated, or any sync call throws, queue progress in `deviceBooksStore.pendingProgressByUser`.
+4. In all cases, user progress cache is updated locally via `queryClient.setQueryData(...)`.
+
+Reconnect behavior:
+
+- `useAuthBootstrap` flushes `syncPendingProgress()` first, then bookmark queues, once online + authenticated.
+- Queue entries are latest-only per `libraryItemId`.
 
 ## Store Fields Used by the UI
 

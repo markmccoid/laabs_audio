@@ -25,6 +25,7 @@ This document describes the authentication flow for Audiobookshelf in this app. 
 - `device-books-store.ts` persists device-only book data:
   - downloads + local cover URIs
   - per-user-book playback rates
+  - offline progress sync queue
   - offline bookmark create/delete queues
   - local bookmark notes
 
@@ -62,7 +63,11 @@ This document describes the authentication flow for Audiobookshelf in this app. 
 
 - Subscribes to `NetInfo` and updates `authStore.isOnline`.
 - Attempts `refreshSession()` when online and a refresh token exists.
-- Flushes pending bookmark queues from `device-books-store` when authenticated and online.
+- Captures a background progress snapshot through AppState when a book is loaded.
+- Flushes pending offline queues from `device-books-store` when authenticated and online:
+  1. pending progress sync
+  2. pending bookmark creates
+  3. pending bookmark deletes
 
 ## Authenticated API Call Flow
 
@@ -90,7 +95,7 @@ All API calls should go through `absClient`, which uses `authFetch`.
 3. If both refresh and re-login fail:
    - SecureStore tokens cleared
    - `loginRequired` set to `true`
-   - state transitions to `anonymous`
+   - state transitions to `anonymous` or `offlineOnly` (if offline content exists)
 
 ## Logout Flow
 

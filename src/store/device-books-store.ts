@@ -64,6 +64,13 @@ type PendingBookmarkDelete = {
   bookmarkTime: number;
 };
 
+export type PendingProgressSync = {
+  libraryItemId: string;
+  currentTime: number;
+  isFinished: boolean;
+  updatedAt: number;
+};
+
 export type HomeDerivedShelfId = "continueListening" | "recentlyAdded" | "discover" | "downloaded";
 
 export type HomeShelfVisibility = Record<HomeDerivedShelfId, boolean>;
@@ -99,6 +106,7 @@ type DeviceBooksPersistedState = {
   bookmarkNotesByUserBookTime: Record<string, string>;
   pendingBookmarkCreatesByUser: Record<string, Record<string, PendingBookmarkCreate>>;
   pendingBookmarkDeletesByUser: Record<string, Record<string, PendingBookmarkDelete>>;
+  pendingProgressByUser: Record<string, Record<string, PendingProgressSync>>;
   customShelvesByScope: Record<string, HomeCustomShelf[]>;
   homeShelfVisibilityByScope: Record<string, HomeShelfVisibility>;
 };
@@ -132,6 +140,17 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
       bookmarkTime: number,
       options?: { userKey?: string | null },
     ) => Promise<void>;
+    queueProgressSync: (
+      libraryItemId: string,
+      payload: { currentTime: number; isFinished: boolean; updatedAt?: number },
+      options?: { userKey?: string | null },
+    ) => void;
+    clearPendingProgressSync: (
+      libraryItemId: string,
+      options?: { userKey?: string | null },
+    ) => void;
+    hasPendingProgressSync: (options?: { userKey?: string | null }) => boolean;
+    syncPendingProgress: (options?: { userKey?: string | null }) => Promise<void>;
     syncPendingBookmarks: (options?: { userKey?: string | null }) => Promise<void>;
     syncPendingBookmarkDeletes: (options?: { userKey?: string | null }) => Promise<void>;
     createCustomShelf: (shelfName: string, options?: HomeShelfScopeOptions) => string | null;
@@ -195,6 +214,7 @@ const createDefaultPersistedState = (): DeviceBooksPersistedState => ({
   bookmarkNotesByUserBookTime: {},
   pendingBookmarkCreatesByUser: {},
   pendingBookmarkDeletesByUser: {},
+  pendingProgressByUser: {},
   customShelvesByScope: {},
   homeShelfVisibilityByScope: {},
 });
@@ -544,6 +564,114 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                     bookmarkTime,
                   },
                 },
+              },
+            };
+          });
+        },
+
+        queueProgressSync: (libraryItemId, payload, options) => {
+          const userKey = resolveUserKey(options?.userKey);
+          if (!userKey || !libraryItemId) return;
+
+          const currentTime = Math.max(0, Math.floor(payload.currentTime));
+          const isFinished = Boolean(payload.isFinished);
+          const updatedAt = payload.updatedAt ?? Date.now();
+
+          set((state) => {
+            const queueByItemId = state.pendingProgressByUser[userKey] ?? {};
+            const previous = queueByItemId[libraryItemId];
+            if (
+              previous &&
+              previous.currentTime === currentTime &&
+              previous.isFinished === isFinished &&
+              previous.updatedAt >= updatedAt
+            ) {
+              return state;
+            }
+            return {
+              ...state,
+              pendingProgressByUser: {
+                ...state.pendingProgressByUser,
+                [userKey]: {
+                  ...queueByItemId,
+                  [libraryItemId]: {
+                    libraryItemId,
+                    currentTime,
+                    isFinished,
+                    updatedAt,
+                  },
+                },
+              },
+            };
+          });
+        },
+
+        clearPendingProgressSync: (libraryItemId, options) => {
+          const userKey = resolveUserKey(options?.userKey);
+          if (!userKey || !libraryItemId) return;
+
+          set((state) => {
+            const queueByItemId = state.pendingProgressByUser[userKey] ?? {};
+            if (!queueByItemId[libraryItemId]) return state;
+            const { [libraryItemId]: _removed, ...remaining } = queueByItemId;
+            return {
+              ...state,
+              pendingProgressByUser: {
+                ...state.pendingProgressByUser,
+                [userKey]: remaining,
+              },
+            };
+          });
+        },
+
+        hasPendingProgressSync: (options) => {
+          const userKey = resolveUserKey(options?.userKey);
+          if (!userKey) return false;
+          return Object.keys(get().pendingProgressByUser[userKey] ?? {}).length > 0;
+        },
+
+        syncPendingProgress: async (options) => {
+          const authState = authStore.getState();
+          const online = authState.isOnline ?? true;
+          const authed = authState.status === "authenticated";
+          if (!online || !authed) return;
+
+          const userKey = resolveUserKey(options?.userKey);
+          if (!userKey) return;
+
+          const queuedProgressByItemId = get().pendingProgressByUser[userKey] ?? {};
+          const queuedEntries = Object.values(queuedProgressByItemId).sort(
+            (a, b) => a.updatedAt - b.updatedAt,
+          );
+          if (!queuedEntries.length) return;
+
+          const succeededLibraryItemIds: string[] = [];
+          for (const queuedProgress of queuedEntries) {
+            try {
+              await meApi.updateProgress(queuedProgress.libraryItemId, {
+                currentTime: queuedProgress.currentTime,
+                isFinished: queuedProgress.isFinished,
+              });
+              succeededLibraryItemIds.push(queuedProgress.libraryItemId);
+            } catch {
+              // Keep pending for retry
+            }
+          }
+
+          if (!succeededLibraryItemIds.length) return;
+
+          set((state) => {
+            const currentQueueByItemId = state.pendingProgressByUser[userKey] ?? {};
+            if (!Object.keys(currentQueueByItemId).length) return state;
+            const nextQueueByItemId = { ...currentQueueByItemId };
+            for (const libraryItemId of succeededLibraryItemIds) {
+              delete nextQueueByItemId[libraryItemId];
+            }
+            return {
+              ...state,
+              pendingProgressByUser: {
+                ...state.pendingProgressByUser,
+                [userKey]: nextQueueByItemId,
               },
             };
           });
@@ -1244,10 +1372,11 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         bookmarkNotesByUserBookTime: state.bookmarkNotesByUserBookTime,
         pendingBookmarkCreatesByUser: state.pendingBookmarkCreatesByUser,
         pendingBookmarkDeletesByUser: state.pendingBookmarkDeletesByUser,
+        pendingProgressByUser: state.pendingProgressByUser,
         customShelvesByScope: state.customShelvesByScope,
         homeShelfVisibilityByScope: state.homeShelfVisibilityByScope,
       }),
-      version: 3,
+      version: 4,
       migrate: (persistedState, version) => {
         const base = createDefaultPersistedState();
         const typedState =
@@ -1275,6 +1404,18 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             customShelvesByScope: typedState.customShelvesByScope ?? {},
             homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
             downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
+            pendingProgressByUser: typedState.pendingProgressByUser ?? {},
+          };
+        }
+
+        if (version < 4) {
+          return {
+            ...base,
+            ...typedState,
+            customShelvesByScope: typedState.customShelvesByScope ?? {},
+            homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
+            downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
+            pendingProgressByUser: typedState.pendingProgressByUser ?? {},
           };
         }
 

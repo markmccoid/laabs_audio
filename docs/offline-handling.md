@@ -47,9 +47,22 @@ This document describes how offline state is detected, how network requests beha
 ### Session refresh behavior
 
 - `useAuthBootstrap` attempts `refreshSession()` automatically when connectivity returns.
-- Bookmark sync queues are also flushed when online and authenticated.
+- Progress and bookmark sync queues are flushed when online and authenticated.
 - File:
   - `src/auth/use-auth-bootstrap.ts`
+
+### Offline progress queue behavior
+
+- Progress queue is persisted in `device-books-store` as `pendingProgressByUser`.
+- Queue is user-scoped and stores only the latest progress per `libraryItemId`.
+- Queue writes happen when:
+  - playback sync points cannot reach server (`interval`, `pause`, `seek`)
+  - app leaves active state and a book is loaded (AppState background snapshot)
+- Queue flush happens when `isOnline === true` and auth status is `authenticated`.
+- Flush order is:
+  1. progress queue
+  2. pending bookmark creates
+  3. pending bookmark deletes
 
 ## UX Rules
 
@@ -143,6 +156,9 @@ Files:
 8. Tap `Retry` while still offline and confirm no UI break (banner remains).
 9. Restore connectivity and tap `Retry`.
 10. Confirm banner disappears and muted/badged cards return to normal.
+11. Stream a book, go offline, and trigger pause/seek; confirm progress is queued instead of lost.
+12. Return online and confirm queued progress syncs to server.
+13. While a book is loaded, background the app and confirm a progress snapshot is queued.
 
 ## Notes For Future Changes
 

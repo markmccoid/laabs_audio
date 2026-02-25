@@ -10,7 +10,6 @@ import {
   deviceBooksStore,
   selectBookPlaybackRate,
   selectBookPlaybackRateIfStored,
-  selectIsBookDownloaded,
   type DownloadTrack,
 } from "../store/device-books-store";
 import { settingsStore } from "../store/settings-store";
@@ -934,23 +933,58 @@ class PlayerService {
     const timeListenedSeconds = msToSeconds(this.listenedMs);
     const isFinished =
       state.durationMs > 0 && state.positionMs >= state.durationMs - secondsToMs(3);
+    const queueProgressSync = () => {
+      deviceBooksStore.getState().actions.queueProgressSync(state.libraryItemId as string, {
+        currentTime: currentTimeSeconds,
+        isFinished,
+      });
+    };
+    const clearQueuedProgressSync = () => {
+      deviceBooksStore.getState().actions.clearPendingProgressSync(state.libraryItemId as string);
+    };
 
     try {
-      if (state.sessionId !== LOCAL_SESSION_ID) {
-        await sessionsApi.syncSession(state.sessionId, {
-          timeListened: timeListenedSeconds,
-          currentTime: currentTimeSeconds,
-          duration: durationSeconds || undefined,
-        });
-      } else if (
-        this.isDownloadedBook(state.libraryItemId) &&
-        authStore.getState().status === "authenticated" &&
-        authStore.getState().isOnline !== false
-      ) {
-        await meApi.updateProgress(state.libraryItemId, {
-          currentTime: currentTimeSeconds,
-          isFinished,
-        });
+      const authState = authStore.getState();
+      const online = authState.isOnline !== false;
+      const authenticated = authState.status === "authenticated";
+      const hasQueuedProgress = deviceBooksStore.getState().actions.hasPendingProgressSync();
+      let syncedToServer = false;
+
+      if (online && authenticated) {
+        const shouldUseProgressUpdateApi =
+          state.sessionId === LOCAL_SESSION_ID || hasQueuedProgress;
+
+        if (shouldUseProgressUpdateApi) {
+          await meApi.updateProgress(state.libraryItemId, {
+            currentTime: currentTimeSeconds,
+            isFinished,
+          });
+          syncedToServer = true;
+        } else {
+          const syncResult = await sessionsApi.syncSession(state.sessionId, {
+            timeListened: timeListenedSeconds,
+            currentTime: currentTimeSeconds,
+            duration: durationSeconds || undefined,
+          });
+          if (syncResult.success) {
+            syncedToServer = true;
+          } else {
+            // Session may have closed server-side. Persist progress via direct update.
+            await meApi.updateProgress(state.libraryItemId, {
+              currentTime: currentTimeSeconds,
+              isFinished,
+            });
+            syncedToServer = true;
+          }
+        }
+      }
+
+      if (syncedToServer) {
+        clearQueuedProgressSync();
+        this.lastSyncAt = Date.now();
+        playbackStore.getState().actions.setLastSyncAt(this.lastSyncAt);
+      } else {
+        queueProgressSync();
       }
 
       this.updateUserServerStateCache({
@@ -959,16 +993,23 @@ class PlayerService {
         durationSeconds,
         isFinished,
       });
-
-      this.lastSyncAt = Date.now();
-      playbackStore.getState().actions.setLastSyncAt(this.lastSyncAt);
-    } catch {
-      playbackStore.getState().actions.setError(`Sync failed (${reason})`);
+    } catch (error) {
+      queueProgressSync();
+      this.updateUserServerStateCache({
+        libraryItemId: state.libraryItemId,
+        currentTimeSeconds,
+        durationSeconds,
+        isFinished,
+      });
+      if (__DEV__) {
+        console.warn("[player-service] progress:queued-after-sync-error", {
+          reason,
+          libraryItemId: state.libraryItemId,
+          sessionId: state.sessionId,
+          error,
+        });
+      }
     }
-  }
-
-  private isDownloadedBook(libraryItemId: string) {
-    return selectIsBookDownloaded(deviceBooksStore.getState(), libraryItemId);
   }
 
   private touchUserServerStateCacheForPlayStart() {

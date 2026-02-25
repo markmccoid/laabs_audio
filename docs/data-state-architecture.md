@@ -27,6 +27,7 @@ This document defines where audiobook data lives after the data restructure.
 - Examples:
   - downloaded file URIs and download progress
   - custom local covers
+  - offline progress sync queue (`pendingProgressByUser`)
   - offline bookmark create/delete queue
   - local bookmark notes
   - per-user-book playback rate
@@ -83,9 +84,29 @@ UI components consume merged book objects and do not manage cross-store joins di
 Playback loop behavior:
 
 1. During playback, high-frequency ticks stay in `playbackStore`.
-2. On sync points (`interval`, `pause`, `seek`), `playerService` syncs ABS session state.
-3. `playerService` immediately mirrors progress into React Query using `queryClient.setQueryData(...)` for `["user", userKey, "serverState"]`.
-4. Persisted React Query cache is updated without requiring an extra fetch.
-5. `loadBook` uses cached progress for resume immediately, and now also reconciles server progress in background.
+2. On sync points (`interval`, `pause`, `seek`), `playerService` attempts server sync.
+3. If server sync cannot be completed, latest progress is written to `pendingProgressByUser` (one entry per `libraryItemId`).
+4. `playerService` still mirrors progress into React Query using `queryClient.setQueryData(...)` for `["user", userKey, "serverState"]`.
+5. Persisted React Query cache is updated without requiring an extra fetch.
+6. `loadBook` uses cached progress for resume immediately, and now also reconciles server progress in background.
 
 This keeps library UI and player progress aligned while minimizing duplicated state.
+
+## Offline Queue Lifecycle
+
+Progress queue flush conditions:
+
+1. User is authenticated.
+2. Device is online.
+
+Flush order (from `useAuthBootstrap`):
+
+1. `syncPendingProgress()`
+2. `syncPendingBookmarks()`
+3. `syncPendingBookmarkDeletes()`
+
+Queue invariants:
+
+- User-scoped by `userKey`
+- One latest progress record per `libraryItemId`
+- Successful sync removes the queued item; failed sync keeps it for retry
