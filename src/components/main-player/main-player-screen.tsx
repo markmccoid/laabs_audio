@@ -1,9 +1,11 @@
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
-import { usePlaybackStore } from "@/player";
+import { usePlaybackStore, useSleepTimerActions, useSleepTimerStatus } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import { Link } from "expo-router";
+import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
 import { StyleSheet, Text, View, useColorScheme, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -24,6 +26,8 @@ const MainPlayerScreen = () => {
   const hasLoadedBook = usePlaybackStore(
     (state) => Boolean(state.libraryItemId) && state.queue.length > 0,
   );
+  const sleepTimerStatus = useSleepTimerStatus();
+  const sleepTimeActions = useSleepTimerActions();
   const { data: bookData, isLoading } = useGetItemDetails(currentLibraryItemId);
 
   const metadata = bookData?.media?.metadata;
@@ -117,6 +121,50 @@ const MainPlayerScreen = () => {
             >
               by {authorName}
             </Text>
+            {sleepTimerStatus.isActive ? (
+              <Link href="">
+                <Link.Trigger>
+                  <View className="py-[10] self-start border-hairline border-accent mt-[6] px-[10] rounded-full bg-surface flex-row items-center gap-[6]">
+                    <SymbolView name="powersleep" size={15} tintColor={themeColors.accent} />
+                    <Text
+                      style={{
+                        height: "100%",
+                        fontSize: 13,
+                        fontWeight: "700",
+                        color: themeColors.text,
+                        fontVariant: ["tabular-nums"],
+                      }}
+                    >
+                      {sleepTimerStatus.title}
+                    </Text>
+                  </View>
+                </Link.Trigger>
+
+                <Link.Menu>
+                  <Link.MenuAction icon="stop.circle" onPress={() => sleepTimeActions.stopTimer()}>
+                    Stop Timer
+                  </Link.MenuAction>
+                  <Link.MenuAction
+                    icon="gauge.with.dots.needle.bottom.50percent.badge.plus"
+                    onPress={() => sleepTimeActions.adjustMinutesBy(5)}
+                  >
+                    5
+                  </Link.MenuAction>
+                  <Link.MenuAction
+                    icon="gauge.with.dots.needle.bottom.50percent.badge.plus"
+                    onPress={() => sleepTimeActions.adjustMinutesBy(10)}
+                  >
+                    10
+                  </Link.MenuAction>
+                  <Link.MenuAction
+                    icon="gauge.with.dots.needle.bottom.50percent.badge.plus"
+                    onPress={() => sleepTimeActions.adjustMinutesBy(15)}
+                  >
+                    15
+                  </Link.MenuAction>
+                </Link.Menu>
+              </Link>
+            ) : null}
             {isLoading ? (
               <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
                 Loading details...

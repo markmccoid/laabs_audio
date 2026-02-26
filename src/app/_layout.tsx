@@ -14,6 +14,7 @@ import { LibrarySelectionGate } from "../components/library-selection-gate";
 import { OfflineConnectionBanner } from "../components/offline-connection-banner";
 import "../global.css";
 import { playerService } from "../player/player-service";
+import { SleepTimerCoordinator } from "../player/sleep-timer-coordinator";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { mmkvQueryPersister } from "../store/mmkv-query-persister";
@@ -165,6 +166,7 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1, backgroundColor: themeColors.bg }}>
           <LibrarySelectionGate />
           <OfflineConnectionBanner />
+          <SleepTimerCoordinator />
           <View style={{ flex: 1 }}>
             <Stack
               screenOptions={{

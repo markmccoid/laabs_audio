@@ -1,3 +1,4 @@
+import { useSleepTimerStatus } from "@/player";
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Bookmark } from "@/types/absTypes";
@@ -16,6 +17,7 @@ type ActionIconButtonProps = {
   disabled?: boolean;
   onPress: () => void;
   badgeCount?: number;
+  isActive?: boolean;
 };
 
 const ActionIconButton = ({
@@ -24,6 +26,7 @@ const ActionIconButton = ({
   disabled = false,
   onPress,
   badgeCount,
+  isActive = false,
 }: ActionIconButtonProps) => {
   const themeColors = useThemeColors();
   const showBadge = typeof badgeCount === "number" && badgeCount > 0;
@@ -52,10 +55,14 @@ const ActionIconButton = ({
             borderCurve: "continuous",
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: themeColors.bg,
+            backgroundColor: isActive ? themeColors.accent : themeColors.bg,
           }}
         >
-          <SymbolView name={icon} size={35} tintColor={themeColors.accent} />
+          <SymbolView
+            name={icon}
+            size={35}
+            tintColor={isActive ? themeColors.accentForeground : themeColors.accent}
+          />
         </View>
         {showBadge ? (
           <View
@@ -99,6 +106,7 @@ const ActionIconButton = ({
 const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
   const themeColors = useThemeColors();
   const { data: userServerState } = useGetUserServerState();
+  const sleepTimerStatus = useSleepTimerStatus();
 
   const bookmarkCount = useMemo(() => {
     if (!libraryItemId) return 0;
@@ -168,7 +176,12 @@ const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
           onPress={openAddBookmark}
           disabled={!libraryItemId}
         />
-        <ActionIconButton icon="powersleep" label="Sleep timer" onPress={openSleepTimer} />
+        <ActionIconButton
+          icon="powersleep"
+          label={sleepTimerStatus.isActive ? "Sleep timer active" : "Sleep timer"}
+          onPress={openSleepTimer}
+          isActive={sleepTimerStatus.isActive}
+        />
       </View>
     </View>
   );
