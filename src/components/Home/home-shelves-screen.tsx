@@ -18,7 +18,7 @@ const HomeShelvesScreen = () => {
   const isOnline = useAuthStore((state) => state.isOnline);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
-  const { visibleShelves, refreshDiscover } = useHomeShelves();
+  const { visibleShelves, progressByBookId, refreshDiscover } = useHomeShelves();
 
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
@@ -106,6 +106,7 @@ const HomeShelvesScreen = () => {
             key={shelf.id}
             title={shelf.title}
             books={shelf.books}
+            progressByBookId={progressByBookId}
             isOffline={isOnline === false}
             emptyMessage={shelf.emptyMessage}
             shelfHref={{

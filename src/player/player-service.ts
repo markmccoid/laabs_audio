@@ -28,6 +28,7 @@ const CHAPTER_RESTART_THRESHOLD_MS = 3000;
 const MIN_PLAYBACK_RATE = 0.25;
 const MAX_PLAYBACK_RATE = 2.0;
 const LOCAL_SESSION_ID = "local";
+const PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS = 5;
 
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
@@ -49,6 +50,18 @@ const toQueueLogEntry = (track: PlaybackQueueItem, index: number) => ({
   startOffsetMs: track.startOffsetMs,
   durationMs: track.durationMs,
 });
+
+const pickNewestProgress = <
+  T extends { libraryItemId?: string; mediaItemId?: string; lastUpdate?: number },
+>(
+  entries: T[],
+) =>
+  entries.reduce<T | null>((latest, current) => {
+    if (!latest) return current;
+    const latestUpdate = Math.max(0, Math.floor(latest.lastUpdate ?? 0));
+    const currentUpdate = Math.max(0, Math.floor(current.lastUpdate ?? 0));
+    return currentUpdate >= latestUpdate ? current : latest;
+  }, null);
 
 // Orchestrates playback between the UI, store, and audio engine.
 class PlayerService {
@@ -341,9 +354,21 @@ class PlayerService {
       )?.progressByBookId ??
       {};
 
-    const cachedUserProgress = candidateIds
+    const directCachedUserProgress = candidateIds
       .map((candidateId) => progressByLibraryItemId[candidateId])
       .find((progress) => typeof progress?.currentTime === "number");
+    const fallbackCachedUserProgress = pickNewestProgress(
+      Object.values(progressByLibraryItemId).filter((progress) => {
+        if (!progress || typeof progress.currentTime !== "number") return false;
+        const libraryItemId = progress.libraryItemId;
+        const mediaItemId = progress.mediaItemId;
+        return (
+          (typeof libraryItemId === "string" && candidateIds.includes(libraryItemId)) ||
+          (typeof mediaItemId === "string" && candidateIds.includes(mediaItemId))
+        );
+      }),
+    );
+    const cachedUserProgress = directCachedUserProgress ?? fallbackCachedUserProgress;
     const localBookProgressMs =
       typeof cachedUserProgress?.currentTime === "number"
         ? secondsToMs(cachedUserProgress.currentTime)
@@ -1016,19 +1041,63 @@ class PlayerService {
     const state = playbackStore.getState();
     if (!state.libraryItemId) return;
 
+    const cachedProgress = this.getCachedProgressForLibraryItem(state.libraryItemId);
     const currentTimeSeconds = msToSeconds(state.positionMs);
     const durationSeconds = msToSeconds(state.durationMs);
     const isFinished =
       state.durationMs > 0 && state.positionMs >= state.durationMs - secondsToMs(3);
+    const previousCurrentTimeSeconds = Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0));
+    const shouldPreventTransientRegression =
+      Boolean(cachedProgress) &&
+      !cachedProgress?.isFinished &&
+      previousCurrentTimeSeconds >
+        currentTimeSeconds + PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS;
+    const promotedCurrentTimeSeconds = shouldPreventTransientRegression
+      ? previousCurrentTimeSeconds
+      : currentTimeSeconds;
+    const promotedDurationSeconds = Math.max(
+      durationSeconds,
+      Math.max(0, Math.floor(cachedProgress?.duration ?? 0)),
+    );
+    const promotedIsFinished = shouldPreventTransientRegression
+      ? Boolean(cachedProgress?.isFinished)
+      : isFinished;
 
     // Promote the currently playing title in local cache immediately; server sync still
     // happens on interval/pause/seek.
     this.updateUserServerStateCache({
       libraryItemId: state.libraryItemId,
-      currentTimeSeconds,
-      durationSeconds,
-      isFinished,
+      currentTimeSeconds: promotedCurrentTimeSeconds,
+      durationSeconds: promotedDurationSeconds,
+      isFinished: promotedIsFinished,
     });
+  }
+
+  private getCachedProgressForLibraryItem(libraryItemId: string) {
+    const activeLibraryUserKey = authStore.getState().activeLibraryUserKey;
+    if (!activeLibraryUserKey) return null;
+
+    const cachedUserServerState = queryClient.getQueryData<UserServerState>(
+      queryKeys.userServerState(activeLibraryUserKey),
+    );
+    const progressByLibraryItemId =
+      cachedUserServerState?.progressByLibraryItemId ??
+      // Compatibility for older persisted query shape.
+      (
+        cachedUserServerState as UserServerState & {
+          progressByBookId?: UserServerState["progressByLibraryItemId"];
+        }
+      )?.progressByBookId ??
+      {};
+
+    const directMatch = progressByLibraryItemId[libraryItemId];
+    if (directMatch) return directMatch;
+
+    return pickNewestProgress(
+      Object.values(progressByLibraryItemId).filter(
+        (progress) => progress?.libraryItemId === libraryItemId,
+      ),
+    );
   }
 
   private reconcileBookProgressFromServer(libraryItemId: string) {
@@ -1036,10 +1105,34 @@ class PlayerService {
       .getProgress(libraryItemId)
       .then((serverProgress) => {
         if (typeof serverProgress.currentTime !== "number") return;
+        const resolvedLibraryItemId = serverProgress.libraryItemId || libraryItemId;
+        const cachedProgress = this.getCachedProgressForLibraryItem(resolvedLibraryItemId);
+        const cachedCurrentTimeSeconds = Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0));
+        const serverCurrentTimeSeconds = Math.max(0, Math.floor(serverProgress.currentTime));
+        const serverLastUpdate = Math.max(0, Math.floor(serverProgress.lastUpdate ?? 0));
+        const cachedLastUpdate = Math.max(0, Math.floor(cachedProgress?.lastUpdate ?? 0));
+        const serverSnapshotIsOlder =
+          cachedLastUpdate > 0 && serverLastUpdate > 0 && serverLastUpdate < cachedLastUpdate;
+        const serverWouldRegressProgress =
+          cachedCurrentTimeSeconds >
+          serverCurrentTimeSeconds + PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS;
+        const serverFreshnessUnknown = serverLastUpdate <= 0;
+        const shouldIgnoreStaleServerSnapshot =
+          !serverProgress.isFinished &&
+          serverWouldRegressProgress &&
+          (serverSnapshotIsOlder || serverFreshnessUnknown);
+
+        if (shouldIgnoreStaleServerSnapshot) {
+          return;
+        }
+
         this.updateUserServerStateCache({
-          libraryItemId: serverProgress.libraryItemId || libraryItemId,
-          currentTimeSeconds: serverProgress.currentTime,
-          durationSeconds: serverProgress.duration ?? 0,
+          libraryItemId: resolvedLibraryItemId,
+          currentTimeSeconds: serverCurrentTimeSeconds,
+          durationSeconds: Math.max(
+            Math.max(0, Math.floor(serverProgress.duration ?? 0)),
+            Math.max(0, Math.floor(cachedProgress?.duration ?? 0)),
+          ),
           isFinished: Boolean(serverProgress.isFinished),
         });
       })

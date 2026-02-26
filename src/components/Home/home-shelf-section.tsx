@@ -1,4 +1,5 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
+import type { UserBookProgress } from "@/api/me-api";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Href } from "expo-router";
 import { Link } from "expo-router";
@@ -9,6 +10,7 @@ import { ShelfBookCard } from "./shelf-book-card";
 type HomeShelfSectionProps = {
   title: string;
   books: LibraryItemSummary[];
+  progressByBookId: Record<string, UserBookProgress>;
   isOffline: boolean;
   emptyMessage: string;
   shelfHref: Href;
@@ -18,6 +20,7 @@ type HomeShelfSectionProps = {
 export const HomeShelfSection = ({
   title,
   books,
+  progressByBookId,
   isOffline,
   emptyMessage,
   shelfHref,
@@ -98,7 +101,13 @@ export const HomeShelfSection = ({
           data={books}
           horizontal
           keyExtractor={(book) => book.id}
-          renderItem={({ item }) => <ShelfBookCard book={item} isOffline={isOffline} />}
+          renderItem={({ item }) => (
+            <ShelfBookCard
+              book={item}
+              progress={progressByBookId[item.id]}
+              isOffline={isOffline}
+            />
+          )}
           contentContainerStyle={{
             paddingHorizontal: 18,
             paddingBottom: 2,

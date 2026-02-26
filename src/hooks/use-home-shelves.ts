@@ -392,6 +392,7 @@ export const useHomeShelves = () => {
     shelves: orderedShelves,
     visibleShelves,
     customShelves,
+    progressByBookId,
     refreshDiscover,
   };
 };
