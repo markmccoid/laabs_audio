@@ -27,6 +27,8 @@ type Result = {
 };
 
 const MINUTE_MS = 60_000;
+const RESUME_POSITION_TOLERANCE_SECONDS = 5;
+const LIVE_PROGRESS_HANDOFF_DELAY_MS = 1500;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
@@ -45,6 +47,10 @@ export const useBookProgressDisplay = ({
   playbackState,
 }: Params): Result => {
   const [liveProgressSeconds, setLiveProgressSeconds] = useState<number | null>(null);
+  const persistedProgressSeconds = useMemo(
+    () => Math.max(0, matchedProgress?.currentTime ?? fallbackProgress?.currentTime ?? 0),
+    [fallbackProgress?.currentTime, matchedProgress?.currentTime],
+  );
 
   useEffect(() => {
     setLiveProgressSeconds(null);
@@ -59,15 +65,31 @@ export const useBookProgressDisplay = ({
     const updateFromPlaybackStore = () => {
       const state = playbackStore.getState();
       if (state.libraryItemId !== libraryItemId || state.playbackState !== "playing") return;
-      setLiveProgressSeconds(msToSeconds(state.positionMs));
+      const candidateProgressSeconds = msToSeconds(state.positionMs);
+      const expectedMinimumProgressSeconds =
+        persistedProgressSeconds > RESUME_POSITION_TOLERANCE_SECONDS
+          ? persistedProgressSeconds - RESUME_POSITION_TOLERANCE_SECONDS
+          : 0;
+      const canTrustLiveProgress =
+        persistedProgressSeconds <= RESUME_POSITION_TOLERANCE_SECONDS ||
+        candidateProgressSeconds >= expectedMinimumProgressSeconds;
+
+      if (canTrustLiveProgress) {
+        setLiveProgressSeconds(candidateProgressSeconds);
+      }
     };
 
-    // Override persisted progress immediately for an actively playing viewed book.
+    // Prefer live playback position for active playback, but keep persisted progress
+    // until the engine catches up to a believable resumed position.
     updateFromPlaybackStore();
 
+    const handoffTimeoutId = setTimeout(updateFromPlaybackStore, LIVE_PROGRESS_HANDOFF_DELAY_MS);
     const intervalId = setInterval(updateFromPlaybackStore, MINUTE_MS);
-    return () => clearInterval(intervalId);
-  }, [libraryItemId, isViewedBookActive, playbackState]);
+    return () => {
+      clearTimeout(handoffTimeoutId);
+      clearInterval(intervalId);
+    };
+  }, [libraryItemId, isViewedBookActive, playbackState, persistedProgressSeconds]);
 
   return useMemo(() => {
     const serverDurationSeconds = Math.max(
@@ -76,10 +98,6 @@ export const useBookProgressDisplay = ({
     );
     const resolvedDurationSeconds = Math.max(Math.max(0, durationSeconds), serverDurationSeconds);
 
-    const persistedProgressSeconds = Math.max(
-      0,
-      matchedProgress?.currentTime ?? fallbackProgress?.currentTime ?? 0,
-    );
     const rawProgressSeconds = liveProgressSeconds ?? persistedProgressSeconds;
 
     const progressSeconds =
@@ -104,6 +122,13 @@ export const useBookProgressDisplay = ({
       isFinished,
       isInProgress,
     };
-  }, [durationSeconds, fallbackProgress, liveProgressSeconds, matchedProgress]);
+  }, [
+    durationSeconds,
+    fallbackProgress?.duration,
+    fallbackProgress?.isFinished,
+    liveProgressSeconds,
+    matchedProgress?.duration,
+    matchedProgress?.isFinished,
+    persistedProgressSeconds,
+  ]);
 };
-
