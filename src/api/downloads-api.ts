@@ -1,4 +1,4 @@
-import * as FileSystem from "expo-file-system";
+import { Directory, File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { Alert } from "react-native";
 import { authService } from "../auth/auth-service";
@@ -42,41 +42,47 @@ export const downloadsApi = {
   },
 
   async downloadEbook(itemId: string, fileIno: string, filenameWithExt: string) {
-    let tempFileUri: string | null = null;
+    let tempFile: File | null = null;
     const { url, authHeader } = await downloadsApi.getDownloadSpec(itemId, fileIno);
 
     try {
-      if (!FileSystem.cacheDirectory) {
+      // 1. Check for cache directory using the new Paths API
+      if (!Paths.cache) {
         throw new Error("Cache directory not available on this platform");
       }
-      const tempDir = `${FileSystem.cacheDirectory}temp_downloads/`;
-      await FileSystem.makeDirectoryAsync(tempDir, { intermediates: true });
-      tempFileUri = `${tempDir}${filenameWithExt}`;
 
-      const downloadResult = await FileSystem.downloadAsync(url, tempFileUri, {
-        headers: authHeader,
+      // 2. Create the temporary directory using the new Directory class
+      const tempDir = new Directory(Paths.cache, "temp_downloads");
+      // 'idempotent: true' prevents an error from being thrown if the directory already exists
+      tempDir.create({ intermediates: true, idempotent: true });
+
+      // 3. Define the temporary file destination
+      tempFile = new File(tempDir, filenameWithExt);
+
+      // 4. Download the file using the modern downloadFileAsync method
+      const output = await File.downloadFileAsync(url, tempFile, {
+        headers: authHeader as Record<string, string>,
       });
 
-      if (downloadResult.status === 200) {
+      // The new API returns the downloaded File object rather than a status payload
+      if (output.exists) {
         const isAvailable = await Sharing.isAvailableAsync();
         if (isAvailable) {
-          await Sharing.shareAsync(downloadResult.uri);
+          await Sharing.shareAsync(output.uri);
         } else {
           Alert.alert("Download Complete", "File downloaded successfully");
         }
       } else {
-        throw new Error(`Download failed with status: ${downloadResult.status}`);
+        throw new Error("Download failed: File could not be retrieved.");
       }
     } catch (error) {
       console.error("Download error:", error);
       Alert.alert("Download Failed", "Unable to download the file. Please try again.");
     } finally {
-      if (tempFileUri) {
+      // 5. Clean up the temporary file synchronously using the new object methods
+      if (tempFile && tempFile.exists) {
         try {
-          const fileInfo = await FileSystem.getInfoAsync(tempFileUri);
-          if (fileInfo.exists) {
-            await FileSystem.deleteAsync(tempFileUri);
-          }
+          tempFile.delete();
         } catch (cleanupError) {
           console.warn("Failed to clean up temporary file:", cleanupError);
         }
