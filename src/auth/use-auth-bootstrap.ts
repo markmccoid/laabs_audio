@@ -9,6 +9,8 @@ import {
 } from "../store/device-books-store";
 import { playbackStore } from "../player/playback-store";
 
+const MIN_BACKGROUND_PROGRESS_SECONDS_TO_QUEUE = 1;
+
 export const useAuthBootstrap = () => {
   const status = useAuthStore((state) => state.status);
   const isOnline = useAuthStore((state) => state.isOnline);
@@ -27,6 +29,7 @@ export const useAuthBootstrap = () => {
     syncPendingProgress,
     syncPendingBookmarks,
     syncPendingBookmarkDeletes,
+    syncPendingPlaylistOps,
   } = useDeviceBooksActions();
   const {
     hydrateFromStorage,
@@ -67,10 +70,14 @@ export const useAuthBootstrap = () => {
       const playbackState = playbackStore.getState();
       if (!playbackState.libraryItemId) return;
       if (!playbackState.queue.length) return;
+      const isPlayableState =
+        playbackState.playbackState === "playing" || playbackState.playbackState === "paused";
+      if (!isPlayableState) return;
 
       const currentTime = Math.max(0, Math.floor(playbackState.positionMs / 1000));
       const isFinished =
         playbackState.durationMs > 0 && playbackState.positionMs >= playbackState.durationMs - 3000;
+      if (currentTime < MIN_BACKGROUND_PROGRESS_SECONDS_TO_QUEUE && !isFinished) return;
 
       queueProgressSync(playbackState.libraryItemId, {
         currentTime,
@@ -88,6 +95,7 @@ export const useAuthBootstrap = () => {
       await syncPendingProgress().catch(() => undefined);
       await syncPendingBookmarks().catch(() => undefined);
       await syncPendingBookmarkDeletes().catch(() => undefined);
+      await syncPendingPlaylistOps().catch(() => undefined);
     };
     syncPending().catch(() => undefined);
   }, [
@@ -95,6 +103,7 @@ export const useAuthBootstrap = () => {
     status,
     syncPendingBookmarkDeletes,
     syncPendingBookmarks,
+    syncPendingPlaylistOps,
     syncPendingProgress,
   ]);
 

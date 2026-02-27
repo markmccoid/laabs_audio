@@ -29,6 +29,7 @@ const MIN_PLAYBACK_RATE = 0.25;
 const MAX_PLAYBACK_RATE = 2.0;
 const LOCAL_SESSION_ID = "local";
 const PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS = 5;
+const INITIAL_INTERVAL_SYNC_GUARD_WINDOW_SECONDS = 20;
 
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
@@ -304,17 +305,56 @@ class PlayerService {
   }
 
   private resolveStoredBookRate(rateCandidateIds: string[]) {
+    return this.resolveStoredBookRateIfAvailable(rateCandidateIds) ?? DEFAULT_BOOK_PLAYBACK_RATE;
+  }
+
+  private resolveStoredBookRateIfAvailable(rateCandidateIds: string[]) {
     if (!rateCandidateIds.length) {
-      return DEFAULT_BOOK_PLAYBACK_RATE;
+      return null;
     }
     const deviceBooksState = deviceBooksStore.getState();
+    const storedRate = rateCandidateIds
+      .map((candidateId) => selectBookPlaybackRateIfStored(deviceBooksState, candidateId))
+      .find((rate): rate is number => rate !== null);
+    if (typeof storedRate === "number") {
+      return clampPlaybackRate(storedRate);
+    }
+    const fallbackRate = selectBookPlaybackRate(deviceBooksState, rateCandidateIds[0]);
+    return typeof fallbackRate === "number" ? clampPlaybackRate(fallbackRate) : null;
+  }
+
+  private resolvePreferredRateForState(state: PlaybackStoreState) {
+    const rateCandidateIds = this.buildCandidateIds(state.libraryItemId);
     return (
-      rateCandidateIds
-        .map((candidateId) => selectBookPlaybackRateIfStored(deviceBooksState, candidateId))
-        .find((rate) => rate !== null) ??
-      selectBookPlaybackRate(deviceBooksState, rateCandidateIds[0]) ??
-      DEFAULT_BOOK_PLAYBACK_RATE
+      this.resolveStoredBookRateIfAvailable(rateCandidateIds) ??
+      clampPlaybackRate(state.rate ?? DEFAULT_BOOK_PLAYBACK_RATE)
     );
+  }
+
+  private async reconcilePlaybackRate(reason: "play" | "status-transition") {
+    const state = playbackStore.getState();
+    if (!state.queue.length) return;
+
+    const preferredRate = this.resolvePreferredRateForState(state);
+    if (Math.abs(state.rate - preferredRate) > 0.0001) {
+      playbackStore.getState().actions.setRate(preferredRate);
+      if (state.libraryItemId) {
+        deviceBooksStore.getState().actions.setBookPlaybackRate(state.libraryItemId, preferredRate);
+      }
+    }
+
+    try {
+      await this.engine.setRate(preferredRate, settingsStore.getState().pitchCorrectionQuality);
+    } catch (error) {
+      if (__DEV__) {
+        console.warn("[player-service] rate:reconcile-failed", {
+          reason,
+          libraryItemId: state.libraryItemId,
+          preferredRate,
+          error,
+        });
+      }
+    }
   }
 
   private async getCachedUserServerState(options?: { fetchIfMissing?: boolean }) {
@@ -565,15 +605,14 @@ class PlayerService {
         await this.engine.waitForPlaying({ timeoutMs: 15000 });
       }
 
-      // Ensure speed is reapplied after native playback starts.
-      await this.engine.setRate(
-        playbackStore.getState().rate,
-        settingsStore.getState().pitchCorrectionQuality,
-      );
+      // Ensure preferred per-book speed is applied after native playback starts.
+      await this.reconcilePlaybackRate("play");
 
       this.logSnapshot("after play");
       playbackStore.getState().actions.setPlaybackState("playing");
       playbackStore.getState().actions.setError(null);
+      // Arm interval sync from play start so we do not flush transient 0s immediately.
+      this.lastSyncAttemptAt = Date.now();
       this.touchUserServerStateCacheForPlayStart();
       this.logPlaybackResult("started");
     } catch (error) {
@@ -892,6 +931,9 @@ class PlayerService {
     // Keep store playbackState aligned with engine state.
     if (status.isPlaying && state.playbackState !== "playing") {
       updates.playbackState = "playing";
+      // Playback can resume from system controls/background without going through play().
+      // Reconcile and reapply persisted speed on this transition.
+      void this.reconcilePlaybackRate("status-transition");
     } else if (!status.isPlaying && state.playbackState === "playing") {
       updates.playbackState = "paused";
     }
@@ -946,6 +988,39 @@ class PlayerService {
     await this.loadTrack(nextIndex, { initialPositionMs: 0, autoPlay: true });
   }
 
+  private resolveProgressForSync(payload: {
+    libraryItemId: string;
+    currentTimeSeconds: number;
+    durationSeconds: number;
+    timeListenedSeconds: number;
+    isFinished: boolean;
+    reason: "interval" | "pause" | "seek";
+  }) {
+    const cachedProgress = this.getCachedProgressForLibraryItem(payload.libraryItemId);
+    const previousCurrentTimeSeconds = Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0));
+    const shouldPreventTransientRegression =
+      payload.reason === "interval" &&
+      payload.timeListenedSeconds <= INITIAL_INTERVAL_SYNC_GUARD_WINDOW_SECONDS &&
+      !payload.isFinished &&
+      Boolean(cachedProgress) &&
+      previousCurrentTimeSeconds >
+        payload.currentTimeSeconds + PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS;
+
+    return {
+      currentTimeSeconds: shouldPreventTransientRegression
+        ? previousCurrentTimeSeconds
+        : payload.currentTimeSeconds,
+      durationSeconds: Math.max(
+        payload.durationSeconds,
+        Math.max(0, Math.floor(cachedProgress?.duration ?? 0)),
+      ),
+      isFinished: shouldPreventTransientRegression
+        ? Boolean(cachedProgress?.isFinished)
+        : payload.isFinished,
+      preventedRegression: shouldPreventTransientRegression,
+    };
+  }
+
   private async syncProgress(reason: "interval" | "pause" | "seek") {
     const state = playbackStore.getState();
     if (!state.libraryItemId || !state.sessionId) return;
@@ -958,10 +1033,29 @@ class PlayerService {
     const timeListenedSeconds = msToSeconds(this.listenedMs);
     const isFinished =
       state.durationMs > 0 && state.positionMs >= state.durationMs - secondsToMs(3);
+    const promotedProgress = this.resolveProgressForSync({
+      libraryItemId: state.libraryItemId,
+      currentTimeSeconds,
+      durationSeconds,
+      timeListenedSeconds,
+      isFinished,
+      reason,
+    });
+
+    if (promotedProgress.preventedRegression && __DEV__) {
+      console.warn("[player-service] progress:prevented-transient-regression", {
+        reason,
+        libraryItemId: state.libraryItemId,
+        currentTimeSeconds,
+        promotedCurrentTimeSeconds: promotedProgress.currentTimeSeconds,
+        timeListenedSeconds,
+      });
+    }
+
     const queueProgressSync = () => {
       deviceBooksStore.getState().actions.queueProgressSync(state.libraryItemId as string, {
-        currentTime: currentTimeSeconds,
-        isFinished,
+        currentTime: promotedProgress.currentTimeSeconds,
+        isFinished: promotedProgress.isFinished,
       });
     };
     const clearQueuedProgressSync = () => {
@@ -981,14 +1075,14 @@ class PlayerService {
 
         if (shouldUseProgressUpdateApi) {
           await meApi.updateProgress(state.libraryItemId, {
-            currentTime: currentTimeSeconds,
-            isFinished,
+            currentTime: promotedProgress.currentTimeSeconds,
+            isFinished: promotedProgress.isFinished,
           });
           syncedToServer = true;
         } else {
           const syncResult = await sessionsApi.syncSession(state.sessionId, {
             timeListened: timeListenedSeconds,
-            currentTime: currentTimeSeconds,
+            currentTime: promotedProgress.currentTimeSeconds,
             duration: durationSeconds || undefined,
           });
           if (syncResult.success) {
@@ -996,8 +1090,8 @@ class PlayerService {
           } else {
             // Session may have closed server-side. Persist progress via direct update.
             await meApi.updateProgress(state.libraryItemId, {
-              currentTime: currentTimeSeconds,
-              isFinished,
+              currentTime: promotedProgress.currentTimeSeconds,
+              isFinished: promotedProgress.isFinished,
             });
             syncedToServer = true;
           }
@@ -1014,17 +1108,17 @@ class PlayerService {
 
       this.updateUserServerStateCache({
         libraryItemId: state.libraryItemId,
-        currentTimeSeconds,
-        durationSeconds,
-        isFinished,
+        currentTimeSeconds: promotedProgress.currentTimeSeconds,
+        durationSeconds: promotedProgress.durationSeconds,
+        isFinished: promotedProgress.isFinished,
       });
     } catch (error) {
       queueProgressSync();
       this.updateUserServerStateCache({
         libraryItemId: state.libraryItemId,
-        currentTimeSeconds,
-        durationSeconds,
-        isFinished,
+        currentTimeSeconds: promotedProgress.currentTimeSeconds,
+        durationSeconds: promotedProgress.durationSeconds,
+        isFinished: promotedProgress.isFinished,
       });
       if (__DEV__) {
         console.warn("[player-service] progress:queued-after-sync-error", {

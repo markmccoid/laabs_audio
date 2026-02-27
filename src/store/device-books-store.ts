@@ -1,11 +1,13 @@
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { AbsApiError, AbsOfflineError } from "../api/abs-client";
 import type { LibraryItemSummary } from "../api/library-items-api";
 import { buildCoverUrls } from "../api/cover-urls";
 import { downloadsApi } from "../api/downloads-api";
 import { itemsApi, type ItemDetails } from "../api/items-api";
-import { meApi, type UserServerState } from "../api/me-api";
+import { meApi, type UserBookProgress, type UserServerState } from "../api/me-api";
+import { playlistsApi, type PlaylistSummary } from "../api/playlists-api";
 import { authStore } from "../auth/auth-store";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
@@ -21,6 +23,8 @@ import {
 export const DEFAULT_BOOK_PLAYBACK_RATE = 1;
 const MIN_BOOK_PLAYBACK_RATE = 0.25;
 const MAX_BOOK_PLAYBACK_RATE = 2.0;
+const ZERO_PROGRESS_REGRESSION_GUARD_SECONDS = 5;
+const GLOBAL_PLAYBACK_RATE_KEY = "__global__";
 
 const clampBookPlaybackRate = (value: number) =>
   Math.max(MIN_BOOK_PLAYBACK_RATE, Math.min(MAX_BOOK_PLAYBACK_RATE, value));
@@ -83,6 +87,43 @@ export type HomeCustomShelf = {
   updatedAt: number;
 };
 
+export type PlaylistShelfSyncState = "synced" | "pending" | "missing" | "unsynced";
+
+export type HomePlaylistShelf = {
+  id: string;
+  absPlaylistId: string;
+  libraryId: string;
+  name: string;
+  description: string | null;
+  bookIds: string[];
+  createdAt: number;
+  updatedAt: number;
+  serverUpdatedAt: number | null;
+  syncState: PlaylistShelfSyncState;
+  missingOnServerAt: number | null;
+  lastServerSyncAt: number | null;
+};
+
+export type PlaylistOperationType = "rename" | "addItems" | "removeItems" | "setItems" | "delete";
+
+export type PendingPlaylistOp = {
+  id: string;
+  type: PlaylistOperationType;
+  scopeKey: string;
+  userKey: string;
+  libraryId: string;
+  shelfId: string;
+  absPlaylistId: string;
+  payload: {
+    name?: string;
+    libraryItemIds?: string[];
+  };
+  createdAt: number;
+  attemptCount: number;
+  lastError: string | null;
+  permanentFailure: boolean;
+};
+
 export const DEFAULT_HOME_SHELF_VISIBILITY: HomeShelfVisibility = {
   continueListening: true,
   recentlyAdded: true,
@@ -91,6 +132,8 @@ export const DEFAULT_HOME_SHELF_VISIBILITY: HomeShelfVisibility = {
 };
 
 const EMPTY_HOME_CUSTOM_SHELVES: HomeCustomShelf[] = [];
+const EMPTY_HOME_PLAYLIST_SHELVES: HomePlaylistShelf[] = [];
+const EMPTY_SUPPRESSED_PLAYLIST_IDS: string[] = [];
 
 type HomeShelfScopeOptions = {
   userKey?: string | null;
@@ -108,6 +151,9 @@ type DeviceBooksPersistedState = {
   pendingBookmarkDeletesByUser: Record<string, Record<string, PendingBookmarkDelete>>;
   pendingProgressByUser: Record<string, Record<string, PendingProgressSync>>;
   customShelvesByScope: Record<string, HomeCustomShelf[]>;
+  playlistShelvesByScope: Record<string, HomePlaylistShelf[]>;
+  suppressedPlaylistIdsByScope: Record<string, string[]>;
+  pendingPlaylistOpsByUser: Record<string, PendingPlaylistOp[]>;
   homeShelfVisibilityByScope: Record<string, HomeShelfVisibility>;
 };
 
@@ -176,6 +222,49 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
       orderedBookIds: string[],
       options?: HomeShelfScopeOptions,
     ) => void;
+    upsertPlaylistsFromServer: (
+      playlists: PlaylistSummary[],
+      options?: HomeShelfScopeOptions,
+    ) => void;
+    markMissingPlaylists: (
+      existingPlaylistIds: string[],
+      options?: HomeShelfScopeOptions,
+    ) => void;
+    suppressPlaylistShelf: (shelfId: string, options?: HomeShelfScopeOptions) => void;
+    restoreSuppressedPlaylist: (shelfId: string, options?: HomeShelfScopeOptions) => void;
+    createPlaylistShelf: (
+      payload: { name: string; description?: string | null },
+      options?: HomeShelfScopeOptions,
+    ) => Promise<string | null>;
+    renamePlaylistShelfOptimistic: (
+      shelfId: string,
+      shelfName: string,
+      options?: HomeShelfScopeOptions,
+    ) => Promise<void>;
+    addBooksToPlaylistShelfOptimistic: (
+      shelfId: string,
+      libraryItemIds: string[],
+      options?: HomeShelfScopeOptions,
+    ) => Promise<void>;
+    removeBooksFromPlaylistShelfOptimistic: (
+      shelfId: string,
+      libraryItemIds: string[],
+      options?: HomeShelfScopeOptions,
+    ) => Promise<void>;
+    reorderPlaylistShelfBooksOptimistic: (
+      shelfId: string,
+      orderedBookIds: string[],
+      options?: HomeShelfScopeOptions,
+    ) => Promise<void>;
+    deletePlaylistShelfFromServer: (
+      shelfId: string,
+      options?: HomeShelfScopeOptions,
+    ) => Promise<void>;
+    deletePlaylistShelfLocal: (shelfId: string, options?: HomeShelfScopeOptions) => void;
+    enqueuePlaylistOp: (
+      op: Omit<PendingPlaylistOp, "id" | "createdAt" | "attemptCount" | "lastError" | "permanentFailure">,
+    ) => void;
+    syncPendingPlaylistOps: (options?: { userKey?: string | null }) => Promise<void>;
     reorderDownloadedShelfBooks: (
       orderedBookIds: string[],
       options?: HomeShelfScopeOptions,
@@ -216,6 +305,9 @@ const createDefaultPersistedState = (): DeviceBooksPersistedState => ({
   pendingBookmarkDeletesByUser: {},
   pendingProgressByUser: {},
   customShelvesByScope: {},
+  playlistShelvesByScope: {},
+  suppressedPlaylistIdsByScope: {},
+  pendingPlaylistOpsByUser: {},
   homeShelfVisibilityByScope: {},
 });
 
@@ -232,6 +324,10 @@ const resolveLibraryId = (override?: string | null) => override ?? authStore.get
 const normalizeShelfName = (value: string) => value.trim();
 
 const createShelfId = () => `shelf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+const createPlaylistShelfId = (absPlaylistId: string) => `playlist:${absPlaylistId}`;
+const parseAbsPlaylistId = (shelfId: string) =>
+  shelfId.startsWith("playlist:") ? shelfId.slice("playlist:".length) : null;
+const createPlaylistOpId = () => `playlist_op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 const buildHomeScopeKey = (userKey: string | null, libraryId: string | null) => {
   if (!userKey || !libraryId) return null;
@@ -244,6 +340,13 @@ const resolveHomeScopeKey = (options?: HomeShelfScopeOptions) => {
   const userKey = resolveUserKey(options?.userKey);
   const libraryId = resolveLibraryId(options?.libraryId);
   return buildHomeScopeKey(userKey, libraryId);
+};
+
+const resolveScopeContext = (options?: HomeShelfScopeOptions) => {
+  const userKey = resolveUserKey(options?.userKey);
+  const libraryId = resolveLibraryId(options?.libraryId);
+  const scopeKey = buildHomeScopeKey(userKey, libraryId);
+  return { userKey, libraryId, scopeKey };
 };
 
 const getShelfVisibility = (
@@ -272,6 +375,12 @@ const reorderByIds = <T extends { id: string }>(items: T[], orderedIds: string[]
   return reordered;
 };
 
+const dedupeIds = (ids: string[]) =>
+  reorderByIds(
+    ids.map((id) => ({ id })),
+    ids,
+  ).map((value) => value.id);
+
 const toUserBookKey = (userKey: string, libraryItemId: string) => `${userKey}::${libraryItemId}`;
 
 const toUserBookmarkKey = (userKey: string, libraryItemId: string, bookmarkTime: number | string) =>
@@ -280,11 +389,81 @@ const toUserBookmarkKey = (userKey: string, libraryItemId: string, bookmarkTime:
 const toPendingBookmarkId = (libraryItemId: string, bookmarkTime: number | string) =>
   `${libraryItemId}::${bookmarkTime}`;
 
+const findPlaybackRateKeyByLibraryItemId = (
+  playbackRatesByUserBook: Record<string, number>,
+  libraryItemId: string,
+) => {
+  const suffix = `::${libraryItemId}`;
+  const matchingKeys = Object.keys(playbackRatesByUserBook).filter((key) => key.endsWith(suffix));
+  if (!matchingKeys.length) return null;
+  if (matchingKeys.length === 1) return matchingKeys[0];
+
+  const matchingRates = matchingKeys.map((key) => playbackRatesByUserBook[key]);
+  const uniqueRates = new Set(matchingRates.map((rate) => Number(rate.toFixed(2))));
+  if (uniqueRates.size === 1) {
+    return matchingKeys[matchingKeys.length - 1];
+  }
+  return null;
+};
+
+const findStoredPlaybackRateForLibraryItem = (
+  playbackRatesByUserBook: Record<string, number>,
+  libraryItemId: string,
+  userKey?: string | null,
+) => {
+  const resolvedUserKey = resolveUserKey(userKey);
+  if (resolvedUserKey) {
+    const exactKey = toUserBookKey(resolvedUserKey, libraryItemId);
+    const exactRate = playbackRatesByUserBook[exactKey];
+    if (typeof exactRate === "number") return clampBookPlaybackRate(exactRate);
+  }
+
+  const fallbackKey = findPlaybackRateKeyByLibraryItemId(playbackRatesByUserBook, libraryItemId);
+  if (fallbackKey) {
+    const fallbackRate = playbackRatesByUserBook[fallbackKey];
+    if (typeof fallbackRate === "number") return clampBookPlaybackRate(fallbackRate);
+  }
+
+  return null;
+};
+
 const buildEmptyUserServerState = (userKey: string): UserServerState => ({
   userId: userKey,
   progressByLibraryItemId: {},
   bookmarksByLibraryItemId: {},
 });
+
+const getCachedProgressForLibraryItem = (
+  userKey: string,
+  libraryItemId: string,
+): UserBookProgress | null => {
+  const cachedUserServerState = queryClient.getQueryData<UserServerState>(
+    queryKeys.userServerState(userKey),
+  );
+  const progressByLibraryItemId =
+    cachedUserServerState?.progressByLibraryItemId ??
+    // Compatibility for older persisted query shape.
+    (
+      cachedUserServerState as UserServerState & {
+        progressByBookId?: Record<string, UserBookProgress>;
+      }
+    )?.progressByBookId ??
+    {};
+
+  const directMatch = progressByLibraryItemId[libraryItemId];
+  if (directMatch) return directMatch;
+
+  return Object.values(progressByLibraryItemId).reduce<UserBookProgress | null>(
+    (latest, current) => {
+      if (!current || current.libraryItemId !== libraryItemId) return latest;
+      if (!latest) return current;
+      const latestUpdate = Math.max(0, Math.floor(latest.lastUpdate ?? 0));
+      const currentUpdate = Math.max(0, Math.floor(current.lastUpdate ?? 0));
+      return currentUpdate >= latestUpdate ? current : latest;
+    },
+    null,
+  );
+};
 
 const ensureUserServerStateIsPersisted = (userKey: string) => {
   queryClient.setQueryDefaults(queryKeys.userServerState(userKey), {
@@ -343,6 +522,71 @@ const removeBookmarkFromUserServerStateCache = (
   );
 };
 
+const ensureLibraryPlaylistsPersisted = (userKey: string, libraryId: string) => {
+  queryClient.setQueryDefaults(queryKeys.libraryPlaylists(userKey, libraryId), {
+    meta: { persist: true },
+  });
+};
+
+const upsertPlaylistsInLibraryCache = (
+  userKey: string,
+  libraryId: string,
+  playlists: PlaylistSummary[],
+) => {
+  if (!playlists.length) return;
+  ensureLibraryPlaylistsPersisted(userKey, libraryId);
+  queryClient.setQueryData<PlaylistSummary[]>(
+    queryKeys.libraryPlaylists(userKey, libraryId),
+    (previous) => {
+      const current = previous ?? [];
+      const next = [...current];
+      let didChange = false;
+
+      playlists.forEach((playlist) => {
+        if (!playlist.id) return;
+        const normalized: PlaylistSummary = {
+          ...playlist,
+          libraryId: playlist.libraryId || libraryId,
+        };
+        const index = next.findIndex((entry) => entry.id === normalized.id);
+        if (index === -1) {
+          next.push(normalized);
+          didChange = true;
+          return;
+        }
+        next[index] = normalized;
+        didChange = true;
+      });
+
+      return didChange ? next : previous;
+    },
+  );
+};
+
+const removePlaylistFromLibraryCache = (
+  userKey: string,
+  libraryId: string,
+  absPlaylistId: string,
+) => {
+  ensureLibraryPlaylistsPersisted(userKey, libraryId);
+  queryClient.setQueryData<PlaylistSummary[]>(
+    queryKeys.libraryPlaylists(userKey, libraryId),
+    (previous) => {
+      if (!previous?.length) return previous;
+      const next = previous.filter((playlist) => playlist.id !== absPlaylistId);
+      return next.length === previous.length ? previous : next;
+    },
+  );
+};
+
+const isTransientPlaylistError = (error: unknown) => {
+  if (error instanceof AbsOfflineError) return true;
+  if (!(error instanceof AbsApiError)) return true;
+  if (typeof error.status !== "number") return true;
+  if (error.status === 408 || error.status === 429) return true;
+  return error.status >= 500;
+};
+
 // Root directory for all offline downloads
 const DOWNLOAD_ROOT = getDocumentDirectory()
   ? `${getDocumentDirectory()}laabs-downloads/`
@@ -392,9 +636,17 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
       actions: {
         setBookPlaybackRate: (libraryItemId, playbackRate, options) => {
           const userKey = resolveUserKey(options?.userKey);
-          if (!userKey || !libraryItemId) return;
+          if (!libraryItemId) return;
           const normalizedRate = clampBookPlaybackRate(playbackRate);
-          const key = toUserBookKey(userKey, libraryItemId);
+          const key = (() => {
+            if (userKey) return toUserBookKey(userKey, libraryItemId);
+            const existingKey = findPlaybackRateKeyByLibraryItemId(
+              get().playbackRatesByUserBook,
+              libraryItemId,
+            );
+            if (existingKey) return existingKey;
+            return toUserBookKey(GLOBAL_PLAYBACK_RATE_KEY, libraryItemId);
+          })();
           set((state) => ({
             ...state,
             playbackRatesByUserBook: {
@@ -580,6 +832,15 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           set((state) => {
             const queueByItemId = state.pendingProgressByUser[userKey] ?? {};
             const previous = queueByItemId[libraryItemId];
+            const shouldKeepQueuedProgressFloor =
+              Boolean(previous) &&
+              !isFinished &&
+              currentTime <= 0 &&
+              !previous.isFinished &&
+              previous.currentTime > ZERO_PROGRESS_REGRESSION_GUARD_SECONDS;
+            if (shouldKeepQueuedProgressFloor) {
+              return state;
+            }
             if (
               previous &&
               previous.currentTime === currentTime &&
@@ -645,26 +906,68 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           );
           if (!queuedEntries.length) return;
 
-          const succeededLibraryItemIds: string[] = [];
+          const resolvedLibraryItemIds: string[] = [];
           for (const queuedProgress of queuedEntries) {
             try {
+              let knownCurrentTimeSeconds = Math.max(
+                0,
+                Math.floor(
+                  getCachedProgressForLibraryItem(userKey, queuedProgress.libraryItemId)
+                    ?.currentTime ?? 0,
+                ),
+              );
+
+              if (
+                !queuedProgress.isFinished &&
+                queuedProgress.currentTime <= 0 &&
+                knownCurrentTimeSeconds <= ZERO_PROGRESS_REGRESSION_GUARD_SECONDS
+              ) {
+                try {
+                  const serverProgress = await meApi.getProgress(queuedProgress.libraryItemId);
+                  if (typeof serverProgress.currentTime === "number") {
+                    knownCurrentTimeSeconds = Math.max(
+                      knownCurrentTimeSeconds,
+                      Math.max(0, Math.floor(serverProgress.currentTime)),
+                    );
+                  }
+                } catch {
+                  // Fall back to cached state only.
+                }
+              }
+
+              const shouldSkipStaleZeroProgress =
+                !queuedProgress.isFinished &&
+                queuedProgress.currentTime <= 0 &&
+                knownCurrentTimeSeconds > ZERO_PROGRESS_REGRESSION_GUARD_SECONDS;
+              if (shouldSkipStaleZeroProgress) {
+                if (__DEV__) {
+                  console.warn("[device-books-store] progress:skip-stale-zero-sync", {
+                    libraryItemId: queuedProgress.libraryItemId,
+                    queuedCurrentTime: queuedProgress.currentTime,
+                    knownCurrentTimeSeconds,
+                  });
+                }
+                resolvedLibraryItemIds.push(queuedProgress.libraryItemId);
+                continue;
+              }
+
               await meApi.updateProgress(queuedProgress.libraryItemId, {
                 currentTime: queuedProgress.currentTime,
                 isFinished: queuedProgress.isFinished,
               });
-              succeededLibraryItemIds.push(queuedProgress.libraryItemId);
+              resolvedLibraryItemIds.push(queuedProgress.libraryItemId);
             } catch {
               // Keep pending for retry
             }
           }
 
-          if (!succeededLibraryItemIds.length) return;
+          if (!resolvedLibraryItemIds.length) return;
 
           set((state) => {
             const currentQueueByItemId = state.pendingProgressByUser[userKey] ?? {};
             if (!Object.keys(currentQueueByItemId).length) return state;
             const nextQueueByItemId = { ...currentQueueByItemId };
-            for (const libraryItemId of succeededLibraryItemIds) {
+            for (const libraryItemId of resolvedLibraryItemIds) {
               delete nextQueueByItemId[libraryItemId];
             }
             return {
@@ -965,6 +1268,820 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               },
             };
           });
+        },
+
+        upsertPlaylistsFromServer: (playlists, options) => {
+          const { scopeKey, libraryId, userKey } = resolveScopeContext(options);
+          if (!scopeKey || !libraryId) return;
+
+          const now = Date.now();
+          set((state) => {
+            const currentShelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+            const currentById = new Map(currentShelves.map((shelf) => [shelf.id, shelf]));
+            const pendingOps = userKey ? state.pendingPlaylistOpsByUser[userKey] ?? [] : [];
+
+            playlists.forEach((playlist) => {
+              if (!playlist.id) return;
+              const shelfId = createPlaylistShelfId(playlist.id);
+              const previous = currentById.get(shelfId);
+              const hasQueuedOps = pendingOps.some(
+                (op) => op.shelfId === shelfId && !op.permanentFailure,
+              );
+              const preserveLocal = hasQueuedOps || previous?.syncState === "unsynced";
+              const nextSyncState: PlaylistShelfSyncState =
+                previous?.syncState === "unsynced"
+                  ? "unsynced"
+                  : hasQueuedOps
+                    ? "pending"
+                    : "synced";
+              const incomingIds = dedupeIds(
+                playlist.items.map((item) => item.libraryItemId).filter((id) => Boolean(id)),
+              );
+
+              currentById.set(shelfId, {
+                id: shelfId,
+                absPlaylistId: playlist.id,
+                libraryId,
+                name: preserveLocal && previous ? previous.name : playlist.name,
+                description:
+                  preserveLocal && previous ? previous.description : (playlist.description ?? null),
+                bookIds: preserveLocal && previous ? previous.bookIds : incomingIds,
+                createdAt: previous?.createdAt ?? playlist.createdAt ?? now,
+                updatedAt: now,
+                serverUpdatedAt: playlist.updatedAt,
+                syncState: nextSyncState,
+                missingOnServerAt: null,
+                lastServerSyncAt: now,
+              });
+            });
+
+            const ordered: HomePlaylistShelf[] = [];
+            currentShelves.forEach((shelf) => {
+              const nextShelf = currentById.get(shelf.id);
+              if (!nextShelf) return;
+              ordered.push(nextShelf);
+              currentById.delete(shelf.id);
+            });
+            if (currentById.size > 0) {
+              ordered.push(...currentById.values());
+            }
+
+            if (!ordered.length && !currentShelves.length) return state;
+
+            return {
+              ...state,
+              playlistShelvesByScope: {
+                ...state.playlistShelvesByScope,
+                [scopeKey]: ordered,
+              },
+            };
+          });
+        },
+
+        markMissingPlaylists: (existingPlaylistIds, options) => {
+          const { scopeKey } = resolveScopeContext(options);
+          if (!scopeKey) return;
+
+          const existingSet = new Set(existingPlaylistIds.map((id) => createPlaylistShelfId(id)));
+          const now = Date.now();
+
+          set((state) => {
+            const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+            if (!shelves.length) return state;
+
+            let didChange = false;
+            const nextShelves = shelves.map((shelf) => {
+              const shouldBeMissing = !existingSet.has(shelf.id);
+              if (!shouldBeMissing) {
+                if (shelf.syncState === "missing") {
+                  didChange = true;
+                  return {
+                    ...shelf,
+                    syncState: "synced" as const,
+                    missingOnServerAt: null,
+                    lastServerSyncAt: now,
+                  };
+                }
+                if (shelf.lastServerSyncAt === now) return shelf;
+                didChange = true;
+                return {
+                  ...shelf,
+                  lastServerSyncAt: now,
+                };
+              }
+
+              if (shelf.syncState === "missing") return shelf;
+              didChange = true;
+              return {
+                ...shelf,
+                syncState: "missing" as const,
+                missingOnServerAt: shelf.missingOnServerAt ?? now,
+                lastServerSyncAt: now,
+              };
+            });
+
+            if (!didChange) return state;
+
+            return {
+              ...state,
+              playlistShelvesByScope: {
+                ...state.playlistShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+            };
+          });
+        },
+
+        suppressPlaylistShelf: (shelfId, options) => {
+          const { scopeKey } = resolveScopeContext(options);
+          if (!scopeKey || !shelfId) return;
+
+          set((state) => {
+            const currentSuppressed = state.suppressedPlaylistIdsByScope[scopeKey] ?? [];
+            if (currentSuppressed.includes(shelfId)) return state;
+            return {
+              ...state,
+              suppressedPlaylistIdsByScope: {
+                ...state.suppressedPlaylistIdsByScope,
+                [scopeKey]: [...currentSuppressed, shelfId],
+              },
+            };
+          });
+        },
+
+        restoreSuppressedPlaylist: (shelfId, options) => {
+          const { scopeKey } = resolveScopeContext(options);
+          if (!scopeKey || !shelfId) return;
+
+          set((state) => {
+            const currentSuppressed = state.suppressedPlaylistIdsByScope[scopeKey] ?? [];
+            if (!currentSuppressed.includes(shelfId)) return state;
+            return {
+              ...state,
+              suppressedPlaylistIdsByScope: {
+                ...state.suppressedPlaylistIdsByScope,
+                [scopeKey]: currentSuppressed.filter((id) => id !== shelfId),
+              },
+            };
+          });
+        },
+
+        createPlaylistShelf: async (payload, options) => {
+          const { scopeKey, libraryId, userKey } = resolveScopeContext(options);
+          const nextName = normalizeShelfName(payload.name);
+          if (!scopeKey || !libraryId || !nextName) return null;
+
+          const authState = authStore.getState();
+          const online = authState.isOnline ?? true;
+          const authed = authState.status === "authenticated";
+          if (!online || !authed) return null;
+
+          try {
+            const created = await playlistsApi.createPlaylist({
+              libraryId,
+              name: nextName,
+              description: payload.description ?? null,
+              items: [],
+            });
+            if (!created?.id) return null;
+            if (userKey) {
+              upsertPlaylistsInLibraryCache(userKey, libraryId, [created]);
+            }
+            get().actions.upsertPlaylistsFromServer([created], options);
+            return createPlaylistShelfId(created.id);
+          } catch {
+            return null;
+          }
+        },
+
+        renamePlaylistShelfOptimistic: async (shelfId, shelfName, options) => {
+          const { scopeKey, userKey, libraryId } = resolveScopeContext(options);
+          const nextName = normalizeShelfName(shelfName);
+          if (!scopeKey || !userKey || !libraryId || !shelfId || !nextName) return;
+          const absPlaylistId = parseAbsPlaylistId(shelfId);
+          if (!absPlaylistId) return;
+
+          set((state) => {
+            const currentShelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+            let didChange = false;
+            const nextShelves = currentShelves.map((shelf) => {
+              if (shelf.id !== shelfId) return shelf;
+              if (shelf.name === nextName && shelf.syncState === "pending") return shelf;
+              didChange = true;
+              return {
+                ...shelf,
+                name: nextName,
+                updatedAt: Date.now(),
+                syncState: "pending" as const,
+              };
+            });
+            if (!didChange) return state;
+            return {
+              ...state,
+              playlistShelvesByScope: {
+                ...state.playlistShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+            };
+          });
+
+          const authState = authStore.getState();
+          const online = authState.isOnline ?? true;
+          const authed = authState.status === "authenticated";
+
+          if (!online || !authed) {
+            get().actions.enqueuePlaylistOp({
+              type: "rename",
+              scopeKey,
+              userKey,
+              libraryId,
+              shelfId,
+              absPlaylistId,
+              payload: { name: nextName },
+            });
+            return;
+          }
+
+          try {
+            const updated = await playlistsApi.renamePlaylist(absPlaylistId, nextName);
+            if (updated) {
+              upsertPlaylistsInLibraryCache(userKey, libraryId, [updated]);
+              get().actions.upsertPlaylistsFromServer([updated], { userKey, libraryId });
+            } else {
+              set((state) => {
+                const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+                const nextShelves = shelves.map((shelf) =>
+                  shelf.id === shelfId ? { ...shelf, syncState: "synced" as const } : shelf,
+                );
+                return {
+                  ...state,
+                  playlistShelvesByScope: {
+                    ...state.playlistShelvesByScope,
+                    [scopeKey]: nextShelves,
+                  },
+                };
+              });
+            }
+          } catch (error) {
+            if (isTransientPlaylistError(error)) {
+              get().actions.enqueuePlaylistOp({
+                type: "rename",
+                scopeKey,
+                userKey,
+                libraryId,
+                shelfId,
+                absPlaylistId,
+                payload: { name: nextName },
+              });
+              return;
+            }
+
+            set((state) => {
+              const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+              const nextShelves = shelves.map((shelf) =>
+                shelf.id === shelfId ? { ...shelf, syncState: "unsynced" as const } : shelf,
+              );
+              return {
+                ...state,
+                playlistShelvesByScope: {
+                  ...state.playlistShelvesByScope,
+                  [scopeKey]: nextShelves,
+                },
+              };
+            });
+          }
+        },
+
+        addBooksToPlaylistShelfOptimistic: async (shelfId, libraryItemIds, options) => {
+          const { scopeKey, userKey, libraryId } = resolveScopeContext(options);
+          if (!scopeKey || !userKey || !libraryId || !shelfId || !libraryItemIds.length) return;
+          const absPlaylistId = parseAbsPlaylistId(shelfId);
+          if (!absPlaylistId) return;
+
+          const dedupedIds = dedupeIds(libraryItemIds);
+          set((state) => {
+            const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+            let didChange = false;
+            const nextShelves = shelves.map((shelf) => {
+              if (shelf.id !== shelfId) return shelf;
+              const nextIds = dedupeIds([...shelf.bookIds, ...dedupedIds]);
+              const unchanged =
+                nextIds.length === shelf.bookIds.length &&
+                nextIds.every((id, index) => id === shelf.bookIds[index]);
+              if (unchanged) return shelf;
+              didChange = true;
+              return {
+                ...shelf,
+                bookIds: nextIds,
+                updatedAt: Date.now(),
+                syncState: "pending" as const,
+              };
+            });
+            if (!didChange) return state;
+            return {
+              ...state,
+              playlistShelvesByScope: {
+                ...state.playlistShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+            };
+          });
+
+          const authState = authStore.getState();
+          const online = authState.isOnline ?? true;
+          const authed = authState.status === "authenticated";
+
+          if (!online || !authed) {
+            get().actions.enqueuePlaylistOp({
+              type: "addItems",
+              scopeKey,
+              userKey,
+              libraryId,
+              shelfId,
+              absPlaylistId,
+              payload: { libraryItemIds: dedupedIds },
+            });
+            return;
+          }
+
+          try {
+            const updated = await playlistsApi.batchAddItems(absPlaylistId, dedupedIds);
+            if (updated) {
+              upsertPlaylistsInLibraryCache(userKey, libraryId, [updated]);
+              get().actions.upsertPlaylistsFromServer([updated], { userKey, libraryId });
+            } else {
+              set((state) => {
+                const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+                return {
+                  ...state,
+                  playlistShelvesByScope: {
+                    ...state.playlistShelvesByScope,
+                    [scopeKey]: shelves.map((shelf) =>
+                      shelf.id === shelfId ? { ...shelf, syncState: "synced" as const } : shelf,
+                    ),
+                  },
+                };
+              });
+            }
+          } catch (error) {
+            if (isTransientPlaylistError(error)) {
+              get().actions.enqueuePlaylistOp({
+                type: "addItems",
+                scopeKey,
+                userKey,
+                libraryId,
+                shelfId,
+                absPlaylistId,
+                payload: { libraryItemIds: dedupedIds },
+              });
+              return;
+            }
+
+            set((state) => {
+              const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+              return {
+                ...state,
+                playlistShelvesByScope: {
+                  ...state.playlistShelvesByScope,
+                  [scopeKey]: shelves.map((shelf) =>
+                    shelf.id === shelfId ? { ...shelf, syncState: "unsynced" as const } : shelf,
+                  ),
+                },
+              };
+            });
+          }
+        },
+
+        removeBooksFromPlaylistShelfOptimistic: async (shelfId, libraryItemIds, options) => {
+          const { scopeKey, userKey, libraryId } = resolveScopeContext(options);
+          if (!scopeKey || !userKey || !libraryId || !shelfId || !libraryItemIds.length) return;
+          const absPlaylistId = parseAbsPlaylistId(shelfId);
+          if (!absPlaylistId) return;
+
+          const removeIds = new Set(dedupeIds(libraryItemIds));
+          set((state) => {
+            const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+            let didChange = false;
+            const nextShelves = shelves.map((shelf) => {
+              if (shelf.id !== shelfId) return shelf;
+              const nextIds = shelf.bookIds.filter((id) => !removeIds.has(id));
+              const unchanged =
+                nextIds.length === shelf.bookIds.length &&
+                nextIds.every((id, index) => id === shelf.bookIds[index]);
+              if (unchanged) return shelf;
+              didChange = true;
+              return {
+                ...shelf,
+                bookIds: nextIds,
+                updatedAt: Date.now(),
+                syncState: "pending" as const,
+              };
+            });
+            if (!didChange) return state;
+            return {
+              ...state,
+              playlistShelvesByScope: {
+                ...state.playlistShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+            };
+          });
+
+          const authState = authStore.getState();
+          const online = authState.isOnline ?? true;
+          const authed = authState.status === "authenticated";
+
+          if (!online || !authed) {
+            get().actions.enqueuePlaylistOp({
+              type: "removeItems",
+              scopeKey,
+              userKey,
+              libraryId,
+              shelfId,
+              absPlaylistId,
+              payload: { libraryItemIds: Array.from(removeIds) },
+            });
+            return;
+          }
+
+          try {
+            const updated = await playlistsApi.batchRemoveItems(absPlaylistId, Array.from(removeIds));
+            if (updated) {
+              upsertPlaylistsInLibraryCache(userKey, libraryId, [updated]);
+              get().actions.upsertPlaylistsFromServer([updated], { userKey, libraryId });
+            } else {
+              set((state) => {
+                const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+                return {
+                  ...state,
+                  playlistShelvesByScope: {
+                    ...state.playlistShelvesByScope,
+                    [scopeKey]: shelves.map((shelf) =>
+                      shelf.id === shelfId ? { ...shelf, syncState: "synced" as const } : shelf,
+                    ),
+                  },
+                };
+              });
+            }
+          } catch (error) {
+            if (isTransientPlaylistError(error)) {
+              get().actions.enqueuePlaylistOp({
+                type: "removeItems",
+                scopeKey,
+                userKey,
+                libraryId,
+                shelfId,
+                absPlaylistId,
+                payload: { libraryItemIds: Array.from(removeIds) },
+              });
+              return;
+            }
+
+            set((state) => {
+              const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+              return {
+                ...state,
+                playlistShelvesByScope: {
+                  ...state.playlistShelvesByScope,
+                  [scopeKey]: shelves.map((shelf) =>
+                    shelf.id === shelfId ? { ...shelf, syncState: "unsynced" as const } : shelf,
+                  ),
+                },
+              };
+            });
+          }
+        },
+
+        reorderPlaylistShelfBooksOptimistic: async (shelfId, orderedBookIds, options) => {
+          const { scopeKey, userKey, libraryId } = resolveScopeContext(options);
+          if (!scopeKey || !userKey || !libraryId || !shelfId || !orderedBookIds.length) return;
+          const absPlaylistId = parseAbsPlaylistId(shelfId);
+          if (!absPlaylistId) return;
+
+          const orderedIds = dedupeIds(orderedBookIds);
+          set((state) => {
+            const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+            let didChange = false;
+            const nextShelves = shelves.map((shelf) => {
+              if (shelf.id !== shelfId) return shelf;
+              const reordered = reorderByIds(
+                shelf.bookIds.map((id) => ({ id })),
+                orderedIds,
+              ).map((entry) => entry.id);
+              const unchanged =
+                reordered.length === shelf.bookIds.length &&
+                reordered.every((id, index) => id === shelf.bookIds[index]);
+              if (unchanged) return shelf;
+              didChange = true;
+              return {
+                ...shelf,
+                bookIds: reordered,
+                updatedAt: Date.now(),
+                syncState: "pending" as const,
+              };
+            });
+            if (!didChange) return state;
+            return {
+              ...state,
+              playlistShelvesByScope: {
+                ...state.playlistShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+            };
+          });
+
+          const authState = authStore.getState();
+          const online = authState.isOnline ?? true;
+          const authed = authState.status === "authenticated";
+
+          if (!online || !authed) {
+            get().actions.enqueuePlaylistOp({
+              type: "setItems",
+              scopeKey,
+              userKey,
+              libraryId,
+              shelfId,
+              absPlaylistId,
+              payload: { libraryItemIds: orderedIds },
+            });
+            return;
+          }
+
+          try {
+            const updated = await playlistsApi.setPlaylistItems(absPlaylistId, orderedIds);
+            if (updated) {
+              upsertPlaylistsInLibraryCache(userKey, libraryId, [updated]);
+              get().actions.upsertPlaylistsFromServer([updated], { userKey, libraryId });
+            } else {
+              set((state) => {
+                const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+                return {
+                  ...state,
+                  playlistShelvesByScope: {
+                    ...state.playlistShelvesByScope,
+                    [scopeKey]: shelves.map((shelf) =>
+                      shelf.id === shelfId ? { ...shelf, syncState: "synced" as const } : shelf,
+                    ),
+                  },
+                };
+              });
+            }
+          } catch (error) {
+            if (isTransientPlaylistError(error)) {
+              get().actions.enqueuePlaylistOp({
+                type: "setItems",
+                scopeKey,
+                userKey,
+                libraryId,
+                shelfId,
+                absPlaylistId,
+                payload: { libraryItemIds: orderedIds },
+              });
+              return;
+            }
+
+            set((state) => {
+              const shelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+              return {
+                ...state,
+                playlistShelvesByScope: {
+                  ...state.playlistShelvesByScope,
+                  [scopeKey]: shelves.map((shelf) =>
+                    shelf.id === shelfId ? { ...shelf, syncState: "unsynced" as const } : shelf,
+                  ),
+                },
+              };
+            });
+          }
+        },
+
+        deletePlaylistShelfFromServer: async (shelfId, options) => {
+          const { scopeKey, userKey, libraryId } = resolveScopeContext(options);
+          if (!scopeKey || !userKey || !libraryId || !shelfId) return;
+          const absPlaylistId = parseAbsPlaylistId(shelfId);
+          if (!absPlaylistId) return;
+
+          get().actions.deletePlaylistShelfLocal(shelfId, options);
+          removePlaylistFromLibraryCache(userKey, libraryId, absPlaylistId);
+
+          const authState = authStore.getState();
+          const online = authState.isOnline ?? true;
+          const authed = authState.status === "authenticated";
+          if (!online || !authed) {
+            get().actions.enqueuePlaylistOp({
+              type: "delete",
+              scopeKey,
+              userKey,
+              libraryId,
+              shelfId,
+              absPlaylistId,
+              payload: {},
+            });
+            return;
+          }
+
+          try {
+            await playlistsApi.deletePlaylist(absPlaylistId);
+          } catch (error) {
+            if (!isTransientPlaylistError(error)) return;
+            get().actions.enqueuePlaylistOp({
+              type: "delete",
+              scopeKey,
+              userKey,
+              libraryId,
+              shelfId,
+              absPlaylistId,
+              payload: {},
+            });
+          }
+        },
+
+        deletePlaylistShelfLocal: (shelfId, options) => {
+          const { scopeKey } = resolveScopeContext(options);
+          if (!scopeKey || !shelfId) return;
+
+          set((state) => {
+            const currentShelves = state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+            const nextShelves = currentShelves.filter((shelf) => shelf.id !== shelfId);
+            const currentSuppressed = state.suppressedPlaylistIdsByScope[scopeKey] ?? [];
+            const nextSuppressed = currentSuppressed.filter((id) => id !== shelfId);
+            if (
+              nextShelves.length === currentShelves.length &&
+              nextSuppressed.length === currentSuppressed.length
+            ) {
+              return state;
+            }
+            return {
+              ...state,
+              playlistShelvesByScope: {
+                ...state.playlistShelvesByScope,
+                [scopeKey]: nextShelves,
+              },
+              suppressedPlaylistIdsByScope: {
+                ...state.suppressedPlaylistIdsByScope,
+                [scopeKey]: nextSuppressed,
+              },
+            };
+          });
+        },
+
+        enqueuePlaylistOp: (op) => {
+          set((state) => {
+            const currentOps = state.pendingPlaylistOpsByUser[op.userKey] ?? [];
+            let nextOps = currentOps;
+
+            if (op.type === "setItems") {
+              nextOps = currentOps.filter(
+                (existingOp) =>
+                  !(existingOp.type === "setItems" && existingOp.shelfId === op.shelfId && !existingOp.permanentFailure),
+              );
+            }
+
+            const queuedOp: PendingPlaylistOp = {
+              ...op,
+              id: createPlaylistOpId(),
+              createdAt: Date.now(),
+              attemptCount: 0,
+              lastError: null,
+              permanentFailure: false,
+            };
+
+            const updatedShelves = Object.fromEntries(
+              Object.entries(state.playlistShelvesByScope).map(([scopeKey, shelves]) => [
+                scopeKey,
+                shelves.map((shelf) =>
+                  shelf.id === op.shelfId && shelf.syncState !== "missing"
+                    ? { ...shelf, syncState: "pending" as const }
+                    : shelf,
+                ),
+              ]),
+            );
+
+            return {
+              ...state,
+              pendingPlaylistOpsByUser: {
+                ...state.pendingPlaylistOpsByUser,
+                [op.userKey]: [...nextOps, queuedOp],
+              },
+              playlistShelvesByScope: updatedShelves,
+            };
+          });
+        },
+
+        syncPendingPlaylistOps: async (options) => {
+          const authState = authStore.getState();
+          const online = authState.isOnline ?? true;
+          const authed = authState.status === "authenticated";
+          if (!online || !authed) return;
+
+          const userKey = resolveUserKey(options?.userKey);
+          if (!userKey) return;
+
+          const queue = get().pendingPlaylistOpsByUser[userKey] ?? [];
+          if (!queue.length) return;
+
+          const orderedQueue = [...queue].sort((left, right) => left.createdAt - right.createdAt);
+          const queueById = new Map(queue.map((op) => [op.id, op]));
+          const successfulLibraries = new Set<string>();
+
+          for (const op of orderedQueue) {
+            const current = queueById.get(op.id);
+            if (!current || current.permanentFailure) continue;
+
+            try {
+              if (current.type === "rename" && current.payload.name) {
+                await playlistsApi.renamePlaylist(current.absPlaylistId, current.payload.name);
+              } else if (current.type === "addItems" && current.payload.libraryItemIds?.length) {
+                await playlistsApi.batchAddItems(current.absPlaylistId, current.payload.libraryItemIds);
+              } else if (current.type === "removeItems" && current.payload.libraryItemIds?.length) {
+                await playlistsApi.batchRemoveItems(current.absPlaylistId, current.payload.libraryItemIds);
+              } else if (current.type === "setItems" && current.payload.libraryItemIds?.length) {
+                await playlistsApi.setPlaylistItems(current.absPlaylistId, current.payload.libraryItemIds);
+              } else if (current.type === "delete") {
+                await playlistsApi.deletePlaylist(current.absPlaylistId);
+              }
+
+              queueById.delete(current.id);
+              successfulLibraries.add(current.libraryId);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "Playlist sync failed";
+              if (isTransientPlaylistError(error)) {
+                queueById.set(current.id, {
+                  ...current,
+                  attemptCount: current.attemptCount + 1,
+                  lastError: message,
+                });
+                continue;
+              }
+
+              queueById.set(current.id, {
+                ...current,
+                attemptCount: current.attemptCount + 1,
+                lastError: message,
+                permanentFailure: true,
+              });
+
+              set((state) => {
+                const shelves = state.playlistShelvesByScope[current.scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+                return {
+                  ...state,
+                  playlistShelvesByScope: {
+                    ...state.playlistShelvesByScope,
+                    [current.scopeKey]: shelves.map((shelf) =>
+                      shelf.id === current.shelfId ? { ...shelf, syncState: "unsynced" as const } : shelf,
+                    ),
+                  },
+                };
+              });
+            }
+          }
+
+          const nextQueue = Array.from(queueById.values()).sort(
+            (left, right) => left.createdAt - right.createdAt,
+          );
+
+          set((state) => ({
+            ...state,
+            pendingPlaylistOpsByUser: {
+              ...state.pendingPlaylistOpsByUser,
+              [userKey]: nextQueue,
+            },
+            playlistShelvesByScope: Object.fromEntries(
+              Object.entries(state.playlistShelvesByScope).map(([scopeKey, shelves]) => {
+                const queuedByShelfId = new Set(
+                  nextQueue
+                    .filter((op) => op.scopeKey === scopeKey && !op.permanentFailure)
+                    .map((op) => op.shelfId),
+                );
+
+                return [
+                  scopeKey,
+                  shelves.map((shelf) => {
+                    if (shelf.syncState === "missing" || shelf.syncState === "unsynced") return shelf;
+                    if (queuedByShelfId.has(shelf.id)) return { ...shelf, syncState: "pending" as const };
+                    return { ...shelf, syncState: "synced" as const };
+                  }),
+                ];
+              }),
+            ),
+          }));
+
+          if (!successfulLibraries.size) return;
+
+          for (const libraryId of successfulLibraries) {
+            try {
+              ensureLibraryPlaylistsPersisted(userKey, libraryId);
+              const playlists = await playlistsApi.getLibraryPlaylists(libraryId);
+              queryClient.setQueryData(queryKeys.libraryPlaylists(userKey, libraryId), playlists);
+              get().actions.upsertPlaylistsFromServer(playlists, { userKey, libraryId });
+              get().actions.markMissingPlaylists(
+                playlists.map((playlist) => playlist.id),
+                { userKey, libraryId },
+              );
+            } catch {
+              // Keep local state and retry on future sync.
+            }
+          }
         },
 
         reorderDownloadedShelfBooks: (orderedBookIds, options) => {
@@ -1374,9 +2491,12 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         pendingBookmarkDeletesByUser: state.pendingBookmarkDeletesByUser,
         pendingProgressByUser: state.pendingProgressByUser,
         customShelvesByScope: state.customShelvesByScope,
+        playlistShelvesByScope: state.playlistShelvesByScope,
+        suppressedPlaylistIdsByScope: state.suppressedPlaylistIdsByScope,
+        pendingPlaylistOpsByUser: state.pendingPlaylistOpsByUser,
         homeShelfVisibilityByScope: state.homeShelfVisibilityByScope,
       }),
-      version: 4,
+      version: 5,
       migrate: (persistedState, version) => {
         const base = createDefaultPersistedState();
         const typedState =
@@ -1392,6 +2512,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             ...base,
             ...typedState,
             customShelvesByScope: typedState.customShelvesByScope ?? {},
+            playlistShelvesByScope: typedState.playlistShelvesByScope ?? {},
+            suppressedPlaylistIdsByScope: typedState.suppressedPlaylistIdsByScope ?? {},
+            pendingPlaylistOpsByUser: typedState.pendingPlaylistOpsByUser ?? {},
             homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
             downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
           };
@@ -1402,6 +2525,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             ...base,
             ...typedState,
             customShelvesByScope: typedState.customShelvesByScope ?? {},
+            playlistShelvesByScope: typedState.playlistShelvesByScope ?? {},
+            suppressedPlaylistIdsByScope: typedState.suppressedPlaylistIdsByScope ?? {},
+            pendingPlaylistOpsByUser: typedState.pendingPlaylistOpsByUser ?? {},
             homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
             downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
             pendingProgressByUser: typedState.pendingProgressByUser ?? {},
@@ -1413,6 +2539,23 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             ...base,
             ...typedState,
             customShelvesByScope: typedState.customShelvesByScope ?? {},
+            playlistShelvesByScope: typedState.playlistShelvesByScope ?? {},
+            suppressedPlaylistIdsByScope: typedState.suppressedPlaylistIdsByScope ?? {},
+            pendingPlaylistOpsByUser: typedState.pendingPlaylistOpsByUser ?? {},
+            homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
+            downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
+            pendingProgressByUser: typedState.pendingProgressByUser ?? {},
+          };
+        }
+
+        if (version < 5) {
+          return {
+            ...base,
+            ...typedState,
+            customShelvesByScope: typedState.customShelvesByScope ?? {},
+            playlistShelvesByScope: typedState.playlistShelvesByScope ?? {},
+            suppressedPlaylistIdsByScope: typedState.suppressedPlaylistIdsByScope ?? {},
+            pendingPlaylistOpsByUser: typedState.pendingPlaylistOpsByUser ?? {},
             homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
             downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
             pendingProgressByUser: typedState.pendingProgressByUser ?? {},
@@ -1423,6 +2566,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           ...base,
           ...typedState,
           customShelvesByScope: typedState.customShelvesByScope ?? {},
+          playlistShelvesByScope: typedState.playlistShelvesByScope ?? {},
+          suppressedPlaylistIdsByScope: typedState.suppressedPlaylistIdsByScope ?? {},
+          pendingPlaylistOpsByUser: typedState.pendingPlaylistOpsByUser ?? {},
           homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
           downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
         };
@@ -1441,10 +2587,12 @@ export const selectBookPlaybackRate = (
   libraryItemId: string,
   userKey?: string | null,
 ) => {
-  const resolvedUserKey = resolveUserKey(userKey);
-  if (!resolvedUserKey) return DEFAULT_BOOK_PLAYBACK_RATE;
-  const key = toUserBookKey(resolvedUserKey, libraryItemId);
-  return state.playbackRatesByUserBook[key] ?? DEFAULT_BOOK_PLAYBACK_RATE;
+  const storedRate = findStoredPlaybackRateForLibraryItem(
+    state.playbackRatesByUserBook,
+    libraryItemId,
+    userKey,
+  );
+  return typeof storedRate === "number" ? storedRate : DEFAULT_BOOK_PLAYBACK_RATE;
 };
 
 export const selectBookPlaybackRateIfStored = (
@@ -1452,10 +2600,11 @@ export const selectBookPlaybackRateIfStored = (
   libraryItemId: string,
   userKey?: string | null,
 ) => {
-  const resolvedUserKey = resolveUserKey(userKey);
-  if (!resolvedUserKey) return null;
-  const key = toUserBookKey(resolvedUserKey, libraryItemId);
-  const storedRate = state.playbackRatesByUserBook[key];
+  const storedRate = findStoredPlaybackRateForLibraryItem(
+    state.playbackRatesByUserBook,
+    libraryItemId,
+    userKey,
+  );
   return typeof storedRate === "number" ? storedRate : null;
 };
 
@@ -1509,6 +2658,22 @@ export const selectCustomShelvesByScope = (
 ) => {
   if (!scopeKey) return EMPTY_HOME_CUSTOM_SHELVES;
   return state.customShelvesByScope[scopeKey] ?? EMPTY_HOME_CUSTOM_SHELVES;
+};
+
+export const selectPlaylistShelvesByScope = (
+  state: DeviceBooksState,
+  scopeKey: string | null,
+) => {
+  if (!scopeKey) return EMPTY_HOME_PLAYLIST_SHELVES;
+  return state.playlistShelvesByScope[scopeKey] ?? EMPTY_HOME_PLAYLIST_SHELVES;
+};
+
+export const selectSuppressedPlaylistIdsByScope = (
+  state: DeviceBooksState,
+  scopeKey: string | null,
+) => {
+  if (!scopeKey) return EMPTY_SUPPRESSED_PLAYLIST_IDS;
+  return state.suppressedPlaylistIdsByScope[scopeKey] ?? EMPTY_SUPPRESSED_PLAYLIST_IDS;
 };
 
 export const selectDerivedShelfVisibilityByScope = (
