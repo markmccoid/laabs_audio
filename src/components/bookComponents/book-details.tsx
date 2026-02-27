@@ -1,6 +1,6 @@
+import { useThemeColors } from "@/theme/use-app-theme";
 import React from "react";
 import { Pressable, Text, View } from "react-native";
-import { useThemeColors } from "@/theme/use-app-theme";
 import HtmlToMarkdown from "./HtmlToMarkdown";
 
 type Props = {
@@ -30,7 +30,7 @@ const BookDetails = ({ title, description, genres, tags, maxLines = 4 }: Props) 
   return (
     <View style={{ gap: 16 }}>
       <View style={{ gap: 10 }}>
-        <Text selectable style={{ fontSize: 18, fontWeight: "600", color: themeColors.text }}>
+        <Text selectable style={{ fontSize: 16, fontWeight: "600", color: themeColors.text }}>
           {headingTitle}
         </Text>
         <Pressable

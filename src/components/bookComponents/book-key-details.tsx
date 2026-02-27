@@ -104,32 +104,6 @@ const BookKeyDetails = ({
           marginBottom: 2,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-          <View
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 10,
-              borderCurve: "continuous",
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: themeColors.bg,
-            }}
-          >
-            <SymbolView name="clock.fill" size={12} tintColor={themeColors.accent} />
-          </View>
-          <Text
-            selectable
-            style={{
-              fontSize: 17,
-              fontWeight: "700",
-              color: themeColors.text,
-              fontVariant: ["tabular-nums"],
-            }}
-          >
-            {durationLabel}
-          </Text>
-        </View>
         {isInProgress ? (
           <Pressable
             accessibilityRole="button"
@@ -154,13 +128,13 @@ const BookKeyDetails = ({
           >
             <SymbolView
               name={progressDisplay === "elapsed" ? "gauge.with.needle.fill" : "hourglass"}
-              size={13}
+              size={14}
               tintColor={isElapsedView ? themeColors.bg : themeColors.textMuted}
             />
             <Text
               selectable
               style={{
-                fontSize: 11,
+                fontSize: 14,
                 fontWeight: "700",
                 color: isElapsedView ? themeColors.bg : themeColors.textMuted,
                 fontVariant: ["tabular-nums"],
@@ -170,7 +144,33 @@ const BookKeyDetails = ({
               {progressLabel}
             </Text>
           </Pressable>
-        ) : null}
+        ) : (
+          <View></View>
+        )}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+          <View
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 10,
+              borderCurve: "continuous",
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: themeColors.bg,
+            }}
+          >
+            <SymbolView name="clock.fill" size={20} tintColor={themeColors.accent} />
+          </View>
+          <Text
+            selectable
+            className="text-sm font-semibold text-text"
+            style={{
+              fontVariant: ["tabular-nums"],
+            }}
+          >
+            {durationLabel}
+          </Text>
+        </View>
       </View>
       {rows.map((row) => (
         <View key={row.key} style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
