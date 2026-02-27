@@ -1,5 +1,5 @@
 import { useGetItemDetails, useGetUserServerState } from "@/hooks/abs-data-hooks";
-import { playerService, usePlaybackStore } from "@/player";
+import { playbackStore, playerService, usePlaybackStore } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { formatSeconds } from "@/utils/formatUtils";
 import { FlashList } from "@shopify/flash-list";
@@ -132,7 +132,6 @@ const ChapterViewerRoute = () => {
       if (!routeLibraryItemId || pendingChapterId !== null) return;
 
       const shouldAutoPlay = playbackState === "playing";
-      const wasPaused = playbackState === "paused";
       const viewedBookLoadedNow = currentLibraryItemId === routeLibraryItemId && queueLength > 0;
       setPendingChapterId(chapter.id);
 
@@ -141,7 +140,8 @@ const ChapterViewerRoute = () => {
           await playerService.loadBook(routeLibraryItemId, { autoPlay: shouldAutoPlay });
         }
         await playerService.seekTo(chapter.startMs);
-        if (!shouldAutoPlay && wasPaused && !viewedBookLoadedNow) {
+        const latestPlaybackState = playbackStore.getState().playbackState;
+        if (!shouldAutoPlay && !viewedBookLoadedNow && latestPlaybackState === "playing") {
           await playerService.pause();
         }
       } finally {

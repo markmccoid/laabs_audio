@@ -62,6 +62,14 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
     });
   };
 
+  const openChapters = () => {
+    if (!libraryItemId) return;
+    router.push({
+      pathname: "/chapter-viewer",
+      params: { libraryItemId },
+    });
+  };
+
   return (
     <View style={{ width: 60, alignItems: "center", gap: 10 }}>
       <Pressable
@@ -108,6 +116,27 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
           tintColor={isDownloaded ? themeColors.accent : themeColors.text}
           size={25}
         />
+      </Pressable>
+
+      <Pressable
+        onPress={openChapters}
+        disabled={!libraryItemId}
+        accessibilityRole="button"
+        accessibilityLabel="Open chapter list"
+        style={({ pressed }) => ({
+          width: 48,
+          height: 48,
+          borderRadius: 999,
+          borderCurve: "continuous",
+          borderWidth: 1,
+          borderColor: themeColors.border,
+          backgroundColor: themeColors.surface,
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: !libraryItemId ? 0.45 : pressed ? 0.82 : 1,
+        })}
+      >
+        <SymbolView name="line.3.horizontal" tintColor={themeColors.text} size={23} />
       </Pressable>
 
       <Pressable
