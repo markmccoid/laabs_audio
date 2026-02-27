@@ -4,7 +4,6 @@ import { useDeviceBooksActions } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -20,41 +19,60 @@ export const BookBookshelvesSheet = () => {
   const libraryItemId = resolveParam(libraryItemIdParam);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const { customShelves } = useHomeShelves();
-  const { addBookToCustomShelf, removeBookFromCustomShelf } = useDeviceBooksActions();
+  const { customShelves, playlistShelves } = useHomeShelves();
+  const {
+    addBookToCustomShelf,
+    removeBookFromCustomShelf,
+    addBooksToPlaylistShelfOptimistic,
+    removeBooksFromPlaylistShelfOptimistic,
+  } = useDeviceBooksActions();
+  type SelectableShelf = (typeof customShelves)[number] | (typeof playlistShelves)[number];
 
   const canMutate = Boolean(libraryItemId && activeLibraryId && activeLibraryUserKey);
-  const selectedShelfCount = useMemo(() => {
-    if (!libraryItemId) return 0;
-    return customShelves.reduce(
-      (count, shelf) => (shelf.bookIds.includes(libraryItemId) ? count + 1 : count),
-      0,
-    );
-  }, [customShelves, libraryItemId]);
 
   const openBookshelfSettings = () => {
     router.push("/(tabs)/settings/bookshelves");
   };
 
-  const toggleMembership = (shelfId: string, currentlySelected: boolean) => {
+  const toggleMembership = (shelf: SelectableShelf, currentlySelected: boolean) => {
     if (!libraryItemId || !canMutate) return;
     const scopeOptions = { userKey: activeLibraryUserKey, libraryId: activeLibraryId };
 
-    if (currentlySelected) {
-      removeBookFromCustomShelf(shelfId, libraryItemId, scopeOptions);
+    if (shelf.kind === "custom") {
+      if (currentlySelected) {
+        removeBookFromCustomShelf(shelf.id, libraryItemId, scopeOptions);
+        return;
+      }
+      addBookToCustomShelf(shelf.id, libraryItemId, scopeOptions);
       return;
     }
 
-    addBookToCustomShelf(shelfId, libraryItemId, scopeOptions);
+    if (currentlySelected) {
+      void removeBooksFromPlaylistShelfOptimistic(shelf.id, [libraryItemId], scopeOptions);
+      return;
+    }
+    void addBooksToPlaylistShelfOptimistic(shelf.id, [libraryItemId], scopeOptions);
   };
 
-  const renderShelf = (shelf: (typeof customShelves)[number]) => {
+  const renderShelf = (shelf: SelectableShelf) => {
     const isSelected = Boolean(libraryItemId && shelf.bookIds.includes(libraryItemId));
+    const typePill =
+      shelf.kind === "custom"
+        ? {
+            label: "Custom",
+            background: themeColors.accent,
+            textColor: themeColors.accentForeground,
+          }
+        : {
+            label: "Playlist",
+            background: themeColors.absGold,
+            textColor: "#201607",
+          };
 
     return (
       <Pressable
         key={shelf.id}
-        onPress={() => toggleMembership(shelf.id, isSelected)}
+        onPress={() => toggleMembership(shelf, isSelected)}
         disabled={!canMutate}
         style={({ pressed }) => ({
           borderRadius: 14,
@@ -72,13 +90,28 @@ export const BookBookshelvesSheet = () => {
         })}
       >
         <View style={{ flex: 1, gap: 3 }}>
-          <Text
-            selectable
-            numberOfLines={1}
-            style={{ color: themeColors.text, fontSize: 16, fontWeight: "600" }}
-          >
-            {shelf.title}
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Text
+              selectable
+              numberOfLines={1}
+              style={{ color: themeColors.text, fontSize: 16, fontWeight: "600", flexShrink: 1 }}
+            >
+              {shelf.title}
+            </Text>
+            <View
+              style={{
+                borderRadius: 999,
+                borderCurve: "continuous",
+                backgroundColor: typePill.background,
+                paddingHorizontal: 8,
+                paddingVertical: 2,
+              }}
+            >
+              <Text selectable style={{ color: typePill.textColor, fontSize: 10, fontWeight: "700" }}>
+                {typePill.label}
+              </Text>
+            </View>
+          </View>
           <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
             {shelf.bookIds.length} books
           </Text>
@@ -92,7 +125,7 @@ export const BookBookshelvesSheet = () => {
     );
   };
 
-  const shelves = libraryItemId ? customShelves : [];
+  const shelves = libraryItemId ? [...customShelves, ...playlistShelves] : [];
 
   return (
     <ScrollView
@@ -141,7 +174,7 @@ export const BookBookshelvesSheet = () => {
             </Text>
           ) : (
             <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-              No custom shelves yet. Use Settings to create your first shelf.
+              No shelves yet. Use Settings to create your first shelf.
             </Text>
           )}
           <Pressable

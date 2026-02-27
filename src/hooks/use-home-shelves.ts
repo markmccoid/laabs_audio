@@ -2,12 +2,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo } from "react";
 import type { LibraryItemSummary, LibraryItemsSummary } from "../api/library-items-api";
 import type { UserBookProgress, UserServerState } from "../api/me-api";
+import { playlistsApi } from "../api/playlists-api";
 import { useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
 import {
+  selectPlaylistShelvesByScope,
+  selectSuppressedPlaylistIdsByScope,
   toHomeShelfScopeKey,
   useDeviceBooksStore,
   type HomeDerivedShelfId,
+  type PlaylistShelfSyncState,
 } from "../store/device-books-store";
 import {
   DEFAULT_HOME_SHELF_ITEM_COUNT,
@@ -42,7 +46,26 @@ export type HomeCustomShelf = {
   emptyMessage: string;
 };
 
-export type HomeShelf = HomeDerivedShelf | HomeCustomShelf;
+export type HomePlaylistShelf = {
+  kind: "playlist";
+  id: string;
+  absPlaylistId: string;
+  title: string;
+  description: string | null;
+  books: LibraryItemSummary[];
+  bookIds: string[];
+  createdAt: number;
+  updatedAt: number;
+  homeItemCount: number;
+  isVisible: boolean;
+  emptyMessage: string;
+  syncState: PlaylistShelfSyncState;
+  isSuppressed: boolean;
+  missingOnServerAt: number | null;
+  lastServerSyncAt: number | null;
+};
+
+export type HomeShelf = HomeDerivedShelf | HomeCustomShelf | HomePlaylistShelf;
 
 const EMPTY_CUSTOM_SHELVES: {
   id: string;
@@ -114,10 +137,13 @@ export const useHomeShelves = () => {
   const queryClient = useQueryClient();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const authStatus = useAuthStore((state) => state.status);
+  const isOnline = useAuthStore((state) => state.isOnline);
   const homeScopeKey = toHomeShelfScopeKey(activeLibraryUserKey, activeLibraryId);
 
   const libraryBooksQueryKey = queryKeys.libraryBooks(activeLibraryId);
   const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
+  const playlistsQueryKey = queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId);
 
   const immediateCatalog = activeLibraryId
     ? queryClient.getQueryData<LibraryItemsSummary>(libraryBooksQueryKey)
@@ -145,9 +171,28 @@ export const useHomeShelves = () => {
     meta: PERSIST_META,
   });
 
+  const { data: libraryPlaylists } = useQuery({
+    queryKey: playlistsQueryKey,
+    queryFn: () => playlistsApi.getLibraryPlaylists(activeLibraryId),
+    enabled:
+      authStatus === "authenticated" &&
+      Boolean(activeLibraryId) &&
+      Boolean(activeLibraryUserKey) &&
+      isOnline !== false,
+    meta: PERSIST_META,
+  });
+
   const customShelvesRaw = useDeviceBooksStore((state) =>
     homeScopeKey ? state.customShelvesByScope[homeScopeKey] ?? EMPTY_CUSTOM_SHELVES : EMPTY_CUSTOM_SHELVES,
   );
+  const playlistShelvesRaw = useDeviceBooksStore((state) =>
+    selectPlaylistShelvesByScope(state, homeScopeKey),
+  );
+  const suppressedPlaylistIds = useDeviceBooksStore((state) =>
+    selectSuppressedPlaylistIdsByScope(state, homeScopeKey),
+  );
+  const upsertPlaylistsFromServer = useDeviceBooksStore((state) => state.actions.upsertPlaylistsFromServer);
+  const markMissingPlaylists = useDeviceBooksStore((state) => state.actions.markMissingPlaylists);
   const downloadedDetailsById = useDeviceBooksStore((state) => state.downloadedDetailsById);
   const downloadedShelfOrder = useDeviceBooksStore((state) =>
     homeScopeKey ? state.downloadedShelfOrderByScope[homeScopeKey] ?? EMPTY_ORDER : EMPTY_ORDER,
@@ -282,6 +327,30 @@ export const useHomeShelves = () => {
     setDailyDiscoverShelf,
   ]);
 
+  useEffect(() => {
+    if (!homeScopeKey || !activeLibraryId || !activeLibraryUserKey) return;
+    if (!libraryPlaylists) return;
+
+    upsertPlaylistsFromServer(libraryPlaylists, {
+      userKey: activeLibraryUserKey,
+      libraryId: activeLibraryId,
+    });
+    markMissingPlaylists(
+      libraryPlaylists.map((playlist) => playlist.id),
+      {
+        userKey: activeLibraryUserKey,
+        libraryId: activeLibraryId,
+      },
+    );
+  }, [
+    activeLibraryId,
+    activeLibraryUserKey,
+    homeScopeKey,
+    libraryPlaylists,
+    markMissingPlaylists,
+    upsertPlaylistsFromServer,
+  ]);
+
   const refreshDiscover = useCallback(() => {
     if (!homeScopeKey) return;
 
@@ -297,6 +366,11 @@ export const useHomeShelves = () => {
       bookIds: refreshedBooks.slice(0, discoverHomeItemCount).map((book) => book.id),
     });
   }, [discoverDateKey, discoverHomeItemCount, homeScopeKey, setDailyDiscoverShelf, unreadBooks]);
+
+  const suppressedPlaylistIdSet = useMemo(
+    () => new Set(suppressedPlaylistIds),
+    [suppressedPlaylistIds],
+  );
 
   const shelves = useMemo<HomeShelf[]>(() => {
     const derivedShelves: HomeDerivedShelf[] = [
@@ -355,15 +429,39 @@ export const useHomeShelves = () => {
       emptyMessage: "No books yet. Use Add Books to fill this shelf.",
     }));
 
-    return [...derivedShelves, ...customShelves];
+    const playlistShelves: HomePlaylistShelf[] = playlistShelvesRaw.map((shelf) => ({
+      kind: "playlist",
+      id: shelf.id,
+      absPlaylistId: shelf.absPlaylistId,
+      title: shelf.name,
+      description: shelf.description,
+      books: shelf.bookIds
+        .map((bookId) => catalogById.get(bookId))
+        .filter((book): book is LibraryItemSummary => Boolean(book)),
+      bookIds: shelf.bookIds,
+      createdAt: shelf.createdAt,
+      updatedAt: shelf.updatedAt,
+      homeItemCount:
+        shelfSettingsById[shelf.id]?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+      isVisible: shelfSettingsById[shelf.id]?.isVisible ?? false,
+      emptyMessage: "No books in this playlist yet.",
+      syncState: shelf.syncState,
+      isSuppressed: suppressedPlaylistIdSet.has(shelf.id),
+      missingOnServerAt: shelf.missingOnServerAt,
+      lastServerSyncAt: shelf.lastServerSyncAt,
+    }));
+
+    return [...derivedShelves, ...customShelves, ...playlistShelves];
   }, [
     catalogById,
     continueListening,
     customShelvesRaw,
     downloaded,
     discover,
+    playlistShelvesRaw,
     recentlyAdded,
     shelfSettingsById,
+    suppressedPlaylistIdSet,
   ]);
 
   const orderedShelves = useMemo(() => {
@@ -372,7 +470,12 @@ export const useHomeShelves = () => {
 
   const visibleShelves = useMemo<HomeShelf[]>(() => {
     return orderedShelves
-      .filter((shelf) => shelf.isVisible)
+      .filter((shelf) => {
+        if (!shelf.isVisible) return false;
+        if (shelf.kind !== "playlist") return true;
+        if (shelf.isSuppressed) return false;
+        return true;
+      })
       .map((shelf) => ({
         ...shelf,
         books: shelf.books.slice(0, shelf.homeItemCount),
@@ -386,12 +489,31 @@ export const useHomeShelves = () => {
     [orderedShelves],
   );
 
+  const playlistShelves = useMemo<HomePlaylistShelf[]>(
+    () =>
+      orderedShelves.filter(
+        (shelf): shelf is HomePlaylistShelf =>
+          shelf.kind === "playlist" && !shelf.isSuppressed && shelf.syncState !== "missing",
+      ),
+    [orderedShelves],
+  );
+
+  const suppressedPlaylistShelves = useMemo<HomePlaylistShelf[]>(
+    () =>
+      orderedShelves.filter(
+        (shelf): shelf is HomePlaylistShelf => shelf.kind === "playlist" && shelf.isSuppressed,
+      ),
+    [orderedShelves],
+  );
+
   return {
     homeScopeKey,
     catalog,
     shelves: orderedShelves,
     visibleShelves,
     customShelves,
+    playlistShelves,
+    suppressedPlaylistShelves,
     progressByBookId,
     refreshDiscover,
   };

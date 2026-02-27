@@ -7,15 +7,68 @@ import Sortable from "react-native-sortables";
 type BookshelfListItemProps = {
   shelf: HomeShelf;
   onPress: (shelf: HomeShelf) => void;
+  onToggleVisibility: (shelf: HomeShelf, nextVisibility: boolean) => void;
   itemWidth?: number;
 };
 
-export const BookshelfListItem = ({ shelf, onPress, itemWidth }: BookshelfListItemProps) => {
+export const BookshelfListItem = ({
+  shelf,
+  onPress,
+  onToggleVisibility,
+  itemWidth,
+}: BookshelfListItemProps) => {
   const themeColors = useThemeColors();
   const isHidden = !shelf.isVisible;
-  const statusColor = isHidden ? themeColors.textMuted : themeColors.accent;
-  const statusIcon = isHidden ? "eye.slash.fill" : "checkmark.circle.fill";
-  const statusLabel = isHidden ? "Hidden" : "Shown";
+  const syncStatus = (() => {
+    if (shelf.kind === "playlist" && shelf.syncState === "missing") {
+      return {
+        label: "Missing",
+        icon: "exclamationmark.triangle.fill",
+        color: "#b36f00",
+      };
+    }
+    if (shelf.kind === "playlist" && shelf.syncState === "unsynced") {
+      return {
+        label: "Unsynced",
+        icon: "exclamationmark.circle.fill",
+        color: "#d24b20",
+      };
+    }
+    if (shelf.kind === "playlist" && shelf.syncState === "pending") {
+      return {
+        label: "Pending",
+        icon: "clock.fill",
+        color: themeColors.absGold,
+      };
+    }
+    return null;
+  })();
+
+  const typeInfo = (() => {
+    if (shelf.kind === "derived") {
+      return {
+        label: "Derived",
+        borderColor: themeColors.border,
+        bg: themeColors.bg,
+        textColor: themeColors.textMuted,
+      };
+    }
+    if (shelf.kind === "custom") {
+      return {
+        label: "Custom",
+        borderColor: themeColors.accent,
+        bg: themeColors.accent,
+        textColor: themeColors.accentForeground,
+      };
+    }
+    return {
+      label: "Playlist",
+      borderColor: themeColors.absGold,
+      bg: themeColors.absGold,
+      textColor: "#201607",
+    };
+  })();
+
   const primaryTextColor = isHidden ? themeColors.textMuted : themeColors.text;
 
   return (
@@ -56,35 +109,76 @@ export const BookshelfListItem = ({ shelf, onPress, itemWidth }: BookshelfListIt
             gap: 10,
           }}
         >
-          <View style={{ flex: 1, gap: 2 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <Text
-                selectable
-                numberOfLines={1}
-                style={{ color: primaryTextColor, fontSize: 16, fontWeight: "600", flexShrink: 1 }}
-              >
-                {shelf.title}
-              </Text>
-            </View>
+          <View style={{ flex: 1, gap: 4 }}>
             <Text
               selectable
               numberOfLines={1}
-              style={{ color: themeColors.textMuted, fontSize: 12 }}
+              style={{ color: primaryTextColor, fontSize: 15, fontWeight: "600", flexShrink: 1 }}
             >
-              {shelf.kind === "derived" ? "Built-in shelf" : "Custom shelf"}
+              {shelf.title}
             </Text>
+            <View
+              style={{
+                alignSelf: "flex-start",
+                borderRadius: 999,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: typeInfo.borderColor,
+                backgroundColor: typeInfo.bg,
+                paddingHorizontal: 8,
+                paddingVertical: 2,
+              }}
+            >
+              <Text
+                selectable
+                style={{ color: typeInfo.textColor, fontSize: 10, fontWeight: "700" }}
+              >
+                {typeInfo.label}
+              </Text>
+            </View>
           </View>
 
           <View style={{ alignItems: "flex-end", gap: 1 }}>
             <Text selectable style={{ color: primaryTextColor, fontSize: 13, fontWeight: "600" }}>
               {shelf.homeItemCount} items
             </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-              <SymbolView name={statusIcon} tintColor={statusColor} />
-              <Text selectable style={{ color: statusColor, fontSize: 12, fontWeight: "700" }}>
-                {statusLabel}
+            <Pressable
+              onPress={(event) => {
+                event.stopPropagation();
+                onToggleVisibility(shelf, !shelf.isVisible);
+              }}
+              style={{
+                borderRadius: 999,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: isHidden ? themeColors.border : themeColors.accent,
+                backgroundColor: isHidden ? themeColors.bg : themeColors.accent,
+                paddingHorizontal: 10,
+                paddingVertical: 3,
+              }}
+            >
+              <Text
+                selectable
+                style={{
+                  color: isHidden ? themeColors.textMuted : themeColors.accentForeground,
+                  fontSize: 11,
+                  fontWeight: "700",
+                }}
+              >
+                {isHidden ? "Hidden" : "Shown"}
               </Text>
-            </View>
+            </Pressable>
+            {syncStatus ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <SymbolView name={syncStatus.icon as never} tintColor={syncStatus.color} />
+                <Text
+                  selectable
+                  style={{ color: syncStatus.color, fontSize: 12, fontWeight: "700" }}
+                >
+                  {syncStatus.label}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           <SymbolView name="chevron.right" tintColor={themeColors.textMuted} />

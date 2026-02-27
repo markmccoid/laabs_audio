@@ -10,6 +10,7 @@ type ThemeColors = {
   border: string;
   accent: string;
   accentForeground: string;
+  absGold: string;
 };
 
 const FALLBACK_COLORS: ThemeColors = {
@@ -20,13 +21,14 @@ const FALLBACK_COLORS: ThemeColors = {
   border: "#d5ded8",
   accent: "#1f6f43",
   accentForeground: "#f4fbf7",
+  absGold: "#d4af37",
 };
 
 const resolveColor = (value: string | number | undefined, fallback: string) =>
   typeof value === "string" ? value : fallback;
 
 export const useThemeColors = (): ThemeColors => {
-  const [bg, surface, text, textMuted, border, accent, accentForeground] = useCSSVariable([
+  const [bg, surface, text, textMuted, border, accent, accentForeground, absGold] = useCSSVariable([
     "--color-bg",
     "--color-surface",
     "--color-text",
@@ -34,6 +36,7 @@ export const useThemeColors = (): ThemeColors => {
     "--color-border",
     "--color-accent",
     "--color-accent-foreground",
+    "--color-abs-gold",
   ]);
 
   return {
@@ -44,6 +47,7 @@ export const useThemeColors = (): ThemeColors => {
     border: resolveColor(border, FALLBACK_COLORS.border),
     accent: resolveColor(accent, FALLBACK_COLORS.accent),
     accentForeground: resolveColor(accentForeground, FALLBACK_COLORS.accentForeground),
+    absGold: resolveColor(absGold, FALLBACK_COLORS.absGold),
   };
 };
 

@@ -68,7 +68,7 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
         onPress={openBookshelves}
         disabled={!libraryItemId}
         accessibilityRole="button"
-        accessibilityLabel="Manage custom bookshelves"
+        accessibilityLabel="Manage bookshelves"
         style={({ pressed }) => ({
           width: 48,
           height: 48,

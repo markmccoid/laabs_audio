@@ -36,6 +36,11 @@ const DEFAULT_HOME_SHELF_SETTINGS: HomeShelfSettings = {
   homeItemCount: DEFAULT_HOME_SHELF_ITEM_COUNT,
 };
 
+const DEFAULT_PLAYLIST_HOME_SHELF_SETTINGS: HomeShelfSettings = {
+  isVisible: false,
+  homeItemCount: DEFAULT_HOME_SHELF_ITEM_COUNT,
+};
+
 const EMPTY_SCOPE_SETTINGS: HomeShelvesScopeSettings = {
   shelfOrder: [],
   shelfSettingsById: {},
@@ -50,6 +55,11 @@ const normalizeScopeKey = (scopeKey: string | null) => {
 };
 
 const normalizeShelfId = (shelfId: string) => shelfId.trim();
+
+const defaultShelfSettingsForId = (shelfId: string): HomeShelfSettings =>
+  shelfId.startsWith("playlist:")
+    ? DEFAULT_PLAYLIST_HOME_SHELF_SETTINGS
+    : DEFAULT_HOME_SHELF_SETTINGS;
 
 const dedupeShelfOrder = (ids: string[]) => {
   const unique = new Set<string>();
@@ -138,7 +148,8 @@ export const settingsStore = createStore<SettingsState>()(
               normalizedScopeKey,
             );
             const currentShelfSettings =
-              scopeSettings.shelfSettingsById[normalizedShelfId] ?? DEFAULT_HOME_SHELF_SETTINGS;
+              scopeSettings.shelfSettingsById[normalizedShelfId] ??
+              defaultShelfSettingsForId(normalizedShelfId);
             if (currentShelfSettings.isVisible === isVisible) return state;
 
             return {
@@ -172,7 +183,8 @@ export const settingsStore = createStore<SettingsState>()(
               normalizedScopeKey,
             );
             const currentShelfSettings =
-              scopeSettings.shelfSettingsById[normalizedShelfId] ?? DEFAULT_HOME_SHELF_SETTINGS;
+              scopeSettings.shelfSettingsById[normalizedShelfId] ??
+              defaultShelfSettingsForId(normalizedShelfId);
             if (currentShelfSettings.homeItemCount === clampedCount) return state;
 
             return {
@@ -363,7 +375,7 @@ export const selectHomeShelfSettings = (
 
   return (
     state.homeShelvesByScope[normalizedScopeKey]?.shelfSettingsById[normalizedShelfId] ??
-    DEFAULT_HOME_SHELF_SETTINGS
+    defaultShelfSettingsForId(normalizedShelfId)
   );
 };
 

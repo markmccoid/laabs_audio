@@ -1,5 +1,6 @@
 import { libraryItemsApi } from "@/api/library-items-api";
 import { meApi } from "@/api/me-api";
+import { playlistsApi } from "@/api/playlists-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { type HomeShelf, useHomeShelves } from "@/hooks/use-home-shelves";
 import { queryKeys } from "@/query/query-keys";
@@ -44,6 +45,10 @@ const HomeShelvesScreen = () => {
           queryKey: queryKeys.userServerState(activeLibraryUserKey),
           exact: true,
         }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId),
+          exact: true,
+        }),
       ]);
 
       await Promise.all([
@@ -55,6 +60,11 @@ const HomeShelvesScreen = () => {
         queryClient.fetchQuery({
           queryKey: queryKeys.userServerState(activeLibraryUserKey),
           queryFn: () => meApi.getUserServerState(),
+          meta: { persist: true },
+        }),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId),
+          queryFn: () => playlistsApi.getLibraryPlaylists(activeLibraryId),
           meta: { persist: true },
         }),
       ]);

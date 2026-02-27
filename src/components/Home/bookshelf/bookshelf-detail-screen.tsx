@@ -26,7 +26,11 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const isOffline = useAuthStore((state) => state.isOnline === false);
-  const { reorderCustomShelfBooks, reorderDownloadedShelfBooks } = useDeviceBooksActions();
+  const {
+    reorderCustomShelfBooks,
+    reorderDownloadedShelfBooks,
+    reorderPlaylistShelfBooksOptimistic,
+  } = useDeviceBooksActions();
   const { shelves, refreshDiscover } = useHomeShelves();
   const scrollableRef = useAnimatedRef<ScrollView>();
   const [isRouteContentReady, setIsRouteContentReady] = useState(false);
@@ -43,9 +47,10 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
     [normalizedShelfId, normalizedShelfIdLowercase, shelves],
   );
   const isCustomShelf = shelf?.kind === "custom";
+  const isPlaylistShelf = shelf?.kind === "playlist";
   const isDiscoverShelf = shelf?.kind === "derived" && shelf.id === "discover";
   const isDownloadedShelf = shelf?.kind === "derived" && shelf.id === "downloaded";
-  const isSortableGridShelf = isCustomShelf || isDownloadedShelf;
+  const isSortableGridShelf = isCustomShelf || isDownloadedShelf || isPlaylistShelf;
   const contentTopPadding = Math.max(84, insets.top + 56);
 
   useEffect(() => {
@@ -75,6 +80,11 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
 
       if (isDownloadedShelf) {
         reorderDownloadedShelfBooks(orderedBookIds, scopeOptions);
+        return;
+      }
+
+      if (isPlaylistShelf) {
+        void reorderPlaylistShelfBooksOptimistic(shelf.id, orderedBookIds, scopeOptions);
       }
     },
     [
@@ -82,9 +92,11 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
       activeLibraryUserKey,
       isCustomShelf,
       isDownloadedShelf,
+      isPlaylistShelf,
       isSortableGridShelf,
       reorderCustomShelfBooks,
       reorderDownloadedShelfBooks,
+      reorderPlaylistShelfBooksOptimistic,
       shelf,
     ],
   );
