@@ -267,6 +267,7 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
           numberOfLines={1}
           ellipsizeMode="tail"
           selectable
+          className="flex-1"
           style={{ fontSize: 13, color: themeColors.text, fontWeight: "600" }}
         >
           {activeChapterTitle}

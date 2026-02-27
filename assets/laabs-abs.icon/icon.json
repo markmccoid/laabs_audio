@@ -1,25 +1,15 @@
 {
   "fill" : {
-    "automatic-gradient" : "srgb:0.66667,0.47451,0.25882,1.00000",
-    "orientation" : {
-      "start" : {
-        "x" : 0.5,
-        "y" : 0
-      },
-      "stop" : {
-        "x" : 0.5,
-        "y" : 0.7
-      }
-    }
+    "automatic-gradient" : "srgb:0.00000,0.51097,0.30316,1.00000"
   },
   "groups" : [
     {
       "layers" : [
         {
-          "image-name" : "Untitled.png",
-          "name" : "Untitled",
+          "image-name" : "laabsicon_2.png",
+          "name" : "laabsicon_2",
           "position" : {
-            "scale" : 1.45,
+            "scale" : 0.6,
             "translation-in-points" : [
               0,
               0
