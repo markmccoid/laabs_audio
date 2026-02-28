@@ -1,4 +1,4 @@
-import { useCachedBookSummary } from "@/hooks/abs-data-hooks";
+import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore } from "@/player";
 import { useDeviceBooksActions } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -13,11 +13,11 @@ export default function TabLayout() {
   const libraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const { setBookPlaybackRate } = useDeviceBooksActions();
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
-  const currentBook = useCachedBookSummary(currentLibraryItemId ?? undefined);
+  // const currentBook1 = useCachedBookSummary(currentLibraryItemId ?? undefined);
+  const { data: currentBook } = useGetItemDetails(currentLibraryItemId || undefined);
   const themeColors = useThemeColors();
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const isPlaying = playbackState === "playing";
-
   const hasLoadedBook = usePlaybackStore((s) => Boolean(s.libraryItemId) && s.queue.length > 0);
   const handleSetRate = async (rate: number) => {
     await playerService.setRate(rate);
@@ -59,7 +59,7 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Icon sf="gear" md="settings" />
         <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="search" role="search" hidden={false}>
+      <NativeTabs.Trigger name="search" role="search">
         <NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 

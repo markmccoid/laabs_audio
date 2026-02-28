@@ -1,16 +1,14 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import {
+  selectIsAnotherDownloadActive,
+  selectIsBookActivelyDownloading,
   selectIsBookFullyDownloaded,
   useDeviceBooksActions,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router, usePathname } from "expo-router";
-import { useEffect, useRef } from "react";
-import { toast } from "react-native-sonner";
 import { Pressable, Text, View } from "react-native";
-
-const completionToastHandledByLibraryItemId = new Set<string>();
 const logDownloadControls = (event: string, payload?: Record<string, unknown>) => {
   if (!__DEV__) return;
   console.log(`[download-controls] ${event}`, payload ?? {});
@@ -30,45 +28,22 @@ type Props = {
 const DownloadControls = ({ libraryItemId, summary, context = "inline" }: Props) => {
   const themeColors = useThemeColors();
   const pathname = usePathname();
-  const { downloadBook, cancelDownload, deleteDownloadedBookData } = useDeviceBooksActions();
+  const { downloadBook, deleteDownloadedBookData } = useDeviceBooksActions();
+  const activeDownloadSession = useDeviceBooksStore((state) => state.activeDownloadSession);
   const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
   const isDownloaded = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
     return selectIsBookFullyDownloaded(state, libraryItemId);
   });
-  const isDownloading = downloadProgress?.libraryItemId === libraryItemId;
+  const isDownloading = useDeviceBooksStore((state) =>
+    selectIsBookActivelyDownloading(state, libraryItemId),
+  );
   const showDownloadingState = isDownloading && !isDownloaded;
   const isBookDownloadsSheet = context === "sheet";
-  const isAnotherDownloadActive =
-    Boolean(downloadProgress?.libraryItemId) && downloadProgress?.libraryItemId !== libraryItemId;
+  const isAnotherDownloadActive = useDeviceBooksStore((state) =>
+    selectIsAnotherDownloadActive(state, libraryItemId),
+  );
   const progressValue = showDownloadingState ? (downloadProgress?.progress ?? 0) : 0;
-  const previousIsDownloadingRef = useRef(isDownloading);
-
-  useEffect(() => {
-    if (libraryItemId && isDownloading) {
-      completionToastHandledByLibraryItemId.delete(libraryItemId);
-    }
-    const wasDownloading = previousIsDownloadingRef.current;
-    if (wasDownloading && !isDownloading && isDownloaded && libraryItemId) {
-      if (!isBookDownloadsSheet) {
-        previousIsDownloadingRef.current = isDownloading;
-        return;
-      }
-      if (completionToastHandledByLibraryItemId.has(libraryItemId)) {
-        previousIsDownloadingRef.current = isDownloading;
-        return;
-      }
-      completionToastHandledByLibraryItemId.add(libraryItemId);
-      logDownloadControls("complete", { libraryItemId, pathname, context });
-      toast.success("Download complete", {
-        description: summary?.title ?? "This book is ready for offline playback.",
-        duration: 5_000,
-      });
-
-      router.back();
-    }
-    previousIsDownloadingRef.current = isDownloading;
-  }, [context, isBookDownloadsSheet, isDownloaded, isDownloading, libraryItemId, pathname, summary?.title]);
 
   const handleDownload = () => {
     if (!libraryItemId) return;
@@ -76,19 +51,13 @@ const DownloadControls = ({ libraryItemId, summary, context = "inline" }: Props)
       libraryItemId,
       pathname,
       context,
-      activeDownloadLibraryItemId: downloadProgress?.libraryItemId ?? null,
+      activeDownloadLibraryItemId:
+        activeDownloadSession?.libraryItemId ?? downloadProgress?.libraryItemId ?? null,
     });
     void downloadBook(libraryItemId, { summary: summary ?? undefined });
-  };
-
-  const handleCancel = () => {
-    logDownloadControls("cancel:pressed", {
-      libraryItemId: libraryItemId ?? null,
-      pathname,
-      context,
-      activeDownloadLibraryItemId: downloadProgress?.libraryItemId ?? null,
-    });
-    void cancelDownload();
+    if (isBookDownloadsSheet) {
+      router.back();
+    }
   };
 
   const handleDelete = async () => {
@@ -120,7 +89,11 @@ const DownloadControls = ({ libraryItemId, summary, context = "inline" }: Props)
       <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
         {isDownloaded
           ? "Downloaded and ready for offline playback."
-          : "Download this book for offline playback."}
+          : showDownloadingState
+            ? "Download in progress. Use the toast at the top to cancel."
+            : isAnotherDownloadActive
+              ? "Another book is currently downloading."
+              : "Download this book for offline playback."}
       </Text>
 
       {showDownloadingState ? (
@@ -144,41 +117,23 @@ const DownloadControls = ({ libraryItemId, summary, context = "inline" }: Props)
           </View>
           <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
             <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
-              {downloadProgress?.currentFileProcessing ?? "Preparing download..."}
+              {activeDownloadSession?.phase === "cancelling"
+                ? "Cancelling download..."
+                : downloadProgress?.currentFileProcessing ?? "Preparing download..."}
             </Text>
             <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
               {formatPercent(progressValue)}
             </Text>
           </View>
-          <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
-            {downloadProgress?.numberOfFilesDownloaded ?? 0}/{downloadProgress?.numberOfFiles ?? 0}{" "}
-            files
-          </Text>
-          <Pressable
-            onPress={handleCancel}
-            style={({ pressed }) => ({
-              marginTop: 4,
-              borderRadius: 12,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: themeColors.border,
-              paddingVertical: 8,
-              opacity: pressed ? 0.8 : 1,
-              backgroundColor: themeColors.bg,
-            })}
-          >
-            <Text
-              selectable
-              style={{
-                textAlign: "center",
-                fontSize: 13,
-                fontWeight: "600",
-                color: themeColors.text,
-              }}
-            >
-              Cancel Download
+          {downloadProgress ? (
+            <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
+              {downloadProgress.numberOfFilesDownloaded}/{downloadProgress.numberOfFiles} files
             </Text>
-          </Pressable>
+          ) : (
+            <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
+              Waiting for file details...
+            </Text>
+          )}
         </View>
       ) : isDownloaded ? (
         <View style={{ gap: 8 }}>

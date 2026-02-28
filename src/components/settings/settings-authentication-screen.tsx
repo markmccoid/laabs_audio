@@ -12,6 +12,8 @@ export const SettingsAuthenticationScreen = () => {
   const serverUrl = useAuthStore((state) => state.serverUrl);
   const activeLibraryName = useAuthStore((state) => state.activeLibraryName);
   const { logout } = useAuthActions();
+  const canLogIn = status !== "authenticated";
+  const canChangeLibrary = status === "authenticated";
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
@@ -49,44 +51,63 @@ export const SettingsAuthenticationScreen = () => {
               Server: {serverUrl}
             </Text>
           ) : null}
-          {activeLibraryName ? (
+          {canChangeLibrary && activeLibraryName ? (
             <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
               Active library: {activeLibraryName}
             </Text>
           ) : null}
         </View>
 
-        <Pressable
-          onPress={() => router.push("/library-picker")}
-          style={{
-            borderWidth: 1,
-            borderColor: themeColors.border,
-            borderRadius: 14,
-            borderCurve: "continuous",
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-            backgroundColor: themeColors.surface,
-          }}
-        >
-          <Text selectable style={{ color: themeColors.text, fontSize: 16, fontWeight: "600" }}>
-            Change Library
-          </Text>
-        </Pressable>
+        {canChangeLibrary ? (
+          <Pressable
+            onPress={() => router.push("/library-picker")}
+            style={{
+              borderWidth: 1,
+              borderColor: themeColors.border,
+              borderRadius: 14,
+              borderCurve: "continuous",
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              backgroundColor: themeColors.surface,
+            }}
+          >
+            <Text selectable style={{ color: themeColors.text, fontSize: 16, fontWeight: "600" }}>
+              Change Library
+            </Text>
+          </Pressable>
+        ) : null}
 
-        <Pressable
-          onPress={() => logout().catch(() => undefined)}
-          style={{
-            borderRadius: 14,
-            borderCurve: "continuous",
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-            backgroundColor: themeColors.accent,
-          }}
-        >
-          <Text selectable style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>
-            Log Out
-          </Text>
-        </Pressable>
+        {canLogIn ? (
+          <Pressable
+            onPress={() => router.replace({ pathname: "/login", params: { mode: "required" } })}
+            style={{
+              borderRadius: 14,
+              borderCurve: "continuous",
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              backgroundColor: themeColors.accent,
+            }}
+          >
+            <Text selectable style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>
+              Sign In
+            </Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={() => logout().catch(() => undefined)}
+            style={{
+              borderRadius: 14,
+              borderCurve: "continuous",
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              backgroundColor: themeColors.accent,
+            }}
+          >
+            <Text selectable style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>
+              Log Out
+            </Text>
+          </Pressable>
+        )}
       </ScrollView>
     </View>
   );

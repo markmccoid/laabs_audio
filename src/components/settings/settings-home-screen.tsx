@@ -2,6 +2,7 @@ import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import React from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import { useAuthStore } from "@/auth/auth-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 
 type SettingsRowProps = {
@@ -99,6 +100,8 @@ const SettingsGroup = ({
 
 export const SettingsHomeScreen = () => {
   const themeColors = useThemeColors();
+  const status = useAuthStore((state) => state.status);
+  const isAuthenticated = status === "authenticated";
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
@@ -120,21 +123,23 @@ export const SettingsHomeScreen = () => {
           />
         </SettingsGroup>
 
-        <SettingsGroup title="Library">
-          <SettingsRow
-            href="/(tabs)/settings/bookshelves"
-            title="Bookshelves"
-            subtitle="Visibility, order, names, and home item counts"
-            icon="books.vertical"
-          />
-          <SettingsRow
-            href="/(tabs)/settings/playback"
-            title="Playback"
-            subtitle="Defaults for progress display and player behavior"
-            icon="play.circle"
-            isLast
-          />
-        </SettingsGroup>
+        {isAuthenticated ? (
+          <SettingsGroup title="Library">
+            <SettingsRow
+              href="/(tabs)/settings/bookshelves"
+              title="Bookshelves"
+              subtitle="Visibility, order, names, and home item counts"
+              icon="books.vertical"
+            />
+            <SettingsRow
+              href="/(tabs)/settings/playback"
+              title="Playback"
+              subtitle="Defaults for progress display and player behavior"
+              icon="play.circle"
+              isLast
+            />
+          </SettingsGroup>
+        ) : null}
       </ScrollView>
     </View>
   );

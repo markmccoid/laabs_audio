@@ -1,14 +1,25 @@
+import { useAuthStore } from "@/auth/auth-store";
 import LibraryContainer from "@/components/Library/LibraryContainer";
 import { useFiltersActions, useSortDirection, useSortedBy } from "@/store/store-filters";
-import { Stack } from "expo-router";
+import { router, Stack } from "expo-router";
+import { useEffect } from "react";
 
 export default function SearchIndex() {
+  const status = useAuthStore((state) => state.status);
   const filterActions = useFiltersActions();
   const sortedBy = useSortedBy();
   const sortDirection = useSortDirection();
 
+  useEffect(() => {
+    if (status === "authenticated") return;
+    router.replace("/(tabs)/(home)");
+  }, [status]);
+
   console.log("Sorted By", sortedBy, sortDirection);
-  const isSelected = (item: string) => item === sortedBy;
+
+  if (status !== "authenticated") {
+    return null;
+  }
 
   return (
     <>
@@ -40,7 +51,7 @@ export default function SearchIndex() {
               Descending
             </Stack.Toolbar.MenuAction>
           </Stack.Toolbar.Menu>
-          <Stack.Toolbar.Badge>{sortDirection == "asc" ? "↑" : "↓"}</Stack.Toolbar.Badge>
+          <Stack.Toolbar.Badge>{sortDirection === "asc" ? "↑" : "↓"}</Stack.Toolbar.Badge>
           {/* Author */}
           <Stack.Toolbar.MenuAction
             onPress={() => filterActions.setSortedBy("author")}

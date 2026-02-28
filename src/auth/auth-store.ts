@@ -359,10 +359,11 @@ export const authStore = createStore<AuthState>()(
 
       await Promise.all([
         authStorage.clearTokens(),
-        authStorage.clearPassword(),
+        authStorage.clearUsernameAndPassword(),
       ]);
 
       set((current) => ({
+        storedUsername: null,
         accessToken: null,
         refreshToken: null,
         accessTokenExpiresAt: null,

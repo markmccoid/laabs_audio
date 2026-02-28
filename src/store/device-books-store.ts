@@ -28,6 +28,8 @@ const GLOBAL_PLAYBACK_RATE_KEY = "__global__";
 
 const clampBookPlaybackRate = (value: number) =>
   Math.max(MIN_BOOK_PLAYBACK_RATE, Math.min(MAX_BOOK_PLAYBACK_RATE, value));
+const DOWNLOAD_PROGRESS_UI_UPDATE_INTERVAL_MS = 250;
+const DOWNLOAD_PROGRESS_UI_MIN_PERCENT_STEP = 2;
 const logDownload = (event: string, payload?: Record<string, unknown>) => {
   if (!__DEV__) return;
   console.log(`[device-books-store] download:${event}`, payload ?? {});
@@ -56,6 +58,22 @@ export type DownloadProgress = {
   numberOfFiles: number;
   numberOfFilesDownloaded: number;
   downloadCompleted: boolean;
+};
+
+export type ActiveDownloadSession = {
+  libraryItemId: string;
+  title: string | null;
+  phase: "preparing" | "downloading" | "cancelling";
+  startedAt: number;
+};
+
+export type DownloadLifecycleEvent = {
+  id: number;
+  libraryItemId: string;
+  title: string | null;
+  status: "completed" | "failed" | "cancelled";
+  errorMessage?: string | null;
+  finishedAt: number;
 };
 
 type PendingBookmarkCreate = {
@@ -160,8 +178,11 @@ type DeviceBooksPersistedState = {
 export type DeviceBooksState = DeviceBooksPersistedState & {
   // Monotonic token for download session identity
   downloadToken: number;
+  downloadEventToken: number;
   // Active cancel function for current file download
   activeCancelFn?: () => Promise<void>;
+  activeDownloadSession?: ActiveDownloadSession;
+  lastDownloadEvent?: DownloadLifecycleEvent;
   // Active download progress (single download at a time)
   downloadProgress?: DownloadProgress;
   actions: {
@@ -288,6 +309,9 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
       options?: { summary?: LibraryItemSummary },
     ) => Promise<void>;
     cancelDownload: () => Promise<void>;
+    setActiveDownloadSession: (session?: ActiveDownloadSession) => void;
+    publishDownloadEvent: (event: Omit<DownloadLifecycleEvent, "id">) => void;
+    clearLastDownloadEvent: () => void;
     setDownloadProgress: (progress?: DownloadProgress) => void;
     setActiveCancelFn: (cancelFn?: () => Promise<void>) => void;
     incrementDownloadToken: () => number;
@@ -607,6 +631,7 @@ const deleteFileIfExists = async (uri: string) => {
 
 const downloadCoverImage = async (libraryItemId: string) => {
   try {
+    // Covers are part of the offline payload and live beside the downloaded audio files.
     const coverUrls = buildCoverUrls(libraryItemId);
     const dir = await ensureDownloadDir(libraryItemId);
     const { task, fileUri } = downloadFileBlob(
@@ -631,7 +656,10 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
     (set, get) => ({
       ...createDefaultPersistedState(),
       downloadToken: 0,
+      downloadEventToken: 0,
       activeCancelFn: undefined,
+      activeDownloadSession: undefined,
+      lastDownloadEvent: undefined,
       downloadProgress: undefined,
       actions: {
         setBookPlaybackRate: (libraryItemId, playbackRate, options) => {
@@ -2192,6 +2220,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             for (const track of downloadInfo.audioTracks) {
               await deleteFileIfExists(track.fileUri);
             }
+            // Removing a download must clean up both audio files and the local cover image.
             if (downloadInfo.coverLocalUri) {
               await deleteFileIfExists(downloadInfo.coverLocalUri);
             }
@@ -2203,12 +2232,23 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         downloadBook: async (libraryItemId, options) => {
           if (!libraryItemId) return;
 
+          const activeSession = get().activeDownloadSession;
           const activeProgress = get().downloadProgress;
-          if (activeProgress?.libraryItemId === libraryItemId) {
+          if (activeSession?.libraryItemId === libraryItemId) {
             logDownload("start:ignored-already-downloading", {
               libraryItemId,
-              currentFile: activeProgress.currentFileProcessing,
-              progress: activeProgress.progress,
+              phase: activeSession.phase,
+              currentFile: activeProgress?.currentFileProcessing ?? null,
+              progress: activeProgress?.progress ?? 0,
+            });
+            return;
+          }
+
+          if (activeSession?.libraryItemId && activeSession.libraryItemId !== libraryItemId) {
+            logDownload("start:ignored-another-download-active", {
+              libraryItemId,
+              activeDownloadLibraryItemId: activeSession.libraryItemId,
+              phase: activeSession.phase,
             });
             return;
           }
@@ -2216,7 +2256,8 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           logDownload("start:requested", {
             libraryItemId,
             hasSummary: Boolean(options?.summary),
-            activeDownloadLibraryItemId: activeProgress?.libraryItemId ?? null,
+            activeDownloadLibraryItemId:
+              activeSession?.libraryItemId ?? activeProgress?.libraryItemId ?? null,
           });
 
           // Increment token to invalidate any in-flight download session
@@ -2224,148 +2265,51 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           logDownload("start:token-assigned", { libraryItemId, token: myToken });
 
           const isTokenActive = () => get().downloadToken === myToken;
-
-          const details = await itemsApi.getItemDetails(libraryItemId);
-          if (!isTokenActive()) {
-            logDownload("token:stale-after-details", { libraryItemId, token: myToken });
-            return;
-          }
-
-          const downloadDir = await ensureDownloadDir(libraryItemId);
-          if (!isTokenActive()) {
-            logDownload("token:stale-after-dir", { libraryItemId, token: myToken });
-            return;
-          }
-
-          const audioTracks: DownloadTrack[] = [];
-          const filesToCleanUp: string[] = [];
-          const totalFiles = details.audioFiles.length;
-          logDownload("details:fetched", {
+          const startedAt = Date.now();
+          const initialTitle = options?.summary?.title ?? null;
+          let resolvedTitle = initialTitle;
+          get().actions.setActiveDownloadSession({
             libraryItemId,
-            token: myToken,
-            totalFiles,
-            downloadDir,
+            title: initialTitle,
+            phase: "preparing",
+            startedAt,
           });
 
-          for (let i = 0; i < details.audioFiles.length; i += 1) {
-            const audioFile = details.audioFiles[i];
+          try {
+            const details = await itemsApi.getItemDetails(libraryItemId);
             if (!isTokenActive()) {
-              logDownload("token:stale-before-file", {
-                libraryItemId,
-                token: myToken,
-                fileIndex: i + 1,
-                totalFiles,
-              });
+              logDownload("token:stale-after-details", { libraryItemId, token: myToken });
               return;
             }
 
-            logDownload("file:start", {
+            resolvedTitle = details.media.metadata.title ?? resolvedTitle;
+            get().actions.setActiveDownloadSession({
+              libraryItemId,
+              title: resolvedTitle,
+              phase: "preparing",
+              startedAt,
+            });
+
+            const downloadDir = await ensureDownloadDir(libraryItemId);
+            if (!isTokenActive()) {
+              logDownload("token:stale-after-dir", { libraryItemId, token: myToken });
+              return;
+            }
+
+            const audioTracks: DownloadTrack[] = [];
+            const filesToCleanUp: string[] = [];
+            const totalFiles = details.audioFiles.length;
+            logDownload("details:fetched", {
               libraryItemId,
               token: myToken,
-              fileIndex: i + 1,
               totalFiles,
-              ino: audioFile.ino,
-              filename: audioFile.metadata.filename,
+              downloadDir,
             });
 
-            const { url, authHeader } = await downloadsApi.getDownloadSpec(
-              libraryItemId,
-              audioFile.ino,
-            );
-            if (!isTokenActive()) {
-              logDownload("token:stale-after-spec", {
-                libraryItemId,
-                token: myToken,
-                fileIndex: i + 1,
-                totalFiles,
-              });
-              return;
-            }
-
-            const startOffset = audioFile.startOffset ?? 0;
-
-            // Initialize progress state for the current file
-            get().actions.setDownloadProgress({
-              libraryItemId,
-              currentFileProcessing: audioFile.metadata.filename,
-              progress: 0,
-              received: 0,
-              total: audioFile.metadata.size ?? 0,
-              numberOfFiles: totalFiles,
-              numberOfFilesDownloaded: i + 1,
-              downloadCompleted: false,
-            });
-
-            let lastLoggedPercent = -1;
-            try {
-              const { task, cancelDownload, cleanFileName, fileUri } = downloadFileBlob(
-                url,
-                audioFile.metadata.filename,
-                (received, total) => {
-                  if (!isTokenActive()) return;
-                  // Track per-file progress for UI
-                  const percent = total > 0 ? Math.round((received / total) * 100) : 0;
-                  if (
-                    percent === 100 ||
-                    lastLoggedPercent === -1 ||
-                    percent >= lastLoggedPercent + 10
-                  ) {
-                    lastLoggedPercent = percent;
-                    logDownload("file:progress", {
-                      libraryItemId,
-                      token: myToken,
-                      fileIndex: i + 1,
-                      totalFiles,
-                      progress: percent,
-                      received,
-                      total,
-                    });
-                  }
-                  get().actions.setDownloadProgress({
-                    libraryItemId,
-                    currentFileProcessing: audioFile.metadata.filename,
-                    progress: percent,
-                    received,
-                    total,
-                    numberOfFiles: totalFiles,
-                    numberOfFilesDownloaded: i + 1,
-                    downloadCompleted: false,
-                  });
-                },
-                { directory: downloadDir, headers: authHeader },
-              );
-              filesToCleanUp.push(fileUri);
-
-              get().actions.setActiveCancelFn(async () => {
-                await cancelDownload();
-                for (const file of filesToCleanUp) {
-                  await deleteFileIfExists(file);
-                }
-              });
-
-              const result = await task;
-              if (!result || result.status !== 200) {
-                throw new Error(`Download failed with status: ${result?.status ?? "unknown"}`);
-              }
-
-              audioTracks.push({
-                ino: audioFile.ino,
-                filename: audioFile.metadata.filename,
-                cleanFileName,
-                duration: audioFile.duration,
-                startOffset,
-                fileUri,
-              });
-              logDownload("file:complete", {
-                libraryItemId,
-                token: myToken,
-                fileIndex: i + 1,
-                totalFiles,
-                ino: audioFile.ino,
-              });
-            } catch (error) {
+            for (let i = 0; i < details.audioFiles.length; i += 1) {
+              const audioFile = details.audioFiles[i];
               if (!isTokenActive()) {
-                logDownload("token:stale-on-file-error", {
+                logDownload("token:stale-before-file", {
                   libraryItemId,
                   token: myToken,
                   fileIndex: i + 1,
@@ -2373,71 +2317,249 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 });
                 return;
               }
-              for (const file of filesToCleanUp) {
-                await deleteFileIfExists(file);
-              }
-              get().actions.clearDownloadedData(libraryItemId);
-              const finalizedToken = get().actions.incrementDownloadToken();
-              set({ activeCancelFn: undefined, downloadProgress: undefined });
-              logDownload("file:error", {
+
+              logDownload("file:start", {
                 libraryItemId,
                 token: myToken,
-                finalizedToken,
                 fileIndex: i + 1,
                 totalFiles,
-                error: error instanceof Error ? error.message : "unknown",
+                ino: audioFile.ino,
+                filename: audioFile.metadata.filename,
               });
-              throw new Error("Download failed");
+
+              const { url, authHeader } = await downloadsApi.getDownloadSpec(
+                libraryItemId,
+                audioFile.ino,
+              );
+              if (!isTokenActive()) {
+                logDownload("token:stale-after-spec", {
+                  libraryItemId,
+                  token: myToken,
+                  fileIndex: i + 1,
+                  totalFiles,
+                });
+                return;
+              }
+
+              const startOffset = audioFile.startOffset ?? 0;
+
+              // Initialize progress state for the current file
+              get().actions.setDownloadProgress({
+                libraryItemId,
+                currentFileProcessing: audioFile.metadata.filename,
+                progress: 0,
+                received: 0,
+                total: audioFile.metadata.size ?? 0,
+                numberOfFiles: totalFiles,
+                numberOfFilesDownloaded: i + 1,
+                downloadCompleted: false,
+              });
+
+              let lastLoggedPercent = -1;
+              let lastUiPercent = -1;
+              let lastUiUpdateAt = 0;
+              try {
+                const { task, cancelDownload, cleanFileName, fileUri } = downloadFileBlob(
+                  url,
+                  audioFile.metadata.filename,
+                  (received, total) => {
+                    if (!isTokenActive()) return;
+                    const currentSession = get().activeDownloadSession;
+                    if (
+                      currentSession?.libraryItemId === libraryItemId &&
+                      currentSession.phase === "preparing" &&
+                      received > 0
+                    ) {
+                      get().actions.setActiveDownloadSession({
+                        ...currentSession,
+                        phase: "downloading",
+                      });
+                    }
+                    // Track per-file progress for UI
+                    const percent = total > 0 ? Math.round((received / total) * 100) : 0;
+                    if (
+                      percent === 100 ||
+                      lastLoggedPercent === -1 ||
+                      percent >= lastLoggedPercent + 10
+                    ) {
+                      lastLoggedPercent = percent;
+                      logDownload("file:progress", {
+                        libraryItemId,
+                        token: myToken,
+                        fileIndex: i + 1,
+                        totalFiles,
+                        progress: percent,
+                        received,
+                        total,
+                      });
+                    }
+
+                    const now = Date.now();
+                    const shouldUpdateUi =
+                      percent === 100 ||
+                      lastUiPercent === -1 ||
+                      percent >= lastUiPercent + DOWNLOAD_PROGRESS_UI_MIN_PERCENT_STEP ||
+                      now - lastUiUpdateAt >= DOWNLOAD_PROGRESS_UI_UPDATE_INTERVAL_MS;
+
+                    if (!shouldUpdateUi) {
+                      return;
+                    }
+
+                    lastUiPercent = percent;
+                    lastUiUpdateAt = now;
+                    get().actions.setDownloadProgress({
+                      libraryItemId,
+                      currentFileProcessing: audioFile.metadata.filename,
+                      progress: percent,
+                      received,
+                      total,
+                      numberOfFiles: totalFiles,
+                      numberOfFilesDownloaded: i + 1,
+                      downloadCompleted: false,
+                    });
+                  },
+                  { directory: downloadDir, headers: authHeader },
+                );
+                filesToCleanUp.push(fileUri);
+
+                get().actions.setActiveCancelFn(async () => {
+                  await cancelDownload();
+                  for (const file of filesToCleanUp) {
+                    await deleteFileIfExists(file);
+                  }
+                });
+
+                const result = await task;
+                if (!result || result.status !== 200) {
+                  throw new Error(`Download failed with status: ${result?.status ?? "unknown"}`);
+                }
+
+                audioTracks.push({
+                  ino: audioFile.ino,
+                  filename: audioFile.metadata.filename,
+                  cleanFileName,
+                  duration: audioFile.duration,
+                  startOffset,
+                  fileUri,
+                });
+                logDownload("file:complete", {
+                  libraryItemId,
+                  token: myToken,
+                  fileIndex: i + 1,
+                  totalFiles,
+                  ino: audioFile.ino,
+                });
+              } catch (error) {
+                if (!isTokenActive()) {
+                  logDownload("token:stale-on-file-error", {
+                    libraryItemId,
+                    token: myToken,
+                    fileIndex: i + 1,
+                    totalFiles,
+                  });
+                  return;
+                }
+                for (const file of filesToCleanUp) {
+                  await deleteFileIfExists(file);
+                }
+                get().actions.clearDownloadedData(libraryItemId);
+                throw error;
+              }
+
+              get().actions.setDownloadedBookData(libraryItemId, { audioTracks: [...audioTracks] });
+
+              get().actions.setDownloadProgress({
+                libraryItemId,
+                currentFileProcessing: audioFile.metadata.filename,
+                progress: 100,
+                received: audioFile.metadata.size ?? 0,
+                total: audioFile.metadata.size ?? 0,
+                numberOfFiles: totalFiles,
+                numberOfFilesDownloaded: i + 1,
+                downloadCompleted: i + 1 === totalFiles,
+              });
             }
 
-            get().actions.setDownloadedBookData(libraryItemId, { audioTracks: [...audioTracks] });
+            if (!isTokenActive()) {
+              logDownload("token:stale-before-cover", { libraryItemId, token: myToken });
+              return;
+            }
 
-            get().actions.setDownloadProgress({
+            logDownload("cover:start", { libraryItemId, token: myToken });
+            const coverLocalUri = await downloadCoverImage(libraryItemId);
+            if (!isTokenActive()) {
+              logDownload("token:stale-after-cover", { libraryItemId, token: myToken });
+              return;
+            }
+
+            get().actions.setDownloadedBookData(libraryItemId, { audioTracks, coverLocalUri });
+            get().actions.setDownloadedDetails(libraryItemId, details, {
+              coverLocalUri,
+            });
+
+            if (!isTokenActive()) {
+              logDownload("token:stale-before-finalize", { libraryItemId, token: myToken });
+              return;
+            }
+
+            const finalizedToken = get().actions.incrementDownloadToken();
+            set({
+              activeCancelFn: undefined,
+              activeDownloadSession: undefined,
+              downloadProgress: undefined,
+            });
+            logDownload("complete", {
               libraryItemId,
-              currentFileProcessing: audioFile.metadata.filename,
-              progress: 100,
-              received: audioFile.metadata.size ?? 0,
-              total: audioFile.metadata.size ?? 0,
-              numberOfFiles: totalFiles,
-              numberOfFilesDownloaded: i + 1,
-              downloadCompleted: i + 1 === totalFiles,
+              token: myToken,
+              finalizedToken,
+              totalFiles,
+              hasCover: Boolean(coverLocalUri),
+            });
+            get().actions.publishDownloadEvent({
+              libraryItemId,
+              title: resolvedTitle,
+              status: "completed",
+              finishedAt: Date.now(),
+            });
+          } catch (error) {
+            if (!isTokenActive()) {
+              logDownload("token:stale-after-error", { libraryItemId, token: myToken });
+              return;
+            }
+            const finalizedToken = get().actions.incrementDownloadToken();
+            set({
+              activeCancelFn: undefined,
+              activeDownloadSession: undefined,
+              downloadProgress: undefined,
+            });
+            logDownload("failed", {
+              libraryItemId,
+              token: myToken,
+              finalizedToken,
+              error: error instanceof Error ? error.message : "unknown",
+            });
+            get().actions.publishDownloadEvent({
+              libraryItemId,
+              title: resolvedTitle,
+              status: "failed",
+              errorMessage: error instanceof Error ? error.message : "Download failed",
+              finishedAt: Date.now(),
             });
           }
-
-          if (!isTokenActive()) {
-            logDownload("token:stale-before-cover", { libraryItemId, token: myToken });
-            return;
-          }
-
-          logDownload("cover:start", { libraryItemId, token: myToken });
-          const coverLocalUri = await downloadCoverImage(libraryItemId);
-          if (!isTokenActive()) {
-            logDownload("token:stale-after-cover", { libraryItemId, token: myToken });
-            return;
-          }
-
-          get().actions.setDownloadedBookData(libraryItemId, { audioTracks, coverLocalUri });
-          get().actions.setDownloadedDetails(libraryItemId, details, {
-            coverLocalUri,
-          });
-
-          if (!isTokenActive()) {
-            logDownload("token:stale-before-finalize", { libraryItemId, token: myToken });
-            return;
-          }
-          const finalizedToken = get().actions.incrementDownloadToken();
-          set({ activeCancelFn: undefined, downloadProgress: undefined });
-          logDownload("complete", {
-            libraryItemId,
-            token: myToken,
-            finalizedToken,
-            totalFiles,
-            hasCover: Boolean(coverLocalUri),
-          });
         },
 
         cancelDownload: async () => {
-          const cancelledLibraryItemId = get().downloadProgress?.libraryItemId;
+          const activeSession = get().activeDownloadSession;
+          const cancelledLibraryItemId =
+            activeSession?.libraryItemId ?? get().downloadProgress?.libraryItemId;
+          const cancelledTitle = activeSession?.title ?? null;
+          const cancelledStartedAt = activeSession?.startedAt ?? Date.now();
+          if (activeSession) {
+            get().actions.setActiveDownloadSession({
+              ...activeSession,
+              phase: "cancelling",
+            });
+          }
           const nextToken = get().actions.incrementDownloadToken();
           logDownload("cancel:requested", {
             libraryItemId: cancelledLibraryItemId ?? null,
@@ -2450,10 +2572,20 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             // Ignore cancel errors
           }
 
-          set({ activeCancelFn: undefined, downloadProgress: undefined });
+          set({
+            activeCancelFn: undefined,
+            activeDownloadSession: undefined,
+            downloadProgress: undefined,
+          });
 
           if (cancelledLibraryItemId) {
             await get().actions.deleteDownloadedBookData(cancelledLibraryItemId);
+            get().actions.publishDownloadEvent({
+              libraryItemId: cancelledLibraryItemId,
+              title: cancelledTitle,
+              status: "cancelled",
+              finishedAt: Math.max(Date.now(), cancelledStartedAt),
+            });
           }
           logDownload("cancel:complete", {
             libraryItemId: cancelledLibraryItemId ?? null,
@@ -2461,7 +2593,42 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           });
         },
 
+        setActiveDownloadSession: (session) => {
+          set({ activeDownloadSession: session });
+        },
+
+        publishDownloadEvent: (event) => {
+          const nextId = get().downloadEventToken + 1;
+          set({
+            downloadEventToken: nextId,
+            lastDownloadEvent: {
+              ...event,
+              id: nextId,
+            },
+          });
+        },
+
+        clearLastDownloadEvent: () => {
+          set({ lastDownloadEvent: undefined });
+        },
+
         setDownloadProgress: (progress) => {
+          const current = get().downloadProgress;
+          if (
+            current?.libraryItemId === progress?.libraryItemId &&
+            current?.currentFileProcessing === progress?.currentFileProcessing &&
+            current?.progress === progress?.progress &&
+            current?.received === progress?.received &&
+            current?.total === progress?.total &&
+            current?.numberOfFiles === progress?.numberOfFiles &&
+            current?.numberOfFilesDownloaded === progress?.numberOfFilesDownloaded &&
+            current?.downloadCompleted === progress?.downloadCompleted
+          ) {
+            return;
+          }
+          if (!current && !progress) {
+            return;
+          }
           set({ downloadProgress: progress });
         },
 
@@ -2631,6 +2798,30 @@ export const selectBookmarkLocalNote = (
 
 export const selectHasOfflineContent = (state: DeviceBooksState, _userKey?: string | null) => {
   return Object.keys(state.downloadedBookData).length > 0;
+};
+
+export const selectActiveDownloadLibraryItemId = (state: DeviceBooksState) =>
+  state.activeDownloadSession?.libraryItemId;
+
+export const selectIsAnyDownloadActive = (state: DeviceBooksState) =>
+  Boolean(state.activeDownloadSession?.libraryItemId);
+
+export const selectIsAnotherDownloadActive = (
+  state: DeviceBooksState,
+  libraryItemId?: string,
+) => {
+  const activeLibraryItemId = selectActiveDownloadLibraryItemId(state);
+  if (!activeLibraryItemId) return false;
+  if (!libraryItemId) return true;
+  return activeLibraryItemId !== libraryItemId;
+};
+
+export const selectIsBookActivelyDownloading = (
+  state: DeviceBooksState,
+  libraryItemId?: string,
+) => {
+  if (!libraryItemId) return false;
+  return selectActiveDownloadLibraryItemId(state) === libraryItemId;
 };
 
 export const selectIsBookDownloaded = (state: DeviceBooksState, libraryItemId: string) => {

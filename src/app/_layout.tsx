@@ -9,6 +9,7 @@ import { Uniwind } from "uniwind";
 import { libraryItemsApi } from "../api/library-items-api";
 import { meApi } from "../api/me-api";
 import { useAuthStore } from "../auth/auth-store";
+import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
 import { LibrarySelectionGate } from "../components/library-selection-gate";
 import { OfflineConnectionBanner } from "../components/offline-connection-banner";
@@ -73,6 +74,7 @@ export default function RootLayout() {
     if (
       status !== "anonymous" &&
       !loginRequired &&
+      !inLogin &&
       !inTabs &&
       !inLibraryPicker &&
       !inChapterViewer &&
@@ -165,6 +167,7 @@ export default function RootLayout() {
       <ThemeProvider value={navigationTheme}>
         <GestureHandlerRootView style={{ flex: 1, backgroundColor: themeColors.bg }}>
           <LibrarySelectionGate />
+          <ActiveDownloadToastCoordinator />
           <OfflineConnectionBanner />
           <SleepTimerCoordinator />
           <View style={{ flex: 1 }}>

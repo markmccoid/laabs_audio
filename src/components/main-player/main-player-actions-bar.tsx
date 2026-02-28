@@ -1,5 +1,6 @@
-import { useSleepTimerStatus } from "@/player";
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
+import { useSleepTimerStatus } from "@/player";
+import { useBookPlaybackRate } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Bookmark } from "@/types/absTypes";
 import { router } from "expo-router";
@@ -107,6 +108,7 @@ const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
   const themeColors = useThemeColors();
   const { data: userServerState } = useGetUserServerState();
   const sleepTimerStatus = useSleepTimerStatus();
+  const playbackRate = useBookPlaybackRate(libraryItemId);
 
   const bookmarkCount = useMemo(() => {
     if (!libraryItemId) return 0;
@@ -160,7 +162,12 @@ const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
       }}
     >
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-        <ActionIconButton icon="hare.fill" label="Rate" onPress={openRate} />
+        <View className="relative flex-col items-center">
+          <ActionIconButton icon="hare.fill" label="Rate" onPress={openRate} />
+          <Text className="absolute bottom-[-5] text-text-muted" style={{ fontSize: 12 }}>
+            {playbackRate}x
+          </Text>
+        </View>
         <ActionIconButton
           icon="bookmark.fill"
           label={

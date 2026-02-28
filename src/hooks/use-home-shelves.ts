@@ -13,6 +13,7 @@ import {
   type HomeDerivedShelfId,
   type PlaylistShelfSyncState,
 } from "../store/device-books-store";
+import { toDownloadedBookSummary } from "../store/downloaded-book-helpers";
 import {
   DEFAULT_HOME_SHELF_ITEM_COUNT,
   type HomeShelfSettings,
@@ -194,6 +195,7 @@ export const useHomeShelves = () => {
   const upsertPlaylistsFromServer = useDeviceBooksStore((state) => state.actions.upsertPlaylistsFromServer);
   const markMissingPlaylists = useDeviceBooksStore((state) => state.actions.markMissingPlaylists);
   const downloadedDetailsById = useDeviceBooksStore((state) => state.downloadedDetailsById);
+  const downloadedBookData = useDeviceBooksStore((state) => state.downloadedBookData);
   const downloadedShelfOrder = useDeviceBooksStore((state) =>
     homeScopeKey ? state.downloadedShelfOrderByScope[homeScopeKey] ?? EMPTY_ORDER : EMPTY_ORDER,
   );
@@ -270,6 +272,19 @@ export const useHomeShelves = () => {
     const downloadedBooks = recentlyAdded.filter((book) => Boolean(downloadedDetailsById[book.id]));
     return reorderByIds(downloadedBooks, downloadedShelfOrder);
   }, [downloadedDetailsById, downloadedShelfOrder, recentlyAdded]);
+
+  const offlineDownloaded = useMemo(() => {
+    const downloadedBooks = Object.values(downloadedDetailsById).map((details) =>
+      toDownloadedBookSummary(details, downloadedBookData[details.id]?.coverLocalUri),
+    );
+    const orderedBooks = reorderByIds(downloadedBooks, downloadedShelfOrder);
+
+    if (orderedBooks.length > 0) {
+      return orderedBooks;
+    }
+
+    return downloadedBooks.sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [downloadedBookData, downloadedDetailsById, downloadedShelfOrder]);
 
   const discoverDateKey = toDailySeedKey();
   const hasDiscoverSnapshotForToday = storedDiscoverShelf?.dateKey === discoverDateKey;
@@ -469,6 +484,24 @@ export const useHomeShelves = () => {
   }, [shelves, storedShelfOrder]);
 
   const visibleShelves = useMemo<HomeShelf[]>(() => {
+    if (authStatus !== "authenticated") {
+      return [
+        {
+          kind: "derived",
+          id: "downloaded",
+          title: "Downloaded",
+          books: offlineDownloaded.slice(
+            0,
+            shelfSettingsById.downloaded?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+          ),
+          homeItemCount:
+            shelfSettingsById.downloaded?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+          isVisible: shelfSettingsById.downloaded?.isVisible ?? true,
+          emptyMessage: "No downloaded books yet.",
+        },
+      ];
+    }
+
     return orderedShelves
       .filter((shelf) => {
         if (!shelf.isVisible) return false;
@@ -480,7 +513,7 @@ export const useHomeShelves = () => {
         ...shelf,
         books: shelf.books.slice(0, shelf.homeItemCount),
       }));
-  }, [orderedShelves]);
+  }, [authStatus, offlineDownloaded, orderedShelves, shelfSettingsById.downloaded]);
 
   const customShelves = useMemo<HomeCustomShelf[]>(
     () => [
@@ -509,7 +542,21 @@ export const useHomeShelves = () => {
   return {
     homeScopeKey,
     catalog,
-    shelves: orderedShelves,
+    shelves:
+      authStatus === "authenticated"
+        ? orderedShelves
+        : [
+            {
+              kind: "derived" as const,
+              id: "downloaded" as const,
+              title: "Downloaded",
+              books: offlineDownloaded,
+              homeItemCount:
+                shelfSettingsById.downloaded?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+              isVisible: shelfSettingsById.downloaded?.isVisible ?? true,
+              emptyMessage: "No downloaded books yet.",
+            },
+          ],
     visibleShelves,
     customShelves,
     playlistShelves,

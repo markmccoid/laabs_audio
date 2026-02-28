@@ -2,6 +2,7 @@ import type { LibraryItemSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
 import { usePlaybackStore } from "@/player";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
+import { resolvePreferredCoverUri } from "@/store/downloaded-book-helpers";
 import type { BookProgressTimeDisplay } from "@/store/settings-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -51,7 +52,11 @@ export const ShelfBookCard = ({ book, progress, isOffline }: ShelfBookCardProps)
   const isDownloaded = useDeviceBooksStore((state) =>
     selectHasPlayableBookDownload(state, book.id),
   );
+  const coverLocalUri = useDeviceBooksStore((state) =>
+    state.downloadedBookData[book.id]?.coverLocalUri ?? null,
+  );
   const showOfflineUnavailable = isOffline && !isDownloaded;
+  const coverSource = resolvePreferredCoverUri(coverLocalUri, book.cover) ?? book.cover;
   const activePlaybackSeconds = Math.max(0, Math.floor(activePlaybackPositionMs / 1000));
   const activePlaybackDurationSeconds = Math.max(0, Math.floor(activePlaybackDurationMs / 1000));
   const durationSeconds = Math.max(
@@ -97,7 +102,7 @@ export const ShelfBookCard = ({ book, progress, isOffline }: ShelfBookCardProps)
       >
         <View style={{ width: COVER_SIZE, height: COVER_SIZE }}>
           <Image
-            source={book.cover}
+            source={coverSource}
             style={{
               width: COVER_SIZE,
               height: COVER_SIZE,

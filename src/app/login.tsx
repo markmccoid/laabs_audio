@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { SymbolView } from "expo-symbols";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
 import { useThemeColors } from "../theme/use-app-theme";
 
@@ -20,13 +21,14 @@ export default function LoginScreen() {
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [serverUrl, setServerUrl] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (storedUsername) setUsername(storedUsername);
-    if (storedServerUrl) setServerUrl(storedServerUrl);
+    setUsername(storedUsername ?? "");
+    setServerUrl(storedServerUrl ?? "");
   }, [storedServerUrl, storedUsername]);
 
   const handleClose = () => {
@@ -117,16 +119,31 @@ export default function LoginScreen() {
 
         <View>
           <Text className="mb-2 text-sm font-medium text-text-muted">Password</Text>
-          <TextInput
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-            placeholder="password"
-            placeholderTextColor={themeColors.textMuted}
-            selectionColor={themeColors.accent}
-            className="rounded-xl border border-border bg-surface px-4 py-3 text-base text-text"
-            style={{ color: themeColors.text }}
-          />
+          <View className="flex-row items-center rounded-xl border border-border bg-surface px-4">
+            <TextInput
+              secureTextEntry={!isPasswordVisible}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="password"
+              placeholderTextColor={themeColors.textMuted}
+              selectionColor={themeColors.accent}
+              className="flex-1 py-3 text-base text-text"
+              style={{ color: themeColors.text }}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={isPasswordVisible ? "Hide password" : "Show password"}
+              onPress={() => setIsPasswordVisible((current) => !current)}
+              className="ml-3"
+              hitSlop={10}
+            >
+              <SymbolView
+                name={isPasswordVisible ? "eye.slash" : "eye"}
+                tintColor={themeColors.textMuted}
+                size={18}
+              />
+            </Pressable>
+          </View>
         </View>
       </View>
 

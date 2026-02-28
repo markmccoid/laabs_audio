@@ -25,6 +25,11 @@ import {
   useSortedBy,
   useTags,
 } from "../store/store-filters";
+import { useDeviceBooksStore } from "../store/device-books-store";
+import {
+  resolvePreferredCoverUri,
+  toDownloadedBookSummary,
+} from "../store/downloaded-book-helpers";
 import { useLibrariesQuery } from "./use-libraries-query";
 
 //# ----------------------------------------------
@@ -470,6 +475,9 @@ export type ItemDetailsWithSummary = LibraryItemSummary &
 export const useCachedBookSummary = (itemId?: string) => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const queryClient = useQueryClient();
+  const downloadedCoverLocalUri = useDeviceBooksStore((state) =>
+    itemId ? state.downloadedBookData[itemId]?.coverLocalUri ?? null : null,
+  );
   const booksQueryKey = queryKeys.libraryBooks(activeLibraryId);
   const immediateCachedBooks = activeLibraryId
     ? queryClient.getQueryData<LibraryItemsSummary>(booksQueryKey)
@@ -488,8 +496,22 @@ export const useCachedBookSummary = (itemId?: string) => {
 
   const summaryFromQueryCache = useMemo(() => {
     if (!itemId) return null;
-    return (cachedBooks ?? immediateCachedBooks)?.find((book) => book.id === itemId) ?? null;
-  }, [cachedBooks, immediateCachedBooks, itemId]);
+    const summary = (cachedBooks ?? immediateCachedBooks)?.find((book) => book.id === itemId) ?? null;
+    if (!summary) return null;
+
+    const coverUri = resolvePreferredCoverUri(
+      downloadedCoverLocalUri,
+      summary.coverFull ?? summary.cover,
+    );
+
+    if (!coverUri) return summary;
+
+    return {
+      ...summary,
+      cover: coverUri,
+      coverFull: coverUri,
+    };
+  }, [cachedBooks, downloadedCoverLocalUri, immediateCachedBooks, itemId]);
 
   return summaryFromQueryCache ?? null;
 };
@@ -497,6 +519,13 @@ export const useCachedBookSummary = (itemId?: string) => {
 export const useGetItemDetails = (itemId?: string) => {
   const status = useAuthStore((state) => state.status);
   const cachedSummary = useCachedBookSummary(itemId);
+  const downloadedDetails = useDeviceBooksStore((state) =>
+    itemId ? state.downloadedDetailsById[itemId] : undefined,
+  );
+  const downloadedBookData = useDeviceBooksStore((state) =>
+    itemId ? state.downloadedBookData[itemId] : undefined,
+  );
+  const downloadedCoverLocalUri = downloadedBookData?.coverLocalUri ?? null;
 
   // Always call useQuery, but control when it's enabled
   const {
@@ -517,28 +546,63 @@ export const useGetItemDetails = (itemId?: string) => {
   });
 
   const data = useMemo<ItemDetailsWithSummary | undefined>(() => {
+    const fallbackCoverUri = resolvePreferredCoverUri(
+      downloadedCoverLocalUri,
+      details?.coverUri ?? cachedSummary?.coverFull ?? cachedSummary?.cover,
+    );
+
     if (details) {
-      return cachedSummary
-        ? {
-            ...cachedSummary,
-            ...details,
-            coverUri: details.coverUri ?? cachedSummary.coverFull,
-          }
-        : (details as ItemDetailsWithSummary);
+      return {
+        ...(cachedSummary ?? {}),
+        ...details,
+        ...(fallbackCoverUri
+          ? {
+              coverUri: fallbackCoverUri,
+              cover: fallbackCoverUri,
+              coverFull: fallbackCoverUri,
+            }
+          : {}),
+      };
     }
 
     if (!cachedSummary) return undefined;
 
     return {
       ...cachedSummary,
-      coverUri: cachedSummary.coverFull,
+      ...(fallbackCoverUri
+        ? {
+            coverUri: fallbackCoverUri,
+            cover: fallbackCoverUri,
+            coverFull: fallbackCoverUri,
+          }
+        : {}),
     };
-  }, [details, cachedSummary]);
+  }, [cachedSummary, details, downloadedCoverLocalUri]);
+
+  const downloadedFallback = useMemo<ItemDetailsWithSummary | undefined>(() => {
+    if (!downloadedDetails) return undefined;
+
+    const summary = toDownloadedBookSummary(downloadedDetails, downloadedCoverLocalUri);
+    const coverUri = resolvePreferredCoverUri(downloadedCoverLocalUri, downloadedDetails.coverUri);
+
+    return {
+      ...summary,
+      ...downloadedDetails,
+      duration: summary.duration,
+      ...(coverUri
+        ? {
+            coverUri,
+            cover: coverUri,
+            coverFull: coverUri,
+          }
+        : {}),
+    };
+  }, [downloadedCoverLocalUri, downloadedDetails]);
 
   // Return appropriate data based on authentication state
   if (status !== "authenticated") {
     return {
-      data: undefined,
+      data: downloadedFallback,
       isPending: false,
       isError: false,
       isLoading: false,

@@ -1,26 +1,127 @@
-import { selectIsBookFullyDownloaded, useDeviceBooksStore } from "@/store/device-books-store";
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
+import {
+  selectIsAnyDownloadActive,
+  selectIsAnotherDownloadActive,
+  selectIsBookActivelyDownloading,
+  selectIsBookFullyDownloaded,
+  useDeviceBooksStore,
+} from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Bookmark } from "@/types/absTypes";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
+import Svg, { Circle } from "react-native-svg";
 
 type BookQuickActionsProps = {
   libraryItemId?: string;
 };
 
 const clampPercent = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
+type DownloadIconProps = {
+  isDownloaded: boolean;
+  isDownloading: boolean;
+  progressPercent: number;
+  borderColor: string;
+  accentColor: string;
+  textColor: string;
+};
+
+type DownloadProgressRingProps = {
+  progressPercent: number;
+  trackColor: string;
+  accentColor: string;
+};
+
+const DownloadProgressRing = ({
+  progressPercent,
+  trackColor,
+  accentColor,
+}: DownloadProgressRingProps) => {
+  const clampedPercent = clampPercent(progressPercent);
+  const size = 32;
+  const strokeWidth = 3;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference - (clampedPercent / 100) * circumference;
+
+  return (
+    <Svg
+      pointerEvents="none"
+      width={size}
+      height={size}
+      style={{
+        position: "absolute",
+        width: size,
+        height: size,
+      }}
+    >
+      <Circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        stroke={trackColor}
+        strokeOpacity={0.35}
+        strokeWidth={strokeWidth}
+        fill="none"
+      />
+      <Circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        stroke={accentColor}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={dashOffset}
+        fill="none"
+        rotation={-90}
+        originX={size / 2}
+        originY={size / 2}
+      />
+    </Svg>
+  );
+};
+
+const DownloadQuickActionIcon = ({
+  isDownloaded,
+  isDownloading,
+  progressPercent,
+  borderColor,
+  accentColor,
+  textColor,
+}: DownloadIconProps) => {
+  return (
+    <View style={{ width: 32, height: 32, alignItems: "center", justifyContent: "center" }}>
+      {isDownloading ? (
+        <DownloadProgressRing
+          progressPercent={progressPercent}
+          trackColor={borderColor}
+          accentColor={accentColor}
+        />
+      ) : null}
+      <SymbolView
+        name={isDownloaded ? "icloud.fill" : "icloud.and.arrow.down"}
+        tintColor={isDownloaded || isDownloading ? accentColor : textColor}
+        size={25}
+      />
+    </View>
+  );
+};
 
 export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   const themeColors = useThemeColors();
   const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
+  const isAnyDownloadActive = useDeviceBooksStore(selectIsAnyDownloadActive);
   const { data: userServerState } = useGetUserServerState();
   const isDownloaded = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
     return selectIsBookFullyDownloaded(state, libraryItemId);
   });
+  const isAnotherDownloadActive = useDeviceBooksStore((state) =>
+    selectIsAnotherDownloadActive(state, libraryItemId),
+  );
   const bookmarks = useMemo(() => {
     const bookmarksByLibraryItemId =
       userServerState?.bookmarksByLibraryItemId ??
@@ -33,7 +134,9 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
     return libraryItemId ? bookmarksByLibraryItemId[libraryItemId] ?? [] : [];
   }, [libraryItemId, userServerState]);
 
-  const isDownloading = downloadProgress?.libraryItemId === libraryItemId;
+  const isDownloading = useDeviceBooksStore((state) =>
+    selectIsBookActivelyDownloading(state, libraryItemId),
+  );
   const progressPercent = isDownloading ? clampPercent(downloadProgress?.progress ?? 0) : 0;
   const bookmarkCount = bookmarks.length;
   const bookmarkBadgeLabel = bookmarkCount > 99 ? "99+" : String(bookmarkCount);
@@ -48,6 +151,7 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
 
   const openDownloads = () => {
     if (!libraryItemId) return;
+    if (isAnyDownloadActive) return;
     router.push({
       pathname: "/book-downloads",
       params: { libraryItemId },
@@ -95,9 +199,15 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
 
       <Pressable
         onPress={openDownloads}
-        disabled={!libraryItemId}
+        disabled={!libraryItemId || isAnyDownloadActive}
         accessibilityRole="button"
-        accessibilityLabel="Open download options"
+        accessibilityLabel={
+          isDownloading
+            ? "Download in progress"
+            : isAnotherDownloadActive
+              ? "Another book is downloading"
+              : "Open download options"
+        }
         style={({ pressed }) => ({
           width: 48,
           height: 48,
@@ -108,13 +218,16 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
           backgroundColor: themeColors.surface,
           alignItems: "center",
           justifyContent: "center",
-          opacity: !libraryItemId ? 0.45 : pressed ? 0.82 : 1,
+          opacity: !libraryItemId ? 0.45 : isAnotherDownloadActive ? 0.45 : pressed ? 0.82 : 1,
         })}
       >
-        <SymbolView
-          name={isDownloaded ? "icloud.fill" : "icloud.and.arrow.down"}
-          tintColor={isDownloaded ? themeColors.accent : themeColors.text}
-          size={25}
+        <DownloadQuickActionIcon
+          isDownloaded={isDownloaded}
+          isDownloading={isDownloading}
+          progressPercent={progressPercent}
+          borderColor={themeColors.border}
+          accentColor={themeColors.accent}
+          textColor={themeColors.text}
         />
       </Pressable>
 
@@ -201,19 +314,6 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
         </View>
       </Pressable>
 
-      {isDownloading ? (
-        <Text
-          selectable
-          style={{
-            color: themeColors.textMuted,
-            fontSize: 11,
-            fontWeight: "600",
-            fontVariant: ["tabular-nums"],
-          }}
-        >
-          {progressPercent}%
-        </Text>
-      ) : null}
     </View>
   );
 };

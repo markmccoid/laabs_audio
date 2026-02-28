@@ -86,6 +86,15 @@ export const authStorage = {
     await deleteItem(KEYS.password);
   },
 
+  async clearUsernameAndPassword() {
+    await logAvailability();
+    log("clearUsernameAndPassword");
+    await Promise.all([
+      deleteItem(KEYS.username),
+      deleteItem(KEYS.password),
+    ]);
+  },
+
   async clearCredentials() {
     await logAvailability();
     log("clearCredentials");
