@@ -133,7 +133,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
     isViewedBookActive,
     playbackState,
   });
-  const coverURL = bookData?.coverUri ?? bookData?.coverFull ?? bookData?.cover;
+  const coverURL = bookData?.coverUri;
   const backgroundSource = coverURL ? { uri: coverURL } : fallbackImage;
 
   const isDarkTheme = useMemo(() => {

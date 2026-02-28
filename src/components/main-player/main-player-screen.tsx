@@ -38,7 +38,7 @@ const MainPlayerScreen = () => {
   const resolvedAuthorName = metadata?.authorName ?? authorFromList ?? bookData?.author ?? "";
   const authorName = resolvedAuthorName.trim().length > 0 ? resolvedAuthorName : "Unknown author";
   const title = bookData?.title ?? "No book selected";
-  const coverURL = bookData?.coverUri ?? bookData?.coverFull ?? bookData?.cover;
+  const coverURL = bookData?.coverUri;
   const backgroundSource = coverURL ? { uri: coverURL } : fallbackImage;
   const chapters = bookData?.media?.chapters ?? [];
   const fallbackDurationMs = Math.max(

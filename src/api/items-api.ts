@@ -41,7 +41,7 @@ export const itemsApi = {
       media: response.media,
       bookDuration: response.media.duration,
       userMediaProgress: response.userMediaProgress,
-      coverUri: coverUrls.coverFull,
+      coverUri: coverUrls.coverFullWithToken,
       authorBookCount,
       updatedAt: response.updatedAt,
       libraryFiles: response.libraryFiles,

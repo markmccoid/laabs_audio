@@ -6,6 +6,21 @@ export const resolvePreferredCoverUri = (
   fallbackCoverUri?: string | null,
 ) => coverLocalUri ?? fallbackCoverUri ?? null;
 
+type BookCoverFields = {
+  cover?: string | null;
+  coverFull?: string | null;
+  coverUri?: string | null;
+};
+
+export const resolveBookCoverUri = (
+  coverFields?: BookCoverFields | null,
+  coverLocalUri?: string | null,
+) =>
+  resolvePreferredCoverUri(
+    coverLocalUri,
+    coverFields?.coverUri ?? coverFields?.coverFull ?? coverFields?.cover,
+  );
+
 export const toDownloadedBookSummary = (
   details: ItemDetails,
   coverLocalUri?: string | null,
@@ -14,7 +29,7 @@ export const toDownloadedBookSummary = (
   const authors = metadata.authors?.map((author) => author.name).filter(Boolean).join(", ");
   const narrators = metadata.narrators?.filter(Boolean).join(", ");
   const series = metadata.series?.map((item) => item.name).filter(Boolean).join(", ");
-  const coverUri = resolvePreferredCoverUri(coverLocalUri, details.coverUri) ?? details.coverUri;
+  const coverUri = resolveBookCoverUri(details, coverLocalUri) ?? details.coverUri;
 
   return {
     id: details.id,

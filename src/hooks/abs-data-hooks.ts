@@ -27,7 +27,7 @@ import {
 } from "../store/store-filters";
 import { useDeviceBooksStore } from "../store/device-books-store";
 import {
-  resolvePreferredCoverUri,
+  resolveBookCoverUri,
   toDownloadedBookSummary,
 } from "../store/downloaded-book-helpers";
 import { useLibrariesQuery } from "./use-libraries-query";
@@ -499,10 +499,7 @@ export const useCachedBookSummary = (itemId?: string) => {
     const summary = (cachedBooks ?? immediateCachedBooks)?.find((book) => book.id === itemId) ?? null;
     if (!summary) return null;
 
-    const coverUri = resolvePreferredCoverUri(
-      downloadedCoverLocalUri,
-      summary.coverFull ?? summary.cover,
-    );
+    const coverUri = resolveBookCoverUri(summary, downloadedCoverLocalUri);
 
     if (!coverUri) return summary;
 
@@ -546,9 +543,13 @@ export const useGetItemDetails = (itemId?: string) => {
   });
 
   const data = useMemo<ItemDetailsWithSummary | undefined>(() => {
-    const fallbackCoverUri = resolvePreferredCoverUri(
+    const fallbackCoverUri = resolveBookCoverUri(
+      {
+        coverUri: details?.coverUri,
+        coverFull: cachedSummary?.coverFull,
+        cover: cachedSummary?.cover,
+      },
       downloadedCoverLocalUri,
-      details?.coverUri ?? cachedSummary?.coverFull ?? cachedSummary?.cover,
     );
 
     if (details) {
@@ -583,7 +584,7 @@ export const useGetItemDetails = (itemId?: string) => {
     if (!downloadedDetails) return undefined;
 
     const summary = toDownloadedBookSummary(downloadedDetails, downloadedCoverLocalUri);
-    const coverUri = resolvePreferredCoverUri(downloadedCoverLocalUri, downloadedDetails.coverUri);
+    const coverUri = resolveBookCoverUri(downloadedDetails, downloadedCoverLocalUri);
 
     return {
       ...summary,
