@@ -10,7 +10,18 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import * as Sharing from "expo-sharing";
 import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
-import { Alert, FlatList, Modal, Pressable, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
 
@@ -562,141 +573,157 @@ export const BookBookmarksSheet = () => {
         animationType="fade"
         onRequestClose={closeEditModal}
       >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(2, 6, 23, 0.45)",
-            justifyContent: "center",
-            paddingHorizontal: 18,
-          }}
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close bookmark editor"
-            onPress={closeEditModal}
-            style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
-          />
           <View
             style={{
-              borderRadius: 18,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: themeColors.border,
-              backgroundColor: themeColors.surface,
-              padding: 16,
-              gap: 12,
+              flex: 1,
+              backgroundColor: "rgba(2, 6, 23, 0.45)",
+              justifyContent: "center",
+              paddingHorizontal: 18,
+              paddingVertical: 24,
             }}
           >
-            <Text selectable style={{ color: themeColors.text, fontSize: 18, fontWeight: "700" }}>
-              Edit Bookmark
-            </Text>
-
-            <View style={{ gap: 6 }}>
-              <Text
-                selectable
-                style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}
-              >
-                Bookmark Name
-              </Text>
-              <TextInput
-                value={editingTitle}
-                onChangeText={setEditingTitle}
-                editable={!isSavingEdit}
-                placeholder="Bookmark name"
-                placeholderTextColor={themeColors.textMuted}
-                style={{
-                  borderRadius: 12,
-                  borderCurve: "continuous",
-                  borderWidth: 1,
-                  borderColor: themeColors.border,
-                  backgroundColor: themeColors.bg,
-                  color: themeColors.text,
-                  paddingHorizontal: 12,
-                  paddingVertical: 10,
-                  fontSize: 14,
-                }}
-              />
-            </View>
-
-            <View style={{ gap: 6 }}>
-              <Text
-                selectable
-                style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}
-              >
-                Bookmark Note
-              </Text>
-              <TextInput
-                value={editingNote}
-                onChangeText={setEditingNote}
-                editable={!isSavingEdit}
-                placeholder="Add a local note"
-                placeholderTextColor={themeColors.textMuted}
-                multiline
-                textAlignVertical="top"
-                style={{
-                  minHeight: 96,
-                  borderRadius: 12,
-                  borderCurve: "continuous",
-                  borderWidth: 1,
-                  borderColor: themeColors.border,
-                  backgroundColor: themeColors.bg,
-                  color: themeColors.text,
-                  paddingHorizontal: 12,
-                  paddingVertical: 10,
-                  fontSize: 14,
-                }}
-              />
-            </View>
-
-            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 10 }}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Cancel edit bookmark"
-                onPress={closeEditModal}
-                disabled={isSavingEdit}
-                style={({ pressed }) => ({
-                  borderRadius: 10,
-                  borderCurve: "continuous",
-                  borderWidth: 1,
-                  borderColor: themeColors.border,
-                  backgroundColor: themeColors.bg,
-                  paddingHorizontal: 14,
-                  paddingVertical: 10,
-                  opacity: pressed || isSavingEdit ? 0.8 : 1,
-                })}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close bookmark editor"
+              onPress={closeEditModal}
+              style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
+            />
+            <View
+              style={{
+                maxHeight: "85%",
+                borderRadius: 18,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                backgroundColor: themeColors.surface,
+                padding: 16,
+                gap: 12,
+              }}
+            >
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ gap: 12 }}
+                showsVerticalScrollIndicator={false}
               >
                 <Text
                   selectable
-                  style={{ color: themeColors.text, fontSize: 13, fontWeight: "600" }}
+                  style={{ color: themeColors.text, fontSize: 18, fontWeight: "700" }}
                 >
-                  Cancel
+                  Edit Bookmark
                 </Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Save bookmark changes"
-                onPress={() => {
-                  void handleSaveEdit();
-                }}
-                disabled={isSavingEdit}
-                style={({ pressed }) => ({
-                  borderRadius: 10,
-                  borderCurve: "continuous",
-                  borderWidth: 1,
-                  borderColor: themeColors.accent,
-                  backgroundColor: themeColors.accent,
-                  paddingHorizontal: 14,
-                  paddingVertical: 10,
-                  opacity: pressed || isSavingEdit ? 0.82 : 1,
-                })}
-              >
-                <Text selectable style={{ color: "#ffffff", fontSize: 13, fontWeight: "700" }}>
-                  {isSavingEdit ? "Saving..." : "Save"}
-                </Text>
-              </Pressable>
+
+                <View style={{ gap: 6 }}>
+                  <Text
+                    selectable
+                    style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}
+                  >
+                    Bookmark Name
+                  </Text>
+                  <TextInput
+                    value={editingTitle}
+                    onChangeText={setEditingTitle}
+                    editable={!isSavingEdit}
+                    placeholder="Bookmark name"
+                    placeholderTextColor={themeColors.textMuted}
+                    style={{
+                      borderRadius: 12,
+                      borderCurve: "continuous",
+                      borderWidth: 1,
+                      borderColor: themeColors.border,
+                      backgroundColor: themeColors.bg,
+                      color: themeColors.text,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      fontSize: 14,
+                    }}
+                  />
+                </View>
+
+                <View style={{ gap: 6 }}>
+                  <Text
+                    selectable
+                    style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}
+                  >
+                    Bookmark Note
+                  </Text>
+                  <TextInput
+                    value={editingNote}
+                    onChangeText={setEditingNote}
+                    editable={!isSavingEdit}
+                    placeholder="Add a local note"
+                    placeholderTextColor={themeColors.textMuted}
+                    multiline
+                    textAlignVertical="top"
+                    style={{
+                      minHeight: 96,
+                      borderRadius: 12,
+                      borderCurve: "continuous",
+                      borderWidth: 1,
+                      borderColor: themeColors.border,
+                      backgroundColor: themeColors.bg,
+                      color: themeColors.text,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      fontSize: 14,
+                    }}
+                  />
+                </View>
+              </ScrollView>
+
+              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 10 }}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel edit bookmark"
+                  onPress={closeEditModal}
+                  disabled={isSavingEdit}
+                  style={({ pressed }) => ({
+                    borderRadius: 10,
+                    borderCurve: "continuous",
+                    borderWidth: 1,
+                    borderColor: themeColors.border,
+                    backgroundColor: themeColors.bg,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    opacity: pressed || isSavingEdit ? 0.8 : 1,
+                  })}
+                >
+                  <Text
+                    selectable
+                    style={{ color: themeColors.text, fontSize: 13, fontWeight: "600" }}
+                  >
+                    Cancel
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Save bookmark changes"
+                  onPress={() => {
+                    void handleSaveEdit();
+                  }}
+                  disabled={isSavingEdit}
+                  style={({ pressed }) => ({
+                    borderRadius: 10,
+                    borderCurve: "continuous",
+                    borderWidth: 1,
+                    borderColor: themeColors.accent,
+                    backgroundColor: themeColors.accent,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    opacity: pressed || isSavingEdit ? 0.82 : 1,
+                  })}
+                >
+                  <Text selectable style={{ color: "#ffffff", fontSize: 13, fontWeight: "700" }}>
+                    {isSavingEdit ? "Saving..." : "Save"}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );

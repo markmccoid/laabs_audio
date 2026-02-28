@@ -6,7 +6,7 @@ import { formatSeconds } from "@/utils/formatUtils";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Keyboard, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
 
@@ -62,6 +62,7 @@ export const BookAddBookmarkSheet = () => {
       await addBookmark(libraryItemId, bookmarkPayload, {
         localNote: localNote.length > 0 ? localNote : null,
       });
+      Keyboard.dismiss();
       toast.success("Bookmark added");
       router.back();
     } catch (error) {
@@ -78,6 +79,8 @@ export const BookAddBookmarkSheet = () => {
     <ScrollView
       style={{ flex: 1 }}
       contentInsetAdjustmentBehavior="automatic"
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
       contentContainerStyle={{
         flexGrow: 1,
         gap: 14,
