@@ -4,7 +4,9 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import type { Href } from "expo-router";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
+import { useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
+import type { SharedValue } from "react-native-reanimated";
 import { ShelfBookCard } from "./shelf-book-card";
 
 type HomeShelfSectionProps = {
@@ -13,8 +15,10 @@ type HomeShelfSectionProps = {
   progressByBookId: Record<string, UserBookProgress>;
   isOffline: boolean;
   emptyMessage: string;
+  headerHeight: number;
   shelfHref: Href;
   onRefresh?: () => void;
+  scrollY: SharedValue<number>;
 };
 
 export const HomeShelfSection = ({
@@ -23,14 +27,24 @@ export const HomeShelfSection = ({
   progressByBookId,
   isOffline,
   emptyMessage,
+  headerHeight,
   shelfHref,
   onRefresh,
+  scrollY,
 }: HomeShelfSectionProps) => {
   const themeColors = useThemeColors();
   const hasBooks = books.length > 0;
+  const [sectionTop, setSectionTop] = useState(0);
+  const [listTop, setListTop] = useState(0);
+  const menuContentTop = sectionTop + listTop + 118;
 
   return (
-    <View style={{ gap: 12 }}>
+    <View
+      style={{ gap: 12 }}
+      onLayout={(event) => {
+        setSectionTop(event.nativeEvent.layout.y);
+      }}
+    >
       <View className="flex-row items-center justify-between px-[18] py-[1]">
         <View className="pl-4 pr-10 rounded-xl overflow-hidden border-hairline border-accent border-t-0 border-l-0 border-r-0">
           {/* <LinearGradient
@@ -97,25 +111,33 @@ export const HomeShelfSection = ({
           {emptyMessage}
         </Text>
       ) : (
-        <FlatList
-          data={books}
-          horizontal
-          keyExtractor={(book) => book.id}
-          renderItem={({ item }) => (
-            <ShelfBookCard
-              book={item}
-              progress={progressByBookId[item.id]}
-              isOffline={isOffline}
-            />
-          )}
-          contentContainerStyle={{
-            paddingHorizontal: 18,
-            paddingBottom: 2,
-            // backgroundColor: "#ffccaa",
+        <View
+          onLayout={(event) => {
+            setListTop(event.nativeEvent.layout.y);
           }}
-          ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
-          showsHorizontalScrollIndicator={false}
-        />
+        >
+          <FlatList
+            data={books}
+            horizontal
+            keyExtractor={(book) => book.id}
+            renderItem={({ item }) => (
+              <ShelfBookCard
+                book={item}
+                headerHeight={headerHeight}
+                isOffline={isOffline}
+                menuContentTop={menuContentTop}
+                progress={progressByBookId[item.id]}
+                scrollY={scrollY}
+              />
+            )}
+            contentContainerStyle={{
+              paddingHorizontal: 18,
+              paddingBottom: 2,
+            }}
+            ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
+            showsHorizontalScrollIndicator={false}
+          />
+        </View>
       )}
     </View>
   );

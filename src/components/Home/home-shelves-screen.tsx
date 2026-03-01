@@ -5,13 +5,16 @@ import { useAuthStore } from "@/auth/auth-store";
 import { type HomeShelf, useHomeShelves } from "@/hooks/use-home-shelves";
 import { queryKeys } from "@/query/query-keys";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { useHeaderHeight } from "@react-navigation/elements";
 import { useQueryClient } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { useCallback, useState } from "react";
-import { RefreshControl, ScrollView, Text, View } from "react-native";
+import { RefreshControl, Text, View } from "react-native";
+import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
 import { HomeShelfSection } from "./home-shelf-section";
 
 const HomeShelvesScreen = () => {
+  const headerHeight = useHeaderHeight();
   const themeColors = useThemeColors();
   const queryClient = useQueryClient();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
@@ -20,6 +23,13 @@ const HomeShelvesScreen = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const { visibleShelves, progressByBookId, refreshDiscover } = useHomeShelves();
+  const scrollY = useSharedValue(0);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollY.value = event.contentOffset.y;
+    },
+  });
 
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
@@ -80,8 +90,10 @@ const HomeShelvesScreen = () => {
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Button icon="box.truck" />
       </Stack.Toolbar>
-      <ScrollView
+      <Animated.ScrollView
         contentInsetAdjustmentBehavior="automatic"
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
         contentContainerStyle={{ paddingTop: 16, paddingBottom: 24, gap: 22 }}
         refreshControl={
           <RefreshControl
@@ -119,6 +131,7 @@ const HomeShelvesScreen = () => {
             progressByBookId={progressByBookId}
             isOffline={isOnline === false}
             emptyMessage={shelf.emptyMessage}
+            headerHeight={headerHeight}
             shelfHref={{
               pathname: "/(tabs)/(home)/bookshelf/[shelfId]",
               params: { shelfId: shelf.id },
@@ -126,6 +139,7 @@ const HomeShelvesScreen = () => {
             onRefresh={
               shelf.kind === "derived" && shelf.id === "discover" ? refreshDiscover : undefined
             }
+            scrollY={scrollY}
           />
         ))}
 
@@ -135,7 +149,7 @@ const HomeShelvesScreen = () => {
         >
           Shelf creation and book assignment are managed in Settings.
         </Text>
-      </ScrollView>
+      </Animated.ScrollView>
     </View>
   );
 };

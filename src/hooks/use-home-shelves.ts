@@ -250,7 +250,11 @@ export const useHomeShelves = () => {
   const continueListening = useMemo(() => {
     const sortedProgress = Object.values(progressByBookId)
       .filter((progress) => {
+        const hasStarted =
+          Math.max(0, Math.floor(progress.currentTime ?? 0)) > 0 ||
+          (progress.progressPercent ?? 0) > 0;
         return (
+          hasStarted &&
           !progress.isFinished &&
           !progress.hideFromContinueListening
         );

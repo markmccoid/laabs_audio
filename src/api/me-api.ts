@@ -69,7 +69,14 @@ export const meApi = {
     return absClient.get<MediaProgress>(`/api/me/progress/${itemId}`);
   },
 
-  updateProgress(itemId: string, payload: { currentTime?: number; isFinished?: boolean }) {
+  updateProgress(
+    itemId: string,
+    payload: {
+      currentTime?: number;
+      isFinished?: boolean;
+      hideFromContinueListening?: boolean;
+    },
+  ) {
     return absClient.patch<void>(`/api/me/progress/${itemId}`, payload);
   },
 
