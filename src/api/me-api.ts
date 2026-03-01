@@ -165,9 +165,6 @@ export const meApi = {
     const continueListeningBooks = progressData.libraryItems ?? [];
     const finishedBooks = finishedItems ?? [];
 
-    const token = authStore.getState().accessToken;
-    if (!token) return [];
-
     const itemsInProgress: ItemsInProgressSummary = [];
 
     for (const mediaMatch of mediaProgress) {
@@ -182,7 +179,7 @@ export const meApi = {
       if (!book) continue;
       if (book.libraryId !== libraryIdToUse) continue;
 
-      const coverUrls = buildCoverUrls(book.id, { token });
+      const coverUrls = buildCoverUrls(book.id);
 
       itemsInProgress.push({
         progressId: mediaMatch?.id,
@@ -195,8 +192,8 @@ export const meApi = {
         currentTime: mediaMatch?.currentTime,
         isFinished: mediaMatch?.isFinished,
         hideFromContinueListening: mediaMatch?.hideFromContinueListening,
-        cover: coverUrls.coverThumbWithToken,
-        coverFull: coverUrls.coverFullWithToken,
+        cover: coverUrls.thumb,
+        coverFull: coverUrls.full,
         lastUpdate: mediaMatch?.lastUpdate || 0,
       });
     }

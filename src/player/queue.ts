@@ -14,7 +14,7 @@ export const buildPlaybackQueue = (session: AudiobookSession) => {
   const title = session.libraryItem.media.metadata.title || "Unknown";
   const author = resolveAuthor(session);
   const libraryItemId = session.libraryItem.id;
-  const artworkUri = buildCoverUrls(libraryItemId).coverFullWithToken;
+  const artworkUri = buildCoverUrls(libraryItemId).full;
 
   const queue: PlaybackQueueItem[] = session.audioTracks.map((track, index) => {
     const source = resolveTrackSource(session, track, index);

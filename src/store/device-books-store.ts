@@ -632,20 +632,46 @@ const deleteFileIfExists = async (uri: string) => {
 const downloadCoverImage = async (libraryItemId: string) => {
   try {
     // Covers are part of the offline payload and live beside the downloaded audio files.
-    const coverUrls = buildCoverUrls(libraryItemId);
+    const token = authStore.getState().accessToken;
+    const coverUrls = buildCoverUrls(libraryItemId, { token });
     const dir = await ensureDownloadDir(libraryItemId);
-    const { task, fileUri } = downloadFileBlob(
-      coverUrls.coverFullWithToken,
-      "cover.webp",
-      undefined,
-      { directory: dir },
-    );
-    const result = await task;
-    if (!result || result.status !== 200) {
-      await deleteFileIfExists(fileUri);
+    const attemptDownload = async (url: string | null) => {
+      if (!url) return null;
+      const { task, fileUri } = downloadFileBlob(url, "cover.webp", undefined, { directory: dir });
+      const result = await task;
+      if (!result || result.status !== 200) {
+        await deleteFileIfExists(fileUri);
+        return {
+          fileUri,
+          status: result?.status ?? null,
+        };
+      }
+      return {
+        fileUri,
+        status: result.status,
+      };
+    };
+
+    const publicAttempt = await attemptDownload(coverUrls.full);
+    if (publicAttempt?.status === 200) {
+      return publicAttempt.fileUri;
+    }
+    if (publicAttempt?.status === 404) {
       return null;
     }
-    return fileUri;
+
+    if (publicAttempt?.status && publicAttempt.status !== 401 && publicAttempt.status !== 403) {
+      return null;
+    }
+
+    const privateAttempt = await attemptDownload(coverUrls.fullWithToken);
+    if (privateAttempt?.status === 200) {
+      return privateAttempt.fileUri;
+    }
+    if (privateAttempt?.status === 404) {
+      return null;
+    }
+    return null;
   } catch {
     return null;
   }

@@ -14,6 +14,7 @@ const SettingLayout = () => {
         options={{ title: "Bookshelves", headerTransparent: true }}
       />
       <Stack.Screen name="playback" options={{ title: "Playback", headerTransparent: true }} />
+      <Stack.Screen name="system" options={{ title: "System", headerTransparent: true }} />
       <Stack.Screen
         name="bookshelf-editor"
         options={{

@@ -7,6 +7,7 @@ import {
   type AudioProEvent,
   type AudioProTrack,
 } from "react-native-audio-pro";
+import { DEFAULT_BOOK_COVER } from "../constants/default-book-cover";
 import { settingsStore } from "../store/settings-store";
 import type { PitchCorrectionQuality, PlaybackQueueItem, PlaybackSource } from "./types";
 
@@ -57,7 +58,7 @@ const UPDATE_INTERVAL_MS = 1000;
 const DEFAULT_READY_TIMEOUT_MS = 15000;
 const DEFAULT_PLAYING_TIMEOUT_MS = 15000;
 // AudioPro requires a valid artwork URL/string for each track.
-const DEFAULT_ARTWORK = require("../../assets/images/icon.png");
+const DEFAULT_ARTWORK = DEFAULT_BOOK_COVER;
 
 // AudioPro only supports http(s):// and file:// schemes.
 const ensureFileScheme = (uri: string) => {
@@ -70,6 +71,9 @@ const ensureFileScheme = (uri: string) => {
   }
   return uri;
 };
+
+const isRemoteHttpUri = (uri: string) =>
+  uri.startsWith("http://") || uri.startsWith("https://");
 
 // Resolve a bundled asset module into a local file URI AudioPro can read.
 const resolveAssetFileUri = async (moduleId: number) => {
@@ -106,7 +110,13 @@ const resolveSourceUri = async (source: PlaybackSource) => {
 // AudioPro validates artwork URLs, so always provide a valid local file.
 const resolveArtworkUri = async (track: PlaybackQueueItem) => {
   if (track.artworkUri) {
-    return ensureFileScheme(track.artworkUri);
+    const resolved = ensureFileScheme(track.artworkUri);
+    // AudioPro treats artwork load failures as fatal playback errors on iOS.
+    // Only pass local artwork files into the native player; use the bundled
+    // fallback for remote covers so lock-screen artwork never kills playback.
+    if (!isRemoteHttpUri(resolved)) {
+      return resolved;
+    }
   }
   return resolveAssetFileUri(DEFAULT_ARTWORK);
 };

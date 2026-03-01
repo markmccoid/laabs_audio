@@ -1,12 +1,11 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
+import { CoverImage } from "@/components/images/cover-image";
 import { usePlaybackStore } from "@/player";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
-import { resolvePreferredCoverUri } from "@/store/downloaded-book-helpers";
 import type { BookProgressTimeDisplay } from "@/store/settings-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { Image } from "expo-image";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useState } from "react";
@@ -52,11 +51,10 @@ export const ShelfBookCard = ({ book, progress, isOffline }: ShelfBookCardProps)
   const isDownloaded = useDeviceBooksStore((state) =>
     selectHasPlayableBookDownload(state, book.id),
   );
-  const coverLocalUri = useDeviceBooksStore((state) =>
-    state.downloadedBookData[book.id]?.coverLocalUri ?? null,
+  const coverLocalUri = useDeviceBooksStore(
+    (state) => state.downloadedBookData[book.id]?.coverLocalUri ?? null,
   );
   const showOfflineUnavailable = isOffline && !isDownloaded;
-  const coverSource = resolvePreferredCoverUri(coverLocalUri, book.cover) ?? book.cover;
   const activePlaybackSeconds = Math.max(0, Math.floor(activePlaybackPositionMs / 1000));
   const activePlaybackDurationSeconds = Math.max(0, Math.floor(activePlaybackDurationMs / 1000));
   const durationSeconds = Math.max(
@@ -101,8 +99,11 @@ export const ShelfBookCard = ({ book, progress, isOffline }: ShelfBookCardProps)
         }}
       >
         <View style={{ width: COVER_SIZE, height: COVER_SIZE }}>
-          <Image
-            source={coverSource}
+          <CoverImage
+            libraryItemId={book.id}
+            coverUri={book.cover}
+            localCoverUri={coverLocalUri}
+            variant="thumb"
             style={{
               width: COVER_SIZE,
               height: COVER_SIZE,
@@ -151,13 +152,13 @@ export const ShelfBookCard = ({ book, progress, isOffline }: ShelfBookCardProps)
             }}
           />
         </View>
-        <Text
+        {/* <Text
           selectable
           numberOfLines={1}
           style={{ color: themeColors.text, fontSize: 11, fontWeight: "600", lineHeight: 16 }}
         >
           {book.title}
-        </Text>
+        </Text> */}
         {showProgressLabel ? (
           <View className="flex-row justify-center">
             <Pressable

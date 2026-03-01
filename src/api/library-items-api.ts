@@ -83,11 +83,8 @@ export const libraryItemsApi = {
 
     const responseData = await absClient.get<GetLibraryItemsResponse>(url);
 
-    const token = authStore.getState().accessToken;
-    if (!token) return [];
-
     return responseData.results.map((item) => {
-      const coverUrls = buildCoverUrls(item.id, { token });
+      const coverUrls = buildCoverUrls(item.id);
 
       return {
         id: item.id,
@@ -102,8 +99,8 @@ export const libraryItemsApi = {
         duration: item.media.duration,
         addedAt: item.addedAt,
         updatedAt: item.updatedAt,
-        cover: coverUrls.coverThumbWithToken,
-        coverFull: coverUrls.coverFullWithToken,
+        cover: coverUrls.thumb,
+        coverFull: coverUrls.full,
         numAudioFiles: item.media.numAudioFiles,
         ebookFormat: item.media?.ebookFormat,
         genres: item.media.metadata.genres,
@@ -159,15 +156,10 @@ export const libraryItemsApi = {
       libraryItemsApi.getFavorites(libraryIdToUse),
     ]);
 
-    const token = authStore.getState().accessToken;
-    if (!token) {
-      throw new Error("No ABS token found");
-    }
-
     const resultMap = new Map<string, FavoriteOrFinishedItem>();
 
     const mergeItem = (item: LibraryItem, type: "isFavorite" | "isRead") => {
-      const coverUrls = buildCoverUrls(item.id, { token });
+      const coverUrls = buildCoverUrls(item.id);
 
       const existing = resultMap.get(item.id);
       if (existing) {
@@ -177,7 +169,7 @@ export const libraryItemsApi = {
           itemId: item.id,
           title: item.media.metadata.title,
           author: item.media.metadata.authorName || "",
-          imageURL: coverUrls.coverThumbWithToken,
+          imageURL: coverUrls.thumb,
           type: [type],
         });
       }

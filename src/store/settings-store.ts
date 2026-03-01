@@ -90,6 +90,7 @@ export type SettingsState = {
   seekBackwardSeconds: number;
   seekForwardSeconds: number;
   defaultBookProgressTimeDisplay: BookProgressTimeDisplay;
+  useTokenWithCoverImages: boolean;
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>;
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
   actions: {
@@ -99,6 +100,7 @@ export type SettingsState = {
     setSeekForwardSeconds: (seconds: number) => void;
     setSkipSeconds: (seconds: number) => void;
     setDefaultBookProgressTimeDisplay: (display: BookProgressTimeDisplay) => void;
+    setUseTokenWithCoverImages: (enabled: boolean) => void;
     setHomeShelfVisibility: (scopeKey: string | null, shelfId: string, isVisible: boolean) => void;
     setHomeShelfItemCount: (scopeKey: string | null, shelfId: string, homeItemCount: number) => void;
     setHomeShelfOrder: (scopeKey: string | null, orderedShelfIds: string[]) => void;
@@ -118,6 +120,7 @@ export const settingsStore = createStore<SettingsState>()(
       seekBackwardSeconds: DEFAULT_SEEK_BACKWARD_SECONDS,
       seekForwardSeconds: DEFAULT_SEEK_FORWARD_SECONDS,
       defaultBookProgressTimeDisplay: "elapsed",
+      useTokenWithCoverImages: false,
       homeShelvesByScope: {},
       discoverShelfByScope: {},
       actions: {
@@ -137,6 +140,8 @@ export const settingsStore = createStore<SettingsState>()(
         },
         setDefaultBookProgressTimeDisplay: (defaultBookProgressTimeDisplay) =>
           set({ defaultBookProgressTimeDisplay }),
+        setUseTokenWithCoverImages: (useTokenWithCoverImages) =>
+          set({ useTokenWithCoverImages }),
         setHomeShelfVisibility: (scopeKey, shelfId, isVisible) => {
           const normalizedScopeKey = normalizeScopeKey(scopeKey);
           const normalizedShelfId = normalizeShelfId(shelfId);
@@ -308,10 +313,11 @@ export const settingsStore = createStore<SettingsState>()(
         seekBackwardSeconds: state.seekBackwardSeconds,
         seekForwardSeconds: state.seekForwardSeconds,
         defaultBookProgressTimeDisplay: state.defaultBookProgressTimeDisplay,
+        useTokenWithCoverImages: state.useTokenWithCoverImages,
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 5,
+      version: 6,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -322,6 +328,7 @@ export const settingsStore = createStore<SettingsState>()(
             seekBackwardSeconds: DEFAULT_SEEK_BACKWARD_SECONDS,
             seekForwardSeconds: DEFAULT_SEEK_FORWARD_SECONDS,
             defaultBookProgressTimeDisplay: "elapsed",
+            useTokenWithCoverImages: false,
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
           };
@@ -344,6 +351,10 @@ export const settingsStore = createStore<SettingsState>()(
             version >= 4
               ? state.defaultBookProgressTimeDisplay ?? "elapsed"
               : "elapsed",
+          useTokenWithCoverImages:
+            version >= 6
+              ? state.useTokenWithCoverImages ?? false
+              : false,
           homeShelvesByScope:
             version >= 3
               ? state.homeShelvesByScope ?? EMPTY_HOME_SHELVES_BY_SCOPE

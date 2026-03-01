@@ -1,7 +1,7 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
+import { CoverImage } from "@/components/images/cover-image";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { Image } from "expo-image";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { Pressable, Text, View } from "react-native";
@@ -14,6 +14,9 @@ type BookshelfGridItemProps = {
 export const BookshelfGridItem = ({ book, isOffline }: BookshelfGridItemProps) => {
   const themeColors = useThemeColors();
   const isDownloaded = useDeviceBooksStore((state) => selectHasPlayableBookDownload(state, book.id));
+  const localCoverUri = useDeviceBooksStore(
+    (state) => state.downloadedBookData[book.id]?.coverLocalUri ?? null,
+  );
   const showOfflineUnavailable = isOffline && !isDownloaded;
 
   return (
@@ -26,8 +29,11 @@ export const BookshelfGridItem = ({ book, isOffline }: BookshelfGridItemProps) =
     >
       <Pressable style={{ gap: 8 }}>
         <View style={{ width: "100%", aspectRatio: 1 }}>
-          <Image
-            source={book.cover}
+          <CoverImage
+            libraryItemId={book.id}
+            coverUri={book.cover}
+            localCoverUri={localCoverUri}
+            variant="thumb"
             style={{
               width: "100%",
               aspectRatio: 1,

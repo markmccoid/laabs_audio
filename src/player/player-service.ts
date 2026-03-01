@@ -30,6 +30,9 @@ const MAX_PLAYBACK_RATE = 2.0;
 const LOCAL_SESSION_ID = "local";
 const PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS = 5;
 const INITIAL_INTERVAL_SYNC_GUARD_WINDOW_SECONDS = 20;
+const LOCAL_PLAYBACK_PROGRESS_TIMEOUT_MS = 4000;
+const LOCAL_PLAYBACK_PROGRESS_POLL_INTERVAL_MS = 250;
+const LOCAL_PLAYBACK_PROGRESS_MIN_DELTA_MS = 250;
 
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
@@ -73,6 +76,37 @@ class PlayerService {
   private lastSyncAt = 0;
   private initialized = false;
   private localStreamFallbackInFlight = false;
+
+  private async waitForDownloadedPlaybackProgress() {
+    const startedAt = Date.now();
+    const initialTrackPositionMs = await this.engine.getPositionMs();
+    let lastPositionMs = initialTrackPositionMs;
+
+    while (Date.now() - startedAt < LOCAL_PLAYBACK_PROGRESS_TIMEOUT_MS) {
+      await new Promise((resolve) => setTimeout(resolve, LOCAL_PLAYBACK_PROGRESS_POLL_INTERVAL_MS));
+      const positionMs = await this.engine.getPositionMs();
+      lastPositionMs = positionMs;
+      if (positionMs >= initialTrackPositionMs + LOCAL_PLAYBACK_PROGRESS_MIN_DELTA_MS) {
+        if (__DEV__) {
+          console.log("[player-service] downloaded:progress-confirmed", {
+            initialTrackPositionMs,
+            positionMs,
+          });
+        }
+        return;
+      }
+    }
+
+    const snapshot = this.engine.getDebugSnapshot();
+    if (__DEV__) {
+      console.log("[player-service] downloaded:no-progress-after-play", {
+        initialTrackPositionMs,
+        lastPositionMs,
+        snapshot,
+      });
+    }
+    throw new Error("Downloaded playback did not advance after play");
+  }
 
   init() {
     if (this.initialized) return;
@@ -491,7 +525,7 @@ class PlayerService {
     const fallbackTitle = details.media.metadata.title || "Unknown";
     const fallbackArtworkUri = (() => {
       try {
-        return buildCoverUrls(libraryItemId).coverFullWithToken;
+        return buildCoverUrls(libraryItemId).full;
       } catch {
         return undefined;
       }
@@ -592,6 +626,8 @@ class PlayerService {
     this.logDebug("play");
     const state = playbackStore.getState();
     if (!state.queue.length) return;
+    const currentTrack = state.queue[state.currentTrackIndex];
+    const shouldVerifyDownloadedPlayback = Boolean(currentTrack?.source.isLocal);
 
     try {
       await this.engine.play();
@@ -603,6 +639,17 @@ class PlayerService {
         // Retry play once, then wait again before surfacing an error.
         await this.engine.play();
         await this.engine.waitForPlaying({ timeoutMs: 15000 });
+      }
+
+      if (__DEV__) {
+        console.log("[player-service] play:engine-snapshot", {
+          mode: shouldVerifyDownloadedPlayback ? "downloaded" : "streaming",
+          snapshot: this.engine.getDebugSnapshot(),
+        });
+      }
+
+      if (shouldVerifyDownloadedPlayback) {
+        await this.waitForDownloadedPlaybackProgress();
       }
 
       // Ensure preferred per-book speed is applied after native playback starts.
@@ -657,7 +704,11 @@ class PlayerService {
         playbackStore.getState().actions.setPlaybackState("error");
       }
       playbackStore.getState().actions.setError(message);
-      this.logPlaybackResult("failed", { reason: message });
+      this.logPlaybackResult("failed", {
+        reason: message,
+        mode: currentState.sessionId === LOCAL_SESSION_ID ? "downloaded" : "streaming",
+        snapshot: this.engine.getDebugSnapshot(),
+      });
     }
   }
 

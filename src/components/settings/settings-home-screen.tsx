@@ -6,7 +6,11 @@ import { useAuthStore } from "@/auth/auth-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 
 type SettingsRowProps = {
-  href: "/(tabs)/settings/authentication" | "/(tabs)/settings/bookshelves" | "/(tabs)/settings/playback";
+  href:
+    | "/(tabs)/settings/authentication"
+    | "/(tabs)/settings/bookshelves"
+    | "/(tabs)/settings/playback"
+    | "/(tabs)/settings/system";
   title: string;
   subtitle: string;
   icon: string;
@@ -136,6 +140,12 @@ export const SettingsHomeScreen = () => {
               title="Playback"
               subtitle="Defaults for progress display and player behavior"
               icon="play.circle"
+            />
+            <SettingsRow
+              href="/(tabs)/settings/system"
+              title="System"
+              subtitle="App-level behavior for images and cover handling"
+              icon="gearshape.2"
               isLast
             />
           </SettingsGroup>

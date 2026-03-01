@@ -1,4 +1,6 @@
 import { useAuthStore } from "@/auth/auth-store";
+import { useCoverImageSource } from "@/components/images/cover-image";
+import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import {
   useGetItemDetails,
   useGetUserServerState,
@@ -37,8 +39,6 @@ type Props = {
   libraryItemId: string | undefined;
 };
 
-const fallbackImage = require("../../../assets/images/NoImageFound.png");
-
 const hasHtmlMarkup = (value?: string | null) => typeof value === "string" && /<[^>]+>/.test(value);
 
 const resolveBookDescription = (
@@ -72,6 +72,9 @@ const BookContainer = ({ libraryItemId }: Props) => {
     if (!libraryItemId) return false;
     return selectHasPlayableBookDownload(state, libraryItemId);
   });
+  const localCoverUri = useDeviceBooksStore((state) =>
+    libraryItemId ? state.downloadedBookData[libraryItemId]?.coverLocalUri ?? null : null,
+  );
   const defaultProgressTimeDisplay = useSettingsStore(
     (state) => state.defaultBookProgressTimeDisplay,
   );
@@ -134,7 +137,13 @@ const BookContainer = ({ libraryItemId }: Props) => {
     playbackState,
   });
   const coverURL = bookData?.coverUri;
-  const backgroundSource = coverURL ? { uri: coverURL } : fallbackImage;
+  const backgroundImage = useCoverImageSource({
+    libraryItemId,
+    coverUri: coverURL,
+    localCoverUri,
+    variant: "full",
+  });
+  const backgroundSource = coverURL || localCoverUri ? backgroundImage.source : DEFAULT_BOOK_COVER;
 
   const isDarkTheme = useMemo(() => {
     if (theme === "dark") return true;
@@ -253,7 +262,9 @@ const BookContainer = ({ libraryItemId }: Props) => {
           }}
         >
           <BookImage
+            libraryItemId={libraryItemId}
             coverURL={coverURL}
+            localCoverUri={localCoverUri}
             leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
             showProgressLine={progressSeconds > 0 || isFinished}
             progressPercent={visualProgressPercent}

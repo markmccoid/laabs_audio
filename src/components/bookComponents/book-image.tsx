@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
-import { Image } from "expo-image";
+import { CoverImage } from "@/components/images/cover-image";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { View, useWindowDimensions } from "react-native";
-const fallbackImage = require("../../../assets/images/NoImageFound.png");
 
 type Props = {
+  libraryItemId?: string;
   coverURL: string | undefined;
+  localCoverUri?: string | null;
   leftAccessory?: ReactNode;
   maxSize?: number;
   progressPercent?: number;
@@ -15,7 +16,9 @@ type Props = {
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 const BookImage = ({
+  libraryItemId,
   coverURL,
+  localCoverUri,
   leftAccessory,
   maxSize = 360,
   progressPercent = 0,
@@ -24,14 +27,16 @@ const BookImage = ({
   const themeColors = useThemeColors();
   const { width } = useWindowDimensions();
   const imageSize = Math.min(maxSize, width - 48);
-  const finalCover = coverURL ? { uri: coverURL } : fallbackImage;
   const resolvedProgressPercent = clamp(progressPercent, 0, 1);
 
   return (
     <View style={{ alignItems: "center" }}>
       <View style={{ width: imageSize, height: imageSize, position: "relative" }}>
-        <Image
-          source={finalCover}
+        <CoverImage
+          libraryItemId={libraryItemId}
+          coverUri={coverURL}
+          localCoverUri={localCoverUri}
+          variant="full"
           style={{
             width: imageSize,
             height: imageSize,

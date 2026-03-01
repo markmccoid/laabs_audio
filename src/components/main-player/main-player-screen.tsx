@@ -1,5 +1,8 @@
+import { useCoverImageSource } from "@/components/images/cover-image";
+import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { usePlaybackStore, useSleepTimerActions, useSleepTimerStatus } from "@/player";
+import { useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
@@ -14,7 +17,6 @@ import BookControls from "../bookComponents/book-controls";
 import BookImage from "../bookComponents/book-image";
 import BookTimeSlider from "../bookComponents/book-time-slider";
 import MainPlayerActionsBar from "./main-player-actions-bar";
-const fallbackImage = require("../../../assets/images/NoImageFound.png");
 
 const MainPlayerScreen = () => {
   const themeColors = useThemeColors();
@@ -25,6 +27,9 @@ const MainPlayerScreen = () => {
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId ?? undefined);
   const hasLoadedBook = usePlaybackStore(
     (state) => Boolean(state.libraryItemId) && state.queue.length > 0,
+  );
+  const localCoverUri = useDeviceBooksStore((state) =>
+    currentLibraryItemId ? state.downloadedBookData[currentLibraryItemId]?.coverLocalUri ?? null : null,
   );
   const sleepTimerStatus = useSleepTimerStatus();
   const sleepTimeActions = useSleepTimerActions();
@@ -39,7 +44,14 @@ const MainPlayerScreen = () => {
   const authorName = resolvedAuthorName.trim().length > 0 ? resolvedAuthorName : "Unknown author";
   const title = bookData?.title ?? "No book selected";
   const coverURL = bookData?.coverUri;
-  const backgroundSource = coverURL ? { uri: coverURL } : fallbackImage;
+  const backgroundImage = useCoverImageSource({
+    libraryItemId: currentLibraryItemId,
+    coverUri: coverURL,
+    localCoverUri,
+    variant: "full",
+  });
+  const backgroundSource =
+    coverURL || localCoverUri ? backgroundImage.source : DEFAULT_BOOK_COVER;
   const chapters = bookData?.media?.chapters ?? [];
   const fallbackDurationMs = Math.max(
     0,
@@ -100,7 +112,12 @@ const MainPlayerScreen = () => {
         <View
           style={{ flex: 1, minHeight: 0, justifyContent: "center", alignItems: "center", gap: 10 }}
         >
-          <BookImage coverURL={coverURL} maxSize={artworkSize} />
+          <BookImage
+            libraryItemId={currentLibraryItemId}
+            coverURL={coverURL}
+            localCoverUri={localCoverUri}
+            maxSize={artworkSize}
+          />
           <View style={{ paddingHorizontal: 10, alignItems: "center", gap: 4 }}>
             <Text
               numberOfLines={2}

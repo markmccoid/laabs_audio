@@ -11,15 +11,14 @@ export type CoverUrlOptions = {
 };
 
 export type CoverUrls = {
-  coverThumb: string;
-  coverFull: string;
-  coverThumbWithToken: string;
-  coverFullWithToken: string;
+  thumb: string;
+  full: string;
+  thumbWithToken: string | null;
+  fullWithToken: string | null;
 };
 
 export const buildCoverUrls = (itemId: string, options: CoverUrlOptions = {}): CoverUrls => {
-  const state = authStore.getState();
-  const serverUrl = options.serverUrl ?? state.serverUrl;
+  const serverUrl = options.serverUrl ?? authStore.getState().serverUrl;
 
   if (!serverUrl) {
     throw new Error("Missing server URL for cover URLs");
@@ -29,17 +28,17 @@ export const buildCoverUrls = (itemId: string, options: CoverUrlOptions = {}): C
   const format = options.format ?? "webp";
   const width = options.width ?? 240;
 
-  const coverThumb = `${base}/api/items/${itemId}/cover?format=${format}&width=${width}`;
-  const coverFull = `${base}/api/items/${itemId}/cover?format=${format}`;
+  const thumb = `${base}/api/items/${itemId}/cover?format=${format}&width=${width}`;
+  const full = `${base}/api/items/${itemId}/cover?format=${format}`;
 
-  const token = options.token ?? state.accessToken;
-  const coverThumbWithToken = token ? `${coverThumb}&token=${token}` : coverThumb;
-  const coverFullWithToken = token ? `${coverFull}&token=${token}` : coverFull;
+  const token = options.token?.trim() ? options.token.trim() : null;
+  const thumbWithToken = token ? `${thumb}&token=${token}` : null;
+  const fullWithToken = token ? `${full}&token=${token}` : null;
 
   return {
-    coverThumb,
-    coverFull,
-    coverThumbWithToken,
-    coverFullWithToken,
+    thumb,
+    full,
+    thumbWithToken,
+    fullWithToken,
   };
 };

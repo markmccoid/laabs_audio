@@ -1,8 +1,8 @@
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore } from "@/player";
-import { useDeviceBooksActions } from "@/store/device-books-store";
+import { CoverImage } from "@/components/images/cover-image";
+import { useDeviceBooksActions, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { Image } from "expo-image";
 import { Link } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
@@ -13,6 +13,9 @@ export default function TabLayout() {
   const libraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const { setBookPlaybackRate } = useDeviceBooksActions();
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const localCoverUri = useDeviceBooksStore((state) =>
+    currentLibraryItemId ? state.downloadedBookData[currentLibraryItemId]?.coverLocalUri ?? null : null,
+  );
   // const currentBook1 = useCachedBookSummary(currentLibraryItemId ?? undefined);
   const { data: currentBook } = useGetItemDetails(currentLibraryItemId || undefined);
   const themeColors = useThemeColors();
@@ -69,8 +72,11 @@ export default function TabLayout() {
             <Link href="/main-player" className="flex-1 items-center flex-row  mt-[4]">
               <Link.Trigger>
                 <View className="flex-row items-center h-full flex-1 ">
-                  <Image
-                    source={{ uri: currentBook?.coverFull }}
+                  <CoverImage
+                    libraryItemId={currentLibraryItemId}
+                    coverUri={currentBook?.coverFull}
+                    localCoverUri={localCoverUri}
+                    variant="thumb"
                     style={{
                       width: 35,
                       height: 35,
