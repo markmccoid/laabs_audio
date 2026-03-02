@@ -525,7 +525,10 @@ class PlayerService {
     const fallbackTitle = details.media.metadata.title || "Unknown";
     const fallbackArtworkUri = (() => {
       try {
-        return buildCoverUrls(libraryItemId).full;
+        const artworkUrls = buildCoverUrls(libraryItemId, {
+          token: authStore.getState().accessToken,
+        });
+        return artworkUrls.fullWithToken ?? artworkUrls.full;
       } catch {
         return undefined;
       }

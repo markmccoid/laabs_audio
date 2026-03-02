@@ -23,7 +23,11 @@ export type ShelfBookCardMenuProps = {
   progress?: UserBookProgress;
 };
 
-export type AddableShelf = HomeCustomShelf | HomePlaylistShelf;
+export type SelectableShelf = HomeCustomShelf | HomePlaylistShelf;
+export type ShelfMembershipOption = {
+  shelf: SelectableShelf;
+  isMember: boolean;
+};
 
 const updateUserServerStateProgress = (
   previousState: UserServerState | undefined,
@@ -93,7 +97,12 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const isOnline = useAuthStore((state) => state.isOnline);
   const { customShelves, playlistShelves } = useHomeShelves();
-  const { addBookToCustomShelf, addBooksToPlaylistShelfOptimistic } = useDeviceBooksActions();
+  const {
+    addBookToCustomShelf,
+    addBooksToPlaylistShelfOptimistic,
+    removeBookFromCustomShelf,
+    removeBooksFromPlaylistShelfOptimistic,
+  } = useDeviceBooksActions();
   const isDownloaded = useDeviceBooksStore((state) =>
     selectHasPlayableBookDownload(state, book.id),
   );
@@ -119,19 +128,22 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
   const isBookLoaded = isBookActive && activeQueueLength > 0;
   const canPlay = !isBookLoading && (isOnline !== false || isDownloaded);
   const canMutateShelves = Boolean(activeLibraryId && activeLibraryUserKey);
+  const hasContinueListeningProgress = Boolean(progress);
   const canToggleContinueListeningVisibility = Boolean(
-    authStatus === "authenticated" && isOnline !== false && progress,
+    authStatus === "authenticated" && isOnline !== false && hasContinueListeningProgress,
   );
   const primaryLabel = isBookPlaying ? "Pause" : "Play";
   const primarySystemImage = isBookPlaying ? "pause.fill" : "play.fill";
   const continueListeningVisibilityLabel = progress?.hideFromContinueListening
     ? "Show in Continue Listening"
     : "Hide from Continue Listening";
-  const addableShelves = useMemo<AddableShelf[]>(
+  const continueListeningVisibilityIcon = progress?.hideFromContinueListening ? "eye" : "eye.slash";
+  const shelfMembershipOptions = useMemo<ShelfMembershipOption[]>(
     () =>
-      [...customShelves, ...playlistShelves].filter(
-        (shelf) => !shelf.bookIds.includes(book.id),
-      ),
+      [...customShelves, ...playlistShelves].map((shelf) => ({
+        shelf,
+        isMember: shelf.bookIds.includes(book.id),
+      })),
     [book.id, customShelves, playlistShelves],
   );
 
@@ -272,7 +284,7 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
     }
   };
 
-  const handleAddToShelf = async (shelf: AddableShelf) => {
+  const handleToggleShelfMembership = async (shelf: SelectableShelf, isMember: boolean) => {
     if (busyAction || !canMutateShelves) return;
 
     setBusyAction("shelf");
@@ -283,31 +295,41 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
 
     try {
       if (shelf.kind === "custom") {
-        addBookToCustomShelf(shelf.id, book.id, scopeOptions);
+        if (isMember) {
+          removeBookFromCustomShelf(shelf.id, book.id, scopeOptions);
+        } else {
+          addBookToCustomShelf(shelf.id, book.id, scopeOptions);
+        }
       } else {
-        await addBooksToPlaylistShelfOptimistic(shelf.id, [book.id], scopeOptions);
+        if (isMember) {
+          await removeBooksFromPlaylistShelfOptimistic(shelf.id, [book.id], scopeOptions);
+        } else {
+          await addBooksToPlaylistShelfOptimistic(shelf.id, [book.id], scopeOptions);
+        }
       }
 
-      toast.success(`Added to ${shelf.title}`);
+      toast.success(isMember ? `Removed from ${shelf.title}` : `Added to ${shelf.title}`);
     } catch {
-      toast.error("Unable to add to bookshelf");
+      toast.error(`Unable to ${isMember ? "remove from" : "add to"} bookshelf`);
     } finally {
       setBusyAction(null);
     }
   };
 
   return {
-    addableShelves,
     canMutateShelves,
     isBusy: busyAction !== null,
     primaryDisabled: busyAction !== null || !canPlay,
     finishDisabled: busyAction !== null,
     hideDisabled: busyAction !== null || !canToggleContinueListeningVisibility,
     shelfDisabled: busyAction !== null || !canMutateShelves,
+    continueListeningVisibilityIcon,
     continueListeningVisibilityLabel,
+    hasContinueListeningProgress,
     primaryLabel,
     primarySystemImage,
-    handleAddToShelf,
+    handleToggleShelfMembership,
+    shelfMembershipOptions,
     handleToggleContinueListeningVisibility,
     handlePrimaryAction,
     handleMarkFinished,

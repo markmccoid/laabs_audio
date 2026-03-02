@@ -7,15 +7,17 @@ import {
 
 export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
   const {
-    addableShelves,
+    continueListeningVisibilityIcon,
     continueListeningVisibilityLabel,
+    hasContinueListeningProgress,
     hideDisabled,
     primaryDisabled,
     finishDisabled,
     shelfDisabled,
     primaryLabel,
     primarySystemImage,
-    handleAddToShelf,
+    handleToggleShelfMembership,
+    shelfMembershipOptions,
     handleToggleContinueListeningVisibility,
     handlePrimaryAction,
     handleMarkFinished,
@@ -37,20 +39,20 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
           label={primaryLabel}
         />
         <Menu label="Bookshelves" systemImage="books.vertical">
-          {addableShelves.length > 0 ? (
-            addableShelves.map((shelf) => (
+          {shelfMembershipOptions.length > 0 ? (
+            shelfMembershipOptions.map(({ shelf, isMember }) => (
               <Button
                 key={shelf.id}
                 modifiers={[disabled(shelfDisabled)]}
-                systemImage={shelf.kind === "custom" ? "books.vertical.fill" : "music.note.list"}
+                systemImage={isMember ? "checkmark.circle.fill" : "circle"}
                 onPress={() => {
-                  void handleAddToShelf(shelf);
+                  void handleToggleShelfMembership(shelf, isMember);
                 }}
                 label={shelf.title}
               />
             ))
           ) : (
-            <Button modifiers={[disabled(true)]} label="No available shelves" />
+            <Button modifiers={[disabled(true)]} label="No shelves" />
           )}
         </Menu>
         <Button
@@ -61,14 +63,16 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
           }}
           label="Mark as Finished"
         />
-        <Button
-          modifiers={[disabled(hideDisabled)]}
-          systemImage="eye.slash"
-          onPress={() => {
-            void handleToggleContinueListeningVisibility();
-          }}
-          label={continueListeningVisibilityLabel}
-        />
+        {hasContinueListeningProgress ? (
+          <Button
+            modifiers={[disabled(hideDisabled)]}
+            systemImage={continueListeningVisibilityIcon}
+            onPress={() => {
+              void handleToggleContinueListeningVisibility();
+            }}
+            label={continueListeningVisibilityLabel}
+          />
+        ) : null}
       </Menu>
     </Host>
   );

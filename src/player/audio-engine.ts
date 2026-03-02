@@ -74,6 +74,7 @@ const ensureFileScheme = (uri: string) => {
 
 const isRemoteHttpUri = (uri: string) =>
   uri.startsWith("http://") || uri.startsWith("https://");
+const remoteArtworkValidationCache = new Map<string, string | null>();
 
 // Resolve a bundled asset module into a local file URI AudioPro can read.
 const resolveAssetFileUri = async (moduleId: number) => {
@@ -107,14 +108,37 @@ const resolveSourceUri = async (source: PlaybackSource) => {
   throw new Error("Invalid audio source: missing uri or sourceModule.");
 };
 
-// AudioPro validates artwork URLs, so always provide a valid local file.
+const validateRemoteArtworkUri = async (uri: string) => {
+  const cached = remoteArtworkValidationCache.get(uri);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  try {
+    const response = await fetch(uri, {
+      method: "GET",
+      cache: "no-store",
+    });
+    const resolved = response.ok ? uri : null;
+    remoteArtworkValidationCache.set(uri, resolved);
+    return resolved;
+  } catch {
+    remoteArtworkValidationCache.set(uri, null);
+    return null;
+  }
+};
+
+// AudioPro validates artwork URLs, so only pass remote artwork that we have
+// verified resolves successfully for the current session.
 const resolveArtworkUri = async (track: PlaybackQueueItem) => {
   if (track.artworkUri) {
     const resolved = ensureFileScheme(track.artworkUri);
-    // AudioPro treats artwork load failures as fatal playback errors on iOS.
-    // Only pass local artwork files into the native player; use the bundled
-    // fallback for remote covers so lock-screen artwork never kills playback.
-    if (!isRemoteHttpUri(resolved)) {
+    if (isRemoteHttpUri(resolved)) {
+      const validatedRemoteArtwork = await validateRemoteArtworkUri(resolved);
+      if (validatedRemoteArtwork) {
+        return validatedRemoteArtwork;
+      }
+    } else {
       return resolved;
     }
   }

@@ -10,6 +10,7 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
   const themeColors = useThemeColors();
   const {
     continueListeningVisibilityLabel,
+    hasContinueListeningProgress,
     hideDisabled,
     primaryLabel,
     handleToggleContinueListeningVisibility,
@@ -39,13 +40,17 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
                 void handleMarkFinished();
               },
             },
-            {
-              text: continueListeningVisibilityLabel,
-              onPress: () => {
-                void handleToggleContinueListeningVisibility();
-              },
-              style: hideDisabled ? "cancel" : "default",
-            },
+            ...(hasContinueListeningProgress
+              ? [
+                  {
+                    text: continueListeningVisibilityLabel,
+                    onPress: () => {
+                      void handleToggleContinueListeningVisibility();
+                    },
+                    style: hideDisabled ? "cancel" : "default",
+                  } as const,
+                ]
+              : []),
             {
               text: "Cancel",
               style: "cancel",
