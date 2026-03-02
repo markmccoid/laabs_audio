@@ -262,7 +262,7 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
           opacity: !libraryItemId ? 0.5 : pressed ? 0.7 : 1,
         })}
       >
-        <SymbolView name="line.3.horizontal" tintColor={themeColors.text} size={30} />
+        <SymbolView name="list.bullet" tintColor={themeColors.text} size={30} />
         <Text
           numberOfLines={1}
           ellipsizeMode="tail"

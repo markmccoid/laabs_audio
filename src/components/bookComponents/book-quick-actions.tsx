@@ -1,7 +1,7 @@
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import {
-  selectIsAnyDownloadActive,
   selectIsAnotherDownloadActive,
+  selectIsAnyDownloadActive,
   selectIsBookActivelyDownloading,
   selectIsBookFullyDownloaded,
   useDeviceBooksStore,
@@ -131,7 +131,7 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
         }
       )?.bookmarksByBookId ??
       {};
-    return libraryItemId ? bookmarksByLibraryItemId[libraryItemId] ?? [] : [];
+    return libraryItemId ? (bookmarksByLibraryItemId[libraryItemId] ?? []) : [];
   }, [libraryItemId, userServerState]);
 
   const isDownloading = useDeviceBooksStore((state) =>
@@ -249,7 +249,7 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
           opacity: !libraryItemId ? 0.45 : pressed ? 0.82 : 1,
         })}
       >
-        <SymbolView name="line.3.horizontal" tintColor={themeColors.text} size={23} />
+        <SymbolView name="list.bullet" tintColor={themeColors.text} size={23} />
       </Pressable>
 
       <Pressable
@@ -257,9 +257,7 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
         disabled={!libraryItemId}
         accessibilityRole="button"
         accessibilityLabel={
-          bookmarkCount > 0
-            ? `Open bookmarks, ${bookmarkCount} available`
-            : "Open bookmarks"
+          bookmarkCount > 0 ? `Open bookmarks, ${bookmarkCount} available` : "Open bookmarks"
         }
         style={({ pressed }) => ({
           width: 48,
@@ -313,7 +311,6 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
           ) : null}
         </View>
       </Pressable>
-
     </View>
   );
 };
