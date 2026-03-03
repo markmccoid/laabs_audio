@@ -10,12 +10,13 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
   const themeColors = useThemeColors();
   const {
     continueListeningVisibilityLabel,
-    hasContinueListeningProgress,
+    finishedLabel,
+    hasContinueListeningVisibilityOption,
     hideDisabled,
     primaryLabel,
     handleToggleContinueListeningVisibility,
     handlePrimaryAction,
-    handleMarkFinished,
+    handleToggleFinished,
     isBusy,
   } =
     useShelfBookCardMenuActions(props);
@@ -35,12 +36,12 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
               },
             },
             {
-              text: "Mark as Finished",
+              text: finishedLabel,
               onPress: () => {
-                void handleMarkFinished();
+                void handleToggleFinished();
               },
             },
-            ...(hasContinueListeningProgress
+            ...(hasContinueListeningVisibilityOption
               ? [
                   {
                     text: continueListeningVisibilityLabel,

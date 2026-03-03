@@ -9,7 +9,9 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
   const {
     continueListeningVisibilityIcon,
     continueListeningVisibilityLabel,
-    hasContinueListeningProgress,
+    finishedLabel,
+    finishedSystemImage,
+    hasContinueListeningVisibilityOption,
     hideDisabled,
     primaryDisabled,
     finishDisabled,
@@ -20,7 +22,7 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
     shelfMembershipOptions,
     handleToggleContinueListeningVisibility,
     handlePrimaryAction,
-    handleMarkFinished,
+    handleToggleFinished,
   } = useShelfBookCardMenuActions(props);
 
   return (
@@ -57,13 +59,13 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
         </Menu>
         <Button
           modifiers={[disabled(finishDisabled)]}
-          systemImage="checkmark.circle"
+          systemImage={finishedSystemImage}
           onPress={() => {
-            void handleMarkFinished();
+            void handleToggleFinished();
           }}
-          label="Mark as Finished"
+          label={finishedLabel}
         />
-        {hasContinueListeningProgress ? (
+        {hasContinueListeningVisibilityOption ? (
           <Button
             modifiers={[disabled(hideDisabled)]}
             systemImage={continueListeningVisibilityIcon}

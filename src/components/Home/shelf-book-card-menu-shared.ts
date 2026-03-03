@@ -128,12 +128,24 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
   const isBookLoaded = isBookActive && activeQueueLength > 0;
   const canPlay = !isBookLoading && (isOnline !== false || isDownloaded);
   const canMutateShelves = Boolean(activeLibraryId && activeLibraryUserKey);
-  const hasContinueListeningProgress = Boolean(progress);
+  const hasStartedContinueListening =
+    Math.max(0, Math.floor(progress?.currentTime ?? 0)) > 0 ||
+    (progress?.progressPercent ?? 0) > 0;
+  const hasContinueListeningVisibilityOption = Boolean(
+    progress && hasStartedContinueListening && !progress.isFinished,
+  );
   const canToggleContinueListeningVisibility = Boolean(
-    authStatus === "authenticated" && isOnline !== false && hasContinueListeningProgress,
+    authStatus === "authenticated" &&
+    isOnline !== false &&
+    hasContinueListeningVisibilityOption,
   );
   const primaryLabel = isBookPlaying ? "Pause" : "Play";
   const primarySystemImage = isBookPlaying ? "pause.fill" : "play.fill";
+  const isMarkedFinished = Boolean(progress?.isFinished);
+  const finishedLabel = isMarkedFinished ? "Mark as Unread" : "Mark as Read";
+  const finishedSystemImage = isMarkedFinished
+    ? "arrow.counterclockwise.circle"
+    : "checkmark.circle";
   const continueListeningVisibilityLabel = progress?.hideFromContinueListening
     ? "Show in Continue Listening"
     : "Hide from Continue Listening";
@@ -177,7 +189,7 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
       void queryClient.invalidateQueries({
         queryKey: queryKeys.booksInProgress(activeLibraryId),
       });
-      toast.success("Marked finished");
+      toast.success("Marked read");
       return;
     }
 
@@ -185,7 +197,50 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
       currentTime: durationSeconds,
       isFinished: true,
     });
-    toast.success("Marked finished offline");
+    toast.success("Marked read offline");
+  };
+
+  const syncUnfinishedProgress = async () => {
+    const durationSeconds = Math.max(
+      0,
+      Math.floor(progress?.duration ?? 0),
+      Math.floor(book.duration ?? 0),
+      Math.floor(activeDurationMs / 1000),
+    );
+
+    if (activeLibraryUserKey) {
+      queryClient.setQueryData<UserServerState>(
+        queryKeys.userServerState(activeLibraryUserKey),
+        (previousState) =>
+          updateUserServerStateProgress(previousState, activeLibraryUserKey, {
+            libraryItemId: book.id,
+            currentTimeSeconds: 0,
+            durationSeconds,
+            isFinished: false,
+            progressId: progress?.progressId,
+          }),
+      );
+    }
+
+    if (isOnline !== false && authStatus === "authenticated") {
+      await meApi.updateProgress(book.id, {
+        currentTime: 0,
+        isFinished: false,
+        hideFromContinueListening: progress?.hideFromContinueListening ?? false,
+      });
+      clearPendingProgressSync(book.id);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.booksInProgress(activeLibraryId),
+      });
+      toast.success("Marked unread");
+      return;
+    }
+
+    queueProgressSync(book.id, {
+      currentTime: 0,
+      isFinished: false,
+    });
+    toast.success("Marked unread offline");
   };
 
   const toggleContinueListeningVisibility = async () => {
@@ -243,24 +298,32 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
     }
   };
 
-  const handleMarkFinished = async () => {
+  const handleToggleFinished = async () => {
     if (busyAction) return;
 
+    const alertTitle = isMarkedFinished ? "Mark as Unread" : "Mark as Read";
+    const alertMessage = isMarkedFinished
+      ? `Reset "${book.title}" progress to the beginning and mark it as unread?`
+      : `Mark "${book.title}" as read and move progress to the end?`;
+    const confirmLabel = isMarkedFinished ? "Mark Unread" : "Mark Read";
+
     Alert.alert(
-      "Mark as Finished",
-      `Mark "${book.title}" as finished and move progress to the end?`,
+      alertTitle,
+      alertMessage,
       [
         {
           text: "Cancel",
           style: "cancel",
         },
         {
-          text: "Mark Finished",
+          text: confirmLabel,
           onPress: () => {
             setBusyAction("finished");
-            void syncFinishedProgress()
+            void (isMarkedFinished ? syncUnfinishedProgress() : syncFinishedProgress())
               .catch(() => {
-                toast.error("Unable to mark as finished");
+                toast.error(
+                  isMarkedFinished ? "Unable to mark as unread" : "Unable to mark as read",
+                );
               })
               .finally(() => {
                 setBusyAction(null);
@@ -325,13 +388,15 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
     shelfDisabled: busyAction !== null || !canMutateShelves,
     continueListeningVisibilityIcon,
     continueListeningVisibilityLabel,
-    hasContinueListeningProgress,
+    finishedLabel,
+    finishedSystemImage,
+    hasContinueListeningVisibilityOption,
     primaryLabel,
     primarySystemImage,
     handleToggleShelfMembership,
     shelfMembershipOptions,
     handleToggleContinueListeningVisibility,
     handlePrimaryAction,
-    handleMarkFinished,
+    handleToggleFinished,
   };
 };
