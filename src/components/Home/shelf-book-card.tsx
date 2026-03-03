@@ -3,7 +3,10 @@ import type { UserBookProgress } from "@/api/me-api";
 import { CoverImage } from "@/components/images/cover-image";
 import { usePlaybackStore } from "@/player";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
-import type { BookProgressTimeDisplay } from "@/store/settings-store";
+import {
+  getHomePreviewCoverSize,
+  type BookProgressTimeDisplay,
+} from "@/store/settings-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
@@ -20,7 +23,6 @@ import Animated, {
 } from "react-native-reanimated";
 import { ShelfBookCardMenu } from "./shelf-book-card-menu";
 
-const COVER_SIZE = 160;
 const MENU_FADE_DISTANCE = 36;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
@@ -58,6 +60,7 @@ export const ShelfBookCard = ({
   const defaultProgressTimeDisplay = useSettingsStore(
     (state) => state.defaultBookProgressTimeDisplay,
   );
+  const homePreviewSize = useSettingsStore((state) => state.homePreviewSize);
   const isActivePlaybackBook = usePlaybackStore((state) => state.libraryItemId === book.id);
   const activePlaybackPositionMs = usePlaybackStore((state) =>
     state.libraryItemId === book.id ? state.positionMs : 0,
@@ -100,6 +103,7 @@ export const ShelfBookCard = ({
   const progressLabel = progressDisplay === "elapsed" ? elapsedLabel : remainingLabel;
   const isElapsedView = progressDisplay === "elapsed";
   const [isMenuHiddenNearHeader, setIsMenuHiddenNearHeader] = useState(false);
+  const coverSize = getHomePreviewCoverSize(homePreviewSize);
 
   const menuAnimatedStyle = useAnimatedStyle(() => {
     const menuScreenTop = menuContentTop - scrollY.value;
@@ -138,11 +142,11 @@ export const ShelfBookCard = ({
   return (
     <View
       style={{
-        width: COVER_SIZE,
+        width: coverSize,
         gap: 7,
       }}
     >
-      <View style={{ width: COVER_SIZE, height: COVER_SIZE }}>
+      <View style={{ width: coverSize, height: coverSize }}>
         <Link
           href={{
             pathname: "/(tabs)/(home)/[libraryItemId]",
@@ -152,8 +156,8 @@ export const ShelfBookCard = ({
         >
           <Pressable
             style={({ pressed }) => ({
-              width: COVER_SIZE,
-              height: COVER_SIZE,
+              width: coverSize,
+              height: coverSize,
               opacity: pressed ? 0.96 : 1,
             })}
           >
@@ -163,8 +167,8 @@ export const ShelfBookCard = ({
               localCoverUri={coverLocalUri}
               variant="thumb"
               style={{
-                width: COVER_SIZE,
-                height: COVER_SIZE,
+                width: coverSize,
+                height: coverSize,
                 borderRadius: 16,
                 borderWidth: StyleSheet.hairlineWidth,
                 backgroundColor: themeColors.surface,
@@ -209,7 +213,7 @@ export const ShelfBookCard = ({
       </View>
       <View
         style={{
-          width: COVER_SIZE,
+          width: coverSize,
           height: 5,
           borderRadius: 999,
           borderCurve: "continuous",

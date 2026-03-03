@@ -3,8 +3,16 @@ import { meApi } from "@/api/me-api";
 import { playlistsApi } from "@/api/playlists-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { type HomeShelf, useHomeShelves } from "@/hooks/use-home-shelves";
+import { useLibrarySelection } from "@/hooks/use-library-selection";
 import { queryKeys } from "@/query/query-keys";
+import {
+  HOME_PREVIEW_SIZE_LARGE,
+  HOME_PREVIEW_SIZE_MEDIUM,
+  HOME_PREVIEW_SIZE_SMALL,
+  useSettingsStore,
+} from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import type { Library } from "@/types/absTypes";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useQueryClient } from "@tanstack/react-query";
 import { Stack } from "expo-router";
@@ -20,9 +28,18 @@ const HomeShelvesScreen = () => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const isOnline = useAuthStore((state) => state.isOnline);
+  const homePreviewSize = useSettingsStore((state) => state.homePreviewSize);
+  const setHomePreviewSize = useSettingsStore((state) => state.actions.setHomePreviewSize);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const { visibleShelves, progressByBookId, refreshDiscover } = useHomeShelves();
+  const {
+    libraries,
+    isLoading: isLibrariesLoading,
+    isError: isLibrariesError,
+    refetch: refetchLibraries,
+    selectLibrary,
+  } = useLibrarySelection();
   const scrollY = useSharedValue(0);
 
   const scrollHandler = useAnimatedScrollHandler({
@@ -85,10 +102,72 @@ const HomeShelvesScreen = () => {
     }
   }, [activeLibraryId, activeLibraryUserKey, isOnline, isRefreshing, queryClient]);
 
+  const handleLibraryChange = useCallback(
+    (library: Library) => {
+      if (library.id === activeLibraryId) return;
+      setRefreshMessage(null);
+      selectLibrary(library);
+    },
+    [activeLibraryId, selectLibrary],
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Button icon="box.truck" />
+        {/* <Stack.Toolbar.Button icon="ellipsis" /> */}
+        <Stack.Toolbar.Menu icon="ellipsis">
+          <Stack.Toolbar.Menu icon="books.vertical.fill" title="Change Library">
+            {isLibrariesLoading && libraries.length === 0 ? (
+              <Stack.Toolbar.MenuAction disabled icon="ellipsis">
+                Loading libraries...
+              </Stack.Toolbar.MenuAction>
+            ) : null}
+            {isLibrariesError && libraries.length === 0 ? (
+              <Stack.Toolbar.MenuAction icon="arrow.clockwise" onPress={() => refetchLibraries()}>
+                Retry loading libraries
+              </Stack.Toolbar.MenuAction>
+            ) : null}
+            {!isLibrariesLoading && !isLibrariesError && libraries.length === 0 ? (
+              <Stack.Toolbar.MenuAction disabled icon="books.vertical">
+                No libraries available
+              </Stack.Toolbar.MenuAction>
+            ) : null}
+            {libraries.map((library) => (
+              <Stack.Toolbar.MenuAction
+                key={library.id}
+                icon="text.book.closed.fill"
+                isOn={library.id === activeLibraryId}
+                onPress={() => handleLibraryChange(library)}
+                subtitle={`${library.mediaType} • ${library.icon || library.provider}`}
+              >
+                {library.name}
+              </Stack.Toolbar.MenuAction>
+            ))}
+          </Stack.Toolbar.Menu>
+          <Stack.Toolbar.Menu icon="square.grid.2x2" title="View">
+            <Stack.Toolbar.MenuAction
+              icon="square.grid.2x2"
+              isOn={homePreviewSize === HOME_PREVIEW_SIZE_SMALL}
+              onPress={() => setHomePreviewSize(HOME_PREVIEW_SIZE_SMALL)}
+            >
+              Small
+            </Stack.Toolbar.MenuAction>
+            <Stack.Toolbar.MenuAction
+              icon="square.grid.2x2"
+              isOn={homePreviewSize === HOME_PREVIEW_SIZE_MEDIUM}
+              onPress={() => setHomePreviewSize(HOME_PREVIEW_SIZE_MEDIUM)}
+            >
+              Medium
+            </Stack.Toolbar.MenuAction>
+            <Stack.Toolbar.MenuAction
+              icon="square.grid.2x2"
+              isOn={homePreviewSize === HOME_PREVIEW_SIZE_LARGE}
+              onPress={() => setHomePreviewSize(HOME_PREVIEW_SIZE_LARGE)}
+            >
+              Large
+            </Stack.Toolbar.MenuAction>
+          </Stack.Toolbar.Menu>
+        </Stack.Toolbar.Menu>
       </Stack.Toolbar>
       <Animated.ScrollView
         contentInsetAdjustmentBehavior="automatic"
