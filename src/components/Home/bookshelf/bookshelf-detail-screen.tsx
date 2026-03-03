@@ -3,9 +3,10 @@ import { useAuthStore } from "@/auth/auth-store";
 import { useHomeShelves } from "@/hooks/use-home-shelves";
 import { useDeviceBooksActions } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { FlashListRef } from "@shopify/flash-list";
 import { Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import Animated, { useAnimatedRef } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -33,7 +34,9 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
   } = useDeviceBooksActions();
   const { shelves, refreshDiscover } = useHomeShelves();
   const scrollableRef = useAnimatedRef<ScrollView>();
+  const builtInListRef = useRef<FlashListRef<LibraryItemSummary> | null>(null);
   const [isRouteContentReady, setIsRouteContentReady] = useState(false);
+  const [searchText, setSearchText] = useState("");
   const normalizedShelfId = shelfId.trim();
   const normalizedShelfIdLowercase = normalizedShelfId.toLowerCase();
 
@@ -51,10 +54,13 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
   const isDiscoverShelf = shelf?.kind === "derived" && shelf.id === "discover";
   const isDownloadedShelf = shelf?.kind === "derived" && shelf.id === "downloaded";
   const isSortableGridShelf = isCustomShelf || isDownloadedShelf || isPlaylistShelf;
+  const supportsHeaderSearch =
+    process.env.EXPO_OS === "ios" && shelf?.kind === "derived" && shelf.id !== "downloaded";
   const contentTopPadding = Math.max(84, insets.top + 56);
 
   useEffect(() => {
     setIsRouteContentReady(false);
+    setSearchText("");
     const frame = requestAnimationFrame(() => {
       setIsRouteContentReady(true);
     });
@@ -106,6 +112,15 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
     [isOffline],
   );
 
+  const handleSearchTextChange = useCallback((nextValue: string) => {
+    setSearchText((currentValue) => (currentValue === nextValue ? currentValue : nextValue));
+  }, []);
+
+  const scrollBuiltInListToTop = useCallback(() => {
+    // builtInListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    builtInListRef.current?.scrollToTop();
+  }, []);
+
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       <Stack.Screen
@@ -125,6 +140,26 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
             : undefined,
         }}
       />
+      {isRouteContentReady && shelf && !isSortableGridShelf && supportsHeaderSearch ? (
+        <Stack.SearchBar
+          placement="integratedButton"
+          placeholder="Search by title or author"
+          autoCapitalize="none"
+          hideNavigationBar={false}
+          hideWhenScrolling
+          onChangeText={(event) => {
+            handleSearchTextChange(event.nativeEvent.text);
+          }}
+          onCancelButtonPress={() => {
+            handleSearchTextChange("");
+            scrollBuiltInListToTop();
+          }}
+          onClose={() => {
+            handleSearchTextChange("");
+            scrollBuiltInListToTop();
+          }}
+        />
+      ) : null}
 
       {!isRouteContentReady ? (
         <View
@@ -164,6 +199,8 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
           isOffline={isOffline}
           contentTopPadding={contentTopPadding}
           emptyMessage={shelf.emptyMessage}
+          searchText={supportsHeaderSearch ? searchText : ""}
+          listRef={builtInListRef}
         />
       ) : null}
 
