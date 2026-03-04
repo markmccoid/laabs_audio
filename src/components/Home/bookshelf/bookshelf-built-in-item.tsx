@@ -1,4 +1,5 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
+import type { UserBookProgress } from "@/api/me-api";
 import { CoverImage } from "@/components/images/cover-image";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -7,18 +8,22 @@ import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+const STACKED_BADGE_TOP_OFFSET = 34;
+
 type BookshelfBuiltInItemProps = {
   book: LibraryItemSummary;
   isOffline: boolean;
+  progress?: UserBookProgress;
 };
 
-export const BookshelfBuiltInItem = ({ book, isOffline }: BookshelfBuiltInItemProps) => {
+export const BookshelfBuiltInItem = ({ book, isOffline, progress }: BookshelfBuiltInItemProps) => {
   const themeColors = useThemeColors();
   const isDownloaded = useDeviceBooksStore((state) => selectHasPlayableBookDownload(state, book.id));
   const localCoverUri = useDeviceBooksStore(
     (state) => state.downloadedBookData[book.id]?.coverLocalUri ?? null,
   );
   const showOfflineUnavailable = isOffline && !isDownloaded;
+  const showFinishedIndicator = Boolean(progress?.isFinished);
 
   return (
     <Link
@@ -43,6 +48,7 @@ export const BookshelfBuiltInItem = ({ book, isOffline }: BookshelfBuiltInItemPr
               coverUri={book.cover}
               localCoverUri={localCoverUri}
               variant="thumb"
+              showFinishedIndicator={showFinishedIndicator}
               style={{
                 width: 100,
                 height: 100,
@@ -57,7 +63,7 @@ export const BookshelfBuiltInItem = ({ book, isOffline }: BookshelfBuiltInItemPr
               <View
                 style={{
                   position: "absolute",
-                  top: 6,
+                  top: showFinishedIndicator ? STACKED_BADGE_TOP_OFFSET : 6,
                   right: 6,
                   borderRadius: 999,
                   borderCurve: "continuous",

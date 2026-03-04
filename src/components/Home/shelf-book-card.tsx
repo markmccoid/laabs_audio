@@ -24,6 +24,7 @@ import Animated, {
 import { ShelfBookCardMenu } from "./shelf-book-card-menu";
 
 const MENU_FADE_DISTANCE = 36;
+const STACKED_BADGE_TOP_OFFSET = 34;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -104,6 +105,7 @@ export const ShelfBookCard = ({
   const isElapsedView = progressDisplay === "elapsed";
   const [isMenuHiddenNearHeader, setIsMenuHiddenNearHeader] = useState(false);
   const coverSize = getHomePreviewCoverSize(homePreviewSize);
+  const showFinishedIndicator = Boolean(progress?.isFinished);
 
   const menuAnimatedStyle = useAnimatedStyle(() => {
     const menuScreenTop = menuContentTop - scrollY.value;
@@ -166,6 +168,7 @@ export const ShelfBookCard = ({
               coverUri={book.cover}
               localCoverUri={coverLocalUri}
               variant="thumb"
+              showFinishedIndicator={showFinishedIndicator}
               style={{
                 width: coverSize,
                 height: coverSize,
@@ -179,7 +182,7 @@ export const ShelfBookCard = ({
               <View
                 style={{
                   position: "absolute",
-                  top: 6,
+                  top: showFinishedIndicator ? STACKED_BADGE_TOP_OFFSET : 6,
                   right: 6,
                   borderRadius: 999,
                   borderCurve: "continuous",

@@ -73,7 +73,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
     return selectHasPlayableBookDownload(state, libraryItemId);
   });
   const localCoverUri = useDeviceBooksStore((state) =>
-    libraryItemId ? state.downloadedBookData[libraryItemId]?.coverLocalUri ?? null : null,
+    libraryItemId ? (state.downloadedBookData[libraryItemId]?.coverLocalUri ?? null) : null,
   );
   const defaultProgressTimeDisplay = useSettingsStore(
     (state) => state.defaultBookProgressTimeDisplay,
@@ -174,13 +174,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
       }
     }
     return hasPlayableLocalDownload ? "Local" : "Stream";
-  }, [
-    currentTrackIndex,
-    hasPlayableLocalDownload,
-    isOffline,
-    isViewedBookActive,
-    queue,
-  ]);
+  }, [currentTrackIndex, hasPlayableLocalDownload, isOffline, isViewedBookActive, queue]);
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
@@ -216,9 +210,9 @@ const BookContainer = ({ libraryItemId }: Props) => {
         }}
       >
         <Stack.Screen options={{ headerTitle: bookTitle }} />
-        <Stack.Toolbar placement="right">
+        {/* <Stack.Toolbar placement="right">
           <Stack.Toolbar.Button onPress={() => console.log("Search Lib button")} icon="cube.box" />
-        </Stack.Toolbar>
+        </Stack.Toolbar> */}
 
         <View style={{ alignItems: "center", gap: 6 }}>
           {isLoading ? (
@@ -266,6 +260,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
             coverURL={coverURL}
             localCoverUri={localCoverUri}
             leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
+            showFinishedIndicator={isFinished}
             showProgressLine={progressSeconds > 0 || isFinished}
             progressPercent={visualProgressPercent}
             maxSize={coverMaxSize}

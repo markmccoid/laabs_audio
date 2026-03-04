@@ -1,4 +1,5 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
+import type { UserBookProgress } from "@/api/me-api";
 import { CoverImage } from "@/components/images/cover-image";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -6,18 +7,22 @@ import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { Pressable, Text, View } from "react-native";
 
+const STACKED_BADGE_TOP_OFFSET = 36;
+
 type BookshelfGridItemProps = {
   book: LibraryItemSummary;
   isOffline: boolean;
+  progress?: UserBookProgress;
 };
 
-export const BookshelfGridItem = ({ book, isOffline }: BookshelfGridItemProps) => {
+export const BookshelfGridItem = ({ book, isOffline, progress }: BookshelfGridItemProps) => {
   const themeColors = useThemeColors();
   const isDownloaded = useDeviceBooksStore((state) => selectHasPlayableBookDownload(state, book.id));
   const localCoverUri = useDeviceBooksStore(
     (state) => state.downloadedBookData[book.id]?.coverLocalUri ?? null,
   );
   const showOfflineUnavailable = isOffline && !isDownloaded;
+  const showFinishedIndicator = Boolean(progress?.isFinished);
 
   return (
     <Link
@@ -34,6 +39,7 @@ export const BookshelfGridItem = ({ book, isOffline }: BookshelfGridItemProps) =
             coverUri={book.cover}
             localCoverUri={localCoverUri}
             variant="thumb"
+            showFinishedIndicator={showFinishedIndicator}
             style={{
               width: "100%",
               aspectRatio: 1,
@@ -46,7 +52,7 @@ export const BookshelfGridItem = ({ book, isOffline }: BookshelfGridItemProps) =
             <View
               style={{
                 position: "absolute",
-                top: 8,
+                top: showFinishedIndicator ? STACKED_BADGE_TOP_OFFSET : 8,
                 right: 8,
                 borderRadius: 999,
                 borderCurve: "continuous",

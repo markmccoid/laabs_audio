@@ -11,6 +11,7 @@ type Props = {
   maxSize?: number;
   progressPercent?: number;
   showProgressLine?: boolean;
+  showFinishedIndicator?: boolean;
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
@@ -23,6 +24,7 @@ const BookImage = ({
   maxSize = 360,
   progressPercent = 0,
   showProgressLine = false,
+  showFinishedIndicator = false,
 }: Props) => {
   const themeColors = useThemeColors();
   const { width } = useWindowDimensions();
@@ -37,6 +39,7 @@ const BookImage = ({
           coverUri={coverURL}
           localCoverUri={localCoverUri}
           variant="full"
+          showFinishedIndicator={showFinishedIndicator}
           style={{
             width: imageSize,
             height: imageSize,

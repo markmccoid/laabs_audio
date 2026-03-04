@@ -9,7 +9,7 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 type Props = {
-  libraryItem: LibraryItemSummary;
+  libraryItem: LibraryItemSummary & { isFinished?: boolean };
 };
 const LibraryItem = ({ libraryItem }: Props) => {
   const themeColors = useThemeColors();
@@ -26,6 +26,7 @@ const LibraryItem = ({ libraryItem }: Props) => {
             coverUri={libraryItem.cover}
             localCoverUri={localCoverUri}
             variant="thumb"
+            showFinishedIndicator={Boolean(libraryItem.isFinished)}
             style={{
               width: 100,
               height: 100,

@@ -2,8 +2,11 @@ import { useAuthStore } from "@/auth/auth-store";
 import { buildCoverUrls } from "@/api/cover-urls";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { useSettingsStore } from "@/store/settings-store";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { Image, type ImageProps } from "expo-image";
+import { SymbolView } from "expo-symbols";
 import { useEffect, useMemo, useState } from "react";
+import { StyleSheet, View } from "react-native";
 
 type CoverImageVariant = "thumb" | "full";
 type CoverSourceMode = "local" | "remote-tokenless" | "remote-tokened" | "default";
@@ -13,6 +16,7 @@ export type CoverImageProps = Omit<ImageProps, "source"> & {
   coverUri?: string | null;
   localCoverUri?: string | null;
   variant?: CoverImageVariant;
+  showFinishedIndicator?: boolean;
 };
 
 const isLocalUri = (value?: string | null) =>
@@ -131,9 +135,12 @@ export const CoverImage = ({
   coverUri,
   localCoverUri,
   variant = "full",
+  showFinishedIndicator = false,
   onError,
+  style,
   ...props
 }: CoverImageProps) => {
+  const themeColors = useThemeColors();
   const resolved = useCoverImageSource({
     libraryItemId,
     coverUri,
@@ -146,5 +153,48 @@ export const CoverImage = ({
     onError?.(event);
   };
 
-  return <Image {...props} source={resolved.source} onError={handleError} />;
+  if (!showFinishedIndicator) {
+    return <Image {...props} style={style} source={resolved.source} onError={handleError} />;
+  }
+
+  const flattenedStyle = StyleSheet.flatten(style);
+  const indicatorSize = variant === "thumb" ? 24 : 32;
+  const indicatorInset = variant === "thumb" ? 6 : 10;
+
+  return (
+    <View
+      style={[
+        flattenedStyle,
+        {
+          position: flattenedStyle?.position ?? "relative",
+          overflow: "hidden",
+        },
+      ]}
+    >
+      <Image
+        {...props}
+        style={StyleSheet.absoluteFill}
+        source={resolved.source}
+        onError={handleError}
+      />
+      <View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          top: indicatorInset,
+          right: indicatorInset,
+          borderRadius: 999,
+          borderCurve: "continuous",
+          backgroundColor: "rgba(255,255,255,0.82)",
+          boxShadow: "0 4px 10px rgba(15, 23, 42, 0.22)",
+        }}
+      >
+        <SymbolView
+          name="checkmark.circle.fill"
+          size={indicatorSize}
+          tintColor={themeColors.accent}
+        />
+      </View>
+    </View>
+  );
 };

@@ -1,4 +1,5 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
+import type { UserBookProgress } from "@/api/me-api";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList, FlashListRef } from "@shopify/flash-list";
 import type { RefObject } from "react";
@@ -12,6 +13,7 @@ type BookshelfBuiltInListProps = {
   contentTopPadding: number;
   emptyMessage: string;
   searchText: string;
+  progressByBookId: Record<string, UserBookProgress>;
   listRef?: RefObject<FlashListRef<LibraryItemSummary> | null>;
 };
 
@@ -21,6 +23,7 @@ export const BookshelfBuiltInList = ({
   contentTopPadding,
   emptyMessage,
   searchText,
+  progressByBookId,
   listRef,
 }: BookshelfBuiltInListProps) => {
   const themeColors = useThemeColors();
@@ -63,7 +66,13 @@ export const BookshelfBuiltInList = ({
       ref={listRef}
       data={filteredBooks}
       keyExtractor={(book) => book.id}
-      renderItem={({ item }) => <BookshelfBuiltInItem book={item} isOffline={isOffline} />}
+      renderItem={({ item }) => (
+        <BookshelfBuiltInItem
+          book={item}
+          isOffline={isOffline}
+          progress={progressByBookId[item.id]}
+        />
+      )}
       ListEmptyComponent={
         <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
           {listEmptyMessage}
