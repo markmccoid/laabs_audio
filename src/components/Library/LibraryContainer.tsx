@@ -1,28 +1,45 @@
 import { useAuthStore } from "@/auth/auth-store";
-import { useGetBooks } from "@/hooks/abs-data-hooks";
+import { useGetBooks, useGetFilterData } from "@/hooks/abs-data-hooks";
 import { queryKeys } from "@/query/query-keys";
+import { useFiltersActions, useFiltersStore } from "@/store/store-filters";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
+import { StyleSheet, View } from "react-native";
+import { FilterOptionsSheet, type FilterSheetType } from "./filter-options-sheet";
+import { LibraryFiltersHeader } from "./library-filters-header";
 import LibraryItem from "./LibraryItem";
 
 const LibraryContainer = () => {
+  const themeColors = useThemeColors();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  const [activeSheet, setActiveSheet] = useState<FilterSheetType | null>(null);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-
+  const {
+    genres,
+    tags,
+    isError: isFilterDataError,
+    refetch: refetchFilterData,
+  } = useGetFilterData();
+  const filterActions = useFiltersActions();
+  const selectedGenres = useFiltersStore((state) => state.genres);
+  const selectedTags = useFiltersStore((state) => state.tags);
   const { data, isLoading, isPending } = useGetBooks();
 
+  const genreOptions = useMemo(
+    () => Array.from(new Set(genres.map((genre) => genre.name))),
+    [genres],
+  );
+  const tagOptions = useMemo(() => Array.from(new Set(tags.map((tag) => tag.name))), [tags]);
+
+  const sheetOptions = activeSheet === "tags" ? tagOptions : genreOptions;
+  const selectedValues = activeSheet === "tags" ? selectedTags : selectedGenres;
+
   if (isLoading || isPending || !data) return null;
+
   const onRefresh = async () => {
-    console.log(
-      "All queries:",
-      queryClient
-        .getQueryCache()
-        .getAll()
-        .map((q) => q.queryKey),
-    );
-    console.log("ActiveLib", queryKeys.libraryBooks(activeLibraryId));
     setRefreshing(true);
     await queryClient.refetchQueries({
       queryKey: queryKeys.libraryBooks(activeLibraryId),
@@ -30,17 +47,82 @@ const LibraryContainer = () => {
     });
     setRefreshing(false);
   };
+
+  const toggleSelectedValue = (value: string) => {
+    if (activeSheet === "tags") {
+      if (selectedTags.includes(value)) {
+        filterActions.removeTag(value);
+        return;
+      }
+      filterActions.addTag(value);
+      return;
+    }
+
+    if (selectedGenres.includes(value)) {
+      filterActions.removeGenre(value);
+      return;
+    }
+    filterActions.addGenre(value);
+  };
+
+  const clearActiveSelection = () => {
+    if (activeSheet === "tags") {
+      filterActions.clearTags();
+      return;
+    }
+    filterActions.clearGenres();
+  };
+
   return (
-    <FlashList
-      // contentInset={{ top: headerHeight }}
-      contentInsetAdjustmentBehavior="never"
-      data={data}
-      onRefresh={onRefresh}
-      refreshing={refreshing}
-      renderItem={({ item }) => {
-        return <LibraryItem libraryItem={item} />;
-      }}
-    />
+    <>
+      <FlashList
+        contentInsetAdjustmentBehavior="automatic"
+        ListHeaderComponent={
+          <LibraryFiltersHeader
+            selectedGenres={selectedGenres}
+            selectedTags={selectedTags}
+            isFilterDataError={isFilterDataError}
+            onOpenSheet={(sheetType) => setActiveSheet(sheetType)}
+            onRemoveGenre={(genre) => filterActions.removeGenre(genre)}
+            onRemoveTag={(tag) => filterActions.removeTag(tag)}
+            onRetryFilterData={() => {
+              void refetchFilterData();
+            }}
+          />
+        }
+        data={data}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
+        renderItem={({ item }) => {
+          return <LibraryItem libraryItem={item} />;
+        }}
+        ItemSeparatorComponent={() => (
+          <View
+            style={{
+              height: StyleSheet.hairlineWidth,
+              backgroundColor: themeColors.accent,
+              marginVertical: 5,
+            }}
+          />
+        )}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          // paddingTop: contentTopPadding,
+          paddingBottom: 24,
+        }}
+        showsVerticalScrollIndicator={false}
+      />
+
+      <FilterOptionsSheet
+        visible={Boolean(activeSheet)}
+        type={activeSheet ?? "genres"}
+        options={sheetOptions}
+        selectedValues={selectedValues}
+        onToggle={toggleSelectedValue}
+        onClear={clearActiveSelection}
+        onClose={() => setActiveSheet(null)}
+      />
+    </>
   );
 };
 

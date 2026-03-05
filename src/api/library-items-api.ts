@@ -20,6 +20,7 @@ export type LibraryItemSummary = {
   title: string;
   subtitle?: string | undefined | null;
   author?: string | undefined | null;
+  seriesName?: string | undefined | null;
   series?: string | undefined | null;
   publishedDate?: string | undefined | null;
   publishedYear?: string | undefined | null;
@@ -91,6 +92,7 @@ export const libraryItemsApi = {
         title: item.media.metadata.title,
         subtitle: item.media.metadata.subtitle,
         author: item.media.metadata.authorName,
+        seriesName: item.media.metadata.seriesName,
         series: item.media.metadata.seriesName,
         publishedDate: item.media.metadata.publishedDate,
         publishedYear: item.media.metadata.publishedYear,

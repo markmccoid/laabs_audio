@@ -11,6 +11,7 @@ export interface Author {
 export interface Series {
   id: string;
   name: string;
+  sequence?: string | null;
 }
 
 export interface Chapter {

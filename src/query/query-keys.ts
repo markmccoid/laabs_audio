@@ -14,4 +14,6 @@ export const queryKeys = {
     ["user", userKey ?? null, "serverState"] as const,
   itemDetails: (itemId: string | null | undefined) =>
     ["itemDetails", itemId ?? null] as const,
+  seriesProgress: (seriesId: string | null | undefined) =>
+    ["series", seriesId ?? null, "progress"] as const,
 };

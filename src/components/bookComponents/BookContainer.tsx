@@ -13,10 +13,11 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Stack } from "expo-router";
+import { Stack, router, useSegments } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
 import {
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -56,9 +57,18 @@ const resolveBookDescription = (
   return metadataDescription ?? summaryDescription ?? metadataDescriptionPlain ?? "";
 };
 
+const formatSeriesChipLabel = (seriesName: string, sequence?: string | null) => {
+  const trimmedSequence = sequence?.trim();
+  if (!trimmedSequence) {
+    return seriesName;
+  }
+  return `${seriesName} #${trimmedSequence}`;
+};
+
 const BookContainer = ({ libraryItemId }: Props) => {
   const themeColors = useThemeColors();
   const { theme } = useUniwind();
+  const segments = useSegments();
   const colorScheme = useColorScheme();
   useReconcileBookProgress(libraryItemId);
   const { data: bookData, isLoading } = useGetItemDetails(libraryItemId);
@@ -94,10 +104,16 @@ const BookContainer = ({ libraryItemId }: Props) => {
     bookData?.publishedYear ??
     metadata?.publishedDate?.split("-")[0] ??
     null;
-  const seriesFromList = metadata?.series
-    ?.map((item) => item.name)
-    .filter(Boolean)
-    .join(", ");
+  const seriesEntries = useMemo(() => {
+    return (metadata?.series ?? [])
+      .filter((entry) => Boolean(entry?.id) && Boolean(entry?.name))
+      .map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        sequence: entry.sequence ?? null,
+      }));
+  }, [metadata?.series]);
+  const seriesFromList = seriesEntries.map((item) => item.name).join(", ") || null;
   const series = metadata?.seriesName ?? seriesFromList ?? bookData?.series ?? null;
   const description = resolveBookDescription(
     metadata?.description,
@@ -175,6 +191,21 @@ const BookContainer = ({ libraryItemId }: Props) => {
     }
     return hasPlayableLocalDownload ? "Local" : "Stream";
   }, [currentTrackIndex, hasPlayableLocalDownload, isOffline, isViewedBookActive, queue]);
+  const sourceTab = useMemo<"home" | "search">(
+    () => (segments.includes("search") ? "search" : "home"),
+    [segments],
+  );
+
+  const openSeriesSheet = (seriesId: string, seriesName: string) => {
+    router.push({
+      pathname: "/book-series",
+      params: {
+        seriesId,
+        seriesName,
+        sourceTab,
+      },
+    });
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
@@ -294,6 +325,36 @@ const BookContainer = ({ libraryItemId }: Props) => {
           </View>
         </View>
         <View className="h-[10]" />
+        {seriesEntries.length > 0 ? (
+          <View style={{ gap: 8 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{ flexDirection: "row", gap: 8, paddingVertical: 2 }}>
+                {seriesEntries.map((seriesEntry) => (
+                  <Pressable
+                    key={`${seriesEntry.id}:${seriesEntry.sequence ?? "none"}`}
+                    onPress={() => openSeriesSheet(seriesEntry.id, seriesEntry.name)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${seriesEntry.name} series`}
+                    style={({ pressed }) => ({
+                      borderRadius: 999,
+                      borderCurve: "continuous",
+                      borderWidth: 1,
+                      borderColor: themeColors.accent,
+                      backgroundColor: themeColors.surface,
+                      paddingHorizontal: 12,
+                      paddingVertical: 7,
+                      opacity: pressed ? 0.82 : 1,
+                    })}
+                  >
+                    <Text selectable style={{ fontSize: 12, fontWeight: "600", color: themeColors.accent }}>
+                      {formatSeriesChipLabel(seriesEntry.name, seriesEntry.sequence)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+        ) : null}
 
         <BookDetails title={bookTitle} description={description} genres={genres} tags={tags} />
 

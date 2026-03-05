@@ -2,12 +2,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { sortBy } from "es-toolkit";
 import { useCallback, useEffect, useMemo } from "react";
 import { itemsApi, type ItemDetails } from "../api/items-api";
-import { librariesApi } from "../api/libraries-api";
+import { librariesApi, type LibraryFilterData } from "../api/libraries-api";
 import {
   libraryItemsApi,
   type LibraryItemSummary,
   type LibraryItemsSummary,
 } from "../api/library-items-api";
+import { seriesApi, type SeriesWithProgress } from "../api/series-api";
 import {
   meApi,
   type ItemsInProgressSummary,
@@ -375,6 +376,22 @@ export const useReconcileBookProgress = (libraryItemId?: string) => {
   }, [activeLibraryUserKey, libraryItemId, queryClient, status]);
 };
 
+export const useGetSeriesWithProgress = (seriesId?: string) => {
+  const status = useAuthStore((state) => state.status);
+
+  return useQuery<SeriesWithProgress>({
+    queryKey: queryKeys.seriesProgress(seriesId),
+    queryFn: async () => {
+      if (!seriesId) {
+        throw new Error("No series ID provided");
+      }
+      return seriesApi.getSeriesWithProgress(seriesId);
+    },
+    enabled: status === "authenticated" && !!seriesId,
+    staleTime: 1000 * 30,
+  });
+};
+
 //# ----------------------------------------------
 //# useGetBooksInProgress
 //# Returns data as { libraryItemId: {bookinfo}, ...}
@@ -618,34 +635,62 @@ export const useGetItemDetails = (itemId?: string) => {
 //# ----------------------------------------------
 //# useGetFilterData - Get Tags, Genres, Authros and Series data
 //# ----------------------------------------------
+const FILTER_DATA_STALE_TIME_MS = 24 * 60 * 60 * 1000;
+const EMPTY_FILTER_GENRES: LibraryFilterData["genres"] = [];
+const EMPTY_FILTER_TAGS: LibraryFilterData["tags"] = [];
+const EMPTY_FILTER_AUTHORS: LibraryFilterData["authors"] = [];
+const EMPTY_FILTER_SERIES: LibraryFilterData["series"] = [];
+
 export const useGetFilterData = () => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
 
-  // Always call useQuery unconditionally (React Rules of Hooks)
-  const { data, ...rest } = useQuery({
+  // Keep this query as the single source of truth for filter option caching.
+  // `meta.persist` opts this key into MMKV persistence via PersistQueryClientProvider.
+  const { data, isPending, isLoading, isError, isSuccess, error, ...rest } = useQuery({
     queryKey: queryKeys.libraryFilterData(activeLibraryId),
-    queryFn: async () => {
-      if (!activeLibraryId) {
-        throw new Error("No active library set");
-      }
-      return librariesApi.getFilterData(activeLibraryId);
-    },
+    queryFn: () => librariesApi.getFilterData(activeLibraryId),
     enabled: status === "authenticated" && !!activeLibraryId,
+    // Filter options change infrequently; prefer serving cached MMKV-backed data.
+    staleTime: FILTER_DATA_STALE_TIME_MS,
     meta: { persist: true },
   });
 
-  // Return unauthenticated state after hooks are called
-  if (status !== "authenticated") {
+  const genres = data?.genres ?? EMPTY_FILTER_GENRES;
+  const tags = data?.tags ?? EMPTY_FILTER_TAGS;
+  const authors = data?.authors ?? EMPTY_FILTER_AUTHORS;
+  const series = data?.series ?? EMPTY_FILTER_SERIES;
+
+  // Return non-throwing defaults when auth/library context isn't ready.
+  if (status !== "authenticated" || !activeLibraryId) {
     return {
       filterData: undefined,
+      genres: EMPTY_FILTER_GENRES,
+      tags: EMPTY_FILTER_TAGS,
+      authors: EMPTY_FILTER_AUTHORS,
+      series: EMPTY_FILTER_SERIES,
+      isPending: false,
       isLoading: false,
+      isSuccess: false,
       isError: false,
       error: null,
+      refetch: rest.refetch,
     };
   }
 
-  return { filterData: data, ...rest };
+  return {
+    filterData: data,
+    genres,
+    tags,
+    authors,
+    series,
+    isPending,
+    isLoading,
+    isSuccess,
+    isError,
+    error,
+    ...rest,
+  };
 };
 //# ----------------------------------------------
 //# useInvalidateQueries
