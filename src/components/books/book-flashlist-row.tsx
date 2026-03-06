@@ -28,7 +28,9 @@ export const BookFlashListRow = ({
   showSeries = true,
 }: BookFlashListRowProps) => {
   const themeColors = useThemeColors();
-  const isDownloaded = useDeviceBooksStore((state) => selectHasPlayableBookDownload(state, book.id));
+  const isDownloaded = useDeviceBooksStore((state) =>
+    selectHasPlayableBookDownload(state, book.id),
+  );
   const localCoverUri = useDeviceBooksStore(
     (state) => state.downloadedBookData[book.id]?.coverLocalUri ?? null,
   );
@@ -44,14 +46,24 @@ export const BookFlashListRow = ({
         onPress={onPress}
         disabled={!onPress && !href}
         style={({ pressed }) => ({
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: themeColors.border,
-          backgroundColor: themeColors.surface,
-          padding: 8,
-          opacity: pressed ? 0.86 : 1,
+          // borderWidth: StyleSheet.hairlineWidth,
+          // borderColor: themeColors.border,
+          // backgroundColor: themeColors.surface,
+          // padding: 8,
+          // opacity: pressed ? 0.86 : 1,
         })}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingVertical: 8,
+            paddingHorizontal: 10,
+            marginVertical: 4,
+          }}
+          className="bg-surface border-hairline border-accent border-l-0 border-r-0"
+        >
           <View style={{ width: 100, height: 100 }}>
             <CoverImage
               libraryItemId={book.id}
@@ -64,7 +76,7 @@ export const BookFlashListRow = ({
                 height: 100,
                 borderRadius: 15,
                 borderWidth: StyleSheet.hairlineWidth,
-                borderColor: themeColors.border,
+                borderColor: themeColors.accent,
                 backgroundColor: themeColors.bg,
                 opacity: showOfflineUnavailable ? 0.55 : 1,
               }}
@@ -127,7 +139,11 @@ export const BookFlashListRow = ({
             >
               <View style={{ flexDirection: "row", gap: 4, alignItems: "center" }}>
                 <SymbolView name="hourglass" tintColor={themeColors.textMuted} size={16} />
-                <Text selectable numberOfLines={1} style={{ color: themeColors.textMuted, fontSize: 13 }}>
+                <Text
+                  selectable
+                  numberOfLines={1}
+                  style={{ color: themeColors.textMuted, fontSize: 13 }}
+                >
                   {formatSeconds(book.duration)}
                 </Text>
               </View>

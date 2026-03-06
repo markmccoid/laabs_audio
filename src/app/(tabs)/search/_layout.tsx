@@ -6,7 +6,10 @@ const SearchLayout = () => {
     <Stack>
       <Stack.Screen
         name="index"
-        options={{ headerLargeTitleEnabled: true, headerTransparent: true, headerTitle: "Search" }}
+        options={{
+          headerLargeTitleEnabled: true,
+          headerTransparent: true,
+        }}
       />
       <Stack.Screen
         name="[libraryItemId]"

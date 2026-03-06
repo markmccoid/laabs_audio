@@ -1,4 +1,4 @@
-import type { LibraryItemSummary, LibraryItemsSummary } from "@/api/library-items-api";
+import type { LibraryItemsSummary, LibraryItemSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { BookFlashListRow } from "@/components/books/book-flashlist-row";
@@ -53,7 +53,12 @@ export const BookSeriesSheet = () => {
     () => subscribedCatalog ?? immediateCatalog ?? [],
     [immediateCatalog, subscribedCatalog],
   );
-  const { data: seriesWithProgress, isLoading, isError, refetch } = useGetSeriesWithProgress(seriesId);
+  const {
+    data: seriesWithProgress,
+    isLoading,
+    isError,
+    refetch,
+  } = useGetSeriesWithProgress(seriesId);
 
   const progressByLibraryItemId =
     userServerState?.progressByLibraryItemId ??
@@ -94,8 +99,13 @@ export const BookSeriesSheet = () => {
       <Stack.Screen options={{ headerTitle: seriesName }} />
 
       {!seriesId ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 }}>
-          <Text selectable style={{ color: themeColors.textMuted, fontSize: 14, textAlign: "center" }}>
+        <View
+          style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 }}
+        >
+          <Text
+            selectable
+            style={{ color: themeColors.textMuted, fontSize: 14, textAlign: "center" }}
+          >
             Series ID is missing. Close and reopen the series list.
           </Text>
         </View>
@@ -107,8 +117,19 @@ export const BookSeriesSheet = () => {
           </Text>
         </View>
       ) : isError ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, gap: 10 }}>
-          <Text selectable style={{ color: themeColors.textMuted, fontSize: 14, textAlign: "center" }}>
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: 24,
+            gap: 10,
+          }}
+        >
+          <Text
+            selectable
+            style={{ color: themeColors.textMuted, fontSize: 14, textAlign: "center" }}
+          >
             Could not load this series right now.
           </Text>
           <Pressable
@@ -135,7 +156,7 @@ export const BookSeriesSheet = () => {
         <FlashList
           data={seriesBooks}
           keyExtractor={(item) => item.id}
-          estimatedItemSize={116}
+          // estimatedItemSize={116}
           renderItem={({ item }) => (
             <BookFlashListRow
               book={item}
@@ -144,9 +165,9 @@ export const BookSeriesSheet = () => {
               onPress={() => handleBookPress(item.id)}
             />
           )}
-          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+          // ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListHeaderComponent={
-            <View style={{ gap: 4 }}>
+            <View className="p-2 gap-1">
               <Text selectable style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
                 {seriesWithProgress?.name ?? seriesName}
               </Text>
@@ -165,7 +186,7 @@ export const BookSeriesSheet = () => {
           }
           contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={{
-            paddingHorizontal: 16,
+            // paddingHorizontal: 16,
             paddingTop: 12,
             paddingBottom: Math.max(24, insets.bottom + 12),
           }}

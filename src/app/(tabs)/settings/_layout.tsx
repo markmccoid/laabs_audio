@@ -28,6 +28,7 @@ const SettingLayout = () => {
           // sheetAllowedDetents: [0.5, 0.9],
         }}
       />
+      <Stack.Screen name="testRoute" />
     </Stack>
   );
 };

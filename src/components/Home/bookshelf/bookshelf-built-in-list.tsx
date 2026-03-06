@@ -4,7 +4,7 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList, FlashListRef } from "@shopify/flash-list";
 import type { RefObject } from "react";
 import { useDeferredValue, useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Text } from "react-native";
 import { BookshelfBuiltInItem } from "./bookshelf-built-in-item";
 
 type BookshelfBuiltInListProps = {
@@ -78,17 +78,17 @@ export const BookshelfBuiltInList = ({
           {listEmptyMessage}
         </Text>
       }
-      ItemSeparatorComponent={() => (
-        <View
-          style={{
-            height: StyleSheet.hairlineWidth,
-            backgroundColor: themeColors.accent,
-            marginVertical: 5,
-          }}
-        />
-      )}
+      // ItemSeparatorComponent={() => (
+      //   <View
+      //     style={{
+      //       height: StyleSheet.hairlineWidth,
+      //       backgroundColor: themeColors.accent,
+      //       marginVertical: 5,
+      //     }}
+      //   />
+      // )}
       contentContainerStyle={{
-        paddingHorizontal: 16,
+        // paddingHorizontal: 16,
         // paddingTop: contentTopPadding,
         paddingBottom: 24,
       }}

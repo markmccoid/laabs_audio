@@ -1,9 +1,9 @@
+import { useAuthStore } from "@/auth/auth-store";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import React from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { useAuthStore } from "@/auth/auth-store";
-import { useThemeColors } from "@/theme/use-app-theme";
 
 type SettingsRowProps = {
   href:
@@ -62,13 +62,7 @@ const SettingsRow = ({ href, title, subtitle, icon, isLast = false }: SettingsRo
   );
 };
 
-const SettingsGroup = ({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) => {
+const SettingsGroup = ({ title, children }: { title: string; children: React.ReactNode }) => {
   const themeColors = useThemeColors();
 
   return (
@@ -111,9 +105,17 @@ export const SettingsHomeScreen = () => {
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 18, paddingBottom: 28, gap: 20 }}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingTop: 18,
+          paddingBottom: 28,
+          gap: 20,
+        }}
       >
-        <Text selectable style={{ color: themeColors.textMuted, fontSize: 13, paddingHorizontal: 4 }}>
+        <Text
+          selectable
+          style={{ color: themeColors.textMuted, fontSize: 13, paddingHorizontal: 4 }}
+        >
           Configure account access and how bookshelves appear on Home.
         </Text>
 
@@ -145,6 +147,13 @@ export const SettingsHomeScreen = () => {
               href="/(tabs)/settings/system"
               title="System"
               subtitle="App-level behavior for images and cover handling"
+              icon="gearshape.2"
+              isLast
+            />
+            <SettingsRow
+              href="/(tabs)/settings/testRoute"
+              title="Testng"
+              subtitle="Testomg"
               icon="gearshape.2"
               isLast
             />

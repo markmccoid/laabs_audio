@@ -6,7 +6,6 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
-import { StyleSheet, View } from "react-native";
 import { FilterOptionsSheet, type FilterSheetType } from "./filter-options-sheet";
 import { LibraryFiltersHeader } from "./library-filters-header";
 import LibraryItem from "./LibraryItem";
@@ -96,17 +95,17 @@ const LibraryContainer = () => {
         renderItem={({ item }) => {
           return <LibraryItem libraryItem={item} />;
         }}
-        ItemSeparatorComponent={() => (
-          <View
-            style={{
-              height: StyleSheet.hairlineWidth,
-              backgroundColor: themeColors.accent,
-              marginVertical: 5,
-            }}
-          />
-        )}
+        // ItemSeparatorComponent={() => (
+        //   <View
+        //     style={{
+        //       height: StyleSheet.hairlineWidth,
+        //       backgroundColor: themeColors.accent,
+        //       marginVertical: 5,
+        //     }}
+        //   />
+        // )}
         contentContainerStyle={{
-          paddingHorizontal: 16,
+          // paddingHorizontal: 16,
           // paddingTop: contentTopPadding,
           paddingBottom: 24,
         }}

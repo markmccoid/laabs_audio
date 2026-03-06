@@ -9,8 +9,8 @@ import { Uniwind } from "uniwind";
 import { libraryItemsApi } from "../api/library-items-api";
 import { meApi } from "../api/me-api";
 import { useAuthStore } from "../auth/auth-store";
-import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
+import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
 import { LibrarySelectionGate } from "../components/library-selection-gate";
 import { OfflineConnectionBanner } from "../components/offline-connection-banner";
 import "../global.css";
@@ -333,7 +333,7 @@ export default function RootLayout() {
                   headerShown: true,
                   presentation: "formSheet",
                   animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.85],
+                  sheetAllowedDetents: [0.45, 0.95],
                   sheetGrabberVisible: true,
                   sheetCornerRadius: 20,
                   contentStyle: {
