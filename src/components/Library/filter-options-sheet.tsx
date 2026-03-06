@@ -1,0 +1,146 @@
+import { useThemeColors } from "@/theme/use-app-theme";
+import { SymbolView } from "expo-symbols";
+import React, { useEffect, useMemo, useState } from "react";
+import { FlatList, Modal, Pressable, Text, TextInput, View } from "react-native";
+
+export type FilterSheetType = "genres" | "tags";
+
+type FilterOptionsSheetProps = {
+  visible: boolean;
+  type: FilterSheetType;
+  options: string[];
+  selectedValues: string[];
+  onToggle: (value: string) => void;
+  onClear: () => void;
+  onClose: () => void;
+};
+
+export const FilterOptionsSheet = ({
+  visible,
+  type,
+  options,
+  selectedValues,
+  onToggle,
+  onClear,
+  onClose,
+}: FilterOptionsSheetProps) => {
+  const themeColors = useThemeColors();
+  const [searchValue, setSearchValue] = useState("");
+  const title = type === "genres" ? "Genres" : "Tags";
+
+  useEffect(() => {
+    if (!visible) return;
+    setSearchValue("");
+  }, [type, visible]);
+
+  const filteredOptions = useMemo(() => {
+    const normalizedSearch = searchValue.trim().toLowerCase();
+    if (!normalizedSearch) return options;
+    return options.filter((option) => option.toLowerCase().includes(normalizedSearch));
+  }, [options, searchValue]);
+
+  return (
+    <Modal
+      animationType="slide"
+      visible={visible}
+      onRequestClose={onClose}
+      presentationStyle="formSheet"
+    >
+      <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
+        <View
+          style={{
+            paddingHorizontal: 16,
+            paddingTop: 14,
+            paddingBottom: 10,
+            borderBottomWidth: 1,
+            borderBottomColor: themeColors.border,
+            gap: 12,
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <Text style={{ color: themeColors.text, fontWeight: "700", fontSize: 22 }}>{title}</Text>
+            <Pressable onPress={onClose} hitSlop={10}>
+              <Text style={{ color: themeColors.accent, fontWeight: "600", fontSize: 16 }}>Done</Text>
+            </Pressable>
+          </View>
+
+          <TextInput
+            value={searchValue}
+            onChangeText={setSearchValue}
+            placeholder={`Search ${title.toLowerCase()}`}
+            placeholderTextColor={themeColors.textMuted}
+            style={{
+              borderWidth: 1,
+              borderColor: themeColors.border,
+              borderRadius: 12,
+              color: themeColors.text,
+              backgroundColor: themeColors.surface,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              fontSize: 16,
+            }}
+          />
+
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <Text style={{ color: themeColors.textMuted, fontSize: 13 }}>
+              {selectedValues.length} selected
+            </Text>
+            <Pressable onPress={onClear} disabled={selectedValues.length === 0} hitSlop={10}>
+              <Text
+                style={{
+                  color: selectedValues.length ? themeColors.accent : themeColors.textMuted,
+                  fontWeight: "600",
+                  fontSize: 14,
+                }}
+              >
+                Clear
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <FlatList
+          data={filteredOptions}
+          keyExtractor={(item) => item}
+          keyboardShouldPersistTaps="handled"
+          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={{ paddingVertical: 6 }}
+          renderItem={({ item }) => {
+            const isSelected = selectedValues.includes(item);
+            return (
+              <Pressable
+                onPress={() => onToggle(item)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 10,
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  backgroundColor: isSelected ? themeColors.accentForeground : "transparent",
+                }}
+              >
+                <View
+                  style={{
+                    width: 20,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {isSelected ? (
+                    <SymbolView name="checkmark" tintColor={themeColors.accent} size={16} />
+                  ) : null}
+                </View>
+                <Text style={{ color: themeColors.text, fontSize: 16, flex: 1 }}>{item}</Text>
+              </Pressable>
+            );
+          }}
+          ListEmptyComponent={
+            <View style={{ paddingHorizontal: 16, paddingVertical: 20 }}>
+              <Text style={{ color: themeColors.textMuted }}>No matching {title.toLowerCase()} found.</Text>
+            </View>
+          }
+        />
+      </View>
+    </Modal>
+  );
+};

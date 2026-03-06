@@ -15,8 +15,6 @@ export default function SearchIndex() {
     router.replace("/(tabs)/(home)");
   }, [status]);
 
-  console.log("Sorted By", sortedBy, sortDirection);
-
   if (status !== "authenticated") {
     return null;
   }
@@ -31,7 +29,9 @@ export default function SearchIndex() {
           filterActions.setSearchValue(e.nativeEvent.text);
         }}
       />
+
       <Stack.Toolbar placement="right">
+        {/* Sort menu */}
         <Stack.Toolbar.Menu icon="line.3.horizontal.decrease" title="SORT">
           Sort
           <Stack.Toolbar.Menu
