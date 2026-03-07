@@ -1,25 +1,49 @@
-import { router } from "expo-router";
-import React from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
 import { useAuthActions, useAuthStore } from "@/auth/auth-store";
+import { usePlaybackStore } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { router } from "expo-router";
+import React, { useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export const SettingsAuthenticationScreen = () => {
   const themeColors = useThemeColors();
+  const insets = useSafeAreaInsets();
   const status = useAuthStore((state) => state.status);
   const isOnline = useAuthStore((state) => state.isOnline);
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const serverUrl = useAuthStore((state) => state.serverUrl);
   const activeLibraryName = useAuthStore((state) => state.activeLibraryName);
+  const hasLoadedBook = usePlaybackStore(
+    (state) => Boolean(state.libraryItemId) && state.queue.length > 0,
+  );
   const { logout } = useAuthActions();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const canLogIn = status !== "authenticated";
   const canChangeLibrary = status === "authenticated";
+  const bottomPadding = (hasLoadedBook ? 112 : 0) + Math.max(24, insets.bottom + 16);
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+
+    setIsLoggingOut(true);
+    try {
+      await logout();
+    } catch {
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 24, gap: 14 }}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingTop: 16,
+          paddingBottom: bottomPadding,
+          gap: 14,
+        }}
       >
         <View
           style={{
@@ -71,7 +95,7 @@ export const SettingsAuthenticationScreen = () => {
               backgroundColor: themeColors.surface,
             }}
           >
-            <Text selectable style={{ color: themeColors.text, fontSize: 16, fontWeight: "600" }}>
+            <Text style={{ color: themeColors.text, fontSize: 16, fontWeight: "600" }}>
               Change Library
             </Text>
           </Pressable>
@@ -88,23 +112,30 @@ export const SettingsAuthenticationScreen = () => {
               backgroundColor: themeColors.accent,
             }}
           >
-            <Text selectable style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>
-              Sign In
-            </Text>
+            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Sign In</Text>
           </Pressable>
         ) : (
           <Pressable
-            onPress={() => logout().catch(() => undefined)}
-            style={{
+            onPress={() => {
+              void handleLogout();
+            }}
+            disabled={isLoggingOut}
+            style={({ pressed }) => ({
               borderRadius: 14,
               borderCurve: "continuous",
               paddingHorizontal: 14,
               paddingVertical: 12,
               backgroundColor: themeColors.accent,
-            }}
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              opacity: isLoggingOut ? 0.75 : pressed ? 0.86 : 1,
+            })}
           >
-            <Text selectable style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>
-              Log Out
+            {isLoggingOut ? <ActivityIndicator color="#fff" size="small" /> : null}
+            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>
+              {isLoggingOut ? "Logging Out..." : "Log Out"}
             </Text>
           </Pressable>
         )}

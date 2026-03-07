@@ -36,6 +36,35 @@ const buildUrl = (serverUrl: string, path: string) => {
   return `${base}/${path}`;
 };
 
+const AUTH_REQUEST_TIMEOUT_MS = 15_000;
+const LOGOUT_REQUEST_TIMEOUT_MS = 5_000;
+
+const withTimeoutSignal = (signal: AbortSignal | null | undefined, timeoutMs: number) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error("Auth request timed out"));
+  }, timeoutMs);
+
+  const abortFromParent = () => {
+    controller.abort(signal?.reason);
+  };
+
+  if (signal) {
+    if (signal.aborted) {
+      abortFromParent();
+    } else {
+      signal.addEventListener("abort", abortFromParent, { once: true });
+    }
+  }
+
+  const cleanup = () => {
+    clearTimeout(timeoutId);
+    signal?.removeEventListener("abort", abortFromParent);
+  };
+
+  return { signal: controller.signal, cleanup };
+};
+
 const parseTokens = (
   data: unknown,
   refreshTokenFallback?: string
@@ -81,9 +110,14 @@ const parseTokens = (
   return { accessToken, refreshToken };
 };
 
-const fetchJson = async (url: string, options: RequestInit) => {
+const fetchJson = async (
+  url: string,
+  options: RequestInit,
+  timeoutMs = AUTH_REQUEST_TIMEOUT_MS
+) => {
+  const { signal, cleanup } = withTimeoutSignal(options.signal, timeoutMs);
   try {
-    const response = await fetch(url, options);
+    const response = await fetch(url, { ...options, signal });
     if (!response.ok) {
       const message = `Auth request failed (${response.status})`;
       throw new AuthError(message, "UNAUTHORIZED", response.status);
@@ -94,6 +128,30 @@ const fetchJson = async (url: string, options: RequestInit) => {
       throw error;
     }
     throw new AuthError("Network error", "NETWORK_ERROR");
+  } finally {
+    cleanup();
+  }
+};
+
+const fetchOk = async (
+  url: string,
+  options: RequestInit,
+  timeoutMs = AUTH_REQUEST_TIMEOUT_MS
+) => {
+  const { signal, cleanup } = withTimeoutSignal(options.signal, timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal });
+    if (!response.ok) {
+      const message = `Auth request failed (${response.status})`;
+      throw new AuthError(message, "UNAUTHORIZED", response.status);
+    }
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+    throw new AuthError("Network error", "NETWORK_ERROR");
+  } finally {
+    cleanup();
   }
 };
 
@@ -130,13 +188,17 @@ export const authService = {
   async logout(serverUrl: string, refreshToken: string) {
     const url = buildUrl(serverUrl, "/logout");
     try {
-      await fetchJson(url, {
-        method: "POST",
-        headers: {
-          "x-refresh-token": refreshToken,
+      await fetchOk(
+        url,
+        {
+          method: "POST",
+          headers: {
+            "x-refresh-token": refreshToken,
+          },
         },
-      });
-    } catch (_error) {
+        LOGOUT_REQUEST_TIMEOUT_MS
+      );
+    } catch {
       // Best-effort only; local state is cleared regardless of response.
     }
   },

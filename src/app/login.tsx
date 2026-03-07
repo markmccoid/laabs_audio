@@ -1,9 +1,51 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { SymbolView } from "expo-symbols";
+import Dropdown from "../shared/ui/organisms/dropdown";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
 import { useThemeColors } from "../theme/use-app-theme";
+
+const SERVER_PROTOCOLS = ["https://", "http://"] as const;
+type ServerProtocol = (typeof SERVER_PROTOCOLS)[number];
+const DEFAULT_SERVER_PROTOCOL: ServerProtocol = "https://";
+
+const splitServerUrl = (value: string | null | undefined) => {
+  const trimmedValue = value?.trim() ?? "";
+  if (!trimmedValue) {
+    return {
+      protocol: DEFAULT_SERVER_PROTOCOL,
+      host: "",
+    };
+  }
+
+  const protocolMatch = trimmedValue.match(/^(https?:\/\/)(.*)$/i);
+  if (!protocolMatch) {
+    return {
+      protocol: DEFAULT_SERVER_PROTOCOL,
+      host: trimmedValue,
+    };
+  }
+
+  return {
+    protocol: protocolMatch[1].toLowerCase() === "http://" ? "http://" : "https://",
+    host: protocolMatch[2] ?? "",
+  };
+};
+
+const buildServerUrl = (protocol: ServerProtocol, host: string) => {
+  const trimmedHost = host.trim().replace(/^(https?:\/\/)/i, "");
+  return `${protocol}${trimmedHost}`;
+};
 
 export default function LoginScreen() {
   const storedUsername = useAuthStore((state) => state.storedUsername);
@@ -22,13 +64,16 @@ export default function LoginScreen() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
-  const [serverUrl, setServerUrl] = useState("");
+  const [serverProtocol, setServerProtocol] = useState<ServerProtocol>(DEFAULT_SERVER_PROTOCOL);
+  const [serverHost, setServerHost] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
     setUsername(storedUsername ?? "");
-    setServerUrl(storedServerUrl ?? "");
+    const normalizedServer = splitServerUrl(storedServerUrl);
+    setServerProtocol(normalizedServer.protocol);
+    setServerHost(normalizedServer.host);
   }, [storedServerUrl, storedUsername]);
 
   const handleClose = () => {
@@ -44,14 +89,15 @@ export default function LoginScreen() {
       return;
     }
 
-    if (!username || !password || !serverUrl) {
+    if (!username || !password || !serverHost) {
       setLocalError("Please enter username, password, and server URL.");
       return;
     }
 
+    const finalServerUrl = buildServerUrl(serverProtocol, serverHost);
     setIsSubmitting(true);
     try {
-      await loginWithPassword(username.trim(), password, serverUrl.trim());
+      await loginWithPassword(username.trim(), password, finalServerUrl);
       if (isSheet) {
         setLoginRequired(false);
         router.back();
@@ -66,10 +112,10 @@ export default function LoginScreen() {
     }
   };
 
-  const content = (
+  const form = (
     <View
       className={
-        isSheet ? "rounded-t-3xl bg-surface px-6 pb-8 pt-6" : "flex-1 bg-bg px-6 pt-24"
+        isSheet ? "rounded-t-3xl bg-surface px-6 pb-8 pt-6" : "flex-1 bg-bg px-6 pb-8 pt-24"
       }
     >
       <View className="flex-row items-center justify-between">
@@ -89,17 +135,63 @@ export default function LoginScreen() {
       <View className="mt-6 gap-4">
         <View>
           <Text className="mb-2 text-sm font-medium text-text-muted">Server URL</Text>
-          <TextInput
-            autoCapitalize="none"
-            autoCorrect={false}
-            value={serverUrl}
-            onChangeText={setServerUrl}
-            placeholder="https://your-server.example.com"
-            placeholderTextColor={themeColors.textMuted}
-            selectionColor={themeColors.accent}
-            className="rounded-xl border border-border bg-surface px-4 py-3 text-base text-text"
-            style={{ color: themeColors.text }}
-          />
+          <Dropdown>
+            <View
+              className="flex-row items-center overflow-hidden rounded-xl border border-border bg-surface"
+              style={{ minHeight: 50 }}
+            >
+              <Dropdown.Trigger style={{ minWidth: 112 }}>
+                <View
+                  className="flex-row items-center justify-between px-4 py-3"
+                  style={{
+                    minHeight: 50,
+                    borderRightWidth: 1,
+                    borderRightColor: themeColors.border,
+                  }}
+                >
+                  <Text className="text-base text-text" style={{ color: themeColors.text }}>
+                    {serverProtocol}
+                  </Text>
+                  <SymbolView name="chevron.down" tintColor={themeColors.textMuted} size={14} />
+                </View>
+              </Dropdown.Trigger>
+
+              <TextInput
+                autoCapitalize="none"
+                autoCorrect={false}
+                value={serverHost}
+                onChangeText={setServerHost}
+                placeholder="your-server.example.com"
+                placeholderTextColor={themeColors.textMuted}
+                selectionColor={themeColors.accent}
+                className="flex-1 px-4 py-3 text-base text-text"
+                style={{ color: themeColors.text }}
+              />
+            </View>
+
+            <Dropdown.Content
+              style={{
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                backgroundColor: themeColors.surface,
+              }}
+            >
+              {SERVER_PROTOCOLS.map((protocol) => (
+                <Dropdown.Item
+                  key={protocol}
+                  onPress={() => setServerProtocol(protocol)}
+                  style={{ minHeight: 44 }}
+                >
+                  <Text style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
+                    {protocol}
+                  </Text>
+                  {serverProtocol === protocol ? (
+                    <SymbolView name="checkmark" tintColor={themeColors.accent} size={14} />
+                  ) : null}
+                </Dropdown.Item>
+              ))}
+            </Dropdown.Content>
+          </Dropdown>
         </View>
 
         <View>
@@ -168,13 +260,43 @@ export default function LoginScreen() {
   );
 
   if (!isSheet) {
-    return content;
+    return (
+      <KeyboardAvoidingView
+        className="flex-1 bg-bg"
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <ScrollView
+          className="flex-1"
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets
+          contentContainerStyle={{ flexGrow: 1 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {form}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
   }
 
   return (
-    <View className="flex-1 justify-end bg-black/40">
-      <Pressable className="flex-1" onPress={handleClose} />
-      {content}
-    </View>
+    <KeyboardAvoidingView
+      className="flex-1"
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      <View className="flex-1 justify-end bg-black/40">
+        <Pressable className="flex-1" onPress={handleClose} />
+        <ScrollView
+          className="max-h-[85%]"
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets
+          bounces={false}
+          showsVerticalScrollIndicator={false}
+        >
+          {form}
+        </ScrollView>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
