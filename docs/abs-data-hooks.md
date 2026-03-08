@@ -49,7 +49,22 @@ Returns:
 Notes:
 - Uses `libraryItemsApi.getItems({ libraryId })` with query key `["library", libraryId, "books"]`.
 - Merges user progress/bookmarks from `useGetUserServerState()`.
-- Filters: search term, genres, tags, and "has audio".
+- Merges user favorites from `useGetUserServerState()` into `isFavorite` on each merged book.
+- Filters: search term, genres, tags, favorites, and "has audio".
+- Genre and tag filtering each read a persisted logical operator from `store-filters`:
+  - `genreOperator: "and" | "or"`
+  - `tagOperator: "and" | "or"`
+- Operator semantics:
+  - Genre `and` requires every selected genre on the book.
+  - Genre `or` requires at least one selected genre on the book.
+  - Tag `and` requires every selected tag on the book.
+  - Tag `or` requires at least one selected tag on the book.
+- The genre group and tag group are still combined with a top-level `AND`, so mixed cases behave like:
+  - `(Genre1 AND Genre2) AND (Tag1 OR Tag2)`
+- Favorite filtering is driven by the `favoriteFilter` store value:
+  - `"all"` keeps all books
+  - `"only"` keeps only favorite books
+  - `"exclude"` removes favorite books
 - Sorting uses the `sortedBy` and `sortDirection` filters.
 - When unauthenticated, returns a safe object with `data` undefined.
 

@@ -43,6 +43,7 @@ const formatDurationBadge = (durationSeconds?: number | null) => {
 type ShelfBookCardProps = {
   book: LibraryItemSummary;
   headerHeight: number;
+  isFavorite?: boolean;
   progress?: UserBookProgress;
   isOffline: boolean;
   menuContentTop: number;
@@ -52,6 +53,7 @@ type ShelfBookCardProps = {
 export const ShelfBookCard = ({
   book,
   headerHeight,
+  isFavorite = false,
   progress,
   isOffline,
   menuContentTop,
@@ -168,6 +170,7 @@ export const ShelfBookCard = ({
               coverUri={book.cover}
               localCoverUri={coverLocalUri}
               variant="thumb"
+              showFavoriteIndicator={isFavorite}
               showFinishedIndicator={showFinishedIndicator}
               style={{
                 width: coverSize,
@@ -211,7 +214,7 @@ export const ShelfBookCard = ({
             menuAnimatedStyle,
           ]}
         >
-          <ShelfBookCardMenu book={book} progress={progress} />
+          <ShelfBookCardMenu book={book} isFavorite={isFavorite} progress={progress} />
         </Animated.View>
       </View>
       <View

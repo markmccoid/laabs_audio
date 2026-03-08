@@ -3,12 +3,16 @@ import { SymbolView, type SFSymbol } from "expo-symbols";
 import React from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import type { FilterSheetType } from "./filter-options-sheet";
+import type { FavoriteFilter } from "@/store/store-filters";
 
 type LibraryFiltersHeaderProps = {
   selectedGenres: string[];
   selectedTags: string[];
+  favoriteFilter: FavoriteFilter;
   isFilterDataError: boolean;
   onOpenSheet: (sheetType: FilterSheetType) => void;
+  onCycleFavoriteFilter: () => void;
+  onClearFavoriteFilter: () => void;
   onRemoveGenre: (genre: string) => void;
   onRemoveTag: (tag: string) => void;
   onRetryFilterData: () => void;
@@ -89,14 +93,36 @@ const SelectedFilterChip = ({
 export const LibraryFiltersHeader = ({
   selectedGenres,
   selectedTags,
+  favoriteFilter,
   isFilterDataError,
   onOpenSheet,
+  onCycleFavoriteFilter,
+  onClearFavoriteFilter,
   onRemoveGenre,
   onRemoveTag,
   onRetryFilterData,
 }: LibraryFiltersHeaderProps) => {
   const themeColors = useThemeColors();
-  const hasAnyFilters = selectedGenres.length > 0 || selectedTags.length > 0;
+  const hasFavoriteFilter = favoriteFilter !== "all";
+  const hasAnyFilters = selectedGenres.length > 0 || selectedTags.length > 0 || hasFavoriteFilter;
+  const favoriteIcon: SFSymbol =
+    favoriteFilter === "only"
+      ? "heart.fill"
+      : favoriteFilter === "exclude"
+        ? "heart.slash.fill"
+        : "heart";
+  const favoriteTintColor =
+    favoriteFilter === "only"
+      ? "#d24d57"
+      : favoriteFilter === "exclude"
+        ? themeColors.text
+        : themeColors.textMuted;
+  const favoriteChipLabel =
+    favoriteFilter === "only"
+      ? "Favorites only"
+      : favoriteFilter === "exclude"
+        ? "Exclude favorites"
+        : null;
 
   return (
     <View style={{ gap: 10, paddingHorizontal: 8, paddingBottom: 12, paddingTop: 6 }}>
@@ -113,6 +139,21 @@ export const LibraryFiltersHeader = ({
           count={selectedTags.length}
           onPress={() => onOpenSheet("tags")}
         />
+        <Pressable
+          onPress={onCycleFavoriteFilter}
+          style={{
+            borderWidth: 1,
+            borderRadius: 14,
+            borderColor: hasFavoriteFilter ? favoriteTintColor : themeColors.border,
+            backgroundColor: themeColors.surface,
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <SymbolView name={favoriteIcon} tintColor={favoriteTintColor} size={16} />
+        </Pressable>
       </View>
 
       {hasAnyFilters ? (
@@ -134,6 +175,13 @@ export const LibraryFiltersHeader = ({
                 onPress={() => onRemoveTag(tag)}
               />
             ))}
+            {favoriteChipLabel ? (
+              <SelectedFilterChip
+                icon={favoriteIcon}
+                label={favoriteChipLabel}
+                onPress={onClearFavoriteFilter}
+              />
+            ) : null}
           </View>
         </ScrollView>
       ) : null}

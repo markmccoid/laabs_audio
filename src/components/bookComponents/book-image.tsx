@@ -10,6 +10,7 @@ type Props = {
   leftAccessory?: ReactNode;
   maxSize?: number;
   progressPercent?: number;
+  showFavoriteIndicator?: boolean;
   showProgressLine?: boolean;
   showFinishedIndicator?: boolean;
 };
@@ -23,6 +24,7 @@ const BookImage = ({
   leftAccessory,
   maxSize = 360,
   progressPercent = 0,
+  showFavoriteIndicator = false,
   showProgressLine = false,
   showFinishedIndicator = false,
 }: Props) => {
@@ -39,6 +41,7 @@ const BookImage = ({
           coverUri={coverURL}
           localCoverUri={localCoverUri}
           variant="full"
+          showFavoriteIndicator={showFavoriteIndicator}
           showFinishedIndicator={showFinishedIndicator}
           style={{
             width: imageSize,

@@ -7,6 +7,8 @@ import { mmkvStorage } from "./mmkv-storage";
 // Define sort options type
 export type SortBy = "addedAt" | "author" | "title" | "duration" | "publishedYear";
 export type SortDirection = "asc" | "desc";
+export type FavoriteFilter = "all" | "only" | "exclude";
+export type FilterOperator = "and" | "or";
 
 // Define the state interface
 interface FiltersState {
@@ -14,7 +16,10 @@ interface FiltersState {
   searchTitleAuthor: boolean;
   searchDescription: boolean;
   genres: string[];
+  genreOperator: FilterOperator;
   tags: string[];
+  tagOperator: FilterOperator;
+  favoriteFilter: FavoriteFilter;
   author: string;
   sortedBy: SortBy;
   sortDirection: SortDirection;
@@ -31,10 +36,17 @@ interface FiltersActions {
   addGenre: (genre: string) => void;
   removeGenre: (genre: string) => void;
   clearGenres: () => void;
+  setGenreOperator: (operator: FilterOperator) => void;
+  resetGenreOperator: () => void;
   setTags: (tags: string[]) => void;
   addTag: (tag: string) => void;
   removeTag: (tag: string) => void;
   clearTags: () => void;
+  setTagOperator: (operator: FilterOperator) => void;
+  resetTagOperator: () => void;
+  cycleFavoriteFilter: () => void;
+  setFavoriteFilter: (filter: FavoriteFilter) => void;
+  clearFavoriteFilter: () => void;
   setAuthor: (author: string) => void;
   setSortedBy: (sortBy: SortBy) => void;
   setSortDirection: (sortDir: SortDirection) => void;
@@ -55,6 +67,8 @@ interface FiltersStore extends FiltersState {
 const DEFAULT_SEARCH_VALUE = "";
 const DEFAULT_GENRES: string[] = [];
 const DEFAULT_TAGS: string[] = [];
+const DEFAULT_FILTER_OPERATOR: FilterOperator = "and";
+const DEFAULT_FAVORITE_FILTER: FavoriteFilter = "all";
 const DEFAULT_AUTHOR = "";
 const DEFAULT_SORTED_BY: SortBy = "addedAt";
 
@@ -67,7 +81,10 @@ export const useFiltersStore = create<FiltersStore>()(
       searchTitleAuthor: true,
       searchDescription: false,
       genres: DEFAULT_GENRES,
+      genreOperator: DEFAULT_FILTER_OPERATOR,
       tags: DEFAULT_TAGS,
+      tagOperator: DEFAULT_FILTER_OPERATOR,
+      favoriteFilter: DEFAULT_FAVORITE_FILTER,
       author: DEFAULT_AUTHOR,
       sortedBy: DEFAULT_SORTED_BY,
       sortDirection: "desc",
@@ -111,6 +128,10 @@ export const useFiltersStore = create<FiltersStore>()(
 
         clearGenres: () => set({ genres: [] }),
 
+        setGenreOperator: (genreOperator) => set({ genreOperator }),
+
+        resetGenreOperator: () => set({ genreOperator: DEFAULT_FILTER_OPERATOR }),
+
         setTags: (tags: string[]) => set({ tags }),
 
         addTag: (tag: string) =>
@@ -125,6 +146,28 @@ export const useFiltersStore = create<FiltersStore>()(
 
         clearTags: () => set({ tags: [] }),
 
+        setTagOperator: (tagOperator) => set({ tagOperator }),
+
+        resetTagOperator: () => set({ tagOperator: DEFAULT_FILTER_OPERATOR }),
+
+        cycleFavoriteFilter: () =>
+          set((state) => {
+            // Three-state cycle for the header heart button.
+            switch (state.favoriteFilter) {
+              case "all":
+                return { favoriteFilter: "only" as const };
+              case "only":
+                return { favoriteFilter: "exclude" as const };
+              case "exclude":
+              default:
+                return { favoriteFilter: DEFAULT_FAVORITE_FILTER };
+            }
+          }),
+
+        setFavoriteFilter: (favoriteFilter) => set({ favoriteFilter }),
+
+        clearFavoriteFilter: () => set({ favoriteFilter: DEFAULT_FAVORITE_FILTER }),
+
         setAuthor: (author: string) => set({ author }),
 
         setSortedBy: (sortBy: SortBy) => set({ sortedBy: sortBy }),
@@ -135,7 +178,10 @@ export const useFiltersStore = create<FiltersStore>()(
           set({
             searchValue: DEFAULT_SEARCH_VALUE,
             genres: DEFAULT_GENRES,
+            genreOperator: DEFAULT_FILTER_OPERATOR,
             tags: DEFAULT_TAGS,
+            tagOperator: DEFAULT_FILTER_OPERATOR,
+            favoriteFilter: DEFAULT_FAVORITE_FILTER,
             author: DEFAULT_AUTHOR,
             sortedBy: DEFAULT_SORTED_BY,
           }),
@@ -165,6 +211,8 @@ export const useFiltersStore = create<FiltersStore>()(
         // author: state.author,
         sortedBy: state.sortedBy,
         sortDirection: state.sortDirection,
+        genreOperator: state.genreOperator,
+        tagOperator: state.tagOperator,
       }),
     },
   ),
@@ -184,9 +232,24 @@ export const useSearchValue = () => useFiltersStore((state) => state.searchValue
 export const useGenres = () => useFiltersStore((state) => state.genres);
 
 /**
+ * Hook to get the genre operator.
+ */
+export const useGenreOperator = () => useFiltersStore((state) => state.genreOperator);
+
+/**
  * Hook to get the selected tags array
  */
 export const useTags = () => useFiltersStore((state) => state.tags);
+
+/**
+ * Hook to get the tag operator.
+ */
+export const useTagOperator = () => useFiltersStore((state) => state.tagOperator);
+
+/**
+ * Hook to get the favorite filter mode.
+ */
+export const useFavoriteFilter = () => useFiltersStore((state) => state.favoriteFilter);
 
 /**
  * Hook to get the author value
@@ -247,7 +310,10 @@ export const useAllFilters = () =>
   useFiltersStore((state) => ({
     searchValue: state.searchValue,
     genres: state.genres,
+    genreOperator: state.genreOperator,
     tags: state.tags,
+    tagOperator: state.tagOperator,
+    favoriteFilter: state.favoriteFilter,
     author: state.author,
     sortedBy: state.sortedBy,
   }));
@@ -261,7 +327,10 @@ export const useHasActiveFilters = () =>
     (state) =>
       state.searchValue !== DEFAULT_SEARCH_VALUE ||
       state.genres.length > 0 ||
+      state.genreOperator !== DEFAULT_FILTER_OPERATOR ||
       state.tags.length > 0 ||
+      state.tagOperator !== DEFAULT_FILTER_OPERATOR ||
+      state.favoriteFilter !== DEFAULT_FAVORITE_FILTER ||
       state.author !== DEFAULT_AUTHOR ||
       state.sortedBy !== DEFAULT_SORTED_BY,
   );
@@ -273,13 +342,19 @@ export const useFilterCounts = () =>
   useFiltersStore((state) => ({
     genresCount: state.genres.length,
     tagsCount: state.tags.length,
+    hasGenreOperatorFilter: state.genreOperator !== DEFAULT_FILTER_OPERATOR,
+    hasTagOperatorFilter: state.tagOperator !== DEFAULT_FILTER_OPERATOR,
+    hasFavoriteFilter: state.favoriteFilter !== DEFAULT_FAVORITE_FILTER,
     hasSearch: state.searchValue !== DEFAULT_SEARCH_VALUE,
     hasAuthor: state.author !== DEFAULT_AUTHOR,
     hasCustomSort: state.sortedBy !== DEFAULT_SORTED_BY,
     totalActiveFilters:
       (state.searchValue !== DEFAULT_SEARCH_VALUE ? 1 : 0) +
       state.genres.length +
+      (state.genreOperator !== DEFAULT_FILTER_OPERATOR ? 1 : 0) +
       state.tags.length +
+      (state.tagOperator !== DEFAULT_FILTER_OPERATOR ? 1 : 0) +
+      (state.favoriteFilter !== DEFAULT_FAVORITE_FILTER ? 1 : 0) +
       (state.author !== DEFAULT_AUTHOR ? 1 : 0) +
       (state.sortedBy !== DEFAULT_SORTED_BY ? 1 : 0),
   }));

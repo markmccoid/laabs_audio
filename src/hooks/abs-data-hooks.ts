@@ -11,6 +11,7 @@ import {
 import { seriesApi, type SeriesWithProgress } from "../api/series-api";
 import {
   meApi,
+  createEmptyUserServerState,
   type ItemsInProgressSummary,
   type UserBookProgress,
   type UserServerState,
@@ -19,11 +20,14 @@ import { useAuthActions, useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
 import type { Bookmark } from "../types/absTypes";
 import {
+  useFavoriteFilter,
   useFiltersStore,
+  useGenreOperator,
   useGenres,
   useSearchValue,
   useSortDirection,
   useSortedBy,
+  useTagOperator,
   useTags,
 } from "../store/store-filters";
 import { useDeviceBooksStore } from "../store/device-books-store";
@@ -70,7 +74,10 @@ type Filters = {
   searchDescription?: boolean;
   searchTitleAuthor?: boolean;
   genres?: string[];
+  genreOperator?: "and" | "or";
   tags?: string[];
+  tagOperator?: "and" | "or";
+  favoriteFilter?: "all" | "only" | "exclude";
 };
 const createFilterConfig = (filters: Filters) => ({
   search: {
@@ -83,22 +90,37 @@ const createFilterConfig = (filters: Filters) => ({
     enabled: true, // Always filter for books with audio
     condition: (book: LibraryItemSummary) => (book.numAudioFiles || 0) > 0,
   },
-  // Example additional filters you might add:
+  // Genre and tag operators apply within each group; the groups still combine via top-level AND.
   genre: {
     enabled: (filters?.genres?.length ?? 0) > 0,
     values: filters?.genres,
     condition: (book: LibraryItemSummary) =>
-      // filters.genres?.every((genre) => book.genres?.includes(genre)) ?? true,
-      filters.genres?.some((genre) => book.genres?.includes(genre)) ?? true,
+      filters.genreOperator === "or"
+        ? (filters.genres?.some((genre) => book.genres?.includes(genre)) ?? true)
+        : (filters.genres?.every((genre) => book.genres?.includes(genre)) ?? true),
   },
-  //Tags
   tags: {
     enabled: (filters?.tags?.length ?? 0) > 0,
     values: filters?.tags,
     condition: (book: LibraryItemSummary) =>
-      // filters.tags?.every((tag) => book.tags?.includes(tag)) ?? true,
-      // OR
-      filters.tags?.some((tag) => book.tags?.includes(tag)) ?? true,
+      filters.tagOperator === "or"
+        ? (filters.tags?.some((tag) => book.tags?.includes(tag)) ?? true)
+        : (filters.tags?.every((tag) => book.tags?.includes(tag)) ?? true),
+  },
+  favorites: {
+    enabled: (filters?.favoriteFilter ?? "all") !== "all",
+    mode: filters.favoriteFilter ?? "all",
+    condition: (book: LibraryItemWithUserState) => {
+      switch (filters.favoriteFilter) {
+        case "only":
+          return book.isFavorite === true;
+        case "exclude":
+          return book.isFavorite === false;
+        case "all":
+        default:
+          return true;
+      }
+    },
   },
   // rating: {
   //   enabled: additionalFilters.minRating != null,
@@ -109,7 +131,7 @@ const createFilterConfig = (filters: Filters) => ({
 //~ - ----------------------------------------------------
 //~ Single pass filter function that applies all filters at once
 //~ - ----------------------------------------------------
-const applyFilters = <T extends LibraryItemSummary>(
+const applyFilters = <T extends LibraryItemWithUserState>(
   books: T[],
   filterConfig: ReturnType<typeof createFilterConfig>,
 ) => {
@@ -149,6 +171,9 @@ const applyFilters = <T extends LibraryItemSummary>(
     if (filterConfig.tags.enabled) {
       if (!filterConfig.tags.condition(book)) return false;
     }
+    if (filterConfig.favorites.enabled) {
+      if (!filterConfig.favorites.condition(book)) return false;
+    }
     // Add other filters here as needed
     // Each filter should return false if the book doesn't match
     return true; // Book passes all filters
@@ -160,6 +185,7 @@ export type LibraryItemWithUserState = LibraryItemSummary & {
   userBookmarks: Bookmark[];
   currentTime: number;
   isFinished: boolean;
+  isFavorite: boolean;
 };
 //# ----------------------------------------------
 //# useGetBooks Filter Setup
@@ -179,7 +205,10 @@ export const useGetBooks = () => {
   const searchDescription = useFiltersStore((state) => state.searchDescription);
   const searchTitleAuthor = useFiltersStore((state) => state.searchTitleAuthor);
   const genres = useGenres();
+  const genreOperator = useGenreOperator();
   const tags = useTags();
+  const tagOperator = useTagOperator();
+  const favoriteFilter = useFavoriteFilter();
 
   // Always call useQuery, but disable it when not authenticated
   const {
@@ -214,6 +243,10 @@ export const useGetBooks = () => {
       (userServerState as typeof userServerState & { bookmarksByBookId?: Record<string, Bookmark[]> })
         ?.bookmarksByBookId ??
       {};
+    const favoriteByLibraryItemId =
+      userServerState?.favoritesLibraryId === activeLibraryId
+        ? (userServerState?.favoriteByLibraryItemId ?? {})
+        : {};
 
     return rawData.map((book) => {
       const userProgress = progressByLibraryItemId[book.id] ?? null;
@@ -223,9 +256,10 @@ export const useGetBooks = () => {
         userBookmarks: bookmarksByLibraryItemId[book.id] ?? [],
         currentTime: userProgress?.currentTime ?? 0,
         isFinished: userProgress?.isFinished ?? false,
+        isFavorite: Boolean(favoriteByLibraryItemId[book.id]),
       };
     });
-  }, [rawData, userServerState]);
+  }, [activeLibraryId, rawData, userServerState]);
 
   // Always call useMemo hooks
   const filteredData = useMemo(() => {
@@ -234,7 +268,10 @@ export const useGetBooks = () => {
     const filterConfig = createFilterConfig({
       searchValue,
       genres,
+      genreOperator,
       tags,
+      tagOperator,
+      favoriteFilter,
       searchDescription,
       searchTitleAuthor,
     });
@@ -244,7 +281,17 @@ export const useGetBooks = () => {
     if (!hasActiveFilters) return mergedData;
 
     return applyFilters(mergedData, filterConfig);
-  }, [mergedData, searchValue, genres, tags, searchDescription, searchTitleAuthor]);
+  }, [
+    mergedData,
+    searchValue,
+    genres,
+    genreOperator,
+    tags,
+    tagOperator,
+    favoriteFilter,
+    searchDescription,
+    searchTitleAuthor,
+  ]);
 
   const sortedData = useMemo(() => {
     if (!filteredData?.length) return filteredData;
@@ -312,11 +359,8 @@ export const useReconcileBookProgress = (libraryItemId?: string) => {
         queryClient.setQueryData<UserServerState>(
           queryKeys.userServerState(activeLibraryUserKey),
           (previousState) => {
-            const nextState: UserServerState = previousState ?? {
-              userId: activeLibraryUserKey,
-              progressByLibraryItemId: {},
-              bookmarksByLibraryItemId: {},
-            };
+            const nextState: UserServerState =
+              previousState ?? createEmptyUserServerState(activeLibraryUserKey);
             const previousProgress =
               nextState.progressByLibraryItemId[resolvedLibraryItemId];
             if (previousProgress && previousProgress.lastUpdate > serverLastUpdate) {
@@ -570,16 +614,37 @@ export const useGetItemDetails = (itemId?: string) => {
     );
 
     if (details) {
+      const resolvedCoverUri = fallbackCoverUri ?? cachedSummary?.cover ?? details.coverUri;
+
       return {
-        ...(cachedSummary ?? {}),
         ...details,
-        ...(fallbackCoverUri
-          ? {
-              coverUri: fallbackCoverUri,
-              cover: fallbackCoverUri,
-              coverFull: fallbackCoverUri,
-            }
-          : {}),
+        ...(cachedSummary ?? {}),
+        id: details.id,
+        title: cachedSummary?.title ?? details.media.metadata.title ?? "Book",
+        subtitle: cachedSummary?.subtitle ?? details.media.metadata.subtitle,
+        author: cachedSummary?.author ?? details.media.metadata.authorName,
+        seriesName: cachedSummary?.seriesName ?? details.media.metadata.seriesName,
+        series: cachedSummary?.series ?? details.media.metadata.seriesName,
+        publishedDate:
+          cachedSummary?.publishedDate ?? details.media.metadata.publishedDate,
+        publishedYear:
+          cachedSummary?.publishedYear ?? details.media.metadata.publishedYear,
+        narratedBy: cachedSummary?.narratedBy ?? details.media.metadata.narratorName,
+        description:
+          cachedSummary?.description ??
+          details.media.metadata.description ??
+          details.media.metadata.descriptionPlain,
+        duration: cachedSummary?.duration ?? details.bookDuration,
+        addedAt: cachedSummary?.addedAt ?? 0,
+        updatedAt: details.updatedAt,
+        coverUri: resolvedCoverUri,
+        cover: resolvedCoverUri,
+        coverFull: fallbackCoverUri ?? cachedSummary?.coverFull ?? details.coverUri,
+        numAudioFiles: cachedSummary?.numAudioFiles ?? details.media.numAudioFiles,
+        ebookFormat: cachedSummary?.ebookFormat ?? details.media.ebookFormat,
+        genres: cachedSummary?.genres ?? details.media.metadata.genres ?? [],
+        tags: cachedSummary?.tags ?? details.media.tags ?? [],
+        asin: cachedSummary?.asin ?? details.media.metadata.asin,
       };
     }
 

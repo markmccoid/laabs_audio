@@ -2,7 +2,6 @@ import { useAuthStore } from "@/auth/auth-store";
 import { useGetBooks, useGetFilterData } from "@/hooks/abs-data-hooks";
 import { queryKeys } from "@/query/query-keys";
 import { useFiltersActions, useFiltersStore } from "@/store/store-filters";
-import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
@@ -11,7 +10,6 @@ import { LibraryFiltersHeader } from "./library-filters-header";
 import LibraryItem from "./LibraryItem";
 
 const LibraryContainer = () => {
-  const themeColors = useThemeColors();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [activeSheet, setActiveSheet] = useState<FilterSheetType | null>(null);
@@ -23,8 +21,11 @@ const LibraryContainer = () => {
     refetch: refetchFilterData,
   } = useGetFilterData();
   const filterActions = useFiltersActions();
+  const favoriteFilter = useFiltersStore((state) => state.favoriteFilter);
   const selectedGenres = useFiltersStore((state) => state.genres);
+  const genreOperator = useFiltersStore((state) => state.genreOperator);
   const selectedTags = useFiltersStore((state) => state.tags);
+  const tagOperator = useFiltersStore((state) => state.tagOperator);
   const { data, isLoading, isPending } = useGetBooks();
 
   const genreOptions = useMemo(
@@ -35,6 +36,7 @@ const LibraryContainer = () => {
 
   const sheetOptions = activeSheet === "tags" ? tagOptions : genreOptions;
   const selectedValues = activeSheet === "tags" ? selectedTags : selectedGenres;
+  const selectedOperator = activeSheet === "tags" ? tagOperator : genreOperator;
 
   if (isLoading || isPending || !data) return null;
 
@@ -78,9 +80,12 @@ const LibraryContainer = () => {
         contentInsetAdjustmentBehavior="automatic"
         ListHeaderComponent={
           <LibraryFiltersHeader
+            favoriteFilter={favoriteFilter}
             selectedGenres={selectedGenres}
             selectedTags={selectedTags}
             isFilterDataError={isFilterDataError}
+            onCycleFavoriteFilter={() => filterActions.cycleFavoriteFilter()}
+            onClearFavoriteFilter={() => filterActions.clearFavoriteFilter()}
             onOpenSheet={(sheetType) => setActiveSheet(sheetType)}
             onRemoveGenre={(genre) => filterActions.removeGenre(genre)}
             onRemoveTag={(tag) => filterActions.removeTag(tag)}
@@ -117,7 +122,15 @@ const LibraryContainer = () => {
         type={activeSheet ?? "genres"}
         options={sheetOptions}
         selectedValues={selectedValues}
+        operator={selectedOperator}
         onToggle={toggleSelectedValue}
+        onOperatorChange={(operator) => {
+          if (activeSheet === "tags") {
+            filterActions.setTagOperator(operator);
+            return;
+          }
+          filterActions.setGenreOperator(operator);
+        }}
         onClear={clearActiveSelection}
         onClose={() => setActiveSheet(null)}
       />

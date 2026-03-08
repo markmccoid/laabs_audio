@@ -9,6 +9,9 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
   const {
     continueListeningVisibilityIcon,
     continueListeningVisibilityLabel,
+    favoriteDisabled,
+    favoriteLabel,
+    favoriteSystemImage,
     finishedLabel,
     finishedSystemImage,
     hasContinueListeningVisibilityOption,
@@ -22,6 +25,7 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
     shelfMembershipOptions,
     handleToggleContinueListeningVisibility,
     handlePrimaryAction,
+    handleToggleFavorite,
     handleToggleFinished,
   } = useShelfBookCardMenuActions(props);
 
@@ -57,6 +61,14 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
             <Button modifiers={[disabled(true)]} label="No shelves" />
           )}
         </Menu>
+        <Button
+          modifiers={[disabled(favoriteDisabled)]}
+          systemImage={favoriteSystemImage}
+          onPress={() => {
+            void handleToggleFavorite();
+          }}
+          label={favoriteLabel}
+        />
         <Button
           modifiers={[disabled(finishDisabled)]}
           systemImage={finishedSystemImage}

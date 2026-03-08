@@ -1,4 +1,8 @@
-import { meApi, type UserServerState } from "../api/me-api";
+import {
+  createEmptyUserServerState,
+  meApi,
+  type UserServerState,
+} from "../api/me-api";
 import { playbackApi } from "../api/playback-api";
 import { sessionsApi } from "../api/sessions-api";
 import { buildCoverUrls } from "../api/cover-urls";
@@ -1301,11 +1305,8 @@ class PlayerService {
     queryClient.setQueryData<UserServerState>(
       queryKeys.userServerState(activeLibraryUserKey),
       (previousState) => {
-        const nextState: UserServerState = previousState ?? {
-          userId: activeLibraryUserKey,
-          progressByLibraryItemId: {},
-          bookmarksByLibraryItemId: {},
-        };
+        const nextState: UserServerState =
+          previousState ?? createEmptyUserServerState(activeLibraryUserKey);
         const previousProgress = nextState.progressByLibraryItemId[payload.libraryItemId];
         const now = Date.now();
         const resolvedDuration =

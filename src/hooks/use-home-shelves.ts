@@ -77,6 +77,7 @@ const EMPTY_CUSTOM_SHELVES: {
 }[] = [];
 const EMPTY_CATALOG: LibraryItemsSummary = [];
 const EMPTY_PROGRESS_BY_BOOK: Record<string, UserBookProgress> = {};
+const EMPTY_FAVORITES_BY_BOOK: Record<string, true> = {};
 const EMPTY_ORDER: string[] = [];
 const EMPTY_SHELF_SETTINGS_BY_ID: Record<string, HomeShelfSettings> = {};
 const PERSIST_META = { persist: true } as const;
@@ -246,6 +247,14 @@ export const useHomeShelves = () => {
     });
     return normalizedProgress;
   }, [rawProgressByLibraryItemId]);
+
+  const favoriteByBookId = useMemo(
+    () =>
+      userServerState?.favoritesLibraryId === activeLibraryId
+        ? (userServerState?.favoriteByLibraryItemId ?? EMPTY_FAVORITES_BY_BOOK)
+        : EMPTY_FAVORITES_BY_BOOK,
+    [activeLibraryId, userServerState],
+  );
 
   const continueListening = useMemo(() => {
     const sortedProgress = Object.values(progressByBookId)
@@ -565,6 +574,7 @@ export const useHomeShelves = () => {
     customShelves,
     playlistShelves,
     suppressedPlaylistShelves,
+    favoriteByBookId,
     progressByBookId,
     refreshDiscover,
   };

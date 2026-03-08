@@ -1,6 +1,7 @@
 import { absClient } from "./abs-client";
 import { authStore } from "../auth/auth-store";
 import { buildCoverUrls } from "./cover-urls";
+import { favoritesApi } from "./favorites-api";
 import { libraryItemsApi } from "./library-items-api";
 import type {
   Bookmark,
@@ -43,7 +44,20 @@ export type UserServerState = {
   userId: string;
   progressByLibraryItemId: Record<string, UserBookProgress>;
   bookmarksByLibraryItemId: Record<string, Bookmark[]>;
+  favoriteByLibraryItemId: Record<string, true>;
+  favoritesLibraryId: string | null;
 };
+
+export const createEmptyUserServerState = (
+  userId: string,
+  favoritesLibraryId: string | null = null,
+): UserServerState => ({
+  userId,
+  progressByLibraryItemId: {},
+  bookmarksByLibraryItemId: {},
+  favoriteByLibraryItemId: {},
+  favoritesLibraryId,
+});
 
 const resolveLibraryId = (libraryId?: string | null) =>
   libraryId ?? authStore.getState().activeLibraryId;
@@ -96,7 +110,11 @@ export const meApi = {
   },
 
   async getUserServerState(): Promise<UserServerState> {
-    const userData = await meApi.getMe();
+    const favoritesLibraryId = resolveLibraryId();
+    const [userData, favoriteItems] = await Promise.all([
+      meApi.getMe(),
+      favoritesLibraryId ? libraryItemsApi.getFavorites(favoritesLibraryId) : Promise.resolve([]),
+    ]);
     const ownedProgress = (userData.mediaProgress ?? []).filter(
       (progress) => progress.userId === userData.id,
     );
@@ -151,6 +169,8 @@ export const meApi = {
       userId: userData.id,
       progressByLibraryItemId,
       bookmarksByLibraryItemId,
+      favoriteByLibraryItemId: favoritesApi.buildFavoriteByLibraryItemId(favoriteItems),
+      favoritesLibraryId,
     };
   },
 

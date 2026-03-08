@@ -11,11 +11,17 @@ const STACKED_BADGE_TOP_OFFSET = 36;
 
 type BookshelfGridItemProps = {
   book: LibraryItemSummary;
+  isFavorite?: boolean;
   isOffline: boolean;
   progress?: UserBookProgress;
 };
 
-export const BookshelfGridItem = ({ book, isOffline, progress }: BookshelfGridItemProps) => {
+export const BookshelfGridItem = ({
+  book,
+  isFavorite = false,
+  isOffline,
+  progress,
+}: BookshelfGridItemProps) => {
   const themeColors = useThemeColors();
   const isDownloaded = useDeviceBooksStore((state) => selectHasPlayableBookDownload(state, book.id));
   const localCoverUri = useDeviceBooksStore(
@@ -39,6 +45,7 @@ export const BookshelfGridItem = ({ book, isOffline, progress }: BookshelfGridIt
             coverUri={book.cover}
             localCoverUri={localCoverUri}
             variant="thumb"
+            showFavoriteIndicator={isFavorite}
             showFinishedIndicator={showFinishedIndicator}
             style={{
               width: "100%",

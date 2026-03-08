@@ -16,6 +16,7 @@ export type CoverImageProps = Omit<ImageProps, "source"> & {
   coverUri?: string | null;
   localCoverUri?: string | null;
   variant?: CoverImageVariant;
+  showFavoriteIndicator?: boolean;
   showFinishedIndicator?: boolean;
 };
 
@@ -135,25 +136,30 @@ export const CoverImage = ({
   coverUri,
   localCoverUri,
   variant = "full",
+  showFavoriteIndicator = false,
   showFinishedIndicator = false,
   onError,
   style,
   ...props
 }: CoverImageProps) => {
   const themeColors = useThemeColors();
+  const showFavoriteBadgeOnCovers = useSettingsStore((state) => state.showFavoriteBadgeOnCovers);
+  const showFinishedBadgeOnCovers = useSettingsStore((state) => state.showFinishedBadgeOnCovers);
   const resolved = useCoverImageSource({
     libraryItemId,
     coverUri,
     localCoverUri,
     variant,
   });
+  const shouldShowFavoriteIndicator = showFavoriteIndicator && showFavoriteBadgeOnCovers;
+  const shouldShowFinishedIndicator = showFinishedIndicator && showFinishedBadgeOnCovers;
 
   const handleError: NonNullable<ImageProps["onError"]> = (event) => {
     resolved.onError(event);
     onError?.(event);
   };
 
-  if (!showFinishedIndicator) {
+  if (!shouldShowFinishedIndicator && !shouldShowFavoriteIndicator) {
     return <Image {...props} style={style} source={resolved.source} onError={handleError} />;
   }
 
@@ -177,24 +183,42 @@ export const CoverImage = ({
         source={resolved.source}
         onError={handleError}
       />
-      <View
-        pointerEvents="none"
-        style={{
-          position: "absolute",
-          top: indicatorInset,
-          right: indicatorInset,
-          borderRadius: 999,
-          borderCurve: "continuous",
-          backgroundColor: "rgba(255,255,255,0.82)",
-          boxShadow: "0 4px 10px rgba(15, 23, 42, 0.22)",
-        }}
-      >
-        <SymbolView
-          name="checkmark.circle.fill"
-          size={indicatorSize}
-          tintColor={themeColors.accent}
-        />
-      </View>
+      {shouldShowFavoriteIndicator ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: indicatorInset,
+            left: indicatorInset,
+            borderRadius: 999,
+            borderCurve: "continuous",
+            backgroundColor: "rgba(255,255,255,0.82)",
+            boxShadow: "0 4px 10px rgba(15, 23, 42, 0.22)",
+          }}
+        >
+          <SymbolView name="heart.fill" size={indicatorSize} tintColor="#d24d57" />
+        </View>
+      ) : null}
+      {shouldShowFinishedIndicator ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: indicatorInset,
+            right: indicatorInset,
+            borderRadius: 999,
+            borderCurve: "continuous",
+            backgroundColor: "rgba(255,255,255,0.82)",
+            boxShadow: "0 4px 10px rgba(15, 23, 42, 0.22)",
+          }}
+        >
+          <SymbolView
+            name="checkmark.circle.fill"
+            size={indicatorSize}
+            tintColor={themeColors.accent}
+          />
+        </View>
+      ) : null}
     </View>
   );
 };

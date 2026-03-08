@@ -75,9 +75,18 @@ This keeps startup and route transitions fast while still reconciling to current
 
 - pulls global books from `libraryItemsApi.getItems()`
 - pulls user state from `useGetUserServerState()`
-- merges into `LibraryItemWithUserState`
+- merges progress, bookmarks, and `isFavorite` into `LibraryItemWithUserState`
 
 UI components consume merged book objects and do not manage cross-store joins directly.
+
+Search filtering runs after that merge boundary, so favorite-only and favorite-excluded search modes operate on merged `isFavorite` state instead of raw ABS tags in the UI layer.
+
+Genre and tag filtering also run after that merge boundary. Each filter group has its own persisted logical operator in `store-filters`:
+- `genreOperator` controls whether selected genres are matched with `AND` or `OR`
+- `tagOperator` controls whether selected tags are matched with `AND` or `OR`
+
+Those two groups are still combined with a top-level `AND`, so the effective search expression is:
+- `(selected genres with genreOperator) AND (selected tags with tagOperator)`
 
 ## Playback Write-Through
 

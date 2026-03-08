@@ -36,6 +36,7 @@ export type LibraryItemSummary = {
   genres: string[];
   tags: string[];
   asin?: string | null;
+  isFavorite?: boolean;
 };
 
 export type LibraryItemsSummary = LibraryItemSummary[];

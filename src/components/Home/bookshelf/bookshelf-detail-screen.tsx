@@ -32,7 +32,7 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
     reorderDownloadedShelfBooks,
     reorderPlaylistShelfBooksOptimistic,
   } = useDeviceBooksActions();
-  const { shelves, refreshDiscover, progressByBookId } = useHomeShelves();
+  const { favoriteByBookId, shelves, refreshDiscover, progressByBookId } = useHomeShelves();
   const scrollableRef = useAnimatedRef<ScrollView>();
   const builtInListRef = useRef<FlashListRef<LibraryItemSummary> | null>(null);
   const [isRouteContentReady, setIsRouteContentReady] = useState(false);
@@ -111,11 +111,12 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
     ({ item }) => (
       <BookshelfGridItem
         book={item}
+        isFavorite={Boolean(favoriteByBookId[item.id])}
         isOffline={isOffline}
         progress={progressByBookId[item.id]}
       />
     ),
-    [isOffline, progressByBookId],
+    [favoriteByBookId, isOffline, progressByBookId],
   );
 
   const handleSearchTextChange = useCallback((nextValue: string) => {
@@ -205,6 +206,7 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
           isOffline={isOffline}
           contentTopPadding={contentTopPadding}
           emptyMessage={shelf.emptyMessage}
+          favoriteByBookId={favoriteByBookId}
           searchText={supportsHeaderSearch ? searchText : ""}
           progressByBookId={progressByBookId}
           listRef={builtInListRef}

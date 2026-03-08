@@ -112,6 +112,8 @@ export type SettingsState = {
   defaultBookProgressTimeDisplay: BookProgressTimeDisplay;
   homePreviewSize: HomePreviewSize;
   useTokenWithCoverImages: boolean;
+  showFavoriteBadgeOnCovers: boolean;
+  showFinishedBadgeOnCovers: boolean;
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>;
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
   actions: {
@@ -123,6 +125,8 @@ export type SettingsState = {
     setDefaultBookProgressTimeDisplay: (display: BookProgressTimeDisplay) => void;
     setHomePreviewSize: (size: HomePreviewSize) => void;
     setUseTokenWithCoverImages: (enabled: boolean) => void;
+    setShowFavoriteBadgeOnCovers: (enabled: boolean) => void;
+    setShowFinishedBadgeOnCovers: (enabled: boolean) => void;
     setHomeShelfVisibility: (scopeKey: string | null, shelfId: string, isVisible: boolean) => void;
     setHomeShelfItemCount: (scopeKey: string | null, shelfId: string, homeItemCount: number) => void;
     setHomeShelfOrder: (scopeKey: string | null, orderedShelfIds: string[]) => void;
@@ -144,6 +148,8 @@ export const settingsStore = createStore<SettingsState>()(
       defaultBookProgressTimeDisplay: "elapsed",
       homePreviewSize: DEFAULT_HOME_PREVIEW_SIZE,
       useTokenWithCoverImages: false,
+      showFavoriteBadgeOnCovers: true,
+      showFinishedBadgeOnCovers: true,
       homeShelvesByScope: {},
       discoverShelfByScope: {},
       actions: {
@@ -166,6 +172,10 @@ export const settingsStore = createStore<SettingsState>()(
         setHomePreviewSize: (homePreviewSize) => set({ homePreviewSize }),
         setUseTokenWithCoverImages: (useTokenWithCoverImages) =>
           set({ useTokenWithCoverImages }),
+        setShowFavoriteBadgeOnCovers: (showFavoriteBadgeOnCovers) =>
+          set({ showFavoriteBadgeOnCovers }),
+        setShowFinishedBadgeOnCovers: (showFinishedBadgeOnCovers) =>
+          set({ showFinishedBadgeOnCovers }),
         setHomeShelfVisibility: (scopeKey, shelfId, isVisible) => {
           const normalizedScopeKey = normalizeScopeKey(scopeKey);
           const normalizedShelfId = normalizeShelfId(shelfId);

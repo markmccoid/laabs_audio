@@ -1,6 +1,12 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
-import { meApi, type UserBookProgress, type UserServerState } from "@/api/me-api";
+import {
+  createEmptyUserServerState,
+  meApi,
+  type UserBookProgress,
+  type UserServerState,
+} from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
+import { useFavoriteBookAction } from "@/hooks/use-favorite-book-action";
 import {
   selectHasPlayableBookDownload,
   useDeviceBooksActions,
@@ -21,6 +27,7 @@ import { toast } from "react-native-sonner";
 export type ShelfBookCardMenuProps = {
   book: LibraryItemSummary;
   progress?: UserBookProgress;
+  isFavorite?: boolean;
 };
 
 export type SelectableShelf = HomeCustomShelf | HomePlaylistShelf;
@@ -42,9 +49,7 @@ const updateUserServerStateProgress = (
   },
 ) => {
   const nextState: UserServerState = previousState ?? {
-    userId: userKey,
-    progressByLibraryItemId: {},
-    bookmarksByLibraryItemId: {},
+    ...createEmptyUserServerState(userKey),
   };
   const previousProgress = nextState.progressByLibraryItemId[payload.libraryItemId];
   const now = Date.now();
@@ -90,7 +95,11 @@ const updateUserServerStateProgress = (
   };
 };
 
-export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMenuProps) => {
+export const useShelfBookCardMenuActions = ({
+  book,
+  progress,
+  isFavorite = false,
+}: ShelfBookCardMenuProps) => {
   const queryClient = useQueryClient();
   const authStatus = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
@@ -118,9 +127,10 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
   const activeDurationMs = usePlaybackStore((state) =>
     state.libraryItemId === book.id ? state.durationMs : 0,
   );
-  const [busyAction, setBusyAction] = useState<"primary" | "finished" | "hide" | "shelf" | null>(
-    null,
-  );
+  const [busyAction, setBusyAction] = useState<
+    "primary" | "favorite" | "finished" | "hide" | "shelf" | null
+  >(null);
+  const { canToggleFavorite, isToggleFavoritePending, toggleFavorite } = useFavoriteBookAction();
 
   const isBookActive = currentLibraryItemId === book.id;
   const isBookPlaying = isBookActive && playbackState === "playing";
@@ -140,16 +150,22 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
     hasContinueListeningVisibilityOption,
   );
   const primaryLabel = isBookPlaying ? "Pause" : "Play";
-  const primarySystemImage = isBookPlaying ? "pause.fill" : "play.fill";
+  const primarySystemImage: "pause.fill" | "play.fill" = isBookPlaying
+    ? "pause.fill"
+    : "play.fill";
   const isMarkedFinished = Boolean(progress?.isFinished);
   const finishedLabel = isMarkedFinished ? "Mark as Unread" : "Mark as Read";
-  const finishedSystemImage = isMarkedFinished
-    ? "arrow.counterclockwise.circle"
-    : "checkmark.circle";
+  const finishedSystemImage: "arrow.counterclockwise.circle" | "checkmark.circle" =
+    isMarkedFinished ? "arrow.counterclockwise.circle" : "checkmark.circle";
+  const favoriteLabel = isFavorite ? "Remove Favorite" : "Mark as Favorite";
+  const favoriteSystemImage: "heart.slash" | "heart" = isFavorite
+    ? "heart.slash"
+    : "heart";
   const continueListeningVisibilityLabel = progress?.hideFromContinueListening
     ? "Show in Continue Listening"
     : "Hide from Continue Listening";
-  const continueListeningVisibilityIcon = progress?.hideFromContinueListening ? "eye" : "eye.slash";
+  const continueListeningVisibilityIcon: "eye" | "eye.slash" =
+    progress?.hideFromContinueListening ? "eye" : "eye.slash";
   const shelfMembershipOptions = useMemo<ShelfMembershipOption[]>(
     () =>
       [...customShelves, ...playlistShelves].map((shelf) => ({
@@ -347,6 +363,21 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
     }
   };
 
+  const handleToggleFavorite = async () => {
+    if (busyAction || !canToggleFavorite) return;
+
+    setBusyAction("favorite");
+    try {
+      await toggleFavorite({
+        libraryItemId: book.id,
+        currentTags: book.tags,
+        isFavorite,
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const handleToggleShelfMembership = async (shelf: SelectableShelf, isMember: boolean) => {
     if (busyAction || !canMutateShelves) return;
 
@@ -381,13 +412,17 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
 
   return {
     canMutateShelves,
-    isBusy: busyAction !== null,
-    primaryDisabled: busyAction !== null || !canPlay,
-    finishDisabled: busyAction !== null,
-    hideDisabled: busyAction !== null || !canToggleContinueListeningVisibility,
-    shelfDisabled: busyAction !== null || !canMutateShelves,
+    isBusy: busyAction !== null || isToggleFavoritePending,
+    primaryDisabled: busyAction !== null || isToggleFavoritePending || !canPlay,
+    favoriteDisabled: busyAction !== null || isToggleFavoritePending || !canToggleFavorite,
+    finishDisabled: busyAction !== null || isToggleFavoritePending,
+    hideDisabled:
+      busyAction !== null || isToggleFavoritePending || !canToggleContinueListeningVisibility,
+    shelfDisabled: busyAction !== null || isToggleFavoritePending || !canMutateShelves,
     continueListeningVisibilityIcon,
     continueListeningVisibilityLabel,
+    favoriteLabel,
+    favoriteSystemImage,
     finishedLabel,
     finishedSystemImage,
     hasContinueListeningVisibilityOption,
@@ -397,6 +432,7 @@ export const useShelfBookCardMenuActions = ({ book, progress }: ShelfBookCardMen
     shelfMembershipOptions,
     handleToggleContinueListeningVisibility,
     handlePrimaryAction,
+    handleToggleFavorite,
     handleToggleFinished,
   };
 };

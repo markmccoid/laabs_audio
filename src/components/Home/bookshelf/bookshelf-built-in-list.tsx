@@ -12,6 +12,7 @@ type BookshelfBuiltInListProps = {
   isOffline: boolean;
   contentTopPadding: number;
   emptyMessage: string;
+  favoriteByBookId: Record<string, true>;
   searchText: string;
   progressByBookId: Record<string, UserBookProgress>;
   listRef?: RefObject<FlashListRef<LibraryItemSummary> | null>;
@@ -22,6 +23,7 @@ export const BookshelfBuiltInList = ({
   isOffline,
   contentTopPadding,
   emptyMessage,
+  favoriteByBookId,
   searchText,
   progressByBookId,
   listRef,
@@ -69,6 +71,7 @@ export const BookshelfBuiltInList = ({
       renderItem={({ item }) => (
         <BookshelfBuiltInItem
           book={item}
+          isFavorite={Boolean(favoriteByBookId[item.id])}
           isOffline={isOffline}
           progress={progressByBookId[item.id]}
         />

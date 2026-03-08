@@ -6,7 +6,12 @@ import type { LibraryItemSummary } from "../api/library-items-api";
 import { buildCoverUrls } from "../api/cover-urls";
 import { downloadsApi } from "../api/downloads-api";
 import { itemsApi, type ItemDetails } from "../api/items-api";
-import { meApi, type UserBookProgress, type UserServerState } from "../api/me-api";
+import {
+  createEmptyUserServerState,
+  meApi,
+  type UserBookProgress,
+  type UserServerState,
+} from "../api/me-api";
 import { playlistsApi, type PlaylistSummary } from "../api/playlists-api";
 import { authStore } from "../auth/auth-store";
 import { queryClient } from "../query/query-client";
@@ -451,11 +456,8 @@ const findStoredPlaybackRateForLibraryItem = (
   return null;
 };
 
-const buildEmptyUserServerState = (userKey: string): UserServerState => ({
-  userId: userKey,
-  progressByLibraryItemId: {},
-  bookmarksByLibraryItemId: {},
-});
+const buildEmptyUserServerState = (userKey: string): UserServerState =>
+  createEmptyUserServerState(userKey);
 
 const getCachedProgressForLibraryItem = (
   userKey: string,

@@ -4,13 +4,20 @@ import { BookFlashListRow } from "@/components/books/book-flashlist-row";
 
 type BookshelfBuiltInItemProps = {
   book: LibraryItemSummary;
+  isFavorite?: boolean;
   isOffline: boolean;
   progress?: UserBookProgress;
 };
 
-export const BookshelfBuiltInItem = ({ book, isOffline, progress }: BookshelfBuiltInItemProps) => (
+export const BookshelfBuiltInItem = ({
+  book,
+  isFavorite = false,
+  isOffline,
+  progress,
+}: BookshelfBuiltInItemProps) => (
   <BookFlashListRow
     book={book}
+    isFavorite={isFavorite}
     isOffline={isOffline}
     isFinished={Boolean(progress?.isFinished)}
     href={{

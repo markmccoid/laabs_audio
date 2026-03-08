@@ -6,6 +6,7 @@ import {
   useGetUserServerState,
   useReconcileBookProgress,
 } from "@/hooks/abs-data-hooks";
+import { useFavoriteBookAction } from "@/hooks/use-favorite-book-action";
 import { usePlaybackStore } from "@/player";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
@@ -33,7 +34,6 @@ import BookImage from "./book-image";
 import BookKeyDetails from "./book-key-details";
 import { BookQuickActions } from "./book-quick-actions";
 import BookRateSetter from "./book-rate-setter";
-import DownloadControls from "./download-controls";
 import { useBookProgressDisplay } from "./use-book-progress-display";
 
 type Props = {
@@ -73,6 +73,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
   useReconcileBookProgress(libraryItemId);
   const { data: bookData, isLoading } = useGetItemDetails(libraryItemId);
   const { data: userServerState } = useGetUserServerState();
+  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const isOffline = useAuthStore((state) => state.isOnline === false);
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const playbackState = usePlaybackStore((state) => state.playbackState);
@@ -122,6 +123,13 @@ const BookContainer = ({ libraryItemId }: Props) => {
   );
   const genres = metadata?.genres ?? bookData?.genres ?? [];
   const tags = bookData?.media?.tags ?? bookData?.tags ?? [];
+  const favoriteByLibraryItemId =
+    userServerState?.favoritesLibraryId === activeLibraryId
+      ? (userServerState?.favoriteByLibraryItemId ?? {})
+      : {};
+  const isFavorite = Boolean(libraryItemId ? favoriteByLibraryItemId[libraryItemId] : false);
+  const favoriteMenuLabel = isFavorite ? "Remove Favorite" : "Mark as Favorite";
+  const favoriteMenuIcon = isFavorite ? "heart.slash" : "heart";
   const durationSeconds = bookData?.media?.duration ?? bookData?.duration ?? 0;
   const progressByLibraryItemId =
     userServerState?.progressByLibraryItemId ??
@@ -192,9 +200,10 @@ const BookContainer = ({ libraryItemId }: Props) => {
     return hasPlayableLocalDownload ? "Local" : "Stream";
   }, [currentTrackIndex, hasPlayableLocalDownload, isOffline, isViewedBookActive, queue]);
   const sourceTab = useMemo<"home" | "search">(
-    () => (segments.includes("search") ? "search" : "home"),
+    () => (segments.some((segment) => segment === "search") ? "search" : "home"),
     [segments],
   );
+  const { canToggleFavorite, isToggleFavoritePending, toggleFavorite } = useFavoriteBookAction();
 
   const openSeriesSheet = (seriesId: string, seriesName: string) => {
     router.push({
@@ -241,9 +250,25 @@ const BookContainer = ({ libraryItemId }: Props) => {
         }}
       >
         <Stack.Screen options={{ headerTitle: bookTitle }} />
-        {/* <Stack.Toolbar placement="right">
-          <Stack.Toolbar.Button onPress={() => console.log("Search Lib button")} icon="cube.box" />
-        </Stack.Toolbar> */}
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Menu icon="ellipsis">
+            <Stack.Toolbar.MenuAction
+              disabled={!libraryItemId || isToggleFavoritePending || !canToggleFavorite}
+              icon={favoriteMenuIcon}
+              isOn={isFavorite}
+              onPress={() => {
+                if (!libraryItemId) return;
+                void toggleFavorite({
+                  libraryItemId,
+                  currentTags: tags,
+                  isFavorite,
+                });
+              }}
+            >
+              {favoriteMenuLabel}
+            </Stack.Toolbar.MenuAction>
+          </Stack.Toolbar.Menu>
+        </Stack.Toolbar>
 
         <View style={{ alignItems: "center", gap: 6 }}>
           {isLoading ? (
@@ -291,6 +316,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
             coverURL={coverURL}
             localCoverUri={localCoverUri}
             leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
+            showFavoriteIndicator={isFavorite}
             showFinishedIndicator={isFinished}
             showProgressLine={progressSeconds > 0 || isFinished}
             progressPercent={visualProgressPercent}
@@ -346,7 +372,10 @@ const BookContainer = ({ libraryItemId }: Props) => {
                       opacity: pressed ? 0.82 : 1,
                     })}
                   >
-                    <Text selectable style={{ fontSize: 12, fontWeight: "600", color: themeColors.accent }}>
+                    <Text
+                      selectable
+                      style={{ fontSize: 12, fontWeight: "600", color: themeColors.accent }}
+                    >
                       {formatSeriesChipLabel(seriesEntry.name, seriesEntry.sequence)}
                     </Text>
                   </Pressable>
@@ -358,11 +387,11 @@ const BookContainer = ({ libraryItemId }: Props) => {
 
         <BookDetails title={bookTitle} description={description} genres={genres} tags={tags} />
 
-        <DownloadControls
+        {/* <DownloadControls
           libraryItemId={libraryItemId}
           summary={bookData ?? null}
           context="inline"
-        />
+        /> */}
       </ScrollView>
     </View>
   );

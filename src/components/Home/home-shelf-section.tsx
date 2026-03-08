@@ -12,6 +12,7 @@ import { ShelfBookCard } from "./shelf-book-card";
 type HomeShelfSectionProps = {
   title: string;
   books: LibraryItemSummary[];
+  favoriteByBookId: Record<string, true>;
   progressByBookId: Record<string, UserBookProgress>;
   isOffline: boolean;
   emptyMessage: string;
@@ -24,6 +25,7 @@ type HomeShelfSectionProps = {
 export const HomeShelfSection = ({
   title,
   books,
+  favoriteByBookId,
   progressByBookId,
   isOffline,
   emptyMessage,
@@ -124,6 +126,7 @@ export const HomeShelfSection = ({
               <ShelfBookCard
                 book={item}
                 headerHeight={headerHeight}
+                isFavorite={Boolean(favoriteByBookId[item.id])}
                 isOffline={isOffline}
                 menuContentTop={menuContentTop}
                 progress={progressByBookId[item.id]}

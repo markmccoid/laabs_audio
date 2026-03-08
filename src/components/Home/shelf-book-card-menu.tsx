@@ -10,12 +10,15 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
   const themeColors = useThemeColors();
   const {
     continueListeningVisibilityLabel,
+    favoriteDisabled,
+    favoriteLabel,
     finishedLabel,
     hasContinueListeningVisibilityOption,
     hideDisabled,
     primaryLabel,
     handleToggleContinueListeningVisibility,
     handlePrimaryAction,
+    handleToggleFavorite,
     handleToggleFinished,
     isBusy,
   } =
@@ -35,6 +38,16 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
                 void handlePrimaryAction();
               },
             },
+            ...(!favoriteDisabled
+              ? [
+                  {
+                    text: favoriteLabel,
+                    onPress: () => {
+                      void handleToggleFavorite();
+                    },
+                  },
+                ]
+              : []),
             {
               text: finishedLabel,
               onPress: () => {

@@ -32,7 +32,8 @@ const HomeShelvesScreen = () => {
   const setHomePreviewSize = useSettingsStore((state) => state.actions.setHomePreviewSize);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
-  const { visibleShelves, progressByBookId, refreshDiscover } = useHomeShelves();
+  const { visibleShelves, favoriteByBookId, progressByBookId, refreshDiscover } =
+    useHomeShelves();
   const {
     libraries,
     isLoading: isLibrariesLoading,
@@ -207,6 +208,7 @@ const HomeShelvesScreen = () => {
             key={shelf.id}
             title={shelf.title}
             books={shelf.books}
+            favoriteByBookId={favoriteByBookId}
             progressByBookId={progressByBookId}
             isOffline={isOnline === false}
             emptyMessage={shelf.emptyMessage}
