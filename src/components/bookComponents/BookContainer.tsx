@@ -6,11 +6,11 @@ import {
   useGetUserServerState,
   useReconcileBookProgress,
 } from "@/hooks/abs-data-hooks";
-import { useFavoriteBookAction } from "@/hooks/use-favorite-book-action";
 import { usePlaybackStore } from "@/player";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import type { LibraryItemSummary } from "@/api/library-items-api";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -34,6 +34,7 @@ import BookImage from "./book-image";
 import BookKeyDetails from "./book-key-details";
 import { BookQuickActions } from "./book-quick-actions";
 import BookRateSetter from "./book-rate-setter";
+import { useShelfBookCardMenuActions } from "../Home/shelf-book-card-menu-shared";
 import { useBookProgressDisplay } from "./use-book-progress-display";
 
 type Props = {
@@ -121,15 +122,13 @@ const BookContainer = ({ libraryItemId }: Props) => {
     metadata?.descriptionPlain,
     bookData?.description,
   );
-  const genres = metadata?.genres ?? bookData?.genres ?? [];
-  const tags = bookData?.media?.tags ?? bookData?.tags ?? [];
+  const genres = useMemo(() => metadata?.genres ?? bookData?.genres ?? [], [bookData?.genres, metadata?.genres]);
+  const tags = useMemo(() => bookData?.media?.tags ?? bookData?.tags ?? [], [bookData?.media?.tags, bookData?.tags]);
   const favoriteByLibraryItemId =
     userServerState?.favoritesLibraryId === activeLibraryId
       ? (userServerState?.favoriteByLibraryItemId ?? {})
       : {};
   const isFavorite = Boolean(libraryItemId ? favoriteByLibraryItemId[libraryItemId] : false);
-  const favoriteMenuLabel = isFavorite ? "Remove Favorite" : "Mark as Favorite";
-  const favoriteMenuIcon = isFavorite ? "heart.slash" : "heart";
   const durationSeconds = bookData?.media?.duration ?? bookData?.duration ?? 0;
   const progressByLibraryItemId =
     userServerState?.progressByLibraryItemId ??
@@ -203,7 +202,58 @@ const BookContainer = ({ libraryItemId }: Props) => {
     () => (segments.some((segment) => segment === "search") ? "search" : "home"),
     [segments],
   );
-  const { canToggleFavorite, isToggleFavoritePending, toggleFavorite } = useFavoriteBookAction();
+  const menuBook = useMemo<LibraryItemSummary>(
+    () => ({
+      id: libraryItemId ?? "",
+      title: bookData?.title ?? "Book",
+      subtitle: bookData?.subtitle ?? metadata?.subtitle,
+      author: author ?? undefined,
+      series: series ?? undefined,
+      publishedDate: bookData?.publishedDate ?? metadata?.publishedDate,
+      publishedYear: publishedYear ?? undefined,
+      narratedBy: narrator ?? undefined,
+      description,
+      duration: durationSeconds,
+      addedAt: bookData?.addedAt ?? 0,
+      updatedAt: bookData?.updatedAt ?? 0,
+      cover: bookData?.cover ?? coverURL ?? "",
+      coverFull: bookData?.coverFull ?? coverURL ?? "",
+      numAudioFiles: bookData?.numAudioFiles ?? null,
+      ebookFormat: bookData?.ebookFormat ?? null,
+      genres,
+      tags,
+      asin: bookData?.asin ?? metadata?.asin ?? null,
+    }),
+    [
+      author,
+      bookData,
+      coverURL,
+      description,
+      durationSeconds,
+      genres,
+      libraryItemId,
+      metadata,
+      narrator,
+      publishedYear,
+      series,
+      tags,
+    ],
+  );
+  const menuProgress = libraryItemId ? userServerState?.progressByLibraryItemId?.[libraryItemId] : undefined;
+  const {
+    favoriteDisabled,
+    favoriteLabel,
+    favoriteSystemImage,
+    finishDisabled,
+    finishedLabel,
+    finishedSystemImage,
+    handleToggleFavorite,
+    handleToggleFinished,
+  } = useShelfBookCardMenuActions({
+    book: menuBook,
+    progress: menuProgress,
+    isFavorite,
+  });
 
   const openSeriesSheet = (seriesId: string, seriesName: string) => {
     router.push({
@@ -253,19 +303,24 @@ const BookContainer = ({ libraryItemId }: Props) => {
         <Stack.Toolbar placement="right">
           <Stack.Toolbar.Menu icon="ellipsis">
             <Stack.Toolbar.MenuAction
-              disabled={!libraryItemId || isToggleFavoritePending || !canToggleFavorite}
-              icon={favoriteMenuIcon}
+              disabled={!libraryItemId || favoriteDisabled}
+              icon={favoriteSystemImage}
               isOn={isFavorite}
               onPress={() => {
-                if (!libraryItemId) return;
-                void toggleFavorite({
-                  libraryItemId,
-                  currentTags: tags,
-                  isFavorite,
-                });
+                void handleToggleFavorite();
               }}
             >
-              {favoriteMenuLabel}
+              {favoriteLabel}
+            </Stack.Toolbar.MenuAction>
+            <Stack.Toolbar.MenuAction
+              disabled={!libraryItemId || finishDisabled}
+              icon={finishedSystemImage}
+              isOn={isFinished}
+              onPress={() => {
+                void handleToggleFinished();
+              }}
+            >
+              {finishedLabel}
             </Stack.Toolbar.MenuAction>
           </Stack.Toolbar.Menu>
         </Stack.Toolbar>
