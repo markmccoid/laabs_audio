@@ -32,9 +32,21 @@ export default function SearchIndex() {
 
       <Stack.Toolbar placement="right">
         {/* Sort menu */}
-        <Stack.Toolbar.Menu icon="line.3.horizontal.decrease" title="SORT">
-          Sort
-          <Stack.Toolbar.Menu
+        <Stack.Toolbar.Menu icon="line.3.horizontal.decrease" title="">
+          <Stack.Toolbar.Menu palette inline title="Direction">
+            <Stack.Toolbar.MenuAction
+              icon="arrow.up"
+              isOn={sortDirection === "asc"}
+              onPress={() => filterActions.setSortDirection("asc")}
+            />
+            <Stack.Toolbar.MenuAction
+              icon="arrow.down"
+              isOn={sortDirection === "desc"}
+              onPress={() => filterActions.setSortDirection("desc")}
+            />
+          </Stack.Toolbar.Menu>
+
+          {/* <Stack.Toolbar.Menu
             icon={sortDirection === "asc" ? "arrow.up" : "arrow.down"}
             title="Direction"
           >
@@ -50,7 +62,7 @@ export default function SearchIndex() {
             >
               Descending
             </Stack.Toolbar.MenuAction>
-          </Stack.Toolbar.Menu>
+          </Stack.Toolbar.Menu> */}
           <Stack.Toolbar.Badge>{sortDirection === "asc" ? "↑" : "↓"}</Stack.Toolbar.Badge>
           {/* Author */}
           <Stack.Toolbar.MenuAction
