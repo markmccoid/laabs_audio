@@ -15,6 +15,15 @@ const SearchLayout = () => {
         name="[libraryItemId]"
         options={{ headerLargeTitleEnabled: false, headerTransparent: true, headerTitle: "" }}
       />
+      <Stack.Screen
+        name="filter-sheet"
+        options={{
+          headerShown: false,
+          presentation: "modal",
+          animation: "slide_from_bottom",
+          sheetGrabberVisible: true,
+        }}
+      />
     </Stack>
   );
 };
