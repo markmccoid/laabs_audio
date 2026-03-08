@@ -192,7 +192,10 @@ export const BookBookshelvesSheet = () => {
               opacity: pressed ? 0.82 : 1,
             })}
           >
-            <Text selectable style={{ color: "#ffffff", fontSize: 14, fontWeight: "700" }}>
+            <Text
+              selectable
+              style={{ color: themeColors.accentForeground, fontSize: 14, fontWeight: "700" }}
+            >
               Open Bookshelf Settings
             </Text>
           </Pressable>

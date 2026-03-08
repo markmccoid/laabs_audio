@@ -147,7 +147,10 @@ export const BookSeriesSheet = () => {
               opacity: pressed ? 0.85 : 1,
             })}
           >
-            <Text selectable style={{ color: "#ffffff", fontWeight: "700", fontSize: 13 }}>
+            <Text
+              selectable
+              style={{ color: themeColors.accentForeground, fontWeight: "700", fontSize: 13 }}
+            >
               Retry
             </Text>
           </Pressable>

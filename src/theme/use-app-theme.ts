@@ -1,6 +1,12 @@
 import { DarkTheme, DefaultTheme, type Theme } from "@react-navigation/native";
-import { useMemo } from "react";
-import { useCSSVariable, useUniwind } from "uniwind";
+import { useMemo, useEffect } from "react";
+import { Uniwind, useCSSVariable, useUniwind } from "uniwind";
+import { useSettingsStore } from "@/store/settings-store";
+import {
+  DEFAULT_LIGHT_ACCENT_COLOR,
+  getAccentForegroundColor,
+  resolveAccentThemeColors,
+} from "./accent-color";
 
 type ThemeColors = {
   bg: string;
@@ -19,8 +25,8 @@ const FALLBACK_COLORS: ThemeColors = {
   text: "#122017",
   textMuted: "#5a695f",
   border: "#d5ded8",
-  accent: "#1f6f43",
-  accentForeground: "#f4fbf7",
+  accent: DEFAULT_LIGHT_ACCENT_COLOR,
+  accentForeground: getAccentForegroundColor(DEFAULT_LIGHT_ACCENT_COLOR),
   absGold: "#d4af37",
 };
 
@@ -73,4 +79,23 @@ export const useNavigationTheme = (): Theme => {
       },
     };
   }, [colors.accent, colors.bg, colors.border, colors.surface, colors.text, scheme]);
+};
+
+export const useApplyAccentThemeOverrides = () => {
+  const lightAccentColorOverride = useSettingsStore((state) => state.lightAccentColorOverride);
+  const darkAccentColorOverride = useSettingsStore((state) => state.darkAccentColorOverride);
+
+  useEffect(() => {
+    const lightColors = resolveAccentThemeColors("light", lightAccentColorOverride);
+    const darkColors = resolveAccentThemeColors("dark", darkAccentColorOverride);
+
+    Uniwind.updateCSSVariables("light", {
+      "--color-accent": lightColors.accent,
+      "--color-accent-foreground": lightColors.accentForeground,
+    });
+    Uniwind.updateCSSVariables("dark", {
+      "--color-accent": darkColors.accent,
+      "--color-accent-foreground": darkColors.accentForeground,
+    });
+  }, [darkAccentColorOverride, lightAccentColorOverride]);
 };

@@ -78,7 +78,10 @@ const MainPlayerSheetStub = ({ title, description, icon }: Props) => {
             opacity: pressed ? 0.82 : 1,
           })}
         >
-          <Text selectable style={{ color: "#ffffff", fontWeight: "700", fontSize: 15 }}>
+          <Text
+            selectable
+            style={{ color: themeColors.accentForeground, fontWeight: "700", fontSize: 15 }}
+          >
             Close
           </Text>
         </Pressable>

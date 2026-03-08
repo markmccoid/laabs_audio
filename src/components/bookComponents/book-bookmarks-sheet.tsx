@@ -716,7 +716,14 @@ export const BookBookmarksSheet = () => {
                     opacity: pressed || isSavingEdit ? 0.82 : 1,
                   })}
                 >
-                  <Text selectable style={{ color: "#ffffff", fontSize: 13, fontWeight: "700" }}>
+                  <Text
+                    selectable
+                    style={{
+                      color: themeColors.accentForeground,
+                      fontSize: 13,
+                      fontWeight: "700",
+                    }}
+                  >
                     {isSavingEdit ? "Saving..." : "Save"}
                   </Text>
                 </Pressable>

@@ -179,7 +179,12 @@ const DownloadControls = ({ libraryItemId, summary, context = "inline" }: Props)
           >
             <Text
               selectable
-              style={{ textAlign: "center", fontSize: 13, fontWeight: "600", color: "#ffffff" }}
+              style={{
+                textAlign: "center",
+                fontSize: 13,
+                fontWeight: "600",
+                color: isAnotherDownloadActive ? "#FFFFFF" : themeColors.accentForeground,
+              }}
             >
               {isAnotherDownloadActive ? "Download In Progress" : "Download Book"}
             </Text>

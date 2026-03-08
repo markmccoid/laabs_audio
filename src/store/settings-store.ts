@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { mmkvStorage } from "./mmkv-storage";
 import type { PitchCorrectionQuality } from "../player/types";
+import { DEFAULT_DARK_ACCENT_COLOR, DEFAULT_LIGHT_ACCENT_COLOR, normalizeAccentHex } from "../theme/accent-color";
 
 export const DEFAULT_HOME_SHELF_ITEM_COUNT = 15;
 export const MIN_HOME_SHELF_ITEM_COUNT = 5;
@@ -111,6 +112,9 @@ export type SettingsState = {
   seekForwardSeconds: number;
   defaultBookProgressTimeDisplay: BookProgressTimeDisplay;
   homePreviewSize: HomePreviewSize;
+  autoCreateDarkAccent: boolean;
+  lightAccentColorOverride: string | null;
+  darkAccentColorOverride: string | null;
   useTokenWithCoverImages: boolean;
   showFavoriteBadgeOnCovers: boolean;
   showFinishedBadgeOnCovers: boolean;
@@ -124,6 +128,11 @@ export type SettingsState = {
     setSkipSeconds: (seconds: number) => void;
     setDefaultBookProgressTimeDisplay: (display: BookProgressTimeDisplay) => void;
     setHomePreviewSize: (size: HomePreviewSize) => void;
+    setAutoCreateDarkAccent: (enabled: boolean) => void;
+    setLightAccentColorOverride: (color: string | null) => void;
+    resetLightAccentColorOverride: () => void;
+    setDarkAccentColorOverride: (color: string | null) => void;
+    resetDarkAccentColorOverride: () => void;
     setUseTokenWithCoverImages: (enabled: boolean) => void;
     setShowFavoriteBadgeOnCovers: (enabled: boolean) => void;
     setShowFinishedBadgeOnCovers: (enabled: boolean) => void;
@@ -138,6 +147,12 @@ export type SettingsState = {
   };
 };
 
+const normalizeAccentOverride = (color: string | null | undefined, defaultColor: string) => {
+  const normalizedColor = normalizeAccentHex(color);
+  if (!normalizedColor || normalizedColor === defaultColor) return null;
+  return normalizedColor;
+};
+
 export const settingsStore = createStore<SettingsState>()(
   persist(
     (set) => ({
@@ -147,6 +162,9 @@ export const settingsStore = createStore<SettingsState>()(
       seekForwardSeconds: DEFAULT_SEEK_FORWARD_SECONDS,
       defaultBookProgressTimeDisplay: "elapsed",
       homePreviewSize: DEFAULT_HOME_PREVIEW_SIZE,
+      autoCreateDarkAccent: false,
+      lightAccentColorOverride: null,
+      darkAccentColorOverride: null,
       useTokenWithCoverImages: false,
       showFavoriteBadgeOnCovers: true,
       showFinishedBadgeOnCovers: true,
@@ -170,6 +188,23 @@ export const settingsStore = createStore<SettingsState>()(
         setDefaultBookProgressTimeDisplay: (defaultBookProgressTimeDisplay) =>
           set({ defaultBookProgressTimeDisplay }),
         setHomePreviewSize: (homePreviewSize) => set({ homePreviewSize }),
+        setAutoCreateDarkAccent: (autoCreateDarkAccent) => set({ autoCreateDarkAccent }),
+        setLightAccentColorOverride: (lightAccentColorOverride) =>
+          set({
+            lightAccentColorOverride: normalizeAccentOverride(
+              lightAccentColorOverride,
+              DEFAULT_LIGHT_ACCENT_COLOR,
+            ),
+          }),
+        resetLightAccentColorOverride: () => set({ lightAccentColorOverride: null }),
+        setDarkAccentColorOverride: (darkAccentColorOverride) =>
+          set({
+            darkAccentColorOverride: normalizeAccentOverride(
+              darkAccentColorOverride,
+              DEFAULT_DARK_ACCENT_COLOR,
+            ),
+          }),
+        resetDarkAccentColorOverride: () => set({ darkAccentColorOverride: null }),
         setUseTokenWithCoverImages: (useTokenWithCoverImages) =>
           set({ useTokenWithCoverImages }),
         setShowFavoriteBadgeOnCovers: (showFavoriteBadgeOnCovers) =>
@@ -348,11 +383,14 @@ export const settingsStore = createStore<SettingsState>()(
         seekForwardSeconds: state.seekForwardSeconds,
         defaultBookProgressTimeDisplay: state.defaultBookProgressTimeDisplay,
         homePreviewSize: state.homePreviewSize,
+        autoCreateDarkAccent: state.autoCreateDarkAccent,
+        lightAccentColorOverride: state.lightAccentColorOverride,
+        darkAccentColorOverride: state.darkAccentColorOverride,
         useTokenWithCoverImages: state.useTokenWithCoverImages,
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 7,
+      version: 9,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -364,6 +402,9 @@ export const settingsStore = createStore<SettingsState>()(
             seekForwardSeconds: DEFAULT_SEEK_FORWARD_SECONDS,
             defaultBookProgressTimeDisplay: "elapsed",
             homePreviewSize: DEFAULT_HOME_PREVIEW_SIZE,
+            autoCreateDarkAccent: false,
+            lightAccentColorOverride: null,
+            darkAccentColorOverride: null,
             useTokenWithCoverImages: false,
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
@@ -391,6 +432,24 @@ export const settingsStore = createStore<SettingsState>()(
             version >= 7
               ? state.homePreviewSize ?? DEFAULT_HOME_PREVIEW_SIZE
               : DEFAULT_HOME_PREVIEW_SIZE,
+          autoCreateDarkAccent:
+            version >= 9
+              ? state.autoCreateDarkAccent ?? false
+              : false,
+          lightAccentColorOverride:
+            version >= 8
+              ? normalizeAccentOverride(
+                  state.lightAccentColorOverride ?? null,
+                  DEFAULT_LIGHT_ACCENT_COLOR,
+                )
+              : null,
+          darkAccentColorOverride:
+            version >= 8
+              ? normalizeAccentOverride(
+                  state.darkAccentColorOverride ?? null,
+                  DEFAULT_DARK_ACCENT_COLOR,
+                )
+              : null,
           useTokenWithCoverImages:
             version >= 6
               ? state.useTokenWithCoverImages ?? false

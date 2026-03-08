@@ -19,9 +19,14 @@ import { SleepTimerCoordinator } from "../player/sleep-timer-coordinator";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { mmkvQueryPersister } from "../store/mmkv-query-persister";
-import { useNavigationTheme, useThemeColors } from "../theme/use-app-theme";
+import {
+  useApplyAccentThemeOverrides,
+  useNavigationTheme,
+  useThemeColors,
+} from "../theme/use-app-theme";
 
 export default function RootLayout() {
+  useApplyAccentThemeOverrides();
   const { status } = useAuthBootstrap();
   const navigationTheme = useNavigationTheme();
   const themeColors = useThemeColors();

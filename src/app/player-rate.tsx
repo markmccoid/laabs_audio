@@ -142,7 +142,7 @@ export default function PlayerRateRoute() {
                   style={{
                     fontSize: 14,
                     fontWeight: isSelected ? "700" : "500",
-                    color: isSelected ? "#ffffff" : themeColors.text,
+                    color: isSelected ? themeColors.accentForeground : themeColors.text,
                     fontVariant: ["tabular-nums"],
                   }}
                 >
@@ -190,7 +190,12 @@ export default function PlayerRateRoute() {
           >
             <Text
               selectable
-              style={{ color: "#ffffff", fontSize: 20, fontWeight: "700", fontVariant: ["tabular-nums"] }}
+              style={{
+                color: themeColors.accentForeground,
+                fontSize: 20,
+                fontWeight: "700",
+                fontVariant: ["tabular-nums"],
+              }}
             >
               {rate.toFixed(2)}x
             </Text>
@@ -218,7 +223,10 @@ export default function PlayerRateRoute() {
           opacity: pressed ? 0.82 : 1,
         })}
       >
-        <Text selectable style={{ color: "#ffffff", fontWeight: "700", fontSize: 15 }}>
+        <Text
+          selectable
+          style={{ color: themeColors.accentForeground, fontWeight: "700", fontSize: 15 }}
+        >
           Close
         </Text>
       </Pressable>

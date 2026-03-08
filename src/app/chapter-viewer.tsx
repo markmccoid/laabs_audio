@@ -224,7 +224,9 @@ const ChapterViewerRoute = () => {
               opacity: pressed ? 0.8 : 1,
             })}
           >
-            <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "600" }}>Retry</Text>
+            <Text style={{ color: themeColors.accentForeground, fontSize: 13, fontWeight: "600" }}>
+              Retry
+            </Text>
           </Pressable>
         </View>
       ) : null}
@@ -272,7 +274,7 @@ const ChapterViewerRoute = () => {
                         fontSize: 15,
                         letterSpacing: 0.4,
                         fontWeight: "600",
-                        color: isActive ? "#ffffff" : themeColors.textMuted,
+                        color: isActive ? themeColors.accentForeground : themeColors.textMuted,
                         textTransform: "uppercase",
                       }}
                     >
@@ -286,17 +288,17 @@ const ChapterViewerRoute = () => {
                       style={{
                         fontSize: 15,
                         fontWeight: "600",
-                        color: isActive ? "#ffffff" : themeColors.text,
+                        color: isActive ? themeColors.accentForeground : themeColors.text,
                       }}
                     >
                       {item.title}
                     </Text>
                   </View>
                   <View className="flex-col">
-                    <Text style={{ color: isActive ? "#ffffff" : themeColors.textMuted }}>
+                    <Text style={{ color: isActive ? themeColors.accentForeground : themeColors.textMuted }}>
                       {formatSeconds(item.startMs / 1000)}
                     </Text>
-                    <Text style={{ color: isActive ? "#ffffff" : themeColors.textMuted }}>
+                    <Text style={{ color: isActive ? themeColors.accentForeground : themeColors.textMuted }}>
                       {formatSeconds(item.endMs / 1000)}
                     </Text>
                   </View>
@@ -306,7 +308,7 @@ const ChapterViewerRoute = () => {
                     style={{
                       marginTop: 4,
                       fontSize: 12,
-                      color: isActive ? "#ffffff" : themeColors.textMuted,
+                      color: isActive ? themeColors.accentForeground : themeColors.textMuted,
                     }}
                   >
                     Jumping...

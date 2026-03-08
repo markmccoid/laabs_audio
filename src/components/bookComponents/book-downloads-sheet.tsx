@@ -215,7 +215,12 @@ export const BookDownloadsSheet = () => {
                   selectable
                   numberOfLines={1}
                   ellipsizeMode="middle"
-                  style={{ textAlign: "center", fontSize: 13, fontWeight: "600", color: "#ffffff" }}
+                  style={{
+                    textAlign: "center",
+                    fontSize: 13,
+                    fontWeight: "600",
+                    color: isActive ? "#FFFFFF" : themeColors.accentForeground,
+                  }}
                 >
                   {isActive ? "Preparing ebook..." : `Share ${ebook.label}`}
                 </Text>

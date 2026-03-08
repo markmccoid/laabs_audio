@@ -139,7 +139,7 @@ const BookRateSetter = ({ libraryItemId }: Props) => {
         <Text
           selectable
           style={{
-            color: "#ffffff",
+            color: themeColors.accentForeground,
             fontSize: 30,
             fontWeight: "700",
             fontVariant: ["tabular-nums"],
