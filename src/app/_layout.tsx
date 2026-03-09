@@ -71,7 +71,8 @@ export default function RootLayout() {
       rootSegment === "book-downloads" ||
       rootSegment === "book-bookmarks" ||
       rootSegment === "book-addbookmark" ||
-      rootSegment === "book-series";
+      rootSegment === "book-series" ||
+      rootSegment === "book-filter-results";
     if (status === "anonymous" && !inLogin) {
       router.replace({ pathname: "/login", params: { mode: "required" } });
       return;
@@ -339,6 +340,20 @@ export default function RootLayout() {
                   presentation: "formSheet",
                   animation: "slide_from_bottom",
                   sheetAllowedDetents: [0.45, 0.95],
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="book-filter-results"
+                options={{
+                  headerShown: true,
+                  presentation: "formSheet",
+                  animation: "slide_from_bottom",
+                  sheetAllowedDetents: [0.95],
                   sheetGrabberVisible: true,
                   sheetCornerRadius: 20,
                   contentStyle: {

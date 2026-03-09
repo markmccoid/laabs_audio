@@ -15,6 +15,8 @@ type Props = {
   isInProgress?: boolean;
   defaultProgressTimeDisplay?: BookProgressTimeDisplay;
   progressResetKey?: string;
+  onAuthorPress?: (author: string) => void;
+  onNarratorPress?: (narrator: string) => void;
 };
 
 const formatDurationBadge = (durationSeconds?: number | null) => {
@@ -40,6 +42,8 @@ const BookKeyDetails = ({
   isInProgress = false,
   defaultProgressTimeDisplay = "elapsed",
   progressResetKey,
+  onAuthorPress,
+  onNarratorPress,
 }: Props) => {
   const themeColors = useThemeColors();
   const durationLabel = formatDurationBadge(durationSeconds);
@@ -53,11 +57,17 @@ const BookKeyDetails = ({
 
   const rows = useMemo(() => {
     const values = [
-      { key: "author", icon: "person.fill" as SFSymbol, value: author?.trim() || "Unknown" },
+      {
+        key: "author",
+        icon: "person.fill" as SFSymbol,
+        value: author?.trim() || "Unknown",
+        onPress: author?.trim() ? onAuthorPress : undefined,
+      },
       {
         key: "narrator",
         icon: "person.wave.2.fill" as SFSymbol,
         value: narrator?.trim() || "Unknown",
+        onPress: narrator?.trim() ? onNarratorPress : undefined,
       },
       {
         key: "published",
@@ -75,7 +85,7 @@ const BookKeyDetails = ({
     }
 
     return values;
-  }, [author, narrator, publishedYear, series]);
+  }, [author, narrator, onAuthorPress, onNarratorPress, publishedYear, series]);
 
   const elapsedLabel = formatDurationBadge(progressSeconds);
   const remainingLabel = `${formatDurationBadge(remainingSeconds)} left`;
@@ -175,15 +185,39 @@ const BookKeyDetails = ({
       {rows.map((row) => (
         <View key={row.key} style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
           <View style={{ width: 14, alignItems: "center" }}>
-            <SymbolView name={row.icon} size={11} tintColor={themeColors.textMuted} />
+            <SymbolView
+              name={row.icon}
+              size={11}
+              tintColor={row.onPress ? themeColors.accent : themeColors.textMuted}
+            />
           </View>
-          <Text
-            selectable
-            style={{ flex: 1, fontSize: 12, color: themeColors.text }}
-            numberOfLines={1}
-          >
-            {row.value}
-          </Text>
+          {row.onPress ? (
+            <Pressable
+              onPress={() => row.onPress?.(row.value)}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${row.value}`}
+              style={({ pressed }) => ({
+                flex: 1,
+                opacity: pressed ? 0.82 : 1,
+              })}
+            >
+              <Text
+                selectable
+                style={{ flex: 1, fontSize: 12, color: themeColors.accent, fontWeight: "500" }}
+                numberOfLines={1}
+              >
+                {row.value}
+              </Text>
+            </Pressable>
+          ) : (
+            <Text
+              selectable
+              style={{ flex: 1, fontSize: 12, color: themeColors.text }}
+              numberOfLines={1}
+            >
+              {row.value}
+            </Text>
+          )}
         </View>
       ))}
     </View>

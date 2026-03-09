@@ -9,9 +9,19 @@ type Props = {
   genres?: string[];
   tags?: string[];
   maxLines?: number;
+  onGenrePress?: (genre: string) => void;
+  onTagPress?: (tag: string) => void;
 };
 
-const BookDetails = ({ title, description, genres, tags, maxLines = 4 }: Props) => {
+const BookDetails = ({
+  title,
+  description,
+  genres,
+  tags,
+  maxLines = 4,
+  onGenrePress,
+  onTagPress,
+}: Props) => {
   const themeColors = useThemeColors();
   const [isExpanded, setIsExpanded] = React.useState(false);
   const headingTitle = title?.trim() || "Description";
@@ -21,6 +31,57 @@ const BookDetails = ({ title, description, genres, tags, maxLines = 4 }: Props) 
   const resolvedTags = tags ?? [];
   const hasGenres = resolvedGenres.length > 0;
   const hasTags = resolvedTags.length > 0;
+
+  const renderChip = (
+    value: string,
+    key: string,
+    onPress?: (value: string) => void,
+  ) => {
+    const chipContent = (
+      <Text selectable style={{ fontSize: 12, color: themeColors.accent }}>
+        {value}
+      </Text>
+    );
+
+    if (!onPress) {
+      return (
+        <View
+          key={key}
+          style={{
+            paddingHorizontal: 12,
+            paddingVertical: 6,
+            borderRadius: 999,
+            backgroundColor: themeColors.surface,
+            borderWidth: 1,
+            borderColor: themeColors.accent,
+          }}
+        >
+          {chipContent}
+        </View>
+      );
+    }
+
+    return (
+      <Pressable
+        key={key}
+        onPress={() => onPress(value)}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${value}`}
+        style={({ pressed }) => ({
+          paddingHorizontal: 12,
+          paddingVertical: 6,
+          borderRadius: 999,
+          borderCurve: "continuous",
+          backgroundColor: themeColors.surface,
+          borderWidth: 1,
+          borderColor: themeColors.accent,
+          opacity: pressed ? 0.82 : 1,
+        })}
+      >
+        {chipContent}
+      </Pressable>
+    );
+  };
 
   const handleToggle = () => {
     if (!hasDescription) return;
@@ -79,23 +140,9 @@ const BookDetails = ({ title, description, genres, tags, maxLines = 4 }: Props) 
         </Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {hasGenres ? (
-            resolvedGenres.map((genre, index) => (
-              <View
-                key={`${genre}-${index}`}
-                style={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 999,
-                  backgroundColor: themeColors.surface,
-                  borderWidth: 1,
-                  borderColor: themeColors.accent,
-                }}
-              >
-                <Text selectable style={{ fontSize: 12, color: themeColors.accent }}>
-                  {genre}
-                </Text>
-              </View>
-            ))
+            resolvedGenres.map((genre, index) =>
+              renderChip(genre, `genre-${genre}-${index}`, onGenrePress),
+            )
           ) : (
             <Text selectable style={{ fontSize: 13, color: themeColors.textMuted }}>
               No genres listed.
@@ -110,23 +157,7 @@ const BookDetails = ({ title, description, genres, tags, maxLines = 4 }: Props) 
         </Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {hasTags ? (
-            resolvedTags.map((tag, index) => (
-              <View
-                key={`${tag}-${index}`}
-                style={{
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 999,
-                  backgroundColor: themeColors.surface,
-                  borderWidth: 1,
-                  borderColor: themeColors.accent,
-                }}
-              >
-                <Text selectable style={{ fontSize: 12, color: themeColors.accent }}>
-                  {tag}
-                </Text>
-              </View>
-            ))
+            resolvedTags.map((tag, index) => renderChip(tag, `tag-${tag}-${index}`, onTagPress))
           ) : (
             <Text selectable style={{ fontSize: 13, color: themeColors.textMuted }}>
               No tags listed.

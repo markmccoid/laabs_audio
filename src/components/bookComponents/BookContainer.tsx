@@ -266,6 +266,20 @@ const BookContainer = ({ libraryItemId }: Props) => {
     });
   };
 
+  const openFilterResultsSheet = (
+    filterType: "genre" | "tag" | "author" | "narrator",
+    filterValue: string,
+  ) => {
+    router.push({
+      pathname: "/book-filter-results",
+      params: {
+        filterType,
+        filterValue,
+        sourceTab,
+      },
+    });
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
@@ -393,6 +407,8 @@ const BookContainer = ({ libraryItemId }: Props) => {
               isInProgress={isInProgress}
               defaultProgressTimeDisplay={defaultProgressTimeDisplay}
               progressResetKey={libraryItemId}
+              onAuthorPress={(authorName) => openFilterResultsSheet("author", authorName)}
+              onNarratorPress={(narratorName) => openFilterResultsSheet("narrator", narratorName)}
             />
           </View>
           <View style={{ alignItems: "center", gap: 6 }}>
@@ -440,7 +456,14 @@ const BookContainer = ({ libraryItemId }: Props) => {
           </View>
         ) : null}
 
-        <BookDetails title={bookTitle} description={description} genres={genres} tags={tags} />
+        <BookDetails
+          title={bookTitle}
+          description={description}
+          genres={genres}
+          tags={tags}
+          onGenrePress={(genre) => openFilterResultsSheet("genre", genre)}
+          onTagPress={(tag) => openFilterResultsSheet("tag", tag)}
+        />
 
         {/* <DownloadControls
           libraryItemId={libraryItemId}
