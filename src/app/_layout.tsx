@@ -1,7 +1,8 @@
 import { ThemeProvider } from "@react-navigation/native";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
-import { Stack, router, useSegments } from "expo-router";
-import { useEffect, useMemo, useRef } from "react";
+import * as Linking from "expo-linking";
+import { Stack, router, useGlobalSearchParams, useSegments } from "expo-router";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Toaster } from "react-native-sonner";
@@ -16,6 +17,7 @@ import { OfflineConnectionBanner } from "../components/offline-connection-banner
 import "../global.css";
 import { playerService } from "../player/player-service";
 import { SleepTimerCoordinator } from "../player/sleep-timer-coordinator";
+import { extractBookDetailIdFromUrl } from "../navigation/book-links";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { mmkvQueryPersister } from "../store/mmkv-query-persister";
@@ -24,6 +26,13 @@ import {
   useNavigationTheme,
   useThemeColors,
 } from "../theme/use-app-theme";
+
+const resolveParam = (value?: string | string[]) => {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return typeof value === "string" ? value : undefined;
+};
 
 export default function RootLayout() {
   useApplyAccentThemeOverrides();
@@ -34,7 +43,16 @@ export default function RootLayout() {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const segments = useSegments();
+  const globalParams = useGlobalSearchParams<{ libraryItemId?: string | string[] }>();
   const previousStatus = useRef<typeof status | null>(null);
+  const [initialDeepLinkBookId, setInitialDeepLinkBookId] = useState<string | null | undefined>(
+    undefined,
+  );
+  const returnToLibraryItemId =
+    segments[0] === "(tabs)" && segments[1] === "(home)" && segments[2] === "[libraryItemId]"
+      ? resolveParam(globalParams.libraryItemId)
+      : undefined;
+  const startupBookLinkId = returnToLibraryItemId ?? initialDeepLinkBookId ?? undefined;
 
   // Persist only queries that opt-in via `meta.persist`
   const persistOptions = useMemo(
@@ -54,7 +72,33 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
+    Linking.getInitialURL()
+      .then((initialUrl) => {
+        if (!isMounted) return;
+        setInitialDeepLinkBookId(extractBookDetailIdFromUrl(initialUrl) ?? null);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setInitialDeepLinkBookId(null);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (initialDeepLinkBookId == null) return;
+    if (segments[0] !== "(tabs)") return;
+
+    setInitialDeepLinkBookId(null);
+  }, [initialDeepLinkBookId, segments]);
+
+  useEffect(() => {
     if (status === "hydrating") return;
+    if (initialDeepLinkBookId === undefined) return;
 
     const rootSegment = segments[0];
     const inLogin = rootSegment === "login";
@@ -74,7 +118,13 @@ export default function RootLayout() {
       rootSegment === "book-series" ||
       rootSegment === "book-filter-results";
     if (status === "anonymous" && !inLogin) {
-      router.replace({ pathname: "/login", params: { mode: "required" } });
+      router.replace({
+        pathname: "/login",
+        params: {
+          mode: "required",
+          returnToLibraryItemId: startupBookLinkId,
+        },
+      });
       return;
     }
 
@@ -89,9 +139,12 @@ export default function RootLayout() {
       !inPlayerUtilitySheet &&
       !inBookUtilitySheet
     ) {
+      if (startupBookLinkId) {
+        return;
+      }
       router.replace("/(tabs)/(home)");
     }
-  }, [loginRequired, segments, status]);
+  }, [initialDeepLinkBookId, loginRequired, segments, startupBookLinkId, status]);
 
   useEffect(() => {
     if (status === "hydrating") return;

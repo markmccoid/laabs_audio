@@ -1,3 +1,5 @@
+import type { LibraryItemSummary } from "@/api/library-items-api";
+import { AbsApiError } from "@/api/abs-client";
 import { useAuthStore } from "@/auth/auth-store";
 import { useCoverImageSource } from "@/components/images/cover-image";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
@@ -7,14 +9,14 @@ import {
   useReconcileBookProgress,
 } from "@/hooks/abs-data-hooks";
 import { usePlaybackStore } from "@/player";
+import { shareBook } from "@/sharing/book-share";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import type { LibraryItemSummary } from "@/api/library-items-api";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Stack, router, useSegments } from "expo-router";
+import { Link, Stack, router, useSegments } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
 import {
@@ -28,13 +30,13 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUniwind } from "uniwind";
+import { useShelfBookCardMenuActions } from "../Home/shelf-book-card-menu-shared";
 import BookControls from "./book-controls";
 import BookDetails from "./book-details";
 import BookImage from "./book-image";
 import BookKeyDetails from "./book-key-details";
 import { BookQuickActions } from "./book-quick-actions";
 import BookRateSetter from "./book-rate-setter";
-import { useShelfBookCardMenuActions } from "../Home/shelf-book-card-menu-shared";
 import { useBookProgressDisplay } from "./use-book-progress-display";
 
 type Props = {
@@ -72,7 +74,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
   const segments = useSegments();
   const colorScheme = useColorScheme();
   useReconcileBookProgress(libraryItemId);
-  const { data: bookData, isLoading } = useGetItemDetails(libraryItemId);
+  const { data: bookData, error: itemLoadError, isLoading } = useGetItemDetails(libraryItemId);
   const { data: userServerState } = useGetUserServerState();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const isOffline = useAuthStore((state) => state.isOnline === false);
@@ -122,8 +124,14 @@ const BookContainer = ({ libraryItemId }: Props) => {
     metadata?.descriptionPlain,
     bookData?.description,
   );
-  const genres = useMemo(() => metadata?.genres ?? bookData?.genres ?? [], [bookData?.genres, metadata?.genres]);
-  const tags = useMemo(() => bookData?.media?.tags ?? bookData?.tags ?? [], [bookData?.media?.tags, bookData?.tags]);
+  const genres = useMemo(
+    () => metadata?.genres ?? bookData?.genres ?? [],
+    [bookData?.genres, metadata?.genres],
+  );
+  const tags = useMemo(
+    () => bookData?.media?.tags ?? bookData?.tags ?? [],
+    [bookData?.media?.tags, bookData?.tags],
+  );
   const favoriteByLibraryItemId =
     userServerState?.favoritesLibraryId === activeLibraryId
       ? (userServerState?.favoriteByLibraryItemId ?? {})
@@ -239,7 +247,9 @@ const BookContainer = ({ libraryItemId }: Props) => {
       tags,
     ],
   );
-  const menuProgress = libraryItemId ? userServerState?.progressByLibraryItemId?.[libraryItemId] : undefined;
+  const menuProgress = libraryItemId
+    ? userServerState?.progressByLibraryItemId?.[libraryItemId]
+    : undefined;
   const {
     favoriteDisabled,
     favoriteLabel,
@@ -254,6 +264,14 @@ const BookContainer = ({ libraryItemId }: Props) => {
     progress: menuProgress,
     isFavorite,
   });
+  const isMissingFromCurrentLibrary =
+    Boolean(libraryItemId) &&
+    !isLoading &&
+    !bookData &&
+    itemLoadError instanceof AbsApiError &&
+    itemLoadError.status === 404;
+  const hasItemLoadError =
+    Boolean(libraryItemId) && !isLoading && !bookData && Boolean(itemLoadError) && !isMissingFromCurrentLibrary;
 
   const openSeriesSheet = (seriesId: string, seriesName: string) => {
     router.push({
@@ -277,6 +295,17 @@ const BookContainer = ({ libraryItemId }: Props) => {
         filterValue,
         sourceTab,
       },
+    });
+  };
+
+  const handleShareBook = () => {
+    if (!libraryItemId) return;
+    void shareBook({
+      libraryItemId,
+      title: bookTitle,
+      author,
+      coverUri: coverURL,
+      localCoverUri,
     });
   };
 
@@ -317,7 +346,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
         <Stack.Toolbar placement="right">
           <Stack.Toolbar.Menu icon="ellipsis">
             <Stack.Toolbar.MenuAction
-              disabled={!libraryItemId || favoriteDisabled}
+              disabled={!libraryItemId || favoriteDisabled || isMissingFromCurrentLibrary || hasItemLoadError}
               icon={favoriteSystemImage}
               isOn={isFavorite}
               onPress={() => {
@@ -327,7 +356,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
               {favoriteLabel}
             </Stack.Toolbar.MenuAction>
             <Stack.Toolbar.MenuAction
-              disabled={!libraryItemId || finishDisabled}
+              disabled={!libraryItemId || finishDisabled || isMissingFromCurrentLibrary || hasItemLoadError}
               icon={finishedSystemImage}
               isOn={isFinished}
               onPress={() => {
@@ -372,104 +401,193 @@ const BookContainer = ({ libraryItemId }: Props) => {
           </View>
         ) : null}
 
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "center",
-            alignItems: "flex-start",
-            gap: 12,
-          }}
-        >
-          <BookImage
-            libraryItemId={libraryItemId}
-            coverURL={coverURL}
-            localCoverUri={localCoverUri}
-            leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
-            showFavoriteIndicator={isFavorite}
-            showFinishedIndicator={isFinished}
-            showProgressLine={progressSeconds > 0 || isFinished}
-            progressPercent={visualProgressPercent}
-            maxSize={coverMaxSize}
-          />
-          <BookQuickActions libraryItemId={libraryItemId} />
-        </View>
-        <View className="h-[12]" />
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <View style={{ flex: 1 }}>
-            <BookKeyDetails
-              author={author}
-              narrator={narrator}
-              publishedYear={publishedYear}
-              series={series}
-              durationSeconds={resolvedDurationSeconds}
-              progressSeconds={progressSeconds}
-              remainingSeconds={remainingSeconds}
-              isInProgress={isInProgress}
-              defaultProgressTimeDisplay={defaultProgressTimeDisplay}
-              progressResetKey={libraryItemId}
-              onAuthorPress={(authorName) => openFilterResultsSheet("author", authorName)}
-              onNarratorPress={(narratorName) => openFilterResultsSheet("narrator", narratorName)}
-            />
-          </View>
-          <View style={{ alignItems: "center", gap: 6 }}>
-            <BookControls libraryItemId={libraryItemId} variant="play-only" />
+        {isMissingFromCurrentLibrary ? (
+          <View
+            style={{
+              marginTop: 20,
+              borderWidth: 1,
+              borderColor: themeColors.border,
+              borderRadius: 24,
+              borderCurve: "continuous",
+              backgroundColor: themeColors.surface,
+              paddingHorizontal: 20,
+              paddingVertical: 24,
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <SymbolView name="book.closed" size={30} tintColor={themeColors.textMuted} />
             <Text
               selectable
-              style={{ color: themeColors.textMuted, fontSize: 11, fontWeight: "500" }}
+              style={{ color: themeColors.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}
             >
-              {playbackSourceLabel}
+              Book not found in this library
+            </Text>
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 14, textAlign: "center", lineHeight: 20 }}
+            >
+              This shared book could not be loaded from your current library. Switch libraries and try
+              again.
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push("/library-picker")}
+              style={({ pressed }) => ({
+                borderRadius: 999,
+                borderCurve: "continuous",
+                backgroundColor: themeColors.accent,
+                paddingHorizontal: 18,
+                paddingVertical: 10,
+                opacity: pressed ? 0.88 : 1,
+              })}
+            >
+              <Text style={{ color: themeColors.accentForeground, fontSize: 14, fontWeight: "700" }}>
+                Switch Library
+              </Text>
+            </Pressable>
+          </View>
+        ) : hasItemLoadError ? (
+          <View
+            style={{
+              marginTop: 20,
+              borderWidth: 1,
+              borderColor: themeColors.border,
+              borderRadius: 24,
+              borderCurve: "continuous",
+              backgroundColor: themeColors.surface,
+              paddingHorizontal: 20,
+              paddingVertical: 24,
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <SymbolView name="exclamationmark.triangle" size={28} tintColor={themeColors.textMuted} />
+            <Text selectable style={{ color: themeColors.text, fontSize: 18, fontWeight: "700" }}>
+              Unable to load this book
+            </Text>
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 14, textAlign: "center", lineHeight: 20 }}
+            >
+              Please try again after your connection and library access are available.
             </Text>
           </View>
-        </View>
-        <View className="h-[10]" />
-        {seriesEntries.length > 0 ? (
-          <View style={{ gap: 8 }}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={{ flexDirection: "row", gap: 8, paddingVertical: 2 }}>
-                {seriesEntries.map((seriesEntry) => (
-                  <Pressable
-                    key={`${seriesEntry.id}:${seriesEntry.sequence ?? "none"}`}
-                    onPress={() => openSeriesSheet(seriesEntry.id, seriesEntry.name)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open ${seriesEntry.name} series`}
-                    style={({ pressed }) => ({
-                      borderRadius: 999,
-                      borderCurve: "continuous",
-                      borderWidth: 1,
-                      borderColor: themeColors.accent,
-                      backgroundColor: themeColors.surface,
-                      paddingHorizontal: 12,
-                      paddingVertical: 7,
-                      opacity: pressed ? 0.82 : 1,
-                    })}
-                  >
-                    <Text
-                      selectable
-                      style={{ fontSize: 12, fontWeight: "600", color: themeColors.accent }}
-                    >
-                      {formatSeriesChipLabel(seriesEntry.name, seriesEntry.sequence)}
-                    </Text>
-                  </Pressable>
-                ))}
+        ) : (
+          <>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "center",
+                alignItems: "flex-start",
+                gap: 12,
+              }}
+            >
+              <Link href="">
+                <Link.Trigger>
+                  <BookImage
+                    libraryItemId={libraryItemId}
+                    coverURL={coverURL}
+                    localCoverUri={localCoverUri}
+                    leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
+                    showFavoriteIndicator={isFavorite}
+                    showFinishedIndicator={isFinished}
+                    showProgressLine={progressSeconds > 0 || isFinished}
+                    progressPercent={visualProgressPercent}
+                    maxSize={coverMaxSize}
+                  />
+                </Link.Trigger>
+                <Link.Menu>
+                  <Link.MenuAction onPress={handleShareBook} icon="square.and.arrow.up">
+                    Share Book
+                  </Link.MenuAction>
+                </Link.Menu>
+              </Link>
+              <BookQuickActions libraryItemId={libraryItemId} />
+            </View>
+            <View className="h-[12]" />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <BookKeyDetails
+                  author={author}
+                  narrator={narrator}
+                  publishedYear={publishedYear}
+                  series={series}
+                  durationSeconds={resolvedDurationSeconds}
+                  progressSeconds={progressSeconds}
+                  remainingSeconds={remainingSeconds}
+                  isInProgress={isInProgress}
+                  defaultProgressTimeDisplay={defaultProgressTimeDisplay}
+                  progressResetKey={libraryItemId}
+                  onAuthorPress={(authorName) => openFilterResultsSheet("author", authorName)}
+                  onNarratorPress={(narratorName) => openFilterResultsSheet("narrator", narratorName)}
+                />
               </View>
-            </ScrollView>
-          </View>
+              <View style={{ alignItems: "center", gap: 6 }}>
+                <BookControls libraryItemId={libraryItemId} variant="play-only" />
+                <Text
+                  selectable
+                  style={{ color: themeColors.textMuted, fontSize: 11, fontWeight: "500" }}
+                >
+                  {playbackSourceLabel}
+                </Text>
+              </View>
+            </View>
+            <View className="h-[10]" />
+          </>
+        )}
+        {!isMissingFromCurrentLibrary && !hasItemLoadError ? (
+          <>
+            {seriesEntries.length > 0 ? (
+              <View style={{ gap: 8 }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={{ flexDirection: "row", gap: 8, paddingVertical: 2 }}>
+                    {seriesEntries.map((seriesEntry) => (
+                      <Pressable
+                        key={`${seriesEntry.id}:${seriesEntry.sequence ?? "none"}`}
+                        onPress={() => openSeriesSheet(seriesEntry.id, seriesEntry.name)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open ${seriesEntry.name} series`}
+                        style={({ pressed }) => ({
+                          borderRadius: 999,
+                          borderCurve: "continuous",
+                          borderWidth: 1,
+                          borderColor: themeColors.accent,
+                          backgroundColor: themeColors.surface,
+                          paddingHorizontal: 12,
+                          paddingVertical: 7,
+                          opacity: pressed ? 0.82 : 1,
+                        })}
+                      >
+                        <Text
+                          selectable
+                          style={{ fontSize: 12, fontWeight: "600", color: themeColors.accent }}
+                        >
+                          {formatSeriesChipLabel(seriesEntry.name, seriesEntry.sequence)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </ScrollView>
+              </View>
+            ) : null}
+
+            <BookDetails
+              title={bookTitle}
+              description={description}
+              genres={genres}
+              tags={tags}
+              onGenrePress={(genre) => openFilterResultsSheet("genre", genre)}
+              onTagPress={(tag) => openFilterResultsSheet("tag", tag)}
+            />
+
+            {/* <DownloadControls
+              libraryItemId={libraryItemId}
+              summary={bookData ?? null}
+              context="inline"
+            /> */}
+          </>
         ) : null}
-
-        <BookDetails
-          title={bookTitle}
-          description={description}
-          genres={genres}
-          tags={tags}
-          onGenrePress={(genre) => openFilterResultsSheet("genre", genre)}
-          onTagPress={(tag) => openFilterResultsSheet("tag", tag)}
-        />
-
-        {/* <DownloadControls
-          libraryItemId={libraryItemId}
-          summary={bookData ?? null}
-          context="inline"
-        /> */}
       </ScrollView>
     </View>
   );

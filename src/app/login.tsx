@@ -13,6 +13,7 @@ import {
 import { SymbolView } from "expo-symbols";
 import Dropdown from "../shared/ui/organisms/dropdown";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
+import { getBookDetailHref } from "../navigation/book-links";
 import { useThemeColors } from "../theme/use-app-theme";
 
 const SERVER_PROTOCOLS = ["https://", "http://"] as const;
@@ -54,12 +55,19 @@ export default function LoginScreen() {
   const lastAuthError = useAuthStore((state) => state.lastAuthError);
   const { loginWithPassword, setLoginRequired } = useAuthActions();
   const themeColors = useThemeColors();
-  const params = useLocalSearchParams<{ mode?: string }>();
+  const params = useLocalSearchParams<{ mode?: string; returnToLibraryItemId?: string | string[] }>();
 
   const mode = useMemo(() => {
     return typeof params.mode === "string" ? params.mode : "required";
   }, [params.mode]);
   const isSheet = mode === "sheet";
+  const returnToLibraryItemId = useMemo(() => {
+    const rawValue = params.returnToLibraryItemId;
+    if (Array.isArray(rawValue)) {
+      return rawValue[0];
+    }
+    return typeof rawValue === "string" ? rawValue : undefined;
+  }, [params.returnToLibraryItemId]);
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -98,7 +106,9 @@ export default function LoginScreen() {
     setIsSubmitting(true);
     try {
       await loginWithPassword(username.trim(), password, finalServerUrl);
-      if (isSheet) {
+      if (returnToLibraryItemId) {
+        router.replace(getBookDetailHref(returnToLibraryItemId));
+      } else if (isSheet) {
         setLoginRequired(false);
         router.back();
       } else {

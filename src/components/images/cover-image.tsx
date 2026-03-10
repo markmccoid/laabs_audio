@@ -31,6 +31,45 @@ const getPreferredMode = (preferTokened: boolean, hasTokenedRemote: boolean): Co
   return "remote-tokenless";
 };
 
+export const resolveCoverImageCandidates = ({
+  accessToken,
+  coverUri,
+  libraryItemId,
+  localCoverUri,
+  variant = "full",
+}: {
+  accessToken?: string | null;
+  libraryItemId?: string;
+  coverUri?: string | null;
+  localCoverUri?: string | null;
+  variant?: CoverImageVariant;
+}) => {
+  const localUri = localCoverUri?.trim() || (isLocalUri(coverUri) ? coverUri?.trim() : null) || null;
+
+  if (localUri) {
+    return {
+      localUri,
+      tokenlessRemoteUri: null,
+      tokenedRemoteUri: null,
+    };
+  }
+
+  if (libraryItemId) {
+    const urls = buildCoverUrls(libraryItemId, { token: accessToken });
+    return {
+      localUri: null,
+      tokenlessRemoteUri: variant === "thumb" ? urls.thumb : urls.full,
+      tokenedRemoteUri: variant === "thumb" ? urls.thumbWithToken : urls.fullWithToken,
+    };
+  }
+
+  return {
+    localUri: null,
+    tokenlessRemoteUri: coverUri?.trim() || null,
+    tokenedRemoteUri: null,
+  };
+};
+
 export const useCoverImageSource = ({
   libraryItemId,
   coverUri,
@@ -46,30 +85,13 @@ export const useCoverImageSource = ({
   const accessToken = useAuthStore((state) => state.accessToken);
 
   const candidates = useMemo(() => {
-    const localUri = localCoverUri?.trim() || (isLocalUri(coverUri) ? coverUri?.trim() : null) || null;
-
-    if (localUri) {
-      return {
-        localUri,
-        tokenlessRemoteUri: null,
-        tokenedRemoteUri: null,
-      };
-    }
-
-    if (libraryItemId) {
-      const urls = buildCoverUrls(libraryItemId, { token: accessToken });
-      return {
-        localUri: null,
-        tokenlessRemoteUri: variant === "thumb" ? urls.thumb : urls.full,
-        tokenedRemoteUri: variant === "thumb" ? urls.thumbWithToken : urls.fullWithToken,
-      };
-    }
-
-    return {
-      localUri: null,
-      tokenlessRemoteUri: coverUri?.trim() || null,
-      tokenedRemoteUri: null,
-    };
+    return resolveCoverImageCandidates({
+      accessToken,
+      coverUri,
+      libraryItemId,
+      localCoverUri,
+      variant,
+    });
   }, [accessToken, coverUri, libraryItemId, localCoverUri, variant]);
 
   const hasTokenedRemote = Boolean(candidates.tokenedRemoteUri);
