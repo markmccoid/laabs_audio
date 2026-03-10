@@ -14,6 +14,7 @@ import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
 import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
 import { LibrarySelectionGate } from "../components/library-selection-gate";
 import { OfflineConnectionBanner } from "../components/offline-connection-banner";
+import { AmbientCoordinator } from "../ambient/ambient-coordinator";
 import "../global.css";
 import { playerService } from "../player/player-service";
 import { SleepTimerCoordinator } from "../player/sleep-timer-coordinator";
@@ -27,7 +28,12 @@ import {
   useThemeColors,
 } from "../theme/use-app-theme";
 
-const PLAYER_UTILITY_SHEETS = new Set(["player-rate", "player-bookmarks", "player-sleep-timer"]);
+const PLAYER_UTILITY_SHEETS = new Set([
+  "player-rate",
+  "player-bookmarks",
+  "player-sleep-timer",
+  "player-ambient",
+]);
 const BOOK_UTILITY_SHEETS = new Set([
   "book-bookshelves",
   "book-downloads",
@@ -248,6 +254,7 @@ export default function RootLayout() {
           <ActiveDownloadToastCoordinator />
           <OfflineConnectionBanner />
           <SleepTimerCoordinator />
+          <AmbientCoordinator />
           <View style={{ flex: 1 }}>
             <Stack
               screenOptions={{
@@ -337,6 +344,19 @@ export default function RootLayout() {
               />
               <Stack.Screen
                 name="player-sleep-timer"
+                options={{
+                  presentation: "formSheet",
+                  animation: "slide_from_bottom",
+                  sheetAllowedDetents: [0.45, 0.85],
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="player-ambient"
                 options={{
                   presentation: "formSheet",
                   animation: "slide_from_bottom",

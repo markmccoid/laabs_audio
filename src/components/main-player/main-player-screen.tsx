@@ -16,6 +16,7 @@ import { useUniwind } from "uniwind";
 import BookControls from "../bookComponents/book-controls";
 import BookImage from "../bookComponents/book-image";
 import BookTimeSlider from "../bookComponents/book-time-slider";
+import MainPlayerAmbientControl from "./main-player-ambient-control";
 import MainPlayerActionsBar from "./main-player-actions-bar";
 
 const MainPlayerScreen = () => {
@@ -138,6 +139,7 @@ const MainPlayerScreen = () => {
             >
               by {authorName}
             </Text>
+            <MainPlayerAmbientControl />
             {sleepTimerStatus.isActive ? (
               <Link href="">
                 <Link.Trigger>

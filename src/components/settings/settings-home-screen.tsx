@@ -7,10 +7,12 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 
 type SettingsRowProps = {
   href:
+    | "/(tabs)/settings/ambient-audio"
     | "/(tabs)/settings/authentication"
     | "/(tabs)/settings/bookshelves"
     | "/(tabs)/settings/playback"
-    | "/(tabs)/settings/system";
+    | "/(tabs)/settings/system"
+    | "/(tabs)/settings/testRoute";
   title: string;
   subtitle: string;
   icon: string;
@@ -144,11 +146,16 @@ export const SettingsHomeScreen = () => {
               icon="play.circle"
             />
             <SettingsRow
+              href="/(tabs)/settings/ambient-audio"
+              title="Ambient Audio"
+              subtitle="Import and manage looped ambient tracks"
+              icon="waveform"
+            />
+            <SettingsRow
               href="/(tabs)/settings/system"
               title="System"
               subtitle="App-level behavior for images and cover handling"
               icon="gearshape.2"
-              isLast
             />
             <SettingsRow
               href="/(tabs)/settings/testRoute"

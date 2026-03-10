@@ -13,6 +13,10 @@ const SettingLayout = () => {
         name="bookshelves"
         options={{ title: "Bookshelves", headerTransparent: true }}
       />
+      <Stack.Screen
+        name="ambient-audio"
+        options={{ title: "Ambient Audio", headerTransparent: true }}
+      />
       <Stack.Screen name="playback" options={{ title: "Playback", headerTransparent: true }} />
       <Stack.Screen name="system" options={{ title: "System", headerTransparent: true }} />
       <Stack.Screen
