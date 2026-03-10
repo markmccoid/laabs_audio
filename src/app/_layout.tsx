@@ -27,12 +27,47 @@ import {
   useThemeColors,
 } from "../theme/use-app-theme";
 
+const PLAYER_UTILITY_SHEETS = new Set(["player-rate", "player-bookmarks", "player-sleep-timer"]);
+const BOOK_UTILITY_SHEETS = new Set([
+  "book-bookshelves",
+  "book-downloads",
+  "book-bookmarks",
+  "book-addbookmark",
+  "book-series",
+  "book-filter-results",
+]);
+
 const resolveParam = (value?: string | string[]) => {
   if (Array.isArray(value)) {
     return value[0];
   }
   return typeof value === "string" ? value : undefined;
 };
+
+// Collapse the current top-level route into flags the navigation guard can reason about.
+const getRouteState = (segments: string[]) => {
+  const rootSegment = segments[0];
+
+  return {
+    rootSegment,
+    inLogin: rootSegment === "login",
+    inTabs: rootSegment === "(tabs)",
+    inLibraryPicker: rootSegment === "library-picker",
+    inChapterViewer: rootSegment === "chapter-viewer",
+    inMainPlayer: rootSegment === "main-player",
+    inPlayerUtilitySheet: Boolean(rootSegment && PLAYER_UTILITY_SHEETS.has(rootSegment)),
+    inBookUtilitySheet: Boolean(rootSegment && BOOK_UTILITY_SHEETS.has(rootSegment)),
+  };
+};
+
+// Recover the viewed book id when the router is already sitting on the Home detail route.
+const getReturnToLibraryItemId = (
+  segments: string[],
+  globalParams: { libraryItemId?: string | string[] },
+) =>
+  segments[0] === "(tabs)" && segments[1] === "(home)" && segments[2] === "[libraryItemId]"
+    ? resolveParam(globalParams.libraryItemId)
+    : undefined;
 
 export default function RootLayout() {
   useApplyAccentThemeOverrides();
@@ -48,10 +83,11 @@ export default function RootLayout() {
   const [initialDeepLinkBookId, setInitialDeepLinkBookId] = useState<string | null | undefined>(
     undefined,
   );
-  const returnToLibraryItemId =
-    segments[0] === "(tabs)" && segments[1] === "(home)" && segments[2] === "[libraryItemId]"
-      ? resolveParam(globalParams.libraryItemId)
-      : undefined;
+  const routeState = useMemo(() => getRouteState(segments), [segments]);
+  const returnToLibraryItemId = useMemo(
+    () => getReturnToLibraryItemId(segments, globalParams),
+    [globalParams, segments],
+  );
   const startupBookLinkId = returnToLibraryItemId ?? initialDeepLinkBookId ?? undefined;
 
   // Persist only queries that opt-in via `meta.persist`
@@ -72,6 +108,7 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
+    // Read the cold-start URL once so startup navigation can avoid clobbering a deep link.
     let isMounted = true;
 
     Linking.getInitialURL()
@@ -90,34 +127,19 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
+    // Once the router has entered tabs, the startup deep link has been handed off.
     if (initialDeepLinkBookId == null) return;
-    if (segments[0] !== "(tabs)") return;
+    if (!routeState.inTabs) return;
 
     setInitialDeepLinkBookId(null);
-  }, [initialDeepLinkBookId, segments]);
+  }, [initialDeepLinkBookId, routeState.inTabs]);
 
   useEffect(() => {
     if (status === "hydrating") return;
     if (initialDeepLinkBookId === undefined) return;
 
-    const rootSegment = segments[0];
-    const inLogin = rootSegment === "login";
-    const inTabs = rootSegment === "(tabs)";
-    const inLibraryPicker = rootSegment === "library-picker";
-    const inChapterViewer = rootSegment === "chapter-viewer";
-    const inMainPlayer = rootSegment === "main-player";
-    const inPlayerUtilitySheet =
-      rootSegment === "player-rate" ||
-      rootSegment === "player-bookmarks" ||
-      rootSegment === "player-sleep-timer";
-    const inBookUtilitySheet =
-      rootSegment === "book-bookshelves" ||
-      rootSegment === "book-downloads" ||
-      rootSegment === "book-bookmarks" ||
-      rootSegment === "book-addbookmark" ||
-      rootSegment === "book-series" ||
-      rootSegment === "book-filter-results";
-    if (status === "anonymous" && !inLogin) {
+    // Keep all auth and startup routing decisions in one place to avoid competing redirects.
+    if (status === "anonymous" && !routeState.inLogin) {
       router.replace({
         pathname: "/login",
         params: {
@@ -128,30 +150,34 @@ export default function RootLayout() {
       return;
     }
 
-    if (
-      status !== "anonymous" &&
-      !loginRequired &&
-      !inLogin &&
-      !inTabs &&
-      !inLibraryPicker &&
-      !inChapterViewer &&
-      !inMainPlayer &&
-      !inPlayerUtilitySheet &&
-      !inBookUtilitySheet
-    ) {
+    if (loginRequired && status !== "anonymous" && !routeState.inLogin) {
+      router.push({ pathname: "/login", params: { mode: "sheet" } });
+      return;
+    }
+
+    const isKnownAuthenticatedRoute =
+      routeState.inLogin ||
+      routeState.inTabs ||
+      routeState.inLibraryPicker ||
+      routeState.inChapterViewer ||
+      routeState.inMainPlayer ||
+      routeState.inPlayerUtilitySheet ||
+      routeState.inBookUtilitySheet;
+
+    if (status !== "anonymous" && !loginRequired && !isKnownAuthenticatedRoute) {
       if (startupBookLinkId) {
         return;
       }
       router.replace("/(tabs)/(home)");
     }
-  }, [initialDeepLinkBookId, loginRequired, segments, startupBookLinkId, status]);
+  }, [initialDeepLinkBookId, loginRequired, routeState, startupBookLinkId, status]);
 
   useEffect(() => {
     if (status === "hydrating") return;
 
     const prevStatus = previousStatus.current;
 
-    // Clear persisted query data on logout transitions
+    // Clear persisted query data on logout transitions.
     const didLogout = prevStatus !== null && prevStatus !== "anonymous" && status === "anonymous";
     if (didLogout) {
       queryClient.removeQueries({
@@ -168,7 +194,7 @@ export default function RootLayout() {
       });
     }
 
-    // Track current values for the next transition check
+    // Track current values for the next transition check.
     previousStatus.current = status;
   }, [status]);
 
@@ -178,18 +204,10 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (!loginRequired) return;
-    if (status === "anonymous") return;
-    const rootSegment = segments[0];
-    if (rootSegment === "login") return;
-    router.push({ pathname: "/login", params: { mode: "sheet" } });
-  }, [loginRequired, segments, status]);
-
-  useEffect(() => {
     if (status !== "authenticated") return;
     const prefetches: Promise<unknown>[] = [];
 
-    // Warm the catalog cache for Home/Search. Prefetch is stale-aware (5 minute query staleTime).
+    // Warm the core catalog and user-state queries after auth is ready.
     if (activeLibraryId) {
       prefetches.push(
         queryClient.prefetchQuery({
