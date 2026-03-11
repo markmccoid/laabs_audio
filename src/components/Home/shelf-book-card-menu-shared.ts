@@ -12,6 +12,7 @@ import {
   useDeviceBooksActions,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
+import { shareBook } from "@/sharing/book-share";
 import {
   useHomeShelves,
   type HomeCustomShelf,
@@ -115,6 +116,9 @@ export const useShelfBookCardMenuActions = ({
   const isDownloaded = useDeviceBooksStore((state) =>
     selectHasPlayableBookDownload(state, book.id),
   );
+  const coverLocalUri = useDeviceBooksStore((state) =>
+    state.downloadedBookData[book.id]?.coverLocalUri ?? null,
+  );
   const queueProgressSync = useDeviceBooksStore((state) => state.actions.queueProgressSync);
   const clearPendingProgressSync = useDeviceBooksStore(
     (state) => state.actions.clearPendingProgressSync,
@@ -161,6 +165,8 @@ export const useShelfBookCardMenuActions = ({
   const favoriteSystemImage: "heart.slash" | "heart" = isFavorite
     ? "heart.slash"
     : "heart";
+  const shareLabel = "Share Book";
+  const shareSystemImage: "square.and.arrow.up" = "square.and.arrow.up";
   const continueListeningVisibilityLabel = progress?.hideFromContinueListening
     ? "Show in Continue Listening"
     : "Hide from Continue Listening";
@@ -378,6 +384,22 @@ export const useShelfBookCardMenuActions = ({
     }
   };
 
+  const handleShareBook = async () => {
+    if (busyAction || !book.id) return;
+
+    try {
+      await shareBook({
+        libraryItemId: book.id,
+        title: book.title,
+        author: book.author,
+        coverUri: book.coverFull ?? book.cover ?? null,
+        localCoverUri: coverLocalUri,
+      });
+    } catch {
+      toast.error("Unable to share book");
+    }
+  };
+
   const handleToggleShelfMembership = async (shelf: SelectableShelf, isMember: boolean) => {
     if (busyAction || !canMutateShelves) return;
 
@@ -414,6 +436,7 @@ export const useShelfBookCardMenuActions = ({
     canMutateShelves,
     isBusy: busyAction !== null || isToggleFavoritePending,
     primaryDisabled: busyAction !== null || isToggleFavoritePending || !canPlay,
+    shareDisabled: busyAction !== null || isToggleFavoritePending || !book.id,
     favoriteDisabled: busyAction !== null || isToggleFavoritePending || !canToggleFavorite,
     finishDisabled: busyAction !== null || isToggleFavoritePending,
     hideDisabled:
@@ -425,9 +448,12 @@ export const useShelfBookCardMenuActions = ({
     favoriteSystemImage,
     finishedLabel,
     finishedSystemImage,
+    shareLabel,
+    shareSystemImage,
     hasContinueListeningVisibilityOption,
     primaryLabel,
     primarySystemImage,
+    handleShareBook,
     handleToggleShelfMembership,
     shelfMembershipOptions,
     handleToggleContinueListeningVisibility,

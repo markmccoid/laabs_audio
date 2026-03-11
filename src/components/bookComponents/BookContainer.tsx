@@ -1,5 +1,5 @@
-import type { LibraryItemSummary } from "@/api/library-items-api";
 import { AbsApiError } from "@/api/abs-client";
+import type { LibraryItemSummary } from "@/api/library-items-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { useCoverImageSource } from "@/components/images/cover-image";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
@@ -16,7 +16,7 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Link, Stack, router, useSegments } from "expo-router";
+import { Stack, router, useSegments } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
 import {
@@ -271,7 +271,11 @@ const BookContainer = ({ libraryItemId }: Props) => {
     itemLoadError instanceof AbsApiError &&
     itemLoadError.status === 404;
   const hasItemLoadError =
-    Boolean(libraryItemId) && !isLoading && !bookData && Boolean(itemLoadError) && !isMissingFromCurrentLibrary;
+    Boolean(libraryItemId) &&
+    !isLoading &&
+    !bookData &&
+    Boolean(itemLoadError) &&
+    !isMissingFromCurrentLibrary;
 
   const openSeriesSheet = (seriesId: string, seriesName: string) => {
     router.push({
@@ -346,7 +350,21 @@ const BookContainer = ({ libraryItemId }: Props) => {
         <Stack.Toolbar placement="right">
           <Stack.Toolbar.Menu icon="ellipsis">
             <Stack.Toolbar.MenuAction
-              disabled={!libraryItemId || favoriteDisabled || isMissingFromCurrentLibrary || hasItemLoadError}
+              disabled={!libraryItemId}
+              icon="square.and.arrow.up"
+              onPress={() => {
+                handleShareBook();
+              }}
+            >
+              Share Book
+            </Stack.Toolbar.MenuAction>
+            <Stack.Toolbar.MenuAction
+              disabled={
+                !libraryItemId ||
+                favoriteDisabled ||
+                isMissingFromCurrentLibrary ||
+                hasItemLoadError
+              }
               icon={favoriteSystemImage}
               isOn={isFavorite}
               onPress={() => {
@@ -356,7 +374,9 @@ const BookContainer = ({ libraryItemId }: Props) => {
               {favoriteLabel}
             </Stack.Toolbar.MenuAction>
             <Stack.Toolbar.MenuAction
-              disabled={!libraryItemId || finishDisabled || isMissingFromCurrentLibrary || hasItemLoadError}
+              disabled={
+                !libraryItemId || finishDisabled || isMissingFromCurrentLibrary || hasItemLoadError
+              }
               icon={finishedSystemImage}
               isOn={isFinished}
               onPress={() => {
@@ -419,16 +439,26 @@ const BookContainer = ({ libraryItemId }: Props) => {
             <SymbolView name="book.closed" size={30} tintColor={themeColors.textMuted} />
             <Text
               selectable
-              style={{ color: themeColors.text, fontSize: 20, fontWeight: "700", textAlign: "center" }}
+              style={{
+                color: themeColors.text,
+                fontSize: 20,
+                fontWeight: "700",
+                textAlign: "center",
+              }}
             >
               Book not found in this library
             </Text>
             <Text
               selectable
-              style={{ color: themeColors.textMuted, fontSize: 14, textAlign: "center", lineHeight: 20 }}
+              style={{
+                color: themeColors.textMuted,
+                fontSize: 14,
+                textAlign: "center",
+                lineHeight: 20,
+              }}
             >
-              This shared book could not be loaded from your current library. Switch libraries and try
-              again.
+              This shared book could not be loaded from your current library. Switch libraries and
+              try again.
             </Text>
             <Pressable
               accessibilityRole="button"
@@ -442,7 +472,9 @@ const BookContainer = ({ libraryItemId }: Props) => {
                 opacity: pressed ? 0.88 : 1,
               })}
             >
-              <Text style={{ color: themeColors.accentForeground, fontSize: 14, fontWeight: "700" }}>
+              <Text
+                style={{ color: themeColors.accentForeground, fontSize: 14, fontWeight: "700" }}
+              >
                 Switch Library
               </Text>
             </Pressable>
@@ -462,13 +494,22 @@ const BookContainer = ({ libraryItemId }: Props) => {
               gap: 10,
             }}
           >
-            <SymbolView name="exclamationmark.triangle" size={28} tintColor={themeColors.textMuted} />
+            <SymbolView
+              name="exclamationmark.triangle"
+              size={28}
+              tintColor={themeColors.textMuted}
+            />
             <Text selectable style={{ color: themeColors.text, fontSize: 18, fontWeight: "700" }}>
               Unable to load this book
             </Text>
             <Text
               selectable
-              style={{ color: themeColors.textMuted, fontSize: 14, textAlign: "center", lineHeight: 20 }}
+              style={{
+                color: themeColors.textMuted,
+                fontSize: 14,
+                textAlign: "center",
+                lineHeight: 20,
+              }}
             >
               Please try again after your connection and library access are available.
             </Text>
@@ -483,26 +524,18 @@ const BookContainer = ({ libraryItemId }: Props) => {
                 gap: 12,
               }}
             >
-              <Link href="">
-                <Link.Trigger>
-                  <BookImage
-                    libraryItemId={libraryItemId}
-                    coverURL={coverURL}
-                    localCoverUri={localCoverUri}
-                    leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
-                    showFavoriteIndicator={isFavorite}
-                    showFinishedIndicator={isFinished}
-                    showProgressLine={progressSeconds > 0 || isFinished}
-                    progressPercent={visualProgressPercent}
-                    maxSize={coverMaxSize}
-                  />
-                </Link.Trigger>
-                <Link.Menu>
-                  <Link.MenuAction onPress={handleShareBook} icon="square.and.arrow.up">
-                    Share Book
-                  </Link.MenuAction>
-                </Link.Menu>
-              </Link>
+              <BookImage
+                libraryItemId={libraryItemId}
+                coverURL={coverURL}
+                localCoverUri={localCoverUri}
+                leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
+                showFavoriteIndicator={isFavorite}
+                showFinishedIndicator={isFinished}
+                showProgressLine={progressSeconds > 0 || isFinished}
+                progressPercent={visualProgressPercent}
+                maxSize={coverMaxSize}
+              />
+
               <BookQuickActions libraryItemId={libraryItemId} />
             </View>
             <View className="h-[12]" />
@@ -520,7 +553,9 @@ const BookContainer = ({ libraryItemId }: Props) => {
                   defaultProgressTimeDisplay={defaultProgressTimeDisplay}
                   progressResetKey={libraryItemId}
                   onAuthorPress={(authorName) => openFilterResultsSheet("author", authorName)}
-                  onNarratorPress={(narratorName) => openFilterResultsSheet("narrator", narratorName)}
+                  onNarratorPress={(narratorName) =>
+                    openFilterResultsSheet("narrator", narratorName)
+                  }
                 />
               </View>
               <View style={{ alignItems: "center", gap: 6 }}>

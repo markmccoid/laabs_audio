@@ -16,7 +16,10 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
     hasContinueListeningVisibilityOption,
     hideDisabled,
     primaryLabel,
+    shareDisabled,
+    shareLabel,
     handleToggleContinueListeningVisibility,
+    handleShareBook,
     handlePrimaryAction,
     handleToggleFavorite,
     handleToggleFinished,
@@ -54,6 +57,16 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
                 void handleToggleFinished();
               },
             },
+            ...(!shareDisabled
+              ? [
+                  {
+                    text: shareLabel,
+                    onPress: () => {
+                      void handleShareBook();
+                    },
+                  },
+                ]
+              : []),
             ...(hasContinueListeningVisibilityOption
               ? [
                   {

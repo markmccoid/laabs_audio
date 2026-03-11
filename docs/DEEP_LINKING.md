@@ -13,7 +13,7 @@ laabsaudio:///{libraryItemId}
 That URL is created with `expo-linking` in [`/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/navigation/book-links.ts`](/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/navigation/book-links.ts):
 
 ```ts
-Linking.createURL(`/${libraryItemId}`)
+Linking.createURL(`/${libraryItemId}`);
 ```
 
 Even though the internal Expo Router route is `/(tabs)/(home)/[libraryItemId]`, the public URL does not include `(tabs)` or `(home)` because those are route groups.
@@ -27,22 +27,22 @@ The actual share logic lives in [`/Users/markmccoid/Documents/myProgramming/Reac
 Current share behavior:
 
 - Build the deep link with `Linking.createURL`.
-- Try to use a local/downloaded cover first.
-- If there is no local cover, try Expo Image disk cache with `Image.getCachePathAsync(...)`.
+- Build the remote cover image URL directly from `libraryItemId`.
+- Use the tokened cover URL when `useTokenWithCoverImages` is enabled and a token is available.
 - Open the native share sheet with:
 
 ```ts
 await Share.share({
   message: `${title} -> Open in LAAB -> ${deepLink}`,
-  url: cachedCoverUri ?? undefined,
+  url: remoteCoverUri,
 });
 ```
 
 Important detail:
 
 - The deep link is placed in `message`.
-- The `url` field is reserved for the shareable cover image URI when available.
-- We do not put the deep link in `url` because this share flow is designed to attach the book image when possible.
+- The `url` field is the remote book cover URI derived from `libraryItemId`.
+- We do not put the deep link in `url`; the cover image and the route link are intentionally separated.
 
 ## What `book-links.ts` Is For
 
