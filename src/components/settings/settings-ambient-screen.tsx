@@ -1,15 +1,16 @@
-import { useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
-import * as DocumentPicker from "expo-document-picker";
-import { SymbolView } from "expo-symbols";
 import { ambientService } from "@/ambient/ambient-service";
 import { useAmbientStore } from "@/store/store-ambient";
 import { useThemeColors } from "@/theme/use-app-theme";
+import * as DocumentPicker from "expo-document-picker";
+import { SymbolView } from "expo-symbols";
+import { useMemo, useState } from "react";
+import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
 
 const formatVolumeLabel = (volume: number) => `${Math.round(volume * 100)}%`;
 
 export const SettingsAmbientScreen = () => {
   const themeColors = useThemeColors();
+  const isEnabled = useAmbientStore((state) => state.isEnabled);
   const trackOrder = useAmbientStore((state) => state.trackOrder);
   const tracksById = useAmbientStore((state) => state.tracksById);
   const ambientTracks = useMemo(
@@ -61,7 +62,9 @@ export const SettingsAmbientScreen = () => {
                 error instanceof Error ? error.message : "Unable to delete ambient audio.";
               Alert.alert("Delete failed", message);
             })
-            .finally(() => setPendingDeleteId((currentId) => (currentId === trackId ? null : currentId)));
+            .finally(() =>
+              setPendingDeleteId((currentId) => (currentId === trackId ? null : currentId)),
+            );
         },
       },
     ]);
@@ -78,6 +81,36 @@ export const SettingsAmbientScreen = () => {
           gap: 16,
         }}
       >
+        <View
+          style={{
+            borderWidth: 1,
+            borderColor: themeColors.border,
+            borderRadius: 16,
+            borderCurve: "continuous",
+            padding: 14,
+            gap: 10,
+            backgroundColor: themeColors.surface,
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text selectable style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}>
+                Enable Ambient Audio
+              </Text>
+              <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+                When off, ambient controls are hidden from the main player and any active ambient
+                playback stops immediately.
+              </Text>
+            </View>
+            <Switch
+              value={isEnabled}
+              onValueChange={(enabled) => ambientService.setEnabled(enabled)}
+              trackColor={{ false: themeColors.border, true: themeColors.accent }}
+              thumbColor={isEnabled ? themeColors.accentForeground : "#f4f4f5"}
+            />
+          </View>
+        </View>
+
         <View
           style={{
             borderWidth: 1,
@@ -158,9 +191,14 @@ export const SettingsAmbientScreen = () => {
                     }}
                   >
                     <SymbolView name="waveform" size={18} tintColor={themeColors.accent} />
+                    {/* <SymbolView name="waveform" size={18} tintColor={themeColors.accent} /> */}
                   </View>
                   <View style={{ flex: 1, gap: 2 }}>
-                    <Text selectable numberOfLines={1} style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
+                    <Text
+                      selectable
+                      numberOfLines={1}
+                      style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
+                    >
                       {track.fileName}
                     </Text>
                     <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>

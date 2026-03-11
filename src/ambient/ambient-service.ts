@@ -49,6 +49,18 @@ const getSelectedTrack = () => {
 };
 
 export const ambientService = {
+  setEnabled(enabled: boolean) {
+    if (!enabled) {
+      AudioPro.ambientStop();
+      const actions = ambientStore.getState().actions;
+      actions.clearSelection();
+      actions.setEnabled(false);
+      return;
+    }
+
+    ambientStore.getState().actions.setEnabled(true);
+  },
+
   async importTrackFromFile(options: { sourceUri: string; fileName?: string | null }) {
     const directory = await ensureAmbientDirectory();
     const fileName = sanitizeFileName(options.fileName?.trim() || "Ambient Track");
@@ -93,6 +105,9 @@ export const ambientService = {
 
   playTrack(trackId: string, libraryItemId: string | null) {
     const state = ambientStore.getState();
+    if (!state.isEnabled) {
+      throw new Error("Ambient audio is currently disabled.");
+    }
     const track = state.tracksById[trackId];
     if (!track) {
       throw new Error("Ambient track not found.");

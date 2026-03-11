@@ -1,16 +1,22 @@
-import { Pressable, Text, View } from "react-native";
-import { router } from "expo-router";
-import { SymbolView } from "expo-symbols";
 import { ambientService } from "@/ambient/ambient-service";
 import { usePlaybackStore } from "@/player";
 import { selectSelectedAmbientTrack, useAmbientStore } from "@/store/store-ambient";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { router } from "expo-router";
+import { SymbolView } from "expo-symbols";
+import { Pressable, Text, View } from "react-native";
 
 const MainPlayerAmbientControl = () => {
   const themeColors = useThemeColors();
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const isEnabled = useAmbientStore((state) => state.isEnabled);
+  const trackCount = useAmbientStore((state) => state.trackOrder.length);
   const selectedTrack = useAmbientStore(selectSelectedAmbientTrack);
   const ambientPlaybackState = useAmbientStore((state) => state.playbackState);
+
+  if (!isEnabled || trackCount === 0) {
+    return null;
+  }
 
   if (!selectedTrack) {
     return (
@@ -23,8 +29,8 @@ const MainPlayerAmbientControl = () => {
           minHeight: 40,
           borderRadius: 999,
           borderCurve: "continuous",
-          paddingHorizontal: 14,
-          paddingVertical: 9,
+          paddingHorizontal: 12,
+          paddingVertical: 6,
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "center",
@@ -35,9 +41,9 @@ const MainPlayerAmbientControl = () => {
           opacity: pressed ? 0.82 : 1,
         })}
       >
-        <SymbolView name="plus.circle.fill" size={16} tintColor={themeColors.accent} />
-        <Text selectable style={{ color: themeColors.text, fontSize: 14, fontWeight: "700" }}>
-          Add Ambient Track
+        <SymbolView name="speaker.wave.2.fill" size={25} tintColor={themeColors.accent} />
+        <Text selectable style={{ color: themeColors.text, fontSize: 12, fontWeight: "700" }}>
+          Add Ambient
         </Text>
       </Pressable>
     );
@@ -110,7 +116,11 @@ const MainPlayerAmbientControl = () => {
           opacity: pressed ? 0.78 : 1,
         })}
       >
-        <Text selectable numberOfLines={1} style={{ color: themeColors.text, fontSize: 14, fontWeight: "600" }}>
+        <Text
+          selectable
+          numberOfLines={1}
+          style={{ color: themeColors.text, fontSize: 14, fontWeight: "600" }}
+        >
           {selectedTrack.fileName}
         </Text>
       </Pressable>

@@ -1,0 +1,178 @@
+# Ambient Sound
+
+## Summary
+
+Ambient sound is a separate audio path from audiobook playback. It uses the
+`react-native-audio-pro` ambient APIs directly and does not go through the app's
+main audiobook audio engine.
+
+The feature is intentionally split into:
+
+- persistent ambient state and downloaded file metadata
+- file import and deletion
+- main-player UI for selecting and controlling ambient tracks
+- playback coordination with the active audiobook session
+
+## User Flow
+
+### Settings
+
+Users manage ambient sound from `Settings > Ambient Audio`.
+
+That screen provides:
+
+- an enable/disable switch for ambient sound
+- local file import from Files / iCloud
+- a list of imported ambient tracks
+- delete actions for imported tracks
+
+Important behavior:
+
+- ambient sound is disabled by default
+- turning the switch off immediately stops ambient playback
+- turning the switch off clears the selected ambient track from the active book
+- users can still import and manage ambient tracks while the feature is disabled
+
+### Main Player
+
+Ambient controls are only shown on the main player when both conditions are true:
+
+- ambient sound is enabled
+- at least one ambient track has been imported
+
+If no track is active, the main player shows `Add Ambient Track`.
+
+Once a track is selected:
+
+- the picker sheet dismisses
+- `AudioPro.ambientPlay()` starts the track in a loop
+- `AudioPro.ambientSetVolume()` applies the saved per-track volume
+- the main player shows a compact control row with:
+  - play/pause for ambient only
+  - the selected track name
+  - an `X` button to unload ambient playback
+
+Tapping the track name reopens the ambient picker sheet.
+
+### Ambient Picker Sheet
+
+The player ambient picker is an Expo Router `formSheet`.
+
+It shows:
+
+- the imported ambient track list
+- the current selected track
+- a volume slider for the selected track
+
+Implementation note:
+
+- the root wrapper view uses `collapsable={false}` so the sheet presents
+  correctly with Expo Router form-sheet presentation
+
+## Technical Design
+
+### Store
+
+Persistent ambient state lives in:
+
+- `src/store/store-ambient.ts`
+
+Persisted fields:
+
+- `isEnabled`
+- `tracksById`
+- `trackOrder`
+- `selectedTrackId`
+- `playbackState`
+- `selectedLibraryItemId`
+
+Track metadata:
+
+- `id`
+- `uri`
+- `fileName`
+- `volume`
+- `importedAt`
+
+Default behavior:
+
+- `isEnabled` defaults to `false`
+- track volume defaults to `0.2`
+- volume is stored in raw AudioPro scale `0.0` to `1.0`
+
+### Service Layer
+
+Ambient operations are centralized in:
+
+- `src/ambient/ambient-service.ts`
+
+Responsibilities:
+
+- import selected files into app-owned storage
+- sanitize file names
+- create stable ambient track ids
+- delete stored files when tracks are removed
+- call `AudioPro` ambient methods directly
+- stop and clear active ambient playback when the feature is disabled
+
+Ambient audio storage path:
+
+- `FileSystem.documentDirectory + "laabs-ambient/"`
+
+### Direct AudioPro Usage
+
+Ambient playback uses:
+
+- `AudioPro.ambientPlay({ url, loop: true })`
+- `AudioPro.ambientPause()`
+- `AudioPro.ambientResume()`
+- `AudioPro.ambientStop()`
+- `AudioPro.ambientSetVolume(volume)`
+
+This is separate from:
+
+- `src/player/audio-engine.ts`
+- `src/player/player-service.ts`
+
+The audiobook engine remains responsible only for book playback.
+
+### Coordinator
+
+Playback syncing is handled in:
+
+- `src/ambient/ambient-coordinator.tsx`
+
+The coordinator watches audiobook playback state and current book identity.
+
+Required behavior:
+
+- pausing the book pauses ambient playback
+- resuming the book resumes ambient playback when appropriate
+- stopping the book clears ambient playback
+- changing books clears ambient playback
+
+### Routes and UI Files
+
+Key route and UI files:
+
+- `src/app/(tabs)/settings/ambient-audio.tsx`
+- `src/components/settings/settings-ambient-screen.tsx`
+- `src/app/player-ambient.tsx`
+- `src/components/main-player/player-ambient-sheet.tsx`
+- `src/components/main-player/main-player-ambient-control.tsx`
+
+## Current Constraints
+
+- only local Files / iCloud import is supported
+- no remote ambient catalog exists yet
+- ambient controls only exist on the main-player screen
+- ambient selection is tied to the currently active book session
+- disabling ambient removes it from the main player until re-enabled
+
+## Maintenance Notes
+
+- avoid using selectors that allocate a fresh array directly in `useAmbientStore`
+  subscriptions; derive track lists from stable store slices with `useMemo`
+- avoid same-value writes in the ambient store to reduce unnecessary rerenders
+- keep ambient logic outside the audiobook engine so the two playback paths stay
+  isolated

@@ -149,7 +149,7 @@ export const SettingsHomeScreen = () => {
               href="/(tabs)/settings/ambient-audio"
               title="Ambient Audio"
               subtitle="Import and manage looped ambient tracks"
-              icon="waveform"
+              icon="speaker.wave.2"
             />
             <SettingsRow
               href="/(tabs)/settings/system"

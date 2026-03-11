@@ -16,12 +16,14 @@ export type AmbientTrackRecord = {
 };
 
 export type AmbientStoreState = {
+  isEnabled: boolean;
   tracksById: Record<string, AmbientTrackRecord>;
   trackOrder: string[];
   selectedTrackId: string | null;
   playbackState: AmbientPlaybackState;
   selectedLibraryItemId: string | null;
   actions: {
+    setEnabled: (enabled: boolean) => void;
     addTrack: (track: AmbientTrackRecord) => void;
     removeTrack: (trackId: string) => void;
     setTrackVolume: (trackId: string, volume: number) => void;
@@ -35,6 +37,7 @@ export type AmbientStoreState = {
 const clampAmbientVolume = (value: number) => Math.max(0, Math.min(1, value));
 
 const getBaseState = () => ({
+  isEnabled: false,
   tracksById: {} as Record<string, AmbientTrackRecord>,
   trackOrder: [] as string[],
   selectedTrackId: null as string | null,
@@ -47,6 +50,11 @@ export const ambientStore = createStore<AmbientStoreState>()(
     (set) => ({
       ...getBaseState(),
       actions: {
+        setEnabled: (isEnabled) =>
+          set((state) => {
+            if (state.isEnabled === isEnabled) return state;
+            return { isEnabled };
+          }),
         addTrack: (track) =>
           set((state) => {
             const exists = Boolean(state.tracksById[track.id]);
@@ -127,6 +135,7 @@ export const ambientStore = createStore<AmbientStoreState>()(
       storage: createJSONStorage(() => mmkvStorage),
       version: 1,
       partialize: (state) => ({
+        isEnabled: state.isEnabled,
         tracksById: state.tracksById,
         trackOrder: state.trackOrder,
         selectedTrackId: state.selectedTrackId,
@@ -141,6 +150,7 @@ export const ambientStore = createStore<AmbientStoreState>()(
 
         return {
           ...currentState,
+          isEnabled: typedState.isEnabled ?? false,
           tracksById: typedState.tracksById ?? {},
           trackOrder: typedState.trackOrder ?? [],
           selectedTrackId: typedState.selectedTrackId ?? null,
