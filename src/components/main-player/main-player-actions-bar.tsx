@@ -1,12 +1,14 @@
+import { usePlaybackRateGesture } from "@/hooks/use-playback-rate-gesture";
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { useSleepTimerStatus } from "@/player";
-import { useBookPlaybackRate } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Bookmark } from "@/types/absTypes";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
+import { GestureDetector } from "react-native-gesture-handler";
+import Animated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
 
 type MainPlayerActionsBarProps = {
   libraryItemId?: string;
@@ -104,11 +106,142 @@ const ActionIconButton = ({
   );
 };
 
+type RateActionButtonProps = {
+  libraryItemId?: string;
+  onPress: () => void;
+};
+
+const RateActionButton = ({ libraryItemId, onPress }: RateActionButtonProps) => {
+  const themeColors = useThemeColors();
+  const lastGestureStartAtRef = useRef(0);
+  const lastGestureFinalizeAtRef = useRef(0);
+  const {
+    bubbleOffsetY,
+    bubbleProgress,
+    displayRate,
+    dragOffsetX,
+    dragOffsetY,
+    gesture,
+    iconPressed,
+    targetLibraryItemId,
+  } = usePlaybackRateGesture({
+    libraryItemId,
+    onGestureStart: () => {
+      lastGestureStartAtRef.current = Date.now();
+    },
+    onGestureFinalize: () => {
+      lastGestureFinalizeAtRef.current = Date.now();
+    },
+  });
+
+  const iconAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: dragOffsetX.value },
+      { translateY: dragOffsetY.value },
+      { scale: interpolate(iconPressed.value, [0, 1], [1, 1.18]) },
+    ],
+  }));
+
+  const bubbleAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: bubbleProgress.value,
+    transform: [
+      { translateY: interpolate(bubbleProgress.value, [0, 1], [8, -26]) + bubbleOffsetY.value },
+      { scale: interpolate(bubbleProgress.value, [0, 1], [0.82, 1]) },
+    ],
+  }));
+
+  const handlePress = () => {
+    const now = Date.now();
+    const isGestureStillActive = lastGestureStartAtRef.current > lastGestureFinalizeAtRef.current;
+    const justFinishedGesture = now - lastGestureFinalizeAtRef.current < 250;
+
+    if (isGestureStillActive || justFinishedGesture) {
+      return;
+    }
+
+    onPress();
+  };
+
+  return (
+    <View style={{ minWidth: 70, alignItems: "center", justifyContent: "center", paddingVertical: 4 }}>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          {
+            position: "absolute",
+            top: -18,
+            minWidth: 66,
+            borderRadius: 12,
+            borderCurve: "continuous",
+            paddingHorizontal: 10,
+            paddingVertical: 4,
+            backgroundColor: themeColors.accent,
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 10px 18px rgba(15, 23, 42, 0.18)",
+          },
+          bubbleAnimatedStyle,
+        ]}
+      >
+        <Text
+          selectable
+          style={{
+            color: themeColors.accentForeground,
+            fontSize: 14,
+            fontWeight: "700",
+            fontVariant: ["tabular-nums"],
+          }}
+        >
+          {displayRate.toFixed(2)}x
+        </Text>
+      </Animated.View>
+
+      <GestureDetector gesture={gesture}>
+        <Animated.View style={iconAnimatedStyle}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Rate"
+            accessibilityHint="Tap to open playback rate controls. Long press and drag up to increase or left to decrease."
+            disabled={!targetLibraryItemId}
+            onPress={handlePress}
+            style={({ pressed }) => ({
+              alignItems: "center",
+              justifyContent: "center",
+              minWidth: 70,
+              opacity: !targetLibraryItemId ? 0.45 : pressed ? 0.72 : 1,
+            })}
+          >
+            <View
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 21,
+                borderCurve: "continuous",
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: themeColors.bg,
+              }}
+            >
+              <SymbolView name="hare.fill" size={35} tintColor={themeColors.accent} />
+            </View>
+          </Pressable>
+        </Animated.View>
+      </GestureDetector>
+
+      <Text
+        className="text-text-muted"
+        style={{ marginTop: -1, fontSize: 12, fontVariant: ["tabular-nums"] }}
+      >
+        {displayRate.toFixed(2)}x
+      </Text>
+    </View>
+  );
+};
+
 const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
   const themeColors = useThemeColors();
   const { data: userServerState } = useGetUserServerState();
   const sleepTimerStatus = useSleepTimerStatus();
-  const playbackRate = useBookPlaybackRate(libraryItemId);
 
   const bookmarkCount = useMemo(() => {
     if (!libraryItemId) return 0;
@@ -162,12 +295,12 @@ const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
       }}
     >
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-        <View className="relative flex-col items-center">
-          <ActionIconButton icon="hare.fill" label="Rate" onPress={openRate} />
-          <Text className="absolute bottom-[-5] text-text-muted" style={{ fontSize: 12 }}>
-            {playbackRate}x
-          </Text>
-        </View>
+        <ActionIconButton
+          icon="powersleep"
+          label={sleepTimerStatus.isActive ? "Sleep timer active" : "Sleep timer"}
+          onPress={openSleepTimer}
+          isActive={sleepTimerStatus.isActive}
+        />
         <ActionIconButton
           icon="bookmark.fill"
           label={
@@ -183,12 +316,7 @@ const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
           onPress={openAddBookmark}
           disabled={!libraryItemId}
         />
-        <ActionIconButton
-          icon="powersleep"
-          label={sleepTimerStatus.isActive ? "Sleep timer active" : "Sleep timer"}
-          onPress={openSleepTimer}
-          isActive={sleepTimerStatus.isActive}
-        />
+        <RateActionButton libraryItemId={libraryItemId} onPress={openRate} />
       </View>
     </View>
   );
