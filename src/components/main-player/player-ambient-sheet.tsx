@@ -129,7 +129,10 @@ const PlayerAmbientSheet = () => {
               })
             ) : (
               <View style={{ paddingHorizontal: 16, paddingVertical: 18, gap: 6 }}>
-                <Text selectable style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
+                <Text
+                  selectable
+                  style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
+                >
                   No ambient tracks available
                 </Text>
                 <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
@@ -168,7 +171,7 @@ const PlayerAmbientSheet = () => {
               thumbTintColor={themeColors.accent}
               minimumValue={0}
               maximumValue={1}
-              step={0.05}
+              step={0.01}
               value={selectedTrack.volume}
               onValueChange={(value) => ambientService.setTrackVolume(selectedTrack.id, value)}
             />
