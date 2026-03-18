@@ -8,6 +8,7 @@ import {
 import { useAuthStore } from "@/auth/auth-store";
 import { useFavoriteBookAction } from "@/hooks/use-favorite-book-action";
 import {
+  resolveStoredDownloadCoverUri,
   selectHasPlayableBookDownload,
   useDeviceBooksActions,
   useDeviceBooksStore,
@@ -117,7 +118,7 @@ export const useShelfBookCardMenuActions = ({
     selectHasPlayableBookDownload(state, book.id),
   );
   const coverLocalUri = useDeviceBooksStore((state) =>
-    state.downloadedBookData[book.id]?.coverLocalUri ?? null,
+    resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
   );
   const queueProgressSync = useDeviceBooksStore((state) => state.actions.queueProgressSync);
   const clearPendingProgressSync = useDeviceBooksStore(
@@ -200,6 +201,15 @@ export const useShelfBookCardMenuActions = ({
             isFinished: true,
           }),
       );
+    }
+
+    if (isBookLoaded) {
+      await playerService.finishActiveBook({
+        libraryItemId: book.id,
+        durationSeconds,
+      });
+      toast.success("Marked read");
+      return;
     }
 
     if (isOnline !== false && authStatus === "authenticated") {
@@ -326,7 +336,9 @@ export const useShelfBookCardMenuActions = ({
     const alertTitle = isMarkedFinished ? "Mark as Unread" : "Mark as Read";
     const alertMessage = isMarkedFinished
       ? `Reset "${book.title}" progress to the beginning and mark it as unread?`
-      : `Mark "${book.title}" as read and move progress to the end?`;
+      : isBookLoaded
+        ? `Pause active playback, set progress in Audiobookshelf to the end of "${book.title}", and mark it as finished?`
+        : `Set progress in Audiobookshelf to the end of "${book.title}" and mark it as finished?`;
     const confirmLabel = isMarkedFinished ? "Mark Unread" : "Mark Read";
 
     Alert.alert(

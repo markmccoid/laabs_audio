@@ -1,3 +1,4 @@
+import { AbsApiError } from "../api/abs-client";
 import {
   createEmptyUserServerState,
   meApi,
@@ -12,6 +13,8 @@ import { queryKeys } from "../query/query-keys";
 import {
   DEFAULT_BOOK_PLAYBACK_RATE,
   deviceBooksStore,
+  resolveStoredDownloadCoverUri,
+  resolveStoredDownloadTrackUri,
   selectBookPlaybackRate,
   selectBookPlaybackRateIfStored,
   type DownloadTrack,
@@ -70,6 +73,12 @@ const pickNewestProgress = <
     const currentUpdate = Math.max(0, Math.floor(current.lastUpdate ?? 0));
     return currentUpdate >= latestUpdate ? current : latest;
   }, null);
+
+const resolveQueueDurationMs = (queue: PlaybackQueueItem[]) => {
+  const lastTrack = queue[queue.length - 1];
+  if (!lastTrack) return 0;
+  return Math.max(0, lastTrack.startOffsetMs + lastTrack.durationMs);
+};
 
 // Orchestrates playback between the UI, store, and audio engine.
 class PlayerService {
@@ -537,9 +546,9 @@ class PlayerService {
         return undefined;
       }
     })();
-    const artworkUri = downloadInfo.coverLocalUri ?? fallbackArtworkUri;
+    const artworkUri = resolveStoredDownloadCoverUri(downloadInfo) ?? fallbackArtworkUri;
     const queue: PlaybackQueueItem[] = normalizedTracks
-      .filter((track) => typeof track.fileUri === "string" && track.fileUri.length > 0)
+      .filter((track) => Boolean(resolveStoredDownloadTrackUri(track)))
       .map((track, trackIndex) =>
         this.toDownloadedQueueItem({
           libraryItemId,
@@ -611,6 +620,11 @@ class PlayerService {
       mimeType?: string;
     };
   }): PlaybackQueueItem {
+    const trackUri = resolveStoredDownloadTrackUri(payload.track);
+    if (!trackUri) {
+      throw new Error("Downloaded track path is unavailable in this build.");
+    }
+
     return {
       id: `${payload.libraryItemId}-download-${payload.trackIndex}`,
       libraryItemId: payload.libraryItemId,
@@ -622,7 +636,7 @@ class PlayerService {
       durationMs: secondsToMs(payload.track.normalizedDuration ?? payload.track.duration),
       startOffsetMs: secondsToMs(payload.track.normalizedStartOffset ?? payload.track.startOffset),
       source: {
-        uri: payload.track.fileUri,
+        uri: trackUri,
         mimeType: payload.detailsTrack?.mimeType,
         isLocal: true,
       },
@@ -735,6 +749,119 @@ class PlayerService {
     this.lastSyncAttemptAt = 0;
     this.lastSyncAt = 0;
     this.lastTrackedPositionMs = 0;
+  }
+
+  async finishActiveBook(payload: { libraryItemId: string; durationSeconds?: number }) {
+    const state = playbackStore.getState();
+    if (state.libraryItemId !== payload.libraryItemId || !state.queue.length) {
+      throw new Error("Active playback session not found");
+    }
+
+    const finalDurationMs = Math.max(
+      state.durationMs,
+      secondsToMs(payload.durationSeconds ?? 0),
+      resolveQueueDurationMs(state.queue),
+    );
+    const finalPositionMs = Math.max(0, finalDurationMs);
+    const finalTrack = findTrackForPosition(state.queue, finalPositionMs);
+    if (!finalTrack) {
+      throw new Error("Unable to resolve final playback position");
+    }
+
+    const finalTrackIndex = state.queue.indexOf(finalTrack);
+    const finalTrackPositionMs = Math.max(
+      0,
+      Math.min(finalPositionMs - finalTrack.startOffsetMs, finalTrack.durationMs),
+    );
+    const finalChapter = findChapterForPosition(state.chapterIndex, finalPositionMs);
+    const finalCurrentTimeSeconds = msToSeconds(finalPositionMs);
+    const deviceBookActions = deviceBooksStore.getState().actions;
+    const authState = authStore.getState();
+    const online = authState.isOnline !== false;
+    const authenticated = authState.status === "authenticated";
+    const activeLibraryId = authState.activeLibraryId;
+
+    try {
+      await this.engine.pause();
+    } catch {
+      // Ignore pause failures; the session is being ended explicitly below.
+    }
+
+    if (online && authenticated && state.sessionId && state.sessionId !== LOCAL_SESSION_ID) {
+      try {
+        await sessionsApi.closeSession(state.sessionId, {
+          timeListened: msToSeconds(this.listenedMs),
+          currentTime: finalCurrentTimeSeconds,
+          duration: finalPositionMs > 0 ? finalCurrentTimeSeconds : undefined,
+        });
+      } catch (error) {
+        if (!(error instanceof AbsApiError && error.status === 404) && __DEV__) {
+          console.warn("[player-service] finish:close-session-failed", {
+            libraryItemId: payload.libraryItemId,
+            sessionId: state.sessionId,
+            error,
+          });
+        }
+      }
+    }
+
+    deviceBookActions.clearPendingProgressSync(payload.libraryItemId);
+
+    let syncedToServer = false;
+    if (online && authenticated) {
+      try {
+        await meApi.updateProgress(payload.libraryItemId, {
+          currentTime: finalCurrentTimeSeconds,
+          isFinished: true,
+        });
+        syncedToServer = true;
+      } catch {
+        deviceBookActions.queueProgressSync(payload.libraryItemId, {
+          currentTime: finalCurrentTimeSeconds,
+          isFinished: true,
+        });
+      }
+    } else {
+      deviceBookActions.queueProgressSync(payload.libraryItemId, {
+        currentTime: finalCurrentTimeSeconds,
+        isFinished: true,
+      });
+    }
+
+    this.updateUserServerStateCache({
+      libraryItemId: payload.libraryItemId,
+      currentTimeSeconds: finalCurrentTimeSeconds,
+      durationSeconds: finalCurrentTimeSeconds,
+      isFinished: true,
+    });
+
+    if (activeLibraryId) {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.booksInProgress(activeLibraryId),
+      });
+    }
+
+    this.lastSyncAt = syncedToServer ? Date.now() : 0;
+
+    try {
+      await this.engine.unload();
+    } finally {
+      playbackStore.getState().actions.endSession({
+        libraryItemId: payload.libraryItemId,
+        positionMs: finalPositionMs,
+        trackPositionMs: finalTrackPositionMs,
+        durationMs: finalDurationMs,
+        trackDurationMs: finalTrack.durationMs,
+        currentTrackIndex: finalTrackIndex >= 0 ? finalTrackIndex : state.currentTrackIndex,
+        currentChapterId: finalChapter?.id ?? null,
+      });
+      playbackStore.getState().actions.setLastSyncAt(
+        syncedToServer ? this.lastSyncAt : null,
+      );
+      this.listenedMs = 0;
+      this.lastSyncAttemptAt = 0;
+      this.lastTrackedPositionMs = finalPositionMs;
+    }
   }
 
   async togglePlayPause() {

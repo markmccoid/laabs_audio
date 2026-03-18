@@ -32,6 +32,15 @@ export type PlaybackStoreState = {
     reset: () => void;
     setPlaybackState: (state: PlaybackState) => void;
     setError: (message: string | null) => void;
+    endSession: (payload: {
+      libraryItemId: string;
+      positionMs: number;
+      trackPositionMs: number;
+      durationMs: number;
+      trackDurationMs: number;
+      currentTrackIndex: number;
+      currentChapterId: number | null;
+    }) => void;
     setSession: (payload: {
       libraryItemId: string;
       sessionId: string;
@@ -87,6 +96,30 @@ export const playbackStore = createStore<PlaybackStoreState>()(
         reset: () => set((state) => ({ ...getBaseState(), actions: state.actions })),
         setPlaybackState: (playbackState) => set({ playbackState }),
         setError: (error) => set({ error }),
+        endSession: ({
+          libraryItemId,
+          positionMs,
+          trackPositionMs,
+          durationMs,
+          trackDurationMs,
+          currentTrackIndex,
+          currentChapterId,
+        }) =>
+          set({
+            playbackState: "ended",
+            libraryItemId,
+            sessionId: null,
+            queue: [],
+            chapterIndex: [],
+            currentTrackIndex,
+            positionMs,
+            trackPositionMs,
+            durationMs,
+            trackDurationMs,
+            currentChapterId,
+            error: null,
+            debugStatus: null,
+          }),
         setSession: ({ libraryItemId, sessionId, queue, durationMs, chapterIndex }) =>
           set({
             libraryItemId,
