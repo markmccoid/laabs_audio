@@ -47,6 +47,7 @@ export const useBookProgressDisplay = ({
   playbackState,
 }: Params): Result => {
   const [liveProgressSeconds, setLiveProgressSeconds] = useState<number | null>(null);
+  const [transitionProgressSeconds, setTransitionProgressSeconds] = useState<number | null>(null);
   const persistedProgressSeconds = useMemo(
     () => Math.max(0, matchedProgress?.currentTime ?? fallbackProgress?.currentTime ?? 0),
     [fallbackProgress?.currentTime, matchedProgress?.currentTime],
@@ -54,6 +55,7 @@ export const useBookProgressDisplay = ({
 
   useEffect(() => {
     setLiveProgressSeconds(null);
+    setTransitionProgressSeconds(null);
   }, [libraryItemId]);
 
   useEffect(() => {
@@ -76,6 +78,7 @@ export const useBookProgressDisplay = ({
 
       if (canTrustLiveProgress) {
         setLiveProgressSeconds(candidateProgressSeconds);
+        setTransitionProgressSeconds(candidateProgressSeconds);
       }
     };
 
@@ -91,6 +94,31 @@ export const useBookProgressDisplay = ({
     };
   }, [libraryItemId, isViewedBookActive, playbackState, persistedProgressSeconds]);
 
+  useEffect(() => {
+    if (transitionProgressSeconds === null) {
+      return;
+    }
+
+    if (persistedProgressSeconds >= transitionProgressSeconds) {
+      setTransitionProgressSeconds(null);
+      return;
+    }
+
+    if (isViewedBookActive && playbackState === "playing") {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      setTransitionProgressSeconds((current) =>
+        current !== null && persistedProgressSeconds < current ? null : current,
+      );
+    }, LIVE_PROGRESS_HANDOFF_DELAY_MS);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [isViewedBookActive, playbackState, persistedProgressSeconds, transitionProgressSeconds]);
+
   return useMemo(() => {
     const serverDurationSeconds = Math.max(
       0,
@@ -98,7 +126,13 @@ export const useBookProgressDisplay = ({
     );
     const resolvedDurationSeconds = Math.max(Math.max(0, durationSeconds), serverDurationSeconds);
 
-    const rawProgressSeconds = liveProgressSeconds ?? persistedProgressSeconds;
+    const resolvedTransitionProgressSeconds =
+      transitionProgressSeconds !== null &&
+      transitionProgressSeconds > persistedProgressSeconds
+        ? transitionProgressSeconds
+        : null;
+    const rawProgressSeconds =
+      liveProgressSeconds ?? resolvedTransitionProgressSeconds ?? persistedProgressSeconds;
 
     const progressSeconds =
       resolvedDurationSeconds > 0
@@ -106,7 +140,10 @@ export const useBookProgressDisplay = ({
         : rawProgressSeconds;
 
     const persistedIsFinished = Boolean(matchedProgress?.isFinished ?? fallbackProgress?.isFinished);
-    const isFinished = liveProgressSeconds !== null ? false : persistedIsFinished;
+    const isFinished =
+      liveProgressSeconds !== null || resolvedTransitionProgressSeconds !== null
+        ? false
+        : persistedIsFinished;
     const isInProgress = progressSeconds > 0 && !isFinished;
     const progressPercent =
       resolvedDurationSeconds > 0 ? clamp(progressSeconds / resolvedDurationSeconds, 0, 1) : 0;
@@ -130,5 +167,6 @@ export const useBookProgressDisplay = ({
     matchedProgress?.duration,
     matchedProgress?.isFinished,
     persistedProgressSeconds,
+    transitionProgressSeconds,
   ]);
 };

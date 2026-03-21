@@ -25,6 +25,7 @@ import { ShelfBookCardMenu } from "./shelf-book-card-menu";
 
 const MENU_FADE_DISTANCE = 36;
 const STACKED_BADGE_TOP_OFFSET = 34;
+const LIVE_PROGRESS_HANDOFF_DELAY_MS = 1500;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -74,6 +75,7 @@ export const ShelfBookCard = ({
   const [progressDisplay, setProgressDisplay] = useState<BookProgressTimeDisplay>(
     defaultProgressTimeDisplay,
   );
+  const [transitionProgressSeconds, setTransitionProgressSeconds] = useState<number | null>(null);
   const isDownloaded = useDeviceBooksStore((state) =>
     selectHasPlayableBookDownload(state, book.id),
   );
@@ -83,15 +85,21 @@ export const ShelfBookCard = ({
   const showOfflineUnavailable = isOffline && !isDownloaded;
   const activePlaybackSeconds = Math.max(0, Math.floor(activePlaybackPositionMs / 1000));
   const activePlaybackDurationSeconds = Math.max(0, Math.floor(activePlaybackDurationMs / 1000));
+  const persistedProgressSeconds = Math.max(0, Math.floor(progress?.currentTime ?? 0));
   const durationSeconds = Math.max(
     0,
     Math.floor(progress?.duration ?? book.duration ?? 0),
     activePlaybackDurationSeconds,
   );
+  const resolvedTransitionProgressSeconds =
+    transitionProgressSeconds !== null && transitionProgressSeconds > persistedProgressSeconds
+      ? transitionProgressSeconds
+      : 0;
   const rawProgressSeconds = Math.max(
     0,
-    Math.floor(progress?.currentTime ?? 0),
+    persistedProgressSeconds,
     isActivePlaybackBook ? activePlaybackSeconds : 0,
+    resolvedTransitionProgressSeconds,
   );
   const progressSeconds =
     durationSeconds > 0 ? clamp(rawProgressSeconds, 0, durationSeconds) : rawProgressSeconds;
@@ -142,6 +150,45 @@ export const ShelfBookCard = ({
   useEffect(() => {
     setProgressDisplay(defaultProgressTimeDisplay);
   }, [defaultProgressTimeDisplay, book.id]);
+
+  useEffect(() => {
+    setTransitionProgressSeconds(null);
+  }, [book.id]);
+
+  useEffect(() => {
+    if (!isActivePlaybackBook) {
+      return;
+    }
+
+    setTransitionProgressSeconds((current) =>
+      current === activePlaybackSeconds ? current : activePlaybackSeconds,
+    );
+  }, [activePlaybackSeconds, isActivePlaybackBook]);
+
+  useEffect(() => {
+    if (transitionProgressSeconds === null) {
+      return;
+    }
+
+    if (persistedProgressSeconds >= transitionProgressSeconds) {
+      setTransitionProgressSeconds(null);
+      return;
+    }
+
+    if (isActivePlaybackBook) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      setTransitionProgressSeconds((current) =>
+        current !== null && persistedProgressSeconds < current ? null : current,
+      );
+    }, LIVE_PROGRESS_HANDOFF_DELAY_MS);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [isActivePlaybackBook, persistedProgressSeconds, transitionProgressSeconds]);
 
   return (
     <View
