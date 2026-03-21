@@ -40,6 +40,7 @@ const INITIAL_INTERVAL_SYNC_GUARD_WINDOW_SECONDS = 20;
 const LOCAL_PLAYBACK_PROGRESS_TIMEOUT_MS = 4000;
 const LOCAL_PLAYBACK_PROGRESS_POLL_INTERVAL_MS = 250;
 const LOCAL_PLAYBACK_PROGRESS_MIN_DELTA_MS = 250;
+type ProgressSyncReason = "interval" | "pause" | "seek" | "close";
 
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
@@ -171,6 +172,15 @@ class PlayerService {
     options?: { autoPlay?: boolean },
     internalOptions?: { preferDownloaded?: boolean },
   ) {
+    const existingState = playbackStore.getState();
+    if (
+      existingState.libraryItemId &&
+      existingState.libraryItemId !== libraryItemId &&
+      existingState.queue.length > 0
+    ) {
+      await this.closeActiveBookForTransition();
+    }
+
     playbackStore.getState().actions.setPlaybackState("loading");
     playbackStore.getState().actions.setError(null);
     const preferDownloaded = internalOptions?.preferDownloaded ?? true;
@@ -298,6 +308,14 @@ class PlayerService {
     if (!payload.uri && typeof payload.sourceModule !== "number") {
       throw new Error("loadLocalFile requires a uri or sourceModule");
     }
+    const existingState = playbackStore.getState();
+    if (
+      existingState.libraryItemId &&
+      existingState.libraryItemId !== payload.libraryItemId &&
+      existingState.queue.length > 0
+    ) {
+      await this.closeActiveBookForTransition();
+    }
     const durationMs = payload.durationMs ?? 0;
     // Local-only queue with a single track (used for development/testing).
     const queue: PlaybackQueueItem[] = [
@@ -349,6 +367,68 @@ class PlayerService {
     return ids
       .filter((value): value is string => typeof value === "string" && value.length > 0)
       .filter((value, index, source) => source.indexOf(value) === index);
+  }
+
+  private shouldPersistProgressOnClose(state: PlaybackStoreState) {
+    const isStreamingSession = Boolean(state.sessionId && state.sessionId !== LOCAL_SESSION_ID);
+    return (
+      state.playbackState === "playing" ||
+      (state.playbackState === "paused" && isStreamingSession)
+    );
+  }
+
+  private async unloadAndResetPlayback() {
+    try {
+      await this.engine.unload();
+    } catch (error) {
+      if (__DEV__) {
+        console.warn("[player-service] unload:failed-during-close", { error });
+      }
+    }
+
+    playbackStore.getState().actions.reset();
+    this.listenedMs = 0;
+    this.lastSyncAttemptAt = 0;
+    this.lastSyncAt = 0;
+    this.lastTrackedPositionMs = 0;
+  }
+
+  private async closeActiveBookForTransition() {
+    const state = playbackStore.getState();
+    if (!state.queue.length) {
+      await this.unloadAndResetPlayback();
+      return;
+    }
+
+    const shouldPersistProgress = this.shouldPersistProgressOnClose(state);
+    const shouldCloseStreamSession =
+      state.sessionId !== null &&
+      state.sessionId !== LOCAL_SESSION_ID &&
+      (state.playbackState === "playing" || state.playbackState === "paused");
+
+    if (state.playbackState === "playing") {
+      try {
+        await this.engine.pause();
+      } catch (error) {
+        if (__DEV__) {
+          console.warn("[player-service] close:pause-before-transition-failed", {
+            libraryItemId: state.libraryItemId,
+            error,
+          });
+        }
+      }
+      playbackStore.getState().actions.setPlaybackState("paused");
+    }
+
+    if (shouldPersistProgress) {
+      await this.syncProgress("close", {
+        state: playbackStore.getState(),
+        closeStreamSession: shouldCloseStreamSession,
+        forceDirectProgressUpdate: true,
+      });
+    }
+
+    await this.unloadAndResetPlayback();
   }
 
   private resolveStoredBookRate(rateCandidateIds: string[]) {
@@ -742,13 +822,7 @@ class PlayerService {
   }
 
   async stop() {
-    await this.engine.pause();
-    await this.engine.unload();
-    playbackStore.getState().actions.reset();
-    this.listenedMs = 0;
-    this.lastSyncAttemptAt = 0;
-    this.lastSyncAt = 0;
-    this.lastTrackedPositionMs = 0;
+    await this.closeActiveBookForTransition();
   }
 
   async finishActiveBook(payload: { libraryItemId: string; durationSeconds?: number }) {
@@ -1179,7 +1253,7 @@ class PlayerService {
     durationSeconds: number;
     timeListenedSeconds: number;
     isFinished: boolean;
-    reason: "interval" | "pause" | "seek";
+    reason: ProgressSyncReason;
   }) {
     const cachedProgress = this.getCachedProgressForLibraryItem(payload.libraryItemId);
     const previousCurrentTimeSeconds = Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0));
@@ -1206,8 +1280,15 @@ class PlayerService {
     };
   }
 
-  private async syncProgress(reason: "interval" | "pause" | "seek") {
-    const state = playbackStore.getState();
+  private async syncProgress(
+    reason: ProgressSyncReason,
+    options?: {
+      state?: PlaybackStoreState;
+      closeStreamSession?: boolean;
+      forceDirectProgressUpdate?: boolean;
+    },
+  ) {
+    const state = options?.state ?? playbackStore.getState();
     if (!state.libraryItemId || !state.sessionId) return;
     this.logDebug(`syncProgress: ${reason}`);
     this.lastSyncAttemptAt = Date.now();
@@ -1252,10 +1333,34 @@ class PlayerService {
       const online = authState.isOnline !== false;
       const authenticated = authState.status === "authenticated";
       const hasQueuedProgress = deviceBooksStore.getState().actions.hasPendingProgressSync();
+      const shouldCloseStreamSession = Boolean(
+        options?.closeStreamSession && state.sessionId !== LOCAL_SESSION_ID,
+      );
       let syncedToServer = false;
 
       if (online && authenticated) {
+        if (shouldCloseStreamSession) {
+          try {
+            await sessionsApi.closeSession(state.sessionId, {
+              timeListened: timeListenedSeconds,
+              currentTime: promotedProgress.currentTimeSeconds,
+              duration: promotedProgress.durationSeconds || undefined,
+            });
+          } catch (error) {
+            if (!(error instanceof AbsApiError && error.status === 404) && __DEV__) {
+              console.warn("[player-service] progress:close-session-failed", {
+                reason,
+                libraryItemId: state.libraryItemId,
+                sessionId: state.sessionId,
+                error,
+              });
+            }
+          }
+        }
+
         const shouldUseProgressUpdateApi =
+          Boolean(options?.forceDirectProgressUpdate) ||
+          shouldCloseStreamSession ||
           state.sessionId === LOCAL_SESSION_ID || hasQueuedProgress;
 
         if (shouldUseProgressUpdateApi) {
