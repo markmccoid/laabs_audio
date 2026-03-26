@@ -11,21 +11,35 @@ export const SettingsPlaybackScreen = () => {
   const defaultBookProgressTimeDisplay = useSettingsStore(
     (state) => state.defaultBookProgressTimeDisplay,
   );
-  const skipTimeSeconds = seekForwardSeconds;
-  const [skipTimeDraft, setSkipTimeDraft] = useState(() => String(skipTimeSeconds));
-  const { setDefaultBookProgressTimeDisplay, setSkipSeconds } = useSettingsActions();
+  const [backwardSkipDraft, setBackwardSkipDraft] = useState(() => String(seekBackwardSeconds));
+  const [forwardSkipDraft, setForwardSkipDraft] = useState(() => String(seekForwardSeconds));
+  const { setDefaultBookProgressTimeDisplay, setSeekBackwardSeconds, setSeekForwardSeconds } =
+    useSettingsActions();
 
   useEffect(() => {
-    setSkipTimeDraft(String(skipTimeSeconds));
-  }, [skipTimeSeconds]);
+    setBackwardSkipDraft(String(seekBackwardSeconds));
+  }, [seekBackwardSeconds]);
 
-  const commitSkipTimeDraft = () => {
-    const parsedSeconds = Number.parseInt(skipTimeDraft.trim(), 10);
+  useEffect(() => {
+    setForwardSkipDraft(String(seekForwardSeconds));
+  }, [seekForwardSeconds]);
+
+  const commitBackwardSkipDraft = () => {
+    const parsedSeconds = Number.parseInt(backwardSkipDraft.trim(), 10);
     if (Number.isNaN(parsedSeconds)) {
-      setSkipTimeDraft(String(skipTimeSeconds));
+      setBackwardSkipDraft(String(seekBackwardSeconds));
       return;
     }
-    setSkipSeconds(parsedSeconds);
+    setSeekBackwardSeconds(parsedSeconds);
+  };
+
+  const commitForwardSkipDraft = () => {
+    const parsedSeconds = Number.parseInt(forwardSkipDraft.trim(), 10);
+    if (Number.isNaN(parsedSeconds)) {
+      setForwardSkipDraft(String(seekForwardSeconds));
+      return;
+    }
+    setSeekForwardSeconds(parsedSeconds);
   };
 
   return (
@@ -55,9 +69,6 @@ export const SettingsPlaybackScreen = () => {
           <Text selectable style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}>
             Skip Time
           </Text>
-          <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-            Sets skip duration for both backward and forward controls.
-          </Text>
 
           <View
             style={{
@@ -74,11 +85,65 @@ export const SettingsPlaybackScreen = () => {
               gap: 8,
             }}
           >
+            <Text
+              selectable
+              style={{ minWidth: 74, color: themeColors.text, fontSize: 14, fontWeight: "600" }}
+            >
+              Backward
+            </Text>
             <TextInput
-              value={skipTimeDraft}
-              onChangeText={(nextValue) => setSkipTimeDraft(nextValue.replace(/[^0-9]/g, ""))}
-              onBlur={commitSkipTimeDraft}
-              onEndEditing={commitSkipTimeDraft}
+              value={backwardSkipDraft}
+              onChangeText={(nextValue) => setBackwardSkipDraft(nextValue.replace(/[^0-9]/g, ""))}
+              onBlur={commitBackwardSkipDraft}
+              onEndEditing={commitBackwardSkipDraft}
+              keyboardType="number-pad"
+              inputMode="numeric"
+              returnKeyType="done"
+              maxLength={3}
+              style={{
+                flex: 1,
+                minHeight: 36,
+                borderRadius: 10,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                backgroundColor: themeColors.surface,
+                color: themeColors.text,
+                fontSize: 16,
+                paddingHorizontal: 10,
+                paddingVertical: 8,
+              }}
+            />
+            <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+              seconds
+            </Text>
+          </View>
+
+          <View
+            style={{
+              borderRadius: 12,
+              borderCurve: "continuous",
+              borderWidth: 1,
+              borderColor: themeColors.border,
+              backgroundColor: themeColors.bg,
+              paddingHorizontal: 10,
+              paddingVertical: 8,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <Text
+              selectable
+              style={{ minWidth: 74, color: themeColors.text, fontSize: 14, fontWeight: "600" }}
+            >
+              Forward
+            </Text>
+            <TextInput
+              value={forwardSkipDraft}
+              onChangeText={(nextValue) => setForwardSkipDraft(nextValue.replace(/[^0-9]/g, ""))}
+              onBlur={commitForwardSkipDraft}
+              onEndEditing={commitForwardSkipDraft}
               keyboardType="number-pad"
               inputMode="numeric"
               returnKeyType="done"
@@ -102,13 +167,8 @@ export const SettingsPlaybackScreen = () => {
             </Text>
           </View>
           <Text selectable style={{ color: themeColors.textMuted, fontSize: 12, marginTop: 2 }}>
-            Changing this value updates both forward and backward skip settings.
+            Lock screen forward and backward see will use Backward value.
           </Text>
-          {seekBackwardSeconds !== seekForwardSeconds ? (
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
-              Forward/backward skip are currently different; saving this field will align them.
-            </Text>
-          ) : null}
         </View>
 
         <View

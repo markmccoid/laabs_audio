@@ -3,6 +3,7 @@ import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { usePlaybackStore, useSleepTimerActions, useSleepTimerStatus } from "@/player";
 import { useDeviceBooksStore } from "@/store/device-books-store";
+import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
@@ -29,6 +30,8 @@ const MainPlayerScreen = () => {
   const hasLoadedBook = usePlaybackStore(
     (state) => Boolean(state.libraryItemId) && state.queue.length > 0,
   );
+  const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
+  const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
   const localCoverUri = useDeviceBooksStore((state) =>
     currentLibraryItemId ? state.downloadedBookData[currentLibraryItemId]?.coverLocalUri ?? null : null,
   );
@@ -77,6 +80,7 @@ const MainPlayerScreen = () => {
         : ["rgba(248, 250, 252, 0.14)", "rgba(248, 250, 252, 0.62)", "rgba(248, 250, 252, 0.86)"],
     [isDarkTheme],
   );
+  const skipSummaryLabel = `Back ${seekBackwardSeconds}s / Forward ${seekForwardSeconds}s`;
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
@@ -194,6 +198,17 @@ const MainPlayerScreen = () => {
                 Start playback from Home to load a book.
               </Text>
             ) : null}
+            <Text
+              selectable
+              style={{
+                fontSize: 12,
+                color: themeColors.textMuted,
+                textAlign: "center",
+                fontVariant: ["tabular-nums"],
+              }}
+            >
+              {skipSummaryLabel}
+            </Text>
           </View>
         </View>
 

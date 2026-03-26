@@ -92,6 +92,8 @@ const BookContainer = ({ libraryItemId }: Props) => {
   const defaultProgressTimeDisplay = useSettingsStore(
     (state) => state.defaultBookProgressTimeDisplay,
   );
+  const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
+  const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
   const { width: viewportWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const bookTitle = bookData?.title ?? "Book";
@@ -206,6 +208,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
     }
     return hasPlayableLocalDownload ? "Local" : "Stream";
   }, [currentTrackIndex, hasPlayableLocalDownload, isOffline, isViewedBookActive, queue]);
+  const skipSummaryLabel = `Back ${seekBackwardSeconds}s / Forward ${seekForwardSeconds}s`;
   const sourceTab = useMemo<"home" | "search">(
     () => (segments.some((segment) => segment === "search") ? "search" : "home"),
     [segments],
@@ -565,6 +568,18 @@ const BookContainer = ({ libraryItemId }: Props) => {
                   style={{ color: themeColors.textMuted, fontSize: 11, fontWeight: "500" }}
                 >
                   {playbackSourceLabel}
+                </Text>
+                <Text
+                  selectable
+                  style={{
+                    color: themeColors.textMuted,
+                    fontSize: 11,
+                    fontWeight: "500",
+                    textAlign: "center",
+                    fontVariant: ["tabular-nums"],
+                  }}
+                >
+                  {skipSummaryLabel}
                 </Text>
               </View>
             </View>

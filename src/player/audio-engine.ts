@@ -72,8 +72,7 @@ const ensureFileScheme = (uri: string) => {
   return uri;
 };
 
-const isRemoteHttpUri = (uri: string) =>
-  uri.startsWith("http://") || uri.startsWith("https://");
+const isRemoteHttpUri = (uri: string) => uri.startsWith("http://") || uri.startsWith("https://");
 const remoteArtworkValidationCache = new Map<string, string | null>();
 
 // Resolve a bundled asset module into a local file URI AudioPro can read.
@@ -184,7 +183,7 @@ export const createAudioEngine = (): AudioEngine => {
     // AudioPro exposes one skip interval for lock controls, so use the forward value as source.
     const skipIntervalMs = Math.max(
       1000,
-      Math.round(settingsStore.getState().seekForwardSeconds * 1000),
+      Math.round(settingsStore.getState().seekBackwardSeconds * 1000),
     );
     AudioPro.configure({
       // Speech keeps pitch aligned for audiobook-style speed changes.
