@@ -1,9 +1,12 @@
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { getDocumentDirectory } from "./fileSystemAccess";
 import { mmkvStorage } from "./mmkv-storage";
 
 export const DEFAULT_AMBIENT_VOLUME = 0.2;
+const AMBIENT_ROOT_DIRNAME = "laabs-ambient";
+const DEFAULT_AMBIENT_FILE_NAME = "Ambient Track";
 
 export type AmbientPlaybackState = "idle" | "playing" | "paused";
 
@@ -35,6 +38,120 @@ export type AmbientStoreState = {
 };
 
 const clampAmbientVolume = (value: number) => Math.max(0, Math.min(1, value));
+
+const sanitizeAmbientFileName = (value: string) =>
+  value.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim();
+
+const normalizeAmbientUri = (uri?: string | null) => {
+  const value = uri?.trim();
+  if (!value) return null;
+  if (
+    value.startsWith("file://") ||
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("data:")
+  ) {
+    return value;
+  }
+  if (value.startsWith("/")) {
+    return `file://${value}`;
+  }
+  return value;
+};
+
+const isLocalFileUri = (uri: string) => uri.startsWith("file://") || uri.startsWith("/");
+const isRemoteLikeUri = (uri: string) =>
+  uri.startsWith("http://") ||
+  uri.startsWith("https://") ||
+  uri.startsWith("data:") ||
+  uri.startsWith("content://") ||
+  uri.startsWith("asset://");
+
+const joinDirectoryUri = (directoryUri: string, fileName: string) =>
+  directoryUri.endsWith("/") ? `${directoryUri}${fileName}` : `${directoryUri}/${fileName}`;
+
+const extractFileNameFromUri = (uri: string) => {
+  const normalized = uri.split(/[?#]/, 1)[0] ?? uri;
+  const trimmed = normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+  const lastSlash = trimmed.lastIndexOf("/");
+  return lastSlash >= 0 ? trimmed.slice(lastSlash + 1) : trimmed;
+};
+
+const buildStoredAmbientFileName = (trackId: string, fileName: string) => {
+  const dotIndex = fileName.lastIndexOf(".");
+  const hasExtension = dotIndex > 0 && dotIndex < fileName.length - 1;
+  const basename = hasExtension ? fileName.slice(0, dotIndex) : fileName;
+  const extension = hasExtension ? fileName.slice(dotIndex) : "";
+  return `${trackId}-${basename}${extension}`;
+};
+
+const getAmbientRootDirectory = () => {
+  const documentDirectory = getDocumentDirectory();
+  return documentDirectory ? `${documentDirectory}${AMBIENT_ROOT_DIRNAME}/` : null;
+};
+
+const toPersistedAmbientUri = (track: AmbientTrackRecord) => {
+  const normalized = normalizeAmbientUri(track.uri);
+  if (!normalized) return track.uri;
+  if (isRemoteLikeUri(normalized)) {
+    return normalized;
+  }
+  const fallbackName = buildStoredAmbientFileName(
+    track.id,
+    sanitizeAmbientFileName(track.fileName?.trim() || DEFAULT_AMBIENT_FILE_NAME),
+  );
+  return extractFileNameFromUri(normalized) || fallbackName;
+};
+
+const hydrateAmbientTrackUri = (track: AmbientTrackRecord) => {
+  const normalized = normalizeAmbientUri(track.uri);
+  if (!normalized) return track.uri;
+  if (isRemoteLikeUri(normalized)) {
+    return normalized;
+  }
+
+  const currentRoot = getAmbientRootDirectory();
+  const storedFileName = isLocalFileUri(normalized)
+    ? extractFileNameFromUri(normalized)
+    : normalized;
+  if (!currentRoot || !storedFileName) {
+    return normalized;
+  }
+
+  return joinDirectoryUri(currentRoot, storedFileName);
+};
+
+const toPersistedAmbientTracks = (
+  tracksById?: Record<string, AmbientTrackRecord>,
+): Record<string, AmbientTrackRecord> => {
+  const persisted: Record<string, AmbientTrackRecord> = {};
+
+  Object.entries(tracksById ?? {}).forEach(([trackId, track]) => {
+    persisted[trackId] = {
+      ...track,
+      uri: toPersistedAmbientUri(track),
+      volume: clampAmbientVolume(track.volume),
+    };
+  });
+
+  return persisted;
+};
+
+const hydratePersistedAmbientTracks = (
+  tracksById?: Record<string, AmbientTrackRecord>,
+): Record<string, AmbientTrackRecord> => {
+  const hydrated: Record<string, AmbientTrackRecord> = {};
+
+  Object.entries(tracksById ?? {}).forEach(([trackId, track]) => {
+    hydrated[trackId] = {
+      ...track,
+      uri: hydrateAmbientTrackUri(track),
+      volume: clampAmbientVolume(track.volume),
+    };
+  });
+
+  return hydrated;
+};
 
 const getBaseState = () => ({
   isEnabled: false,
@@ -136,7 +253,7 @@ export const ambientStore = createStore<AmbientStoreState>()(
       version: 1,
       partialize: (state) => ({
         isEnabled: state.isEnabled,
-        tracksById: state.tracksById,
+        tracksById: toPersistedAmbientTracks(state.tracksById),
         trackOrder: state.trackOrder,
         selectedTrackId: state.selectedTrackId,
         playbackState: state.playbackState,
@@ -147,15 +264,23 @@ export const ambientStore = createStore<AmbientStoreState>()(
           persistedState && typeof persistedState === "object"
             ? (persistedState as Partial<AmbientStoreState>)
             : {};
+        const tracksById = hydratePersistedAmbientTracks(typedState.tracksById);
+        const trackOrder = (typedState.trackOrder ?? []).filter((trackId) =>
+          Boolean(tracksById[trackId]),
+        );
+        const selectedTrackId =
+          typedState.selectedTrackId && tracksById[typedState.selectedTrackId]
+            ? typedState.selectedTrackId
+            : null;
 
         return {
           ...currentState,
           isEnabled: typedState.isEnabled ?? false,
-          tracksById: typedState.tracksById ?? {},
-          trackOrder: typedState.trackOrder ?? [],
-          selectedTrackId: typedState.selectedTrackId ?? null,
-          playbackState: typedState.playbackState ?? "idle",
-          selectedLibraryItemId: typedState.selectedLibraryItemId ?? null,
+          tracksById,
+          trackOrder,
+          selectedTrackId,
+          playbackState: selectedTrackId ? (typedState.playbackState ?? "idle") : "idle",
+          selectedLibraryItemId: selectedTrackId ? (typedState.selectedLibraryItemId ?? null) : null,
         };
       },
     },

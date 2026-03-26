@@ -54,6 +54,155 @@ export type DownloadInfo = {
   coverLocalUri?: string | null;
 };
 
+const DOWNLOAD_ROOT_DIRNAME = "laabs-downloads";
+const DOWNLOAD_COVER_FILE_NAME = "cover.webp";
+
+const normalizeStoredLocalUri = (uri?: string | null) => {
+  const value = uri?.trim();
+  if (!value) return null;
+  if (
+    value.startsWith("file://") ||
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("data:")
+  ) {
+    return value;
+  }
+  if (value.startsWith("/")) {
+    return `file://${value}`;
+  }
+  return value;
+};
+
+const isLocalFileUri = (uri: string) => uri.startsWith("file://") || uri.startsWith("/");
+const isRemoteLikeUri = (uri: string) =>
+  uri.startsWith("http://") ||
+  uri.startsWith("https://") ||
+  uri.startsWith("data:") ||
+  uri.startsWith("content://") ||
+  uri.startsWith("asset://");
+
+const joinDirectoryUri = (directoryUri: string, fileName: string) =>
+  directoryUri.endsWith("/") ? `${directoryUri}${fileName}` : `${directoryUri}/${fileName}`;
+
+const extractFileNameFromUri = (uri: string) => {
+  const normalized = uri.split(/[?#]/, 1)[0] ?? uri;
+  const trimmed = normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+  const lastSlash = trimmed.lastIndexOf("/");
+  return lastSlash >= 0 ? trimmed.slice(lastSlash + 1) : trimmed;
+};
+
+const getDownloadRootDirectory = () => {
+  const documentDirectory = getDocumentDirectory();
+  return documentDirectory ? `${documentDirectory}${DOWNLOAD_ROOT_DIRNAME}/` : null;
+};
+
+const buildDownloadFileUri = (libraryItemId: string, fileName: string) => {
+  const rootDirectory = getDownloadRootDirectory();
+  if (!rootDirectory) return null;
+  return joinDirectoryUri(`${rootDirectory}${libraryItemId}/`, fileName);
+};
+
+const toPersistedDownloadPath = (uri?: string | null, fallbackFileName?: string | null) => {
+  const normalized = normalizeStoredLocalUri(uri);
+  if (!normalized) return null;
+  if (isRemoteLikeUri(normalized)) {
+    return normalized;
+  }
+
+  const fileName = fallbackFileName?.trim() || extractFileNameFromUri(normalized);
+  return fileName || normalized;
+};
+
+const hydrateDownloadPath = (
+  libraryItemId: string,
+  storedPath?: string | null,
+  fallbackFileName?: string | null,
+) => {
+  const normalized = normalizeStoredLocalUri(storedPath);
+  if (!normalized) return null;
+  if (isRemoteLikeUri(normalized)) {
+    return normalized;
+  }
+
+  const fileName = isLocalFileUri(normalized)
+    ? extractFileNameFromUri(normalized)
+    : normalized.trim() || fallbackFileName?.trim() || "";
+  if (!fileName) {
+    return normalized;
+  }
+
+  return buildDownloadFileUri(libraryItemId, fileName) ?? normalized;
+};
+
+const toPersistedDownloadInfo = (info?: DownloadInfo | null): DownloadInfo | null => {
+  if (!info) return null;
+  return {
+    ...info,
+    audioTracks: Array.isArray(info.audioTracks)
+      ? info.audioTracks.map((track) => ({
+          ...track,
+          fileUri: toPersistedDownloadPath(track.fileUri, track.cleanFileName) ?? track.fileUri,
+        }))
+      : [],
+    coverLocalUri:
+      toPersistedDownloadPath(info.coverLocalUri, DOWNLOAD_COVER_FILE_NAME) ?? info.coverLocalUri,
+  };
+};
+
+const toPersistedDownloadedBookData = (downloadedBookData?: Record<string, DownloadInfo>) => {
+  const persisted: Record<string, DownloadInfo> = {};
+
+  Object.entries(downloadedBookData ?? {}).forEach(([libraryItemId, info]) => {
+    const persistedInfo = toPersistedDownloadInfo(info);
+    if (!persistedInfo) return;
+    persisted[libraryItemId] = persistedInfo;
+  });
+
+  return persisted;
+};
+
+const hydrateDownloadInfo = (
+  libraryItemId: string,
+  info?: DownloadInfo | null,
+): DownloadInfo | null => {
+  if (!info) return null;
+  return {
+    ...info,
+    audioTracks: Array.isArray(info.audioTracks)
+      ? info.audioTracks.map((track) => ({
+          ...track,
+          fileUri:
+            hydrateDownloadPath(libraryItemId, track.fileUri, track.cleanFileName) ??
+            track.fileUri,
+        }))
+      : [],
+    coverLocalUri: hydrateDownloadPath(
+      libraryItemId,
+      info.coverLocalUri,
+      DOWNLOAD_COVER_FILE_NAME,
+    ),
+  };
+};
+
+const hydratePersistedDownloadedBookData = (downloadedBookData?: Record<string, DownloadInfo>) => {
+  const hydrated: Record<string, DownloadInfo> = {};
+
+  Object.entries(downloadedBookData ?? {}).forEach(([libraryItemId, info]) => {
+    const hydratedInfo = hydrateDownloadInfo(libraryItemId, info);
+    if (!hydratedInfo) return;
+    hydrated[libraryItemId] = hydratedInfo;
+  });
+
+  return hydrated;
+};
+
+export const resolveStoredDownloadTrackUri = (track?: DownloadTrack | null) =>
+  normalizeStoredLocalUri(track?.fileUri);
+
+export const resolveStoredDownloadCoverUri = (downloadInfo?: DownloadInfo | null) =>
+  normalizeStoredLocalUri(downloadInfo?.coverLocalUri);
+
 export type DownloadProgress = {
   libraryItemId: string;
   currentFileProcessing: string;
@@ -614,9 +763,7 @@ const isTransientPlaylistError = (error: unknown) => {
 };
 
 // Root directory for all offline downloads
-const DOWNLOAD_ROOT = getDocumentDirectory()
-  ? `${getDocumentDirectory()}laabs-downloads/`
-  : null;
+const DOWNLOAD_ROOT = getDownloadRootDirectory();
 
 const ensureDownloadDir = async (libraryItemId: string) => {
   if (!DOWNLOAD_ROOT) {
@@ -677,6 +824,44 @@ const downloadCoverImage = async (libraryItemId: string) => {
   } catch {
     return null;
   }
+};
+
+const mergePersistedDeviceBooksState = (
+  persistedState: unknown,
+  currentState: DeviceBooksState,
+): DeviceBooksState => {
+  const base = createDefaultPersistedState();
+  const typedState =
+    persistedState && typeof persistedState === "object"
+      ? (persistedState as Partial<DeviceBooksPersistedState>)
+      : {};
+
+  return {
+    ...currentState,
+    downloadedDetailsById: typedState.downloadedDetailsById ?? base.downloadedDetailsById,
+    downloadedBookData: hydratePersistedDownloadedBookData(
+      typedState.downloadedBookData ?? base.downloadedBookData,
+    ),
+    downloadedShelfOrderByScope:
+      typedState.downloadedShelfOrderByScope ?? base.downloadedShelfOrderByScope,
+    customCoversById: typedState.customCoversById ?? base.customCoversById,
+    playbackRatesByUserBook: typedState.playbackRatesByUserBook ?? base.playbackRatesByUserBook,
+    bookmarkNotesByUserBookTime:
+      typedState.bookmarkNotesByUserBookTime ?? base.bookmarkNotesByUserBookTime,
+    pendingBookmarkCreatesByUser:
+      typedState.pendingBookmarkCreatesByUser ?? base.pendingBookmarkCreatesByUser,
+    pendingBookmarkDeletesByUser:
+      typedState.pendingBookmarkDeletesByUser ?? base.pendingBookmarkDeletesByUser,
+    pendingProgressByUser: typedState.pendingProgressByUser ?? base.pendingProgressByUser,
+    customShelvesByScope: typedState.customShelvesByScope ?? base.customShelvesByScope,
+    playlistShelvesByScope: typedState.playlistShelvesByScope ?? base.playlistShelvesByScope,
+    suppressedPlaylistIdsByScope:
+      typedState.suppressedPlaylistIdsByScope ?? base.suppressedPlaylistIdsByScope,
+    pendingPlaylistOpsByUser:
+      typedState.pendingPlaylistOpsByUser ?? base.pendingPlaylistOpsByUser,
+    homeShelfVisibilityByScope:
+      typedState.homeShelfVisibilityByScope ?? base.homeShelfVisibilityByScope,
+  };
 };
 
 export const deviceBooksStore = createStore<DeviceBooksState>()(
@@ -2677,7 +2862,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
       // Persist only durable data; skip in-flight download session state
       partialize: (state) => ({
         downloadedDetailsById: state.downloadedDetailsById,
-        downloadedBookData: state.downloadedBookData,
+        downloadedBookData: toPersistedDownloadedBookData(state.downloadedBookData),
         downloadedShelfOrderByScope: state.downloadedShelfOrderByScope,
         customCoversById: state.customCoversById,
         playbackRatesByUserBook: state.playbackRatesByUserBook,
@@ -2692,6 +2877,8 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         homeShelfVisibilityByScope: state.homeShelfVisibilityByScope,
       }),
       version: 5,
+      merge: (persistedState, currentState) =>
+        mergePersistedDeviceBooksState(persistedState, currentState),
       migrate: (persistedState, version) => {
         const base = createDefaultPersistedState();
         const typedState =
