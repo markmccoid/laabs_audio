@@ -140,6 +140,7 @@ export const authStore = createStore<AuthState>()(
         },
 
         setHasOfflineContent: (hasOfflineContent) => {
+          log("setHasOfflineContent:call", { hasOfflineContent });
           set((state) => {
             if (state.status === "hydrating") {
               log("offlineContent:update", {
@@ -173,6 +174,13 @@ export const authStore = createStore<AuthState>()(
           const trimmedId = library.id.trim();
           const trimmedName = library.name.trim();
           const userKey = getUserKey(get().storedUsername, get().serverUrl);
+          log("setActiveLibrary", {
+            id: trimmedId,
+            name: trimmedName,
+            userKey,
+            previousId: get().activeLibraryId,
+            previousName: get().activeLibraryName,
+          });
           set({
             activeLibraryId: trimmedId,
             activeLibraryName: trimmedName,

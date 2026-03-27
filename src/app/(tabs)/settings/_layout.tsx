@@ -22,14 +22,14 @@ const SettingLayout = () => {
       <Stack.Screen
         name="bookshelf-editor"
         options={{
-          title: "Bookshelf",
-          headerTransparent: true,
-          presentation: "modal",
+          headerShown: false,
+          presentation: "formSheet",
           animation: "slide_from_bottom",
           sheetGrabberVisible: true,
           sheetCornerRadius: 20,
-
-          // sheetAllowedDetents: [0.5, 0.9],
+          contentStyle: {
+            backgroundColor: "transparent",
+          },
         }}
       />
       <Stack.Screen name="testRoute" />

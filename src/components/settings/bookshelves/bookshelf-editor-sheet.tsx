@@ -1,19 +1,24 @@
 import { useAuthStore } from "@/auth/auth-store";
 import {
-  type HomeCustomShelf,
-  type HomePlaylistShelf,
-  useHomeShelves,
-} from "@/hooks/use-home-shelves";
-import { useDeviceBooksActions } from "@/store/device-books-store";
+  selectCustomShelvesByScope,
+  selectPlaylistShelvesByScope,
+  selectSuppressedPlaylistIdsByScope,
+  toHomeShelfScopeKey,
+  useDeviceBooksActions,
+  useDeviceBooksStore,
+  type HomeDerivedShelfId,
+} from "@/store/device-books-store";
 import {
   DEFAULT_HOME_SHELF_ITEM_COUNT,
   MAX_HOME_SHELF_ITEM_COUNT,
   MIN_HOME_SHELF_ITEM_COUNT,
+  selectHomeShelfSettings,
+  selectHomeShelfOrder,
   useSettingsActions,
   useSettingsStore,
 } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -31,20 +36,59 @@ import { CountStepper } from "./count-stepper";
 
 type EditorMode = "create" | "edit";
 
+type EditorDerivedShelf = {
+  kind: "derived";
+  id: HomeDerivedShelfId;
+  title: string;
+  homeItemCount: number;
+  isVisible: boolean;
+};
+
+type EditorCustomShelf = {
+  kind: "custom";
+  id: string;
+  title: string;
+  bookIds: string[];
+  homeItemCount: number;
+  isVisible: boolean;
+};
+
+type EditorPlaylistShelf = {
+  kind: "playlist";
+  id: string;
+  title: string;
+  bookIds: string[];
+  homeItemCount: number;
+  isVisible: boolean;
+  isSuppressed: boolean;
+};
+
+type EditorShelf = EditorDerivedShelf | EditorCustomShelf | EditorPlaylistShelf;
+
+const DERIVED_SHELF_TITLES: Record<HomeDerivedShelfId, string> = {
+  continueListening: "Continue Listening",
+  recentlyAdded: "Recently Added",
+  discover: "Discover",
+  downloaded: "Downloaded",
+};
+
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
-const isCustomShelf = (value: unknown): value is HomeCustomShelf =>
-  Boolean(value) &&
-  typeof value === "object" &&
-  "kind" in (value as HomeCustomShelf) &&
-  (value as HomeCustomShelf).kind === "custom";
+const isDerivedShelfId = (value: string): value is HomeDerivedShelfId =>
+  value in DERIVED_SHELF_TITLES;
 
-const isPlaylistShelf = (value: unknown): value is HomePlaylistShelf =>
+const isCustomShelf = (value: unknown): value is EditorCustomShelf =>
   Boolean(value) &&
   typeof value === "object" &&
-  "kind" in (value as HomePlaylistShelf) &&
-  (value as HomePlaylistShelf).kind === "playlist";
+  "kind" in (value as EditorCustomShelf) &&
+  (value as EditorCustomShelf).kind === "custom";
+
+const isPlaylistShelf = (value: unknown): value is EditorPlaylistShelf =>
+  Boolean(value) &&
+  typeof value === "object" &&
+  "kind" in (value as EditorPlaylistShelf) &&
+  (value as EditorPlaylistShelf).kind === "playlist";
 
 const Section = ({ children }: { children: React.ReactNode }) => {
   const themeColors = useThemeColors();
@@ -132,40 +176,86 @@ export const BookshelfEditorSheet = () => {
   } = useDeviceBooksActions();
   const { setHomeShelfVisibility, setHomeShelfItemCount, setHomeShelfOrder, clearHomeShelf } =
     useSettingsActions();
-  const { homeScopeKey, shelves } = useHomeShelves();
-  const storedShelfOrder = useSettingsStore((state) =>
-    homeScopeKey ? (state.homeShelvesByScope[homeScopeKey]?.shelfOrder ?? []) : [],
+  const homeScopeKey = toHomeShelfScopeKey(activeLibraryUserKey, activeLibraryId);
+  const customShelves = useDeviceBooksStore((state) =>
+    selectCustomShelvesByScope(state, homeScopeKey),
   );
+  const playlistShelves = useDeviceBooksStore((state) =>
+    selectPlaylistShelvesByScope(state, homeScopeKey),
+  );
+  const suppressedPlaylistIds = useDeviceBooksStore((state) =>
+    selectSuppressedPlaylistIdsByScope(state, homeScopeKey),
+  );
+  const shelfSettings = useSettingsStore((state) =>
+    shelfId ? selectHomeShelfSettings(state, homeScopeKey, shelfId) : null,
+  );
+  const storedShelfOrder = useSettingsStore((state) => selectHomeShelfOrder(state, homeScopeKey));
 
-  const shelf = useMemo(
-    () => shelves.find((candidate) => candidate.id === shelfId) ?? null,
-    [shelfId, shelves],
-  );
+  const shelf = useMemo<EditorShelf | null>(() => {
+    if (!shelfId || !shelfSettings) return null;
+
+    if (isDerivedShelfId(shelfId)) {
+      return {
+        kind: "derived",
+        id: shelfId,
+        title: DERIVED_SHELF_TITLES[shelfId],
+        homeItemCount: shelfSettings.homeItemCount,
+        isVisible: shelfSettings.isVisible,
+      };
+    }
+
+    const customShelf = customShelves.find((candidate) => candidate.id === shelfId);
+    if (customShelf) {
+      return {
+        kind: "custom",
+        id: customShelf.id,
+        title: customShelf.name,
+        bookIds: customShelf.bookIds,
+        homeItemCount: shelfSettings.homeItemCount,
+        isVisible: shelfSettings.isVisible,
+      };
+    }
+
+    const playlistShelf = playlistShelves.find((candidate) => candidate.id === shelfId);
+    if (playlistShelf) {
+      return {
+        kind: "playlist",
+        id: playlistShelf.id,
+        title: playlistShelf.name,
+        bookIds: playlistShelf.bookIds,
+        homeItemCount: shelfSettings.homeItemCount,
+        isVisible: shelfSettings.isVisible,
+        isSuppressed: suppressedPlaylistIds.includes(playlistShelf.id),
+      };
+    }
+
+    return null;
+  }, [customShelves, playlistShelves, shelfId, shelfSettings, suppressedPlaylistIds]);
 
   const [nameDraft, setNameDraft] = useState("");
   const [draftIsVisible, setDraftIsVisible] = useState(false);
   const [draftHomeItemCount, setDraftHomeItemCount] = useState(DEFAULT_HOME_SHELF_ITEM_COUNT);
   const committedRef = useRef(false);
+  const shelfTitle = shelf && (isCustomShelf(shelf) || isPlaylistShelf(shelf)) ? shelf.title : null;
+  const customShelfId = shelf && isCustomShelf(shelf) ? shelf.id : null;
   const isPlaylistCreateDraft = isCreateMode && createShelfType === "playlist" && !shelf;
+  const isCustomCreateRoute = isCreateMode && createShelfType === "custom" && Boolean(shelfId);
 
   useEffect(() => {
     if (isPlaylistCreateDraft) {
       setNameDraft((current) => current || "New Shelf");
       return;
     }
-    if (!shelf || (!isCustomShelf(shelf) && !isPlaylistShelf(shelf))) return;
-    setNameDraft(shelf.title);
-  }, [isPlaylistCreateDraft, shelf]);
+    if (!shelfTitle) return;
+    setNameDraft((current) => (current === shelfTitle ? current : shelfTitle));
+  }, [isPlaylistCreateDraft, shelfTitle]);
 
   useEffect(() => {
-    if (!shelf || (!isCustomShelf(shelf) && !isPlaylistShelf(shelf))) return;
     const nextName = nameDraft.trim();
-    if (!nextName || nextName === shelf.title) return;
-
-    if (!isCustomShelf(shelf)) return;
+    if (!customShelfId || !shelfTitle || !nextName || nextName === shelfTitle) return;
 
     const timer = setTimeout(() => {
-      renameCustomShelf(shelf.id, nextName, {
+      renameCustomShelf(customShelfId, nextName, {
         userKey: activeLibraryUserKey,
         libraryId: activeLibraryId,
       });
@@ -175,15 +265,17 @@ export const BookshelfEditorSheet = () => {
   }, [
     activeLibraryId,
     activeLibraryUserKey,
+    customShelfId,
     nameDraft,
     renameCustomShelf,
-    shelf,
+    shelfTitle,
   ]);
 
   useEffect(() => {
+    if (!isCustomCreateRoute || !shelfId) return;
+
     return () => {
-      if (!isCreateMode || committedRef.current || !shelfId) return;
-      if (!isCustomShelf(shelf)) return;
+      if (committedRef.current) return;
 
       deleteCustomShelf(shelfId, {
         userKey: activeLibraryUserKey,
@@ -197,8 +289,7 @@ export const BookshelfEditorSheet = () => {
     clearHomeShelf,
     deleteCustomShelf,
     homeScopeKey,
-    isCreateMode,
-    shelf,
+    isCustomCreateRoute,
     shelfId,
   ]);
 
@@ -261,7 +352,7 @@ export const BookshelfEditorSheet = () => {
     router.back();
   };
 
-  const handleDeleteCustomShelf = (customShelf: HomeCustomShelf) => {
+  const handleDeleteCustomShelf = (customShelf: EditorCustomShelf) => {
     Alert.alert(
       "Delete bookshelf?",
       `Delete "${customShelf.title}"? This cannot be undone.`,
@@ -284,7 +375,7 @@ export const BookshelfEditorSheet = () => {
     );
   };
 
-  const handleRemovePlaylistFromApp = (playlistShelf: HomePlaylistShelf) => {
+  const handleRemovePlaylistFromApp = (playlistShelf: EditorPlaylistShelf) => {
     Alert.alert(
       "Remove from app view?",
       `Hide "${playlistShelf.title}" from app views while keeping it on Audiobookshelf?`,
@@ -306,7 +397,7 @@ export const BookshelfEditorSheet = () => {
     );
   };
 
-  const handleDeletePlaylistFromAudiobookshelf = (playlistShelf: HomePlaylistShelf) => {
+  const handleDeletePlaylistFromAudiobookshelf = (playlistShelf: EditorPlaylistShelf) => {
     Alert.alert(
       "Delete playlist?",
       `Delete "${playlistShelf.title}" from Audiobookshelf? This cannot be undone.`,
@@ -329,7 +420,7 @@ export const BookshelfEditorSheet = () => {
     );
   };
 
-  const handleConvertToPlaylist = (customShelf: HomeCustomShelf) => {
+  const handleConvertToPlaylist = (customShelf: EditorCustomShelf) => {
     Alert.alert(
       "Convert to Playlist Shelf?",
       `Convert "${customShelf.title}" to a playlist synced with Audiobookshelf?`,
@@ -387,21 +478,26 @@ export const BookshelfEditorSheet = () => {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       collapsable={false}
     >
-      <Stack.Screen
-        options={{
-          title,
-          headerRight: () => (
-            <Pressable onPress={handleDone} style={{ paddingHorizontal: 2, paddingVertical: 4 }}>
-              <Text
-                selectable
-                style={{ color: themeColors.accent, fontSize: 17, fontWeight: "600" }}
-              >
-                Done
-              </Text>
-            </Pressable>
-          ),
+      <View
+        style={{
+          paddingTop: Math.max(insets.top + 10, 18),
+          paddingHorizontal: 16,
+          paddingBottom: 10,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
         }}
-      />
+      >
+        <Text selectable style={{ color: themeColors.text, fontSize: 22, fontWeight: "700" }}>
+          {title}
+        </Text>
+        <Pressable onPress={handleDone} style={{ paddingHorizontal: 2, paddingVertical: 4 }}>
+          <Text selectable style={{ color: themeColors.accent, fontSize: 17, fontWeight: "600" }}>
+            Done
+          </Text>
+        </Pressable>
+      </View>
 
       {!shelf && !isPlaylistCreateDraft ? (
         <View style={{ flex: 1, paddingHorizontal: 16, justifyContent: "center", gap: 10 }}>
@@ -546,10 +642,10 @@ export const BookshelfEditorSheet = () => {
                 {isPlaylistCreateDraft
                   ? 'Playlist shelf is created when "Done" is pressed.'
                   : isCustomShelf(shelf)
-                  ? "Changes are saved automatically."
-                  : isPlaylistShelf(shelf)
-                    ? 'Name changes are saved when "Done" is pressed.'
-                    : "Built-in shelves cannot be renamed or deleted."}
+                    ? "Changes are saved automatically."
+                    : isPlaylistShelf(shelf)
+                      ? 'Name changes are saved when "Done" is pressed.'
+                      : "Built-in shelves cannot be renamed or deleted."}
               </Text>
             </View>
           </Section>

@@ -340,7 +340,6 @@ export const useHomeShelves = () => {
   useEffect(() => {
     if (!homeScopeKey) return;
     if (hasDiscoverSnapshotForToday) return;
-
     setDailyDiscoverShelf(homeScopeKey, {
       dateKey: discoverDateKey,
       seed: discoverSeed,
@@ -358,7 +357,6 @@ export const useHomeShelves = () => {
   useEffect(() => {
     if (!homeScopeKey || !activeLibraryId || !activeLibraryUserKey) return;
     if (!libraryPlaylists) return;
-
     upsertPlaylistsFromServer(libraryPlaylists, {
       userKey: activeLibraryUserKey,
       libraryId: activeLibraryId,

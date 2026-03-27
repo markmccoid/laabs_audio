@@ -491,6 +491,6 @@ export const selectHomeShelfSettings = (
 
 export const selectHomeShelfOrder = (state: SettingsState, scopeKey: string | null) => {
   const normalizedScopeKey = normalizeScopeKey(scopeKey);
-  if (!normalizedScopeKey) return [];
-  return state.homeShelvesByScope[normalizedScopeKey]?.shelfOrder ?? [];
+  if (!normalizedScopeKey) return EMPTY_SCOPE_SETTINGS.shelfOrder;
+  return state.homeShelvesByScope[normalizedScopeKey]?.shelfOrder ?? EMPTY_SCOPE_SETTINGS.shelfOrder;
 };

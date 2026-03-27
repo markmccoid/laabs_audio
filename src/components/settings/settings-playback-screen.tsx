@@ -67,104 +67,85 @@ export const SettingsPlaybackScreen = () => {
           }}
         >
           <Text selectable style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}>
-            Skip Time
+            Skip Time Seconds
           </Text>
 
-          <View
-            style={{
-              marginTop: 6,
-              borderRadius: 12,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: themeColors.border,
-              backgroundColor: themeColors.bg,
-              paddingHorizontal: 10,
-              paddingVertical: 8,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <Text
-              selectable
-              style={{ minWidth: 74, color: themeColors.text, fontSize: 14, fontWeight: "600" }}
-            >
-              Backward
-            </Text>
-            <TextInput
-              value={backwardSkipDraft}
-              onChangeText={(nextValue) => setBackwardSkipDraft(nextValue.replace(/[^0-9]/g, ""))}
-              onBlur={commitBackwardSkipDraft}
-              onEndEditing={commitBackwardSkipDraft}
-              keyboardType="number-pad"
-              inputMode="numeric"
-              returnKeyType="done"
-              maxLength={3}
+          <View>
+            <View
               style={{
-                flex: 1,
-                minHeight: 36,
-                borderRadius: 10,
+                marginTop: 6,
+                borderRadius: 12,
                 borderCurve: "continuous",
                 borderWidth: 1,
                 borderColor: themeColors.border,
-                backgroundColor: themeColors.surface,
-                color: themeColors.text,
-                fontSize: 16,
+                backgroundColor: themeColors.bg,
                 paddingHorizontal: 10,
                 paddingVertical: 8,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
               }}
-            />
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-              seconds
-            </Text>
-          </View>
+            >
+              <Text
+                selectable
+                style={{ minWidth: 74, color: themeColors.text, fontSize: 14, fontWeight: "600" }}
+              >
+                Backward
+              </Text>
+              <TextInput
+                value={backwardSkipDraft}
+                onChangeText={(nextValue) => setBackwardSkipDraft(nextValue.replace(/[^0-9]/g, ""))}
+                onBlur={commitBackwardSkipDraft}
+                onEndEditing={commitBackwardSkipDraft}
+                keyboardType="number-pad"
+                inputMode="numeric"
+                returnKeyType="done"
+                maxLength={3}
+                style={{
+                  flex: 1,
+                  minHeight: 36,
+                  borderRadius: 10,
+                  borderCurve: "continuous",
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  backgroundColor: themeColors.surface,
+                  color: themeColors.text,
+                  fontSize: 16,
+                  paddingHorizontal: 10,
+                  paddingVertical: 8,
+                }}
+              />
 
-          <View
-            style={{
-              borderRadius: 12,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: themeColors.border,
-              backgroundColor: themeColors.bg,
-              paddingHorizontal: 10,
-              paddingVertical: 8,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <Text
-              selectable
-              style={{ minWidth: 74, color: themeColors.text, fontSize: 14, fontWeight: "600" }}
-            >
-              Forward
-            </Text>
-            <TextInput
-              value={forwardSkipDraft}
-              onChangeText={(nextValue) => setForwardSkipDraft(nextValue.replace(/[^0-9]/g, ""))}
-              onBlur={commitForwardSkipDraft}
-              onEndEditing={commitForwardSkipDraft}
-              keyboardType="number-pad"
-              inputMode="numeric"
-              returnKeyType="done"
-              maxLength={3}
-              style={{
-                flex: 1,
-                minHeight: 36,
-                borderRadius: 10,
-                borderCurve: "continuous",
-                borderWidth: 1,
-                borderColor: themeColors.border,
-                backgroundColor: themeColors.surface,
-                color: themeColors.text,
-                fontSize: 16,
-                paddingHorizontal: 10,
-                paddingVertical: 8,
-              }}
-            />
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-              seconds
-            </Text>
+              <Text
+                selectable
+                style={{ minWidth: 74, color: themeColors.text, fontSize: 14, fontWeight: "600" }}
+              >
+                Forward
+              </Text>
+              <TextInput
+                value={forwardSkipDraft}
+                onChangeText={(nextValue) => setForwardSkipDraft(nextValue.replace(/[^0-9]/g, ""))}
+                onBlur={commitForwardSkipDraft}
+                onEndEditing={commitForwardSkipDraft}
+                keyboardType="number-pad"
+                inputMode="numeric"
+                returnKeyType="done"
+                maxLength={3}
+                style={{
+                  flex: 1,
+                  minHeight: 36,
+                  borderRadius: 10,
+                  borderCurve: "continuous",
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  backgroundColor: themeColors.surface,
+                  color: themeColors.text,
+                  fontSize: 16,
+                  paddingHorizontal: 10,
+                  paddingVertical: 8,
+                }}
+              />
+            </View>
           </View>
           <Text selectable style={{ color: themeColors.textMuted, fontSize: 12, marginTop: 2 }}>
             Lock screen forward and backward see will use Backward value.

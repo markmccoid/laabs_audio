@@ -157,13 +157,13 @@ export const SettingsHomeScreen = () => {
               subtitle="App-level behavior for images and cover handling"
               icon="gearshape.2"
             />
-            <SettingsRow
+            {/* <SettingsRow
               href="/(tabs)/settings/testRoute"
               title="Testng"
               subtitle="Testomg"
               icon="gearshape.2"
               isLast
-            />
+            /> */}
           </SettingsGroup>
         ) : null}
       </ScrollView>
