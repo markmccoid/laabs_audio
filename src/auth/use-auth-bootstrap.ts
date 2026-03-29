@@ -39,6 +39,17 @@ export const useAuthBootstrap = () => {
   } = useAuthActions();
 
   useEffect(() => {
+    if (!__DEV__) return;
+    console.log("[auth-bootstrap]", {
+      status,
+      isOnline,
+      hasOfflineContent,
+      hasRefreshToken: Boolean(refreshToken),
+      resolvedUserKey,
+    });
+  }, [hasOfflineContent, isOnline, refreshToken, resolvedUserKey, status]);
+
+  useEffect(() => {
     hydrateFromStorage(hasOfflineContent).catch(() => undefined);
   }, [hasOfflineContent, hydrateFromStorage]);
 

@@ -50,6 +50,11 @@ const BOOK_UTILITY_SHEETS = new Set([
   "book-filter-results",
 ]);
 
+const logStartupDebug = (event: string, payload?: Record<string, unknown>) => {
+  if (!__DEV__) return;
+  console.log("[startup-layout]", event, payload ?? {});
+};
+
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 const resolveParam = (value?: string | string[]) => {
@@ -135,11 +140,42 @@ export default function RootLayout() {
     [globalParams, segments],
   );
   const startupBookLinkId = returnToLibraryItemId ?? initialDeepLinkBookId ?? undefined;
-  const renderReady =
-    status !== "hydrating" && initialDeepLinkBookId !== undefined && queryRestoreReady;
-  const warmupEligible = renderReady && hasPresentedInitialContent;
+  const renderReady = status !== "hydrating";
+  const warmupEligible =
+    renderReady &&
+    initialDeepLinkBookId !== undefined &&
+    queryRestoreReady &&
+    hasPresentedInitialContent;
+
+  const hideNativeSplash = useCallback(() => {
+    if (splashHiddenRef.current) {
+      logStartupDebug("hideNativeSplash:skipped-already-hidden");
+      return;
+    }
+
+    logStartupDebug("hideNativeSplash:attempt", {
+      status,
+      initialDeepLinkBookId,
+      queryRestoreReady,
+      hasPresentedInitialContent,
+      renderReady,
+    });
+    splashHiddenRef.current = true;
+    SplashScreen.hideAsync()
+      .then(() => {
+        logStartupDebug("hideNativeSplash:success");
+        logStartupEvent("native splash hidden");
+      })
+      .catch(() => {
+        logStartupDebug("hideNativeSplash:error");
+        splashHiddenRef.current = false;
+      });
+  }, [hasPresentedInitialContent, initialDeepLinkBookId, queryRestoreReady, renderReady, status]);
 
   const handleQueryRestoreSuccess = useCallback(() => {
+    logStartupDebug("queryRestore:success", {
+      queryCount: queryClient.getQueryCache().getAll().length,
+    });
     setQueryRestoreReady(true);
     logStartupDuration("query restore complete", queryRestoreStartedAtMsRef.current, {
       restoredQueryCount: queryClient.getQueryCache().getAll().length,
@@ -147,6 +183,9 @@ export default function RootLayout() {
   }, []);
 
   const handleQueryRestoreError = useCallback(() => {
+    logStartupDebug("queryRestore:error", {
+      queryCount: queryClient.getQueryCache().getAll().length,
+    });
     setQueryRestoreReady(true);
     logStartupDuration("query restore failed", queryRestoreStartedAtMsRef.current, {
       restoredQueryCount: queryClient.getQueryCache().getAll().length,
@@ -173,11 +212,13 @@ export default function RootLayout() {
   useEffect(() => {
     queryRestoreStartedAtMsRef.current = markStartup("query-restore-start");
     logStartupEvent("query restore start");
+    logStartupDebug("queryRestore:start");
   }, []);
 
   useEffect(
     () =>
       subscribeStartupPresentation(() => {
+        logStartupDebug("startupPresentation:update", getStartupPresentationState());
         setHasPresentedInitialContent(getStartupPresentationState().hasPresentedInitialContent);
       }),
     [],
@@ -186,50 +227,117 @@ export default function RootLayout() {
   useEffect(() => {
     // Read the cold-start URL once so startup navigation can avoid clobbering a deep link.
     let isMounted = true;
+    let didResolveInitialUrl = false;
+    const unresolvedUrlTimer = setTimeout(() => {
+      if (!didResolveInitialUrl) {
+        logStartupDebug("initialUrl:still-pending", {
+          status,
+          renderReady,
+        });
+      }
+    }, 3000);
+
+    logStartupDebug("initialUrl:request");
 
     Linking.getInitialURL()
       .then((initialUrl) => {
+        didResolveInitialUrl = true;
+        clearTimeout(unresolvedUrlTimer);
         if (!isMounted) return;
+        logStartupDebug("initialUrl:resolved", {
+          initialUrl,
+          extractedLibraryItemId: extractBookDetailIdFromUrl(initialUrl) ?? null,
+        });
         setInitialDeepLinkBookId(extractBookDetailIdFromUrl(initialUrl) ?? null);
       })
-      .catch(() => {
+      .catch((error) => {
+        didResolveInitialUrl = true;
+        clearTimeout(unresolvedUrlTimer);
         if (!isMounted) return;
+        logStartupDebug("initialUrl:error", {
+          error: error instanceof Error ? error.message : String(error),
+        });
         setInitialDeepLinkBookId(null);
       });
 
     return () => {
       isMounted = false;
+      clearTimeout(unresolvedUrlTimer);
     };
-  }, []);
+  }, [renderReady, status]);
 
   useEffect(() => {
     // Once the router has entered tabs, the startup deep link has been handed off.
     if (initialDeepLinkBookId == null) return;
     if (!routeState.inTabs) return;
 
+    logStartupDebug("initialUrl:handoff-complete", {
+      initialDeepLinkBookId,
+      routeState,
+    });
     setInitialDeepLinkBookId(null);
-  }, [initialDeepLinkBookId, routeState.inTabs]);
+  }, [initialDeepLinkBookId, routeState]);
 
   const handleAppTreeLayout = useCallback(() => {
+    logStartupDebug("appTree:onLayout", {
+      renderReady,
+      status,
+      initialDeepLinkBookId,
+      queryRestoreReady,
+      hasPresentedInitialContent,
+    });
     if (!renderReady) return;
-    if (splashHiddenRef.current) return;
+    hideNativeSplash();
+  }, [hasPresentedInitialContent, hideNativeSplash, initialDeepLinkBookId, queryRestoreReady, renderReady, status]);
 
-    splashHiddenRef.current = true;
-    SplashScreen.hideAsync()
-      .then(() => {
-        logStartupEvent("native splash hidden");
-      })
-      .catch(() => {
-        splashHiddenRef.current = false;
-      });
-  }, [renderReady]);
+  useEffect(() => {
+    logStartupDebug("renderGate:update", {
+      status,
+      initialDeepLinkBookId,
+      queryRestoreReady,
+      hasPresentedInitialContent,
+      renderReady,
+      warmupEligible,
+      routeState,
+    });
+    if (!renderReady) return;
+
+    const frameId = requestAnimationFrame(() => {
+      logStartupDebug("renderGate:animation-frame");
+      hideNativeSplash();
+    });
+
+    return () => {
+      cancelAnimationFrame(frameId);
+    };
+  }, [
+    hasPresentedInitialContent,
+    hideNativeSplash,
+    initialDeepLinkBookId,
+    queryRestoreReady,
+    renderReady,
+    routeState,
+    status,
+    warmupEligible,
+  ]);
 
   useEffect(() => {
     if (status === "hydrating") return;
     if (initialDeepLinkBookId === undefined) return;
 
+    logStartupDebug("routeGate:evaluate", {
+      status,
+      loginRequired,
+      routeState,
+      startupBookLinkId,
+      initialDeepLinkBookId,
+    });
+
     // Keep all auth and startup routing decisions in one place to avoid competing redirects.
     if (status === "anonymous" && !routeState.inLogin) {
+      logStartupDebug("routeGate:redirect-login-required", {
+        startupBookLinkId,
+      });
       router.replace({
         pathname: "/login",
         params: {
@@ -241,6 +349,7 @@ export default function RootLayout() {
     }
 
     if (loginRequired && status !== "anonymous" && !routeState.inLogin) {
+      logStartupDebug("routeGate:push-login-sheet");
       router.push({ pathname: "/login", params: { mode: "sheet" } });
       return;
     }
@@ -256,8 +365,12 @@ export default function RootLayout() {
 
     if (status !== "anonymous" && !loginRequired && !isKnownAuthenticatedRoute) {
       if (startupBookLinkId) {
+        logStartupDebug("routeGate:holding-for-deeplink", {
+          startupBookLinkId,
+        });
         return;
       }
+      logStartupDebug("routeGate:redirect-home");
       router.replace("/(tabs)/(home)");
     }
   }, [initialDeepLinkBookId, loginRequired, routeState, startupBookLinkId, status]);
