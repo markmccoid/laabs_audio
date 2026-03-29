@@ -1,12 +1,15 @@
 import { ThemeProvider } from "@react-navigation/native";
+import type { QueryKey } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import * as Linking from "expo-linking";
 import { Stack, router, useGlobalSearchParams, useSegments } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import * as SplashScreen from "expo-splash-screen";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, InteractionManager, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Toaster } from "react-native-sonner";
 import { Uniwind } from "uniwind";
+import { AmbientCoordinator } from "../ambient/ambient-coordinator";
 import { libraryItemsApi } from "../api/library-items-api";
 import { meApi } from "../api/me-api";
 import { useAuthStore } from "../auth/auth-store";
@@ -14,12 +17,11 @@ import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
 import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
 import { LibrarySelectionGate } from "../components/library-selection-gate";
 import { OfflineConnectionBanner } from "../components/offline-connection-banner";
-import { AmbientCoordinator } from "../ambient/ambient-coordinator";
 import "../global.css";
+import { extractBookDetailIdFromUrl } from "../navigation/book-links";
 import { playerService } from "../player/player-service";
 import { SleepTimerCoordinator } from "../player/sleep-timer-coordinator";
-import { extractBookDetailIdFromUrl } from "../navigation/book-links";
-import { queryClient } from "../query/query-client";
+import { FIVE_MINUTES_MS, queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { mmkvQueryPersister } from "../store/mmkv-query-persister";
 import {
@@ -27,6 +29,11 @@ import {
   useNavigationTheme,
   useThemeColors,
 } from "../theme/use-app-theme";
+import { logStartupDuration, logStartupEvent, markStartup } from "../utils/dev-startup-tracing";
+import {
+  getStartupPresentationState,
+  subscribeStartupPresentation,
+} from "../utils/startup-presentation";
 
 const PLAYER_UTILITY_SHEETS = new Set([
   "player-rate",
@@ -43,11 +50,38 @@ const BOOK_UTILITY_SHEETS = new Set([
   "book-filter-results",
 ]);
 
+void SplashScreen.preventAutoHideAsync().catch(() => undefined);
+
 const resolveParam = (value?: string | string[]) => {
   if (Array.isArray(value)) {
     return value[0];
   }
   return typeof value === "string" ? value : undefined;
+};
+
+const getWarmQueryState = (queryKey: QueryKey) => {
+  const state = queryClient.getQueryState(queryKey);
+
+  if (!state) {
+    return {
+      cacheState: "missing",
+      isStale: true,
+      dataUpdatedAt: null,
+    } as const;
+  }
+
+  const hasData = state.data !== undefined;
+  const isStale =
+    !hasData ||
+    state.isInvalidated ||
+    state.dataUpdatedAt <= 0 ||
+    Date.now() - state.dataUpdatedAt > FIVE_MINUTES_MS;
+
+  return {
+    cacheState: hasData ? "present" : "empty",
+    isStale,
+    dataUpdatedAt: state.dataUpdatedAt || null,
+  } as const;
 };
 
 // Collapse the current top-level route into flags the navigation guard can reason about.
@@ -86,15 +120,38 @@ export default function RootLayout() {
   const segments = useSegments();
   const globalParams = useGlobalSearchParams<{ libraryItemId?: string | string[] }>();
   const previousStatus = useRef<typeof status | null>(null);
+  const queryRestoreStartedAtMsRef = useRef<number | null>(null);
+  const splashHiddenRef = useRef(false);
   const [initialDeepLinkBookId, setInitialDeepLinkBookId] = useState<string | null | undefined>(
     undefined,
   );
+  const [hasPresentedInitialContent, setHasPresentedInitialContent] = useState(
+    () => getStartupPresentationState().hasPresentedInitialContent,
+  );
+  const [queryRestoreReady, setQueryRestoreReady] = useState(false);
   const routeState = useMemo(() => getRouteState(segments), [segments]);
   const returnToLibraryItemId = useMemo(
     () => getReturnToLibraryItemId(segments, globalParams),
     [globalParams, segments],
   );
   const startupBookLinkId = returnToLibraryItemId ?? initialDeepLinkBookId ?? undefined;
+  const renderReady =
+    status !== "hydrating" && initialDeepLinkBookId !== undefined && queryRestoreReady;
+  const warmupEligible = renderReady && hasPresentedInitialContent;
+
+  const handleQueryRestoreSuccess = useCallback(() => {
+    setQueryRestoreReady(true);
+    logStartupDuration("query restore complete", queryRestoreStartedAtMsRef.current, {
+      restoredQueryCount: queryClient.getQueryCache().getAll().length,
+    });
+  }, []);
+
+  const handleQueryRestoreError = useCallback(() => {
+    setQueryRestoreReady(true);
+    logStartupDuration("query restore failed", queryRestoreStartedAtMsRef.current, {
+      restoredQueryCount: queryClient.getQueryCache().getAll().length,
+    });
+  }, []);
 
   // Persist only queries that opt-in via `meta.persist`
   const persistOptions = useMemo(
@@ -112,6 +169,19 @@ export default function RootLayout() {
   useEffect(() => {
     Uniwind.setTheme("system");
   }, []);
+
+  useEffect(() => {
+    queryRestoreStartedAtMsRef.current = markStartup("query-restore-start");
+    logStartupEvent("query restore start");
+  }, []);
+
+  useEffect(
+    () =>
+      subscribeStartupPresentation(() => {
+        setHasPresentedInitialContent(getStartupPresentationState().hasPresentedInitialContent);
+      }),
+    [],
+  );
 
   useEffect(() => {
     // Read the cold-start URL once so startup navigation can avoid clobbering a deep link.
@@ -139,6 +209,20 @@ export default function RootLayout() {
 
     setInitialDeepLinkBookId(null);
   }, [initialDeepLinkBookId, routeState.inTabs]);
+
+  const handleAppTreeLayout = useCallback(() => {
+    if (!renderReady) return;
+    if (splashHiddenRef.current) return;
+
+    splashHiddenRef.current = true;
+    SplashScreen.hideAsync()
+      .then(() => {
+        logStartupEvent("native splash hidden");
+      })
+      .catch(() => {
+        splashHiddenRef.current = false;
+      });
+  }, [renderReady]);
 
   useEffect(() => {
     if (status === "hydrating") return;
@@ -211,252 +295,325 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (status !== "authenticated") return;
-    const prefetches: Promise<unknown>[] = [];
+    if (!warmupEligible) return;
 
-    // Warm the core catalog and user-state queries after auth is ready.
-    if (activeLibraryId) {
-      prefetches.push(
-        queryClient.prefetchQuery({
-          queryKey: queryKeys.libraryBooks(activeLibraryId),
-          queryFn: () => libraryItemsApi.getItems({ libraryId: activeLibraryId }),
-          meta: { persist: true },
-        }),
-      );
-    }
+    let isCancelled = false;
+    let interactionTask: { cancel?: () => void } | null = null;
 
-    if (activeLibraryUserKey) {
-      prefetches.push(
-        queryClient.prefetchQuery({
-          queryKey: queryKeys.userServerState(activeLibraryUserKey),
-          queryFn: () => meApi.getUserServerState(),
-          meta: { persist: true },
-        }),
-      );
-    }
+    const frameId = requestAnimationFrame(() => {
+      interactionTask = InteractionManager.runAfterInteractions(() => {
+        if (isCancelled) return;
 
-    if (!prefetches.length) return;
-    Promise.all(prefetches).catch(() => undefined);
-  }, [activeLibraryId, activeLibraryUserKey, status]);
+        const warmupStartedAtMs = markStartup("startup-warmup-start");
+        const prefetches: Promise<unknown>[] = [];
 
-  if (status === "hydrating") {
-    return (
+        const tracePrefetch = <T,>(
+          label: string,
+          queryKey: QueryKey,
+          queryFn: () => Promise<T>,
+        ) => {
+          const before = getWarmQueryState(queryKey);
+          logStartupEvent(`warmup ${label} begin`, before);
+
+          return queryClient
+            .prefetchQuery({
+              queryKey,
+              queryFn,
+              meta: { persist: true },
+            })
+            .then(() => {
+              const after = getWarmQueryState(queryKey);
+              logStartupEvent(`warmup ${label} complete`, {
+                beforeCacheState: before.cacheState,
+                beforeIsStale: before.isStale,
+                afterCacheState: after.cacheState,
+                afterIsStale: after.isStale,
+                fetched: before.dataUpdatedAt !== after.dataUpdatedAt,
+              });
+            });
+        };
+
+        if (activeLibraryId) {
+          prefetches.push(
+            tracePrefetch("library books", queryKeys.libraryBooks(activeLibraryId), () =>
+              libraryItemsApi.getItems({ libraryId: activeLibraryId }),
+            ),
+          );
+        }
+
+        if (activeLibraryUserKey) {
+          prefetches.push(
+            tracePrefetch(
+              "user server state",
+              queryKeys.userServerState(activeLibraryUserKey),
+              () => meApi.getUserServerState(),
+            ),
+          );
+        }
+
+        if (!prefetches.length) {
+          logStartupEvent("warmup skipped", {
+            reason: "missing-library-context",
+            hasActiveLibraryId: Boolean(activeLibraryId),
+            hasActiveLibraryUserKey: Boolean(activeLibraryUserKey),
+          });
+          return;
+        }
+
+        logStartupEvent("warmup start", {
+          activeLibraryId,
+          hasActiveLibraryUserKey: Boolean(activeLibraryUserKey),
+        });
+
+        Promise.all(prefetches)
+          .then(() => {
+            logStartupDuration("warmup complete", warmupStartedAtMs, {
+              queryCount: prefetches.length,
+            });
+          })
+          .catch((error) => {
+            logStartupDuration("warmup failed", warmupStartedAtMs, {
+              queryCount: prefetches.length,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+      });
+    });
+
+    return () => {
+      isCancelled = true;
+      cancelAnimationFrame(frameId);
+      interactionTask?.cancel?.();
+    };
+  }, [activeLibraryId, activeLibraryUserKey, status, warmupEligible]);
+
+  const content =
+    !renderReady ? (
       <View className="flex-1 items-center justify-center bg-bg">
         <ActivityIndicator size="large" color={themeColors.accent} />
       </View>
+    ) : (
+      <View style={{ flex: 1 }} onLayout={handleAppTreeLayout}>
+        <ThemeProvider value={navigationTheme}>
+          <GestureHandlerRootView style={{ flex: 1, backgroundColor: themeColors.bg }}>
+            <LibrarySelectionGate />
+            <ActiveDownloadToastCoordinator />
+            <OfflineConnectionBanner />
+            <SleepTimerCoordinator />
+            <AmbientCoordinator />
+            <View style={{ flex: 1 }}>
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: themeColors.bg },
+                }}
+              >
+                <Stack.Screen name="(tabs)" />
+                <Stack.Screen
+                  name="login"
+                  options={{
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    // sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="library-picker"
+                  options={{
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="chapter-viewer"
+                  options={{
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="main-player"
+                  options={{
+                    presentation: "card",
+                    headerShown: false,
+                    gestureDirection: "vertical",
+                    gestureEnabled: true,
+                    contentStyle: {
+                      borderTopLeftRadius: 25,
+                      borderTopRightRadius: 25,
+                      overflow: "hidden",
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="player-rate"
+                  options={{
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.45, 0.85],
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="player-bookmarks"
+                  options={{
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.45, 0.85],
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="player-sleep-timer"
+                  options={{
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.45, 0.85],
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="player-ambient"
+                  options={{
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.45, 0.85],
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="book-bookshelves"
+                  options={{
+                    headerTitle: "Add To Bookshelf",
+                    headerShown: true,
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.45, 0.85],
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="book-downloads"
+                  options={{
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.45, 0.85],
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="book-bookmarks"
+                  options={{
+                    headerShown: false,
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.45, 0.85],
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="book-addbookmark"
+                  options={{
+                    headerShown: false,
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.45, 0.85],
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="book-series"
+                  options={{
+                    headerShown: true,
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.45, 0.95],
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+                <Stack.Screen
+                  name="book-filter-results"
+                  options={{
+                    headerShown: true,
+                    presentation: "formSheet",
+                    animation: "slide_from_bottom",
+                    sheetAllowedDetents: [0.95],
+                    sheetGrabberVisible: true,
+                    sheetCornerRadius: 20,
+                    contentStyle: {
+                      backgroundColor: themeColors.surface,
+                    },
+                  }}
+                />
+              </Stack>
+            </View>
+            <Toaster />
+          </GestureHandlerRootView>
+        </ThemeProvider>
+      </View>
     );
-  }
 
   return (
-    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
-      <ThemeProvider value={navigationTheme}>
-        <GestureHandlerRootView style={{ flex: 1, backgroundColor: themeColors.bg }}>
-          <LibrarySelectionGate />
-          <ActiveDownloadToastCoordinator />
-          <OfflineConnectionBanner />
-          <SleepTimerCoordinator />
-          <AmbientCoordinator />
-          <View style={{ flex: 1 }}>
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: themeColors.bg },
-              }}
-            >
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen
-                name="login"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  // sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="library-picker"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="chapter-viewer"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="main-player"
-                options={{
-                  presentation: "card",
-                  headerShown: false,
-                  gestureDirection: "vertical",
-                  gestureEnabled: true,
-                  contentStyle: {
-                    borderTopLeftRadius: 25,
-                    borderTopRightRadius: 25,
-                    overflow: "hidden",
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="player-rate"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.85],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="player-bookmarks"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.85],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="player-sleep-timer"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.85],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="player-ambient"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.85],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="book-bookshelves"
-                options={{
-                  headerTitle: "Add To Bookshelf",
-                  headerShown: true,
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.85],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="book-downloads"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.85],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="book-bookmarks"
-                options={{
-                  headerShown: false,
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.85],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="book-addbookmark"
-                options={{
-                  headerShown: false,
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.85],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="book-series"
-                options={{
-                  headerShown: true,
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.95],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-              <Stack.Screen
-                name="book-filter-results"
-                options={{
-                  headerShown: true,
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.95],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
-              />
-            </Stack>
-          </View>
-          <Toaster />
-        </GestureHandlerRootView>
-      </ThemeProvider>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={persistOptions}
+      onSuccess={handleQueryRestoreSuccess}
+      onError={handleQueryRestoreError}
+    >
+      {content}
     </PersistQueryClientProvider>
   );
 }

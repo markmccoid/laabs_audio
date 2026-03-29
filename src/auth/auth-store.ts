@@ -2,6 +2,7 @@ import { useStore } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import { mmkvStorage } from "../store/mmkv-storage";
+import { logStartupDuration, logStartupEvent, markStartup } from "../utils/dev-startup-tracing";
 import { AuthError, authService } from "./auth-service";
 import { authStorage } from "./auth-storage";
 import { getJwtExpiry, isTokenExpired } from "./auth-token";
@@ -85,6 +86,14 @@ export const authStore = createStore<AuthState>()(
       activeLibraryUserKey: null,
       actions: {
         hydrateFromStorage: async (initialOfflineContent) => {
+          const isInitialHydrate = get().status === "hydrating";
+          const hydrateStartedAtMs = isInitialHydrate ? markStartup("auth-hydrate-start") : null;
+          if (isInitialHydrate) {
+            logStartupEvent("auth hydrate start", {
+              hasOfflineContentHint: initialOfflineContent ?? null,
+            });
+          }
+
           log("hydrate:start");
           const [credentials, tokens] = await Promise.all([
             authStorage.getCredentials(),
@@ -133,6 +142,15 @@ export const authStore = createStore<AuthState>()(
           log("hydrate:done", {
             status: computeEntryStatus(hasStoredSession, offlineContent),
           });
+
+          if (isInitialHydrate) {
+            logStartupDuration("auth hydrate complete", hydrateStartedAtMs, {
+              status: computeEntryStatus(hasStoredSession, offlineContent),
+              hasStoredSession,
+              hasMatchingLibrary,
+              hasOfflineContent: offlineContent,
+            });
+          }
         },
 
         setOnlineStatus: (isOnline) => {
