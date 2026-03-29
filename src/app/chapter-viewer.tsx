@@ -1,3 +1,4 @@
+import { normalizeUserProgressByLibraryItemId } from "@/api/me-api";
 import { useGetItemDetails, useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { playbackStore, playerService, usePlaybackStore } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -68,15 +69,17 @@ const ChapterViewerRoute = () => {
 
   const localProgressMs = useMemo(() => {
     if (!routeLibraryItemId) return 0;
-    const progressByLibraryItemId =
-      userServerState?.progressByLibraryItemId ??
-      (
-        userServerState as typeof userServerState & {
-          progressByBookId?: Record<string, { currentTime: number }>;
-        }
-      )?.progressByBookId ??
-      {};
-    const currentTimeSeconds = progressByLibraryItemId[routeLibraryItemId]?.currentTime ?? 0;
+    const progressByBookId = normalizeUserProgressByLibraryItemId(
+      userServerState as
+        | (typeof userServerState & {
+            progressByBookId?: Record<
+              string,
+              { libraryItemId?: string; mediaItemId?: string; currentTime: number; lastUpdate?: number }
+            >;
+          })
+        | undefined,
+    );
+    const currentTimeSeconds = progressByBookId[routeLibraryItemId]?.currentTime ?? 0;
     return secondsToMs(currentTimeSeconds);
   }, [routeLibraryItemId, userServerState]);
 

@@ -1,5 +1,5 @@
 import type { LibraryItemsSummary } from "@/api/library-items-api";
-import type { UserBookProgress } from "@/api/me-api";
+import { normalizeUserProgressByLibraryItemId, type UserBookProgress } from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { BookFlashListRow } from "@/components/books/book-flashlist-row";
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
@@ -76,14 +76,15 @@ export const BookFilterResultsSheet = () => {
     () => subscribedCatalog ?? immediateCatalog ?? [],
     [immediateCatalog, subscribedCatalog],
   );
-  const progressByLibraryItemId =
-    userServerState?.progressByLibraryItemId ??
-    (
-      userServerState as typeof userServerState & {
-        progressByBookId?: Record<string, UserBookProgress>;
-      }
-    )?.progressByBookId ??
-    {};
+  const progressByBookId = useMemo(
+    () =>
+      normalizeUserProgressByLibraryItemId(
+        userServerState as
+          | (typeof userServerState & { progressByBookId?: Record<string, UserBookProgress> })
+          | undefined,
+      ),
+    [userServerState],
+  );
 
   const matchingBooks = useMemo(() => {
     if (!filterType || !filterValue) return [];
@@ -167,7 +168,7 @@ export const BookFilterResultsSheet = () => {
             <BookFlashListRow
               book={item}
               isOffline={isOffline}
-              isFinished={Boolean(progressByLibraryItemId[item.id]?.isFinished)}
+              isFinished={Boolean(progressByBookId[item.id]?.isFinished)}
               onPress={() => handleBookPress(item.id)}
             />
           )}

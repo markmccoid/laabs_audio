@@ -48,6 +48,17 @@ export type UserServerState = {
   favoritesLibraryId: string | null;
 };
 
+type UserProgressLike = {
+  libraryItemId?: string;
+  mediaItemId?: string;
+  lastUpdate?: number;
+};
+
+type UserProgressStateLike<T extends UserProgressLike> = {
+  progressByLibraryItemId?: Record<string, T>;
+  progressByBookId?: Record<string, T>;
+};
+
 export const createEmptyUserServerState = (
   userId: string,
   favoritesLibraryId: string | null = null,
@@ -72,6 +83,34 @@ const upsertProgress = (
   if (!existing || value.lastUpdate >= existing.lastUpdate) {
     target[key] = value;
   }
+};
+
+const pickNewerProgress = <T extends UserProgressLike>(current: T | null, candidate: T | null) => {
+  if (!current) return candidate;
+  if (!candidate) return current;
+  const currentLastUpdate = Math.max(0, Math.floor(current.lastUpdate ?? 0));
+  const candidateLastUpdate = Math.max(0, Math.floor(candidate.lastUpdate ?? 0));
+  return candidateLastUpdate >= currentLastUpdate ? candidate : current;
+};
+
+const getProgressLookup = <T extends UserProgressLike>(state?: UserProgressStateLike<T>) =>
+  state?.progressByLibraryItemId ?? state?.progressByBookId ?? {};
+
+export const normalizeUserProgressByLibraryItemId = <T extends UserProgressLike>(
+  state?: UserProgressStateLike<T>,
+) => {
+  const progressLookup = getProgressLookup(state);
+  return Object.entries(progressLookup).reduce<Record<string, T>>((acc, [fallbackKey, progress]) => {
+    if (!progress) return acc;
+    const libraryItemId = progress.libraryItemId || fallbackKey;
+    if (!libraryItemId) return acc;
+    const existing = acc[libraryItemId] ?? null;
+    const preferred = pickNewerProgress(existing, progress);
+    if (preferred) {
+      acc[libraryItemId] = preferred;
+    }
+    return acc;
+  }, {});
 };
 
 export const meApi = {

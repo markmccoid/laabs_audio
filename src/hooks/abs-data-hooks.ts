@@ -12,6 +12,7 @@ import { seriesApi, type SeriesWithProgress } from "../api/series-api";
 import {
   meApi,
   createEmptyUserServerState,
+  normalizeUserProgressByLibraryItemId,
   type ItemsInProgressSummary,
   type UserBookProgress,
   type UserServerState,
@@ -231,12 +232,11 @@ export const useGetBooks = () => {
   const mergedData = useMemo<LibraryItemWithUserState[] | undefined>(() => {
     if (!rawData?.length) return rawData as LibraryItemWithUserState[] | undefined;
 
-    const progressByLibraryItemId =
-      userServerState?.progressByLibraryItemId ??
-      // Compatibility for older persisted query shape.
-      (userServerState as typeof userServerState & { progressByBookId?: Record<string, UserBookProgress> })
-        ?.progressByBookId ??
-      {};
+    const progressByLibraryItemId = normalizeUserProgressByLibraryItemId(
+      userServerState as
+        | (typeof userServerState & { progressByBookId?: Record<string, UserBookProgress> })
+        | undefined,
+    );
     const bookmarksByLibraryItemId =
       userServerState?.bookmarksByLibraryItemId ??
       // Compatibility for older persisted query shape.

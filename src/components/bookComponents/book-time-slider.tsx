@@ -1,3 +1,4 @@
+import { normalizeUserProgressByLibraryItemId } from "@/api/me-api";
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -49,15 +50,17 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
 
   const localProgressMs = useMemo(() => {
     if (!libraryItemId) return 0;
-    const progressByLibraryItemId =
-      userServerState?.progressByLibraryItemId ??
-      (
-        userServerState as typeof userServerState & {
-          progressByBookId?: Record<string, { currentTime: number }>;
-        }
-      )?.progressByBookId ??
-      {};
-    const currentTimeSeconds = progressByLibraryItemId[libraryItemId]?.currentTime ?? 0;
+    const progressByBookId = normalizeUserProgressByLibraryItemId(
+      userServerState as
+        | (typeof userServerState & {
+            progressByBookId?: Record<
+              string,
+              { libraryItemId?: string; mediaItemId?: string; currentTime: number; lastUpdate?: number }
+            >;
+          })
+        | undefined,
+    );
+    const currentTimeSeconds = progressByBookId[libraryItemId]?.currentTime ?? 0;
     return secondsToMs(currentTimeSeconds);
   }, [libraryItemId, userServerState]);
   const [hasStartedPlaying, setHasStartedPlaying] = useState(false);

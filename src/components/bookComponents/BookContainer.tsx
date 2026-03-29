@@ -1,5 +1,6 @@
 import { AbsApiError } from "@/api/abs-client";
 import type { LibraryItemSummary } from "@/api/library-items-api";
+import { normalizeUserProgressByLibraryItemId } from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { useCoverImageSource } from "@/components/images/cover-image";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
@@ -140,18 +141,28 @@ const BookContainer = ({ libraryItemId }: Props) => {
       : {};
   const isFavorite = Boolean(libraryItemId ? favoriteByLibraryItemId[libraryItemId] : false);
   const durationSeconds = bookData?.media?.duration ?? bookData?.duration ?? 0;
-  const progressByLibraryItemId =
-    userServerState?.progressByLibraryItemId ??
-    (
-      userServerState as typeof userServerState & {
-        progressByBookId?: Record<
-          string,
-          { currentTime?: number; duration?: number; isFinished?: boolean }
-        >;
-      }
-    )?.progressByBookId ??
-    {};
-  const matchedProgress = (libraryItemId ? progressByLibraryItemId[libraryItemId] : null) ?? null;
+  const progressByBookId = useMemo(
+    () =>
+      normalizeUserProgressByLibraryItemId(
+        userServerState as
+          | (typeof userServerState & {
+              progressByBookId?: Record<
+                string,
+                {
+                  libraryItemId?: string;
+                  mediaItemId?: string;
+                  currentTime?: number;
+                  duration?: number;
+                  isFinished?: boolean;
+                  lastUpdate?: number;
+                }
+              >;
+            })
+          | undefined,
+      ),
+    [userServerState],
+  );
+  const matchedProgress = (libraryItemId ? progressByBookId[libraryItemId] : null) ?? null;
   const fallbackProgress = bookData?.userMediaProgress;
   const isViewedBookActive = Boolean(libraryItemId) && activeLibraryItemId === libraryItemId;
   const {
@@ -250,9 +261,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
       tags,
     ],
   );
-  const menuProgress = libraryItemId
-    ? userServerState?.progressByLibraryItemId?.[libraryItemId]
-    : undefined;
+  const menuProgress = libraryItemId ? progressByBookId[libraryItemId] : undefined;
   const {
     favoriteDisabled,
     favoriteLabel,
