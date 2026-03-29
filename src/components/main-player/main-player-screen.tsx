@@ -2,7 +2,7 @@ import { useCoverImageSource } from "@/components/images/cover-image";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { usePlaybackStore, useSleepTimerActions, useSleepTimerStatus } from "@/player";
-import { useDeviceBooksStore } from "@/store/device-books-store";
+import { resolveStoredDownloadCoverUri, useDeviceBooksStore } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
@@ -33,7 +33,9 @@ const MainPlayerScreen = () => {
   const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
   const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
   const localCoverUri = useDeviceBooksStore((state) =>
-    currentLibraryItemId ? state.downloadedBookData[currentLibraryItemId]?.coverLocalUri ?? null : null,
+    currentLibraryItemId
+      ? resolveStoredDownloadCoverUri(state.downloadedBookData[currentLibraryItemId])
+      : null,
   );
   const sleepTimerStatus = useSleepTimerStatus();
   const sleepTimeActions = useSleepTimerActions();

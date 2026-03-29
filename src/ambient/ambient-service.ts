@@ -1,10 +1,19 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { AudioPro } from "react-native-audio-pro";
-import { ambientStore, DEFAULT_AMBIENT_VOLUME } from "@/store/store-ambient";
-
-const AMBIENT_ROOT = FileSystem.documentDirectory
-  ? `${FileSystem.documentDirectory}laabs-ambient/`
-  : null;
+import { playbackStore } from "@/player";
+import type { PlaybackState } from "@/player/types";
+import {
+  AMBIENT_DOWNLOAD_DIRECTORY,
+  ensureAppDirectory,
+  resolveDocumentRelativePath,
+  toDocumentRelativePath,
+} from "@/store/fileSystemAccess";
+import {
+  ambientStore,
+  DEFAULT_AMBIENT_VOLUME,
+  isAmbientTrackAvailable,
+  selectAttachedAmbientTrackForBook,
+} from "@/store/store-ambient";
 
 const sanitizeFileName = (value: string) =>
   value.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim();
@@ -34,26 +43,64 @@ const buildStoredFileName = (trackId: string, fileName: string) => {
   return `${trackId}-${basename}${extension}`;
 };
 
-const ensureAmbientDirectory = async () => {
-  if (!AMBIENT_ROOT) {
-    throw new Error("Ambient audio storage is unavailable on this device.");
-  }
-  await FileSystem.makeDirectoryAsync(AMBIENT_ROOT, { intermediates: true });
-  return AMBIENT_ROOT;
+const resolveAmbientTrackUri = (relativePath?: string | null) =>
+  resolveDocumentRelativePath(relativePath);
+
+const shouldAmbientBePlaying = (playbackState: PlaybackState) => playbackState === "playing";
+
+const stopAmbientNative = () => {
+  AudioPro.ambientStop();
 };
 
-const getSelectedTrack = () => {
+const getActiveSession = () => {
   const state = ambientStore.getState();
-  if (!state.selectedTrackId) return null;
-  return state.tracksById[state.selectedTrackId] ?? null;
+  return {
+    activeTrackId: state.activeTrackId,
+    activeLibraryItemId: state.activeLibraryItemId,
+    playbackState: state.playbackState,
+  };
+};
+
+const loadTrackForBookSession = (
+  trackId: string,
+  libraryItemId: string,
+  playbackState: PlaybackState,
+) => {
+  const state = ambientStore.getState();
+  const track = state.tracksById[trackId];
+  if (!isAmbientTrackAvailable(track)) {
+    throw new Error("Ambient track is unavailable in this build.");
+  }
+
+  const trackUri = resolveAmbientTrackUri(track.relativePath);
+  if (!trackUri) {
+    throw new Error("Ambient track path is unavailable in this build.");
+  }
+
+  stopAmbientNative();
+  AudioPro.ambientPlay({
+    url: ensurePlayableUri(trackUri),
+    loop: true,
+  });
+  AudioPro.ambientSetVolume(track.volume);
+
+  const actions = ambientStore.getState().actions;
+  if (shouldAmbientBePlaying(playbackState)) {
+    actions.setActiveSession(trackId, libraryItemId, "playing");
+    return true;
+  }
+
+  AudioPro.ambientPause();
+  actions.setActiveSession(trackId, libraryItemId, "paused");
+  return true;
 };
 
 export const ambientService = {
   setEnabled(enabled: boolean) {
     if (!enabled) {
-      AudioPro.ambientStop();
+      stopAmbientNative();
       const actions = ambientStore.getState().actions;
-      actions.clearSelection();
+      actions.clearActiveSession();
       actions.setEnabled(false);
       return;
     }
@@ -62,7 +109,7 @@ export const ambientService = {
   },
 
   async importTrackFromFile(options: { sourceUri: string; fileName?: string | null }) {
-    const directory = await ensureAmbientDirectory();
+    const directory = await ensureAppDirectory(AMBIENT_DOWNLOAD_DIRECTORY);
     const fileName = sanitizeFileName(options.fileName?.trim() || "Ambient Track");
     const trackId = buildTrackId();
     const storedFileName = buildStoredFileName(trackId, fileName);
@@ -73,10 +120,14 @@ export const ambientService = {
       to: destinationUri,
     });
 
-    const playableUri = ensurePlayableUri(destinationUri);
+    const relativePath = toDocumentRelativePath(destinationUri);
+    if (!relativePath) {
+      throw new Error("Unable to persist ambient audio path.");
+    }
+
     ambientStore.getState().actions.addTrack({
       id: trackId,
-      uri: playableUri,
+      relativePath,
       fileName,
       volume: DEFAULT_AMBIENT_VOLUME,
       importedAt: Date.now(),
@@ -86,60 +137,113 @@ export const ambientService = {
   async removeTrack(trackId: string) {
     const state = ambientStore.getState();
     const track = state.tracksById[trackId];
-    const isSelected = state.selectedTrackId === trackId;
+    const isActiveTrack = state.activeTrackId === trackId;
 
-    if (isSelected) {
-      AudioPro.ambientStop();
+    if (isActiveTrack) {
+      stopAmbientNative();
     }
 
-    if (track?.uri) {
+    const resolvedTrackUri = resolveAmbientTrackUri(track?.relativePath);
+    if (resolvedTrackUri) {
       try {
-        await FileSystem.deleteAsync(track.uri, { idempotent: true });
+        await FileSystem.deleteAsync(resolvedTrackUri, { idempotent: true });
       } catch {
         // Ignore cleanup failures so the store can still be corrected.
       }
     }
 
-    ambientStore.getState().actions.removeTrack(trackId);
+    const actions = ambientStore.getState().actions;
+    actions.removeTrackFromAllBookAttachments(trackId);
+    actions.removeTrack(trackId);
+    if (isActiveTrack) {
+      actions.clearActiveSession();
+    }
   },
 
-  playTrack(trackId: string, libraryItemId: string | null) {
-    const state = ambientStore.getState();
-    if (!state.isEnabled) {
-      throw new Error("Ambient audio is currently disabled.");
+  attachTrackToBook(trackId: string, libraryItemId: string | null) {
+    if (!libraryItemId) {
+      throw new Error("A book must be loaded before attaching ambient audio.");
     }
-    const track = state.tracksById[trackId];
-    if (!track) {
-      throw new Error("Ambient track not found.");
-    }
-
-    AudioPro.ambientPlay({
-      url: ensurePlayableUri(track.uri),
-      loop: true,
-    });
-    AudioPro.ambientSetVolume(track.volume);
 
     const actions = ambientStore.getState().actions;
-    actions.selectTrack(trackId);
-    actions.setPlaybackState("playing");
-    actions.syncSelectedLibraryItem(libraryItemId);
+    actions.attachTrackToBook(trackId, libraryItemId);
+    return this.loadAttachedTrackForBook(libraryItemId);
+  },
+
+  detachTrackFromBook(libraryItemId: string | null) {
+    if (!libraryItemId) return;
+
+    const { activeLibraryItemId } = getActiveSession();
+    if (activeLibraryItemId === libraryItemId) {
+      stopAmbientNative();
+    }
+
+    const actions = ambientStore.getState().actions;
+    actions.detachTrackFromBook(libraryItemId);
+    if (activeLibraryItemId === libraryItemId) {
+      actions.clearActiveSession();
+    }
+  },
+
+  loadAttachedTrackForBook(libraryItemId: string | null) {
+    if (!libraryItemId) return false;
+
+    const state = ambientStore.getState();
+    if (!state.isEnabled) return false;
+
+    const attachedTrack = selectAttachedAmbientTrackForBook(state, libraryItemId);
+    if (!attachedTrack) {
+      if (state.activeLibraryItemId === libraryItemId) {
+        stopAmbientNative();
+        state.actions.clearActiveSession();
+      }
+      return false;
+    }
+
+    const { activeTrackId, activeLibraryItemId, playbackState: ambientPlaybackState } =
+      getActiveSession();
+    const bookPlaybackState = playbackStore.getState().playbackState;
+    const isSameSession =
+      activeTrackId === attachedTrack.id && activeLibraryItemId === libraryItemId;
+
+    if (isSameSession) {
+      if (shouldAmbientBePlaying(bookPlaybackState)) {
+        if (ambientPlaybackState === "paused") {
+          AudioPro.ambientResume();
+          state.actions.setPlaybackState("playing");
+        }
+        return true;
+      }
+
+      if (ambientPlaybackState === "playing") {
+        AudioPro.ambientPause();
+        state.actions.setPlaybackState("paused");
+      }
+      return true;
+    }
+
+    return loadTrackForBookSession(attachedTrack.id, libraryItemId, bookPlaybackState);
   },
 
   pauseTrack() {
+    const { activeTrackId, activeLibraryItemId } = getActiveSession();
+    if (!activeTrackId || !activeLibraryItemId) return;
+
     AudioPro.ambientPause();
     ambientStore.getState().actions.setPlaybackState("paused");
   },
 
   resumeTrack() {
-    const selectedTrack = getSelectedTrack();
-    if (!selectedTrack) return;
+    const { activeTrackId, activeLibraryItemId } = getActiveSession();
+    if (!activeTrackId || !activeLibraryItemId) return;
+
     AudioPro.ambientResume();
     ambientStore.getState().actions.setPlaybackState("playing");
   },
 
-  stopAndClearSelection() {
-    AudioPro.ambientStop();
-    ambientStore.getState().actions.clearSelection();
+  stopActiveTrack() {
+    stopAmbientNative();
+    ambientStore.getState().actions.clearActiveSession();
   },
 
   setTrackVolume(trackId: string, volume: number) {
@@ -147,9 +251,9 @@ export const ambientService = {
     if (!state.tracksById[trackId]) return;
 
     const clampedVolume = Math.max(0, Math.min(1, volume));
-    ambientStore.getState().actions.setTrackVolume(trackId, clampedVolume);
+    state.actions.setTrackVolume(trackId, clampedVolume);
 
-    if (state.selectedTrackId === trackId) {
+    if (state.activeTrackId === trackId) {
       AudioPro.ambientSetVolume(clampedVolume);
     }
   },

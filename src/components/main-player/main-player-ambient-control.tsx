@@ -1,6 +1,11 @@
 import { ambientService } from "@/ambient/ambient-service";
 import { usePlaybackStore } from "@/player";
-import { selectSelectedAmbientTrack, useAmbientStore } from "@/store/store-ambient";
+import {
+  selectActiveAmbientTrack,
+  selectAttachedAmbientTrackForBook,
+  selectAvailableAmbientTracks,
+  useAmbientStore,
+} from "@/store/store-ambient";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -9,16 +14,23 @@ import { Pressable, Text, View } from "react-native";
 const MainPlayerAmbientControl = () => {
   const themeColors = useThemeColors();
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const hasLoadedBook = usePlaybackStore(
+    (state) => Boolean(state.libraryItemId) && state.queue.length > 0,
+  );
   const isEnabled = useAmbientStore((state) => state.isEnabled);
-  const trackCount = useAmbientStore((state) => state.trackOrder.length);
-  const selectedTrack = useAmbientStore(selectSelectedAmbientTrack);
+  const availableTrackCount = useAmbientStore((state) => selectAvailableAmbientTracks(state).length);
+  const attachedTrack = useAmbientStore((state) =>
+    selectAttachedAmbientTrackForBook(state, currentLibraryItemId),
+  );
+  const activeTrack = useAmbientStore(selectActiveAmbientTrack);
+  const activeLibraryItemId = useAmbientStore((state) => state.activeLibraryItemId);
   const ambientPlaybackState = useAmbientStore((state) => state.playbackState);
 
-  if (!isEnabled || trackCount === 0) {
+  if (!hasLoadedBook || !isEnabled || availableTrackCount === 0) {
     return null;
   }
 
-  if (!selectedTrack) {
+  if (!attachedTrack) {
     return (
       <Pressable
         accessibilityRole="button"
@@ -49,7 +61,10 @@ const MainPlayerAmbientControl = () => {
     );
   }
 
-  const isPlaying = ambientPlaybackState === "playing";
+  const isActiveForCurrentBook =
+    activeTrack?.id === attachedTrack.id && activeLibraryItemId === currentLibraryItemId;
+  const isPlaying = isActiveForCurrentBook && ambientPlaybackState === "playing";
+  const isPaused = isActiveForCurrentBook && ambientPlaybackState === "paused";
 
   return (
     <View
@@ -77,12 +92,12 @@ const MainPlayerAmbientControl = () => {
             return;
           }
 
-          if (ambientPlaybackState === "paused") {
+          if (isPaused) {
             ambientService.resumeTrack();
             return;
           }
 
-          ambientService.playTrack(selectedTrack.id, currentLibraryItemId);
+          ambientService.loadAttachedTrackForBook(currentLibraryItemId);
         }}
         style={({ pressed }) => ({
           width: 34,
@@ -104,7 +119,7 @@ const MainPlayerAmbientControl = () => {
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Open ambient picker for ${selectedTrack.fileName}`}
+        accessibilityLabel={`Open ambient picker for ${attachedTrack.fileName}`}
         onPress={() => router.push("/player-ambient")}
         style={({ pressed }) => ({
           flex: 1,
@@ -121,14 +136,14 @@ const MainPlayerAmbientControl = () => {
           numberOfLines={1}
           style={{ color: themeColors.text, fontSize: 14, fontWeight: "600" }}
         >
-          {selectedTrack.fileName}
+          {attachedTrack.fileName}
         </Text>
       </Pressable>
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Remove ambient track ${selectedTrack.fileName}`}
-        onPress={() => ambientService.stopAndClearSelection()}
+        accessibilityLabel={`Remove ambient track ${attachedTrack.fileName}`}
+        onPress={() => ambientService.detachTrackFromBook(currentLibraryItemId)}
         style={({ pressed }) => ({
           width: 34,
           height: 34,

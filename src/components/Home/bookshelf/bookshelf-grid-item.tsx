@@ -1,7 +1,11 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
 import { CoverImage } from "@/components/images/cover-image";
-import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
+import {
+  resolveStoredDownloadCoverUri,
+  selectHasPlayableBookDownload,
+  useDeviceBooksStore,
+} from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -25,7 +29,7 @@ export const BookshelfGridItem = ({
   const themeColors = useThemeColors();
   const isDownloaded = useDeviceBooksStore((state) => selectHasPlayableBookDownload(state, book.id));
   const localCoverUri = useDeviceBooksStore(
-    (state) => state.downloadedBookData[book.id]?.coverLocalUri ?? null,
+    (state) => resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
   );
   const showOfflineUnavailable = isOffline && !isDownloaded;
   const showFinishedIndicator = Boolean(progress?.isFinished);

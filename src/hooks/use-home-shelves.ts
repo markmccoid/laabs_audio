@@ -6,6 +6,7 @@ import { playlistsApi } from "../api/playlists-api";
 import { useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
 import {
+  resolveStoredDownloadCoverUri,
   selectPlaylistShelvesByScope,
   selectSuppressedPlaylistIdsByScope,
   toHomeShelfScopeKey,
@@ -288,7 +289,7 @@ export const useHomeShelves = () => {
 
   const offlineDownloaded = useMemo(() => {
     const downloadedBooks = Object.values(downloadedDetailsById).map((details) =>
-      toDownloadedBookSummary(details, downloadedBookData[details.id]?.coverLocalUri),
+      toDownloadedBookSummary(details, resolveStoredDownloadCoverUri(downloadedBookData[details.id])),
     );
     const orderedBooks = reorderByIds(downloadedBooks, downloadedShelfOrder);
 

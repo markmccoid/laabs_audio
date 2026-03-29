@@ -19,10 +19,13 @@ import { queryKeys } from "../query/query-keys";
 import type { Bookmark } from "../types/absTypes";
 import { mmkvStorage } from "./mmkv-storage";
 import {
+  BOOK_DOWNLOADS_DIRECTORY,
   deleteFromFileSystem,
   downloadFileBlob,
-  ensureDirectory,
-  getDocumentDirectory,
+  ensureAppDirectory,
+  isRelativeDocumentPath,
+  resolveDocumentRelativePath,
+  toDocumentRelativePath,
 } from "./fileSystemAccess";
 
 export const DEFAULT_BOOK_PLAYBACK_RATE = 1;
@@ -46,44 +49,15 @@ export type DownloadTrack = {
   cleanFileName: string;
   duration: number;
   startOffset: number;
-  fileUri: string;
+  relativePath: string;
 };
 
 export type DownloadInfo = {
   audioTracks: DownloadTrack[];
-  coverLocalUri?: string | null;
+  coverRelativePath?: string | null;
 };
 
-const DOWNLOAD_ROOT_DIRNAME = "laabs-downloads";
 const DOWNLOAD_COVER_FILE_NAME = "cover.webp";
-
-const normalizeStoredLocalUri = (uri?: string | null) => {
-  const value = uri?.trim();
-  if (!value) return null;
-  if (
-    value.startsWith("file://") ||
-    value.startsWith("http://") ||
-    value.startsWith("https://") ||
-    value.startsWith("data:")
-  ) {
-    return value;
-  }
-  if (value.startsWith("/")) {
-    return `file://${value}`;
-  }
-  return value;
-};
-
-const isLocalFileUri = (uri: string) => uri.startsWith("file://") || uri.startsWith("/");
-const isRemoteLikeUri = (uri: string) =>
-  uri.startsWith("http://") ||
-  uri.startsWith("https://") ||
-  uri.startsWith("data:") ||
-  uri.startsWith("content://") ||
-  uri.startsWith("asset://");
-
-const joinDirectoryUri = (directoryUri: string, fileName: string) =>
-  directoryUri.endsWith("/") ? `${directoryUri}${fileName}` : `${directoryUri}/${fileName}`;
 
 const extractFileNameFromUri = (uri: string) => {
   const normalized = uri.split(/[?#]/, 1)[0] ?? uri;
@@ -92,116 +66,118 @@ const extractFileNameFromUri = (uri: string) => {
   return lastSlash >= 0 ? trimmed.slice(lastSlash + 1) : trimmed;
 };
 
-const getDownloadRootDirectory = () => {
-  const documentDirectory = getDocumentDirectory();
-  return documentDirectory ? `${documentDirectory}${DOWNLOAD_ROOT_DIRNAME}/` : null;
-};
+const buildDownloadDirectoryRelativePath = (libraryItemId: string) =>
+  `${BOOK_DOWNLOADS_DIRECTORY}/${libraryItemId}`;
 
-const buildDownloadFileUri = (libraryItemId: string, fileName: string) => {
-  const rootDirectory = getDownloadRootDirectory();
-  if (!rootDirectory) return null;
-  return joinDirectoryUri(`${rootDirectory}${libraryItemId}/`, fileName);
-};
-
-const toPersistedDownloadPath = (uri?: string | null, fallbackFileName?: string | null) => {
-  const normalized = normalizeStoredLocalUri(uri);
-  if (!normalized) return null;
-  if (isRemoteLikeUri(normalized)) {
-    return normalized;
-  }
-
-  const fileName = fallbackFileName?.trim() || extractFileNameFromUri(normalized);
-  return fileName || normalized;
-};
-
-const hydrateDownloadPath = (
+const toLegacyDownloadRelativePath = (
   libraryItemId: string,
   storedPath?: string | null,
   fallbackFileName?: string | null,
 ) => {
-  const normalized = normalizeStoredLocalUri(storedPath);
+  const normalized = storedPath?.trim();
   if (!normalized) return null;
-  if (isRemoteLikeUri(normalized)) {
-    return normalized;
+
+  const relativeFromUri = toDocumentRelativePath(normalized);
+  if (relativeFromUri) {
+    return relativeFromUri;
   }
 
-  const fileName = isLocalFileUri(normalized)
-    ? extractFileNameFromUri(normalized)
-    : normalized.trim() || fallbackFileName?.trim() || "";
-  if (!fileName) {
-    return normalized;
+  if (isRelativeDocumentPath(normalized)) {
+    if (normalized.startsWith(`${BOOK_DOWNLOADS_DIRECTORY}/`)) {
+      return normalized;
+    }
+    const fileName = extractFileNameFromUri(normalized) || fallbackFileName?.trim() || "";
+    return fileName ? `${buildDownloadDirectoryRelativePath(libraryItemId)}/${fileName}` : null;
   }
 
-  return buildDownloadFileUri(libraryItemId, fileName) ?? normalized;
+  const fileName = extractFileNameFromUri(normalized) || fallbackFileName?.trim() || "";
+  return fileName ? `${buildDownloadDirectoryRelativePath(libraryItemId)}/${fileName}` : null;
 };
 
-const toPersistedDownloadInfo = (info?: DownloadInfo | null): DownloadInfo | null => {
-  if (!info) return null;
+const normalizeDownloadTrackRecord = (
+  libraryItemId: string,
+  track: unknown,
+): DownloadTrack | null => {
+  if (!track || typeof track !== "object") return null;
+
+  const candidate = track as Partial<DownloadTrack> & { fileUri?: string | null };
+  const relativePath =
+    typeof candidate.relativePath === "string" && isRelativeDocumentPath(candidate.relativePath)
+      ? candidate.relativePath
+      : toLegacyDownloadRelativePath(
+          libraryItemId,
+          candidate.fileUri,
+          candidate.cleanFileName ?? candidate.filename,
+        );
+
+  if (!relativePath) return null;
+
   return {
-    ...info,
-    audioTracks: Array.isArray(info.audioTracks)
-      ? info.audioTracks.map((track) => ({
-          ...track,
-          fileUri: toPersistedDownloadPath(track.fileUri, track.cleanFileName) ?? track.fileUri,
-        }))
-      : [],
-    coverLocalUri:
-      toPersistedDownloadPath(info.coverLocalUri, DOWNLOAD_COVER_FILE_NAME) ?? info.coverLocalUri,
+    ino: typeof candidate.ino === "string" ? candidate.ino : "",
+    filename: typeof candidate.filename === "string" ? candidate.filename : "",
+    cleanFileName:
+      typeof candidate.cleanFileName === "string" && candidate.cleanFileName.trim().length > 0
+        ? candidate.cleanFileName
+        : extractFileNameFromUri(relativePath),
+    duration: typeof candidate.duration === "number" ? candidate.duration : 0,
+    startOffset: typeof candidate.startOffset === "number" ? candidate.startOffset : 0,
+    relativePath,
   };
 };
 
-const toPersistedDownloadedBookData = (downloadedBookData?: Record<string, DownloadInfo>) => {
-  const persisted: Record<string, DownloadInfo> = {};
-
-  Object.entries(downloadedBookData ?? {}).forEach(([libraryItemId, info]) => {
-    const persistedInfo = toPersistedDownloadInfo(info);
-    if (!persistedInfo) return;
-    persisted[libraryItemId] = persistedInfo;
-  });
-
-  return persisted;
-};
-
-const hydrateDownloadInfo = (
+const normalizeDownloadInfo = (
   libraryItemId: string,
-  info?: DownloadInfo | null,
+  info?: DownloadInfo | null | { coverLocalUri?: string | null },
 ): DownloadInfo | null => {
   if (!info) return null;
+
+  const candidate = info as Partial<DownloadInfo> & { coverLocalUri?: string | null };
+  const audioTracks = Array.isArray(candidate.audioTracks)
+    ? candidate.audioTracks
+        .map((track) => normalizeDownloadTrackRecord(libraryItemId, track))
+        .filter((track): track is DownloadTrack => Boolean(track))
+    : [];
+  const coverRelativePath =
+    typeof candidate.coverRelativePath === "string" &&
+    isRelativeDocumentPath(candidate.coverRelativePath)
+      ? candidate.coverRelativePath
+      : toLegacyDownloadRelativePath(
+          libraryItemId,
+          candidate.coverLocalUri,
+          DOWNLOAD_COVER_FILE_NAME,
+        );
+
   return {
-    ...info,
-    audioTracks: Array.isArray(info.audioTracks)
-      ? info.audioTracks.map((track) => ({
-          ...track,
-          fileUri:
-            hydrateDownloadPath(libraryItemId, track.fileUri, track.cleanFileName) ??
-            track.fileUri,
-        }))
-      : [],
-    coverLocalUri: hydrateDownloadPath(
-      libraryItemId,
-      info.coverLocalUri,
-      DOWNLOAD_COVER_FILE_NAME,
-    ),
+    audioTracks,
+    coverRelativePath,
   };
 };
 
-const hydratePersistedDownloadedBookData = (downloadedBookData?: Record<string, DownloadInfo>) => {
-  const hydrated: Record<string, DownloadInfo> = {};
+const normalizePersistedDownloadedBookData = (
+  downloadedBookData?: Record<string, DownloadInfo | { coverLocalUri?: string | null }>,
+) => {
+  const normalized: Record<string, DownloadInfo> = {};
 
   Object.entries(downloadedBookData ?? {}).forEach(([libraryItemId, info]) => {
-    const hydratedInfo = hydrateDownloadInfo(libraryItemId, info);
-    if (!hydratedInfo) return;
-    hydrated[libraryItemId] = hydratedInfo;
+    const normalizedInfo = normalizeDownloadInfo(libraryItemId, info);
+    if (!normalizedInfo) return;
+    normalized[libraryItemId] = normalizedInfo;
   });
 
-  return hydrated;
+  return normalized;
 };
 
-export const resolveStoredDownloadTrackUri = (track?: DownloadTrack | null) =>
-  normalizeStoredLocalUri(track?.fileUri);
+const resolveDownloadTrackUri = (track?: Pick<DownloadTrack, "relativePath"> | null) =>
+  resolveDocumentRelativePath(track?.relativePath);
 
-export const resolveStoredDownloadCoverUri = (downloadInfo?: DownloadInfo | null) =>
-  normalizeStoredLocalUri(downloadInfo?.coverLocalUri);
+const resolveDownloadCoverUri = (downloadInfo?: Pick<DownloadInfo, "coverRelativePath"> | null) =>
+  resolveDocumentRelativePath(downloadInfo?.coverRelativePath ?? null);
+
+const hasValidRelativeDownloadTrack = (track?: Pick<DownloadTrack, "relativePath"> | null) =>
+  Boolean(track?.relativePath && isRelativeDocumentPath(track.relativePath));
+
+const hasPlayableDownloadAudio = (downloadInfo?: DownloadInfo | null) =>
+  Boolean(downloadInfo?.audioTracks?.some((track) => hasValidRelativeDownloadTrack(track)));
 
 export type DownloadProgress = {
   libraryItemId: string;
@@ -453,7 +429,7 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
     setDownloadedDetails: (
       libraryItemId: string,
       details: ItemDetails,
-      options?: { coverLocalUri?: string | null },
+      options?: { coverRelativePath?: string | null },
     ) => void;
     setDownloadedBookData: (libraryItemId: string, info: DownloadInfo) => void;
     clearDownloadedData: (libraryItemId: string) => void;
@@ -763,15 +739,8 @@ const isTransientPlaylistError = (error: unknown) => {
 };
 
 // Root directory for all offline downloads
-const DOWNLOAD_ROOT = getDownloadRootDirectory();
-
 const ensureDownloadDir = async (libraryItemId: string) => {
-  if (!DOWNLOAD_ROOT) {
-    throw new Error("Missing document directory for downloads");
-  }
-  const dir = `${DOWNLOAD_ROOT}${libraryItemId}/`;
-  await ensureDirectory(dir);
-  return dir;
+  return ensureAppDirectory(buildDownloadDirectoryRelativePath(libraryItemId));
 };
 
 const deleteFileIfExists = async (uri: string) => {
@@ -803,7 +772,7 @@ const downloadCoverImage = async (libraryItemId: string) => {
 
     const publicAttempt = await attemptDownload(coverUrls.full);
     if (publicAttempt?.status === 200) {
-      return publicAttempt.fileUri;
+      return toDocumentRelativePath(publicAttempt.fileUri);
     }
     if (publicAttempt?.status === 404) {
       return null;
@@ -815,7 +784,7 @@ const downloadCoverImage = async (libraryItemId: string) => {
 
     const privateAttempt = await attemptDownload(coverUrls.fullWithToken);
     if (privateAttempt?.status === 200) {
-      return privateAttempt.fileUri;
+      return toDocumentRelativePath(privateAttempt.fileUri);
     }
     if (privateAttempt?.status === 404) {
       return null;
@@ -839,7 +808,7 @@ const mergePersistedDeviceBooksState = (
   return {
     ...currentState,
     downloadedDetailsById: typedState.downloadedDetailsById ?? base.downloadedDetailsById,
-    downloadedBookData: hydratePersistedDownloadedBookData(
+    downloadedBookData: normalizePersistedDownloadedBookData(
       typedState.downloadedBookData ?? base.downloadedBookData,
     ),
     downloadedShelfOrderByScope:
@@ -2393,9 +2362,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                   ...state.downloadedBookData,
                   [libraryItemId]: {
                     ...state.downloadedBookData[libraryItemId],
-                    coverLocalUri:
-                      options?.coverLocalUri ??
-                      state.downloadedBookData[libraryItemId].coverLocalUri ??
+                    coverRelativePath:
+                      options?.coverRelativePath ??
+                      state.downloadedBookData[libraryItemId].coverRelativePath ??
                       null,
                   },
                 }
@@ -2431,11 +2400,15 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
 
           if (downloadInfo) {
             for (const track of downloadInfo.audioTracks) {
-              await deleteFileIfExists(track.fileUri);
+              const trackUri = resolveDownloadTrackUri(track);
+              if (trackUri) {
+                await deleteFileIfExists(trackUri);
+              }
             }
             // Removing a download must clean up both audio files and the local cover image.
-            if (downloadInfo.coverLocalUri) {
-              await deleteFileIfExists(downloadInfo.coverLocalUri);
+            const coverUri = resolveDownloadCoverUri(downloadInfo);
+            if (coverUri) {
+              await deleteFileIfExists(coverUri);
             }
           }
 
@@ -2647,13 +2620,18 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                   throw new Error(`Download failed with status: ${result?.status ?? "unknown"}`);
                 }
 
+                const relativePath = toDocumentRelativePath(fileUri);
+                if (!relativePath) {
+                  throw new Error("Unable to persist downloaded track path.");
+                }
+
                 audioTracks.push({
                   ino: audioFile.ino,
                   filename: audioFile.metadata.filename,
                   cleanFileName,
                   duration: audioFile.duration,
                   startOffset,
-                  fileUri,
+                  relativePath,
                 });
                 logDownload("file:complete", {
                   libraryItemId,
@@ -2699,15 +2677,15 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             }
 
             logDownload("cover:start", { libraryItemId, token: myToken });
-            const coverLocalUri = await downloadCoverImage(libraryItemId);
+            const coverRelativePath = await downloadCoverImage(libraryItemId);
             if (!isTokenActive()) {
               logDownload("token:stale-after-cover", { libraryItemId, token: myToken });
               return;
             }
 
-            get().actions.setDownloadedBookData(libraryItemId, { audioTracks, coverLocalUri });
+            get().actions.setDownloadedBookData(libraryItemId, { audioTracks, coverRelativePath });
             get().actions.setDownloadedDetails(libraryItemId, details, {
-              coverLocalUri,
+              coverRelativePath,
             });
 
             if (!isTokenActive()) {
@@ -2726,7 +2704,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               token: myToken,
               finalizedToken,
               totalFiles,
-              hasCover: Boolean(coverLocalUri),
+              hasCover: Boolean(coverRelativePath),
             });
             get().actions.publishDownloadEvent({
               libraryItemId,
@@ -2862,7 +2840,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
       // Persist only durable data; skip in-flight download session state
       partialize: (state) => ({
         downloadedDetailsById: state.downloadedDetailsById,
-        downloadedBookData: toPersistedDownloadedBookData(state.downloadedBookData),
+        downloadedBookData: state.downloadedBookData,
         downloadedShelfOrderByScope: state.downloadedShelfOrderByScope,
         customCoversById: state.customCoversById,
         playbackRatesByUserBook: state.playbackRatesByUserBook,
@@ -2876,7 +2854,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         pendingPlaylistOpsByUser: state.pendingPlaylistOpsByUser,
         homeShelfVisibilityByScope: state.homeShelfVisibilityByScope,
       }),
-      version: 5,
+      version: 6,
       merge: (persistedState, currentState) =>
         mergePersistedDeviceBooksState(persistedState, currentState),
       migrate: (persistedState, version) => {
@@ -2964,6 +2942,10 @@ export const useDeviceBooksStore = <T,>(selector: (state: DeviceBooksState) => T
 
 export const useDeviceBooksActions = () => useDeviceBooksStore((state) => state.actions);
 
+export const resolveStoredDownloadTrackUri = resolveDownloadTrackUri;
+export const resolveStoredDownloadCoverUri = resolveDownloadCoverUri;
+export const hasPlayableStoredDownloadAudio = hasPlayableDownloadAudio;
+
 export const selectBookPlaybackRate = (
   state: DeviceBooksState,
   libraryItemId: string,
@@ -3012,7 +2994,9 @@ export const selectBookmarkLocalNote = (
 };
 
 export const selectHasOfflineContent = (state: DeviceBooksState, _userKey?: string | null) => {
-  return Object.keys(state.downloadedBookData).length > 0;
+  return Object.values(state.downloadedBookData).some((downloadInfo) =>
+    hasPlayableDownloadAudio(downloadInfo),
+  );
 };
 
 export const selectActiveDownloadLibraryItemId = (state: DeviceBooksState) =>
@@ -3040,19 +3024,22 @@ export const selectIsBookActivelyDownloading = (
 };
 
 export const selectIsBookDownloaded = (state: DeviceBooksState, libraryItemId: string) => {
-  return Boolean(state.downloadedBookData[libraryItemId] || state.downloadedDetailsById[libraryItemId]);
+  return hasPlayableDownloadAudio(state.downloadedBookData[libraryItemId]);
 };
 
 export const selectIsBookFullyDownloaded = (state: DeviceBooksState, libraryItemId: string) => {
   const details = state.downloadedDetailsById[libraryItemId];
   const downloadData = state.downloadedBookData[libraryItemId];
-  if (!details || !downloadData?.audioTracks?.length) return false;
+  const validAudioTracks = downloadData?.audioTracks.filter((track) =>
+    hasValidRelativeDownloadTrack(track),
+  );
+  if (!details || !validAudioTracks?.length) return false;
   const expectedTracks = details.audioFiles?.length ?? 0;
-  return expectedTracks === 0 || downloadData.audioTracks.length >= expectedTracks;
+  return expectedTracks === 0 || validAudioTracks.length >= expectedTracks;
 };
 
 export const selectHasPlayableBookDownload = (state: DeviceBooksState, libraryItemId: string) => {
-  return Boolean(state.downloadedBookData[libraryItemId]?.audioTracks?.length);
+  return hasPlayableDownloadAudio(state.downloadedBookData[libraryItemId]);
 };
 
 export const toHomeShelfScopeKey = (userKey: string | null, libraryId: string | null) =>

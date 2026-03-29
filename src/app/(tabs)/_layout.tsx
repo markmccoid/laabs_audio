@@ -1,7 +1,11 @@
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore } from "@/player";
 import { CoverImage } from "@/components/images/cover-image";
-import { useDeviceBooksActions, useDeviceBooksStore } from "@/store/device-books-store";
+import {
+  resolveStoredDownloadCoverUri,
+  useDeviceBooksActions,
+  useDeviceBooksStore,
+} from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
@@ -14,7 +18,9 @@ export default function TabLayout() {
   const { setBookPlaybackRate } = useDeviceBooksActions();
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const localCoverUri = useDeviceBooksStore((state) =>
-    currentLibraryItemId ? state.downloadedBookData[currentLibraryItemId]?.coverLocalUri ?? null : null,
+    currentLibraryItemId
+      ? resolveStoredDownloadCoverUri(state.downloadedBookData[currentLibraryItemId])
+      : null,
   );
   // const currentBook1 = useCachedBookSummary(currentLibraryItemId ?? undefined);
   const { data: currentBook } = useGetItemDetails(currentLibraryItemId || undefined);
@@ -73,7 +79,7 @@ export default function TabLayout() {
               <Link.Trigger>
                 <View className="flex-row items-center h-full flex-1 ">
                   <CoverImage
-                    libraryItemId={currentLibraryItemId}
+                    libraryItemId={currentLibraryItemId ?? undefined}
                     coverUri={currentBook?.coverFull}
                     localCoverUri={localCoverUri}
                     variant="thumb"

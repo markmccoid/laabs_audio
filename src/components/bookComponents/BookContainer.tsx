@@ -11,7 +11,11 @@ import {
 } from "@/hooks/abs-data-hooks";
 import { usePlaybackStore } from "@/player";
 import { shareBook } from "@/sharing/book-share";
-import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
+import {
+  resolveStoredDownloadCoverUri,
+  selectHasPlayableBookDownload,
+  useDeviceBooksStore,
+} from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
@@ -88,7 +92,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
     return selectHasPlayableBookDownload(state, libraryItemId);
   });
   const localCoverUri = useDeviceBooksStore((state) =>
-    libraryItemId ? (state.downloadedBookData[libraryItemId]?.coverLocalUri ?? null) : null,
+    libraryItemId ? resolveStoredDownloadCoverUri(state.downloadedBookData[libraryItemId]) : null,
   );
   const defaultProgressTimeDisplay = useSettingsStore(
     (state) => state.defaultBookProgressTimeDisplay,

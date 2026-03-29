@@ -1,62 +1,103 @@
 import { useEffect, useRef } from "react";
-import { useAmbientActions, useAmbientStore } from "@/store/store-ambient";
 import { usePlaybackStore } from "@/player";
+import { useAmbientStore } from "@/store/store-ambient";
 import { ambientService } from "./ambient-service";
 
 export const AmbientCoordinator = () => {
-  const selectedTrackId = useAmbientStore((state) => state.selectedTrackId);
+  const isEnabled = useAmbientStore((state) => state.isEnabled);
+  const activeTrackId = useAmbientStore((state) => state.activeTrackId);
+  const activeLibraryItemId = useAmbientStore((state) => state.activeLibraryItemId);
   const ambientPlaybackState = useAmbientStore((state) => state.playbackState);
-  const selectedLibraryItemId = useAmbientStore((state) => state.selectedLibraryItemId);
-  const syncSelectedLibraryItem = useAmbientActions().syncSelectedLibraryItem;
-  const playbackState = usePlaybackStore((state) => state.playbackState);
   const libraryItemId = usePlaybackStore((state) => state.libraryItemId);
-  const previousLibraryItemId = useRef<string | null>(libraryItemId);
+  const queueLength = usePlaybackStore((state) => state.queue.length);
+  const playbackState = usePlaybackStore((state) => state.playbackState);
+  const attachedTrackIdForLoadedBook = useAmbientStore((state) =>
+    libraryItemId ? state.attachedTrackIdByLibraryItemId[libraryItemId] ?? null : null,
+  );
+  const hasLoadedBook = Boolean(libraryItemId) && queueLength > 0;
   const previousPlaybackState = useRef(playbackState);
 
   useEffect(() => {
-    if (selectedTrackId) {
-      if (selectedLibraryItemId !== libraryItemId) {
-        syncSelectedLibraryItem(libraryItemId);
+    if (!isEnabled) {
+      if (activeTrackId || activeLibraryItemId || ambientPlaybackState !== "idle") {
+        ambientService.stopActiveTrack();
       }
-    } else if (selectedLibraryItemId !== null) {
-      syncSelectedLibraryItem(null);
-    }
-
-    const previousLibrary = previousLibraryItemId.current;
-    const didLibraryChange = previousLibrary !== libraryItemId;
-
-    if (selectedTrackId && didLibraryChange) {
-      ambientService.stopAndClearSelection();
-    }
-
-    previousLibraryItemId.current = libraryItemId;
-  }, [libraryItemId, selectedLibraryItemId, selectedTrackId, syncSelectedLibraryItem]);
-
-  useEffect(() => {
-    if (!selectedTrackId) {
-      previousPlaybackState.current = playbackState;
       return;
     }
 
-    const previousState = previousPlaybackState.current;
-
-    if (playbackState === "playing" && previousState !== "playing" && ambientPlaybackState === "paused") {
-      ambientService.resumeTrack();
+    if (!hasLoadedBook || !libraryItemId) {
+      if (activeTrackId || activeLibraryItemId || ambientPlaybackState !== "idle") {
+        ambientService.stopActiveTrack();
+      }
+      return;
     }
 
-    if (playbackState === "paused" && previousState !== "paused" && ambientPlaybackState === "playing") {
-      ambientService.pauseTrack();
+    if (!attachedTrackIdForLoadedBook) {
+      if (activeLibraryItemId === libraryItemId || activeTrackId || ambientPlaybackState !== "idle") {
+        ambientService.stopActiveTrack();
+      }
+      return;
     }
 
     if (
-      (playbackState === "idle" || playbackState === "ended" || playbackState === "error") &&
-      previousState !== playbackState
+      activeTrackId !== attachedTrackIdForLoadedBook ||
+      activeLibraryItemId !== libraryItemId ||
+      ambientPlaybackState === "idle"
     ) {
-      ambientService.stopAndClearSelection();
+      ambientService.loadAttachedTrackForBook(libraryItemId);
     }
+  }, [
+    activeLibraryItemId,
+    activeTrackId,
+    ambientPlaybackState,
+    attachedTrackIdForLoadedBook,
+    hasLoadedBook,
+    isEnabled,
+    libraryItemId,
+  ]);
+
+  useEffect(() => {
+    const previousState = previousPlaybackState.current;
+    const didPlaybackStateChange = previousState !== playbackState;
 
     previousPlaybackState.current = playbackState;
-  }, [ambientPlaybackState, playbackState, selectedTrackId]);
+
+    if (!isEnabled || !hasLoadedBook || !libraryItemId) {
+      return;
+    }
+
+    if (!attachedTrackIdForLoadedBook) {
+      return;
+    }
+
+    const isActiveForLoadedBook =
+      activeTrackId === attachedTrackIdForLoadedBook && activeLibraryItemId === libraryItemId;
+    if (!isActiveForLoadedBook) {
+      return;
+    }
+
+    if (!didPlaybackStateChange) {
+      return;
+    }
+
+    if (playbackState === "playing" && previousState !== "playing" && ambientPlaybackState === "paused") {
+      ambientService.resumeTrack();
+      return;
+    }
+
+    if (previousState === "playing" && playbackState !== "playing" && ambientPlaybackState === "playing") {
+      ambientService.pauseTrack();
+    }
+  }, [
+    activeLibraryItemId,
+    activeTrackId,
+    ambientPlaybackState,
+    attachedTrackIdForLoadedBook,
+    hasLoadedBook,
+    isEnabled,
+    libraryItemId,
+    playbackState,
+  ]);
 
   return null;
 };

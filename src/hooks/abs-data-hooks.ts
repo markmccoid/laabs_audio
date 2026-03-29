@@ -31,7 +31,7 @@ import {
   useTagOperator,
   useTags,
 } from "../store/store-filters";
-import { useDeviceBooksStore } from "../store/device-books-store";
+import { resolveStoredDownloadCoverUri, useDeviceBooksStore } from "../store/device-books-store";
 import {
   resolveBookCoverUri,
   toDownloadedBookSummary,
@@ -537,7 +537,7 @@ export const useCachedBookSummary = (itemId?: string) => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const queryClient = useQueryClient();
   const downloadedCoverLocalUri = useDeviceBooksStore((state) =>
-    itemId ? state.downloadedBookData[itemId]?.coverLocalUri ?? null : null,
+    itemId ? resolveStoredDownloadCoverUri(state.downloadedBookData[itemId]) : null,
   );
   const booksQueryKey = queryKeys.libraryBooks(activeLibraryId);
   const immediateCachedBooks = activeLibraryId
@@ -583,7 +583,7 @@ export const useGetItemDetails = (itemId?: string) => {
   const downloadedBookData = useDeviceBooksStore((state) =>
     itemId ? state.downloadedBookData[itemId] : undefined,
   );
-  const downloadedCoverLocalUri = downloadedBookData?.coverLocalUri ?? null;
+  const downloadedCoverLocalUri = resolveStoredDownloadCoverUri(downloadedBookData);
 
   // Always call useQuery, but control when it's enabled
   const {

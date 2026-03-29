@@ -1,74 +1,67 @@
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { getDocumentDirectory } from "./fileSystemAccess";
+import {
+  AMBIENT_DOWNLOAD_DIRECTORY,
+  isRelativeDocumentPath,
+  toDocumentRelativePath,
+} from "./fileSystemAccess";
 import { mmkvStorage } from "./mmkv-storage";
 
 export const DEFAULT_AMBIENT_VOLUME = 0.2;
-const AMBIENT_ROOT_DIRNAME = "laabs-ambient";
-const DEFAULT_AMBIENT_FILE_NAME = "Ambient Track";
 
 export type AmbientPlaybackState = "idle" | "playing" | "paused";
 
 export type AmbientTrackRecord = {
   id: string;
-  uri: string;
+  relativePath: string;
   fileName: string;
   volume: number;
   importedAt: number;
 };
 
-export type AmbientStoreState = {
+type PersistedAmbientState = {
   isEnabled: boolean;
   tracksById: Record<string, AmbientTrackRecord>;
   trackOrder: string[];
-  selectedTrackId: string | null;
-  playbackState: AmbientPlaybackState;
-  selectedLibraryItemId: string | null;
-  actions: {
-    setEnabled: (enabled: boolean) => void;
-    addTrack: (track: AmbientTrackRecord) => void;
-    removeTrack: (trackId: string) => void;
-    setTrackVolume: (trackId: string, volume: number) => void;
-    selectTrack: (trackId: string | null) => void;
-    clearSelection: () => void;
-    setPlaybackState: (state: AmbientPlaybackState) => void;
-    syncSelectedLibraryItem: (libraryItemId: string | null) => void;
-  };
+  attachedTrackIdByLibraryItemId: Record<string, string>;
 };
+
+type RuntimeAmbientState = {
+  activeTrackId: string | null;
+  activeLibraryItemId: string | null;
+  playbackState: AmbientPlaybackState;
+};
+
+type LegacyAmbientState = Partial<
+  PersistedAmbientState & {
+    selectedTrackId: string | null;
+    selectedLibraryItemId: string | null;
+    tracksById: Record<string, AmbientTrackRecord & { uri?: string | null }>;
+  }
+>;
+
+export type AmbientStoreState = PersistedAmbientState &
+  RuntimeAmbientState & {
+    actions: {
+      setEnabled: (enabled: boolean) => void;
+      addTrack: (track: AmbientTrackRecord) => void;
+      removeTrack: (trackId: string) => void;
+      setTrackVolume: (trackId: string, volume: number) => void;
+      attachTrackToBook: (trackId: string, libraryItemId: string) => void;
+      detachTrackFromBook: (libraryItemId: string) => void;
+      removeTrackFromAllBookAttachments: (trackId: string) => void;
+      setActiveSession: (
+        trackId: string | null,
+        libraryItemId: string | null,
+        playbackState: AmbientPlaybackState,
+      ) => void;
+      clearActiveSession: () => void;
+      setPlaybackState: (state: AmbientPlaybackState) => void;
+    };
+  };
 
 const clampAmbientVolume = (value: number) => Math.max(0, Math.min(1, value));
-
-const sanitizeAmbientFileName = (value: string) =>
-  value.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim();
-
-const normalizeAmbientUri = (uri?: string | null) => {
-  const value = uri?.trim();
-  if (!value) return null;
-  if (
-    value.startsWith("file://") ||
-    value.startsWith("http://") ||
-    value.startsWith("https://") ||
-    value.startsWith("data:")
-  ) {
-    return value;
-  }
-  if (value.startsWith("/")) {
-    return `file://${value}`;
-  }
-  return value;
-};
-
-const isLocalFileUri = (uri: string) => uri.startsWith("file://") || uri.startsWith("/");
-const isRemoteLikeUri = (uri: string) =>
-  uri.startsWith("http://") ||
-  uri.startsWith("https://") ||
-  uri.startsWith("data:") ||
-  uri.startsWith("content://") ||
-  uri.startsWith("asset://");
-
-const joinDirectoryUri = (directoryUri: string, fileName: string) =>
-  directoryUri.endsWith("/") ? `${directoryUri}${fileName}` : `${directoryUri}/${fileName}`;
 
 const extractFileNameFromUri = (uri: string) => {
   const normalized = uri.split(/[?#]/, 1)[0] ?? uri;
@@ -77,95 +70,120 @@ const extractFileNameFromUri = (uri: string) => {
   return lastSlash >= 0 ? trimmed.slice(lastSlash + 1) : trimmed;
 };
 
-const buildStoredAmbientFileName = (trackId: string, fileName: string) => {
-  const dotIndex = fileName.lastIndexOf(".");
-  const hasExtension = dotIndex > 0 && dotIndex < fileName.length - 1;
-  const basename = hasExtension ? fileName.slice(0, dotIndex) : fileName;
-  const extension = hasExtension ? fileName.slice(dotIndex) : "";
-  return `${trackId}-${basename}${extension}`;
-};
+const toLegacyAmbientRelativePath = (storedPath?: string | null) => {
+  const normalized = storedPath?.trim();
+  if (!normalized) return null;
 
-const getAmbientRootDirectory = () => {
-  const documentDirectory = getDocumentDirectory();
-  return documentDirectory ? `${documentDirectory}${AMBIENT_ROOT_DIRNAME}/` : null;
-};
-
-const toPersistedAmbientUri = (track: AmbientTrackRecord) => {
-  const normalized = normalizeAmbientUri(track.uri);
-  if (!normalized) return track.uri;
-  if (isRemoteLikeUri(normalized)) {
-    return normalized;
-  }
-  const fallbackName = buildStoredAmbientFileName(
-    track.id,
-    sanitizeAmbientFileName(track.fileName?.trim() || DEFAULT_AMBIENT_FILE_NAME),
-  );
-  return extractFileNameFromUri(normalized) || fallbackName;
-};
-
-const hydrateAmbientTrackUri = (track: AmbientTrackRecord) => {
-  const normalized = normalizeAmbientUri(track.uri);
-  if (!normalized) return track.uri;
-  if (isRemoteLikeUri(normalized)) {
-    return normalized;
+  const relativeFromUri = toDocumentRelativePath(normalized);
+  if (relativeFromUri) {
+    return relativeFromUri;
   }
 
-  const currentRoot = getAmbientRootDirectory();
-  const storedFileName = isLocalFileUri(normalized)
-    ? extractFileNameFromUri(normalized)
-    : normalized;
-  if (!currentRoot || !storedFileName) {
-    return normalized;
+  if (isRelativeDocumentPath(normalized)) {
+    if (normalized.startsWith(`${AMBIENT_DOWNLOAD_DIRECTORY}/`)) {
+      return normalized;
+    }
+    const fileName = extractFileNameFromUri(normalized);
+    return fileName ? `${AMBIENT_DOWNLOAD_DIRECTORY}/${fileName}` : null;
   }
 
-  return joinDirectoryUri(currentRoot, storedFileName);
+  const fileName = extractFileNameFromUri(normalized);
+  return fileName ? `${AMBIENT_DOWNLOAD_DIRECTORY}/${fileName}` : null;
 };
 
-const toPersistedAmbientTracks = (
-  tracksById?: Record<string, AmbientTrackRecord>,
-): Record<string, AmbientTrackRecord> => {
-  const persisted: Record<string, AmbientTrackRecord> = {};
-
-  Object.entries(tracksById ?? {}).forEach(([trackId, track]) => {
-    persisted[trackId] = {
-      ...track,
-      uri: toPersistedAmbientUri(track),
-      volume: clampAmbientVolume(track.volume),
-    };
-  });
-
-  return persisted;
-};
-
-const hydratePersistedAmbientTracks = (
-  tracksById?: Record<string, AmbientTrackRecord>,
-): Record<string, AmbientTrackRecord> => {
-  const hydrated: Record<string, AmbientTrackRecord> = {};
-
-  Object.entries(tracksById ?? {}).forEach(([trackId, track]) => {
-    hydrated[trackId] = {
-      ...track,
-      uri: hydrateAmbientTrackUri(track),
-      volume: clampAmbientVolume(track.volume),
-    };
-  });
-
-  return hydrated;
-};
-
-const getBaseState = () => ({
+const getBasePersistedState = (): PersistedAmbientState => ({
   isEnabled: false,
-  tracksById: {} as Record<string, AmbientTrackRecord>,
-  trackOrder: [] as string[],
-  selectedTrackId: null as string | null,
-  playbackState: "idle" as AmbientPlaybackState,
-  selectedLibraryItemId: null as string | null,
+  tracksById: {},
+  trackOrder: [],
+  attachedTrackIdByLibraryItemId: {},
 });
+
+const getBaseRuntimeState = (): RuntimeAmbientState => ({
+  activeTrackId: null,
+  activeLibraryItemId: null,
+  playbackState: "idle",
+});
+
+const normalizePersistedAmbientTracks = (tracksById: unknown) => {
+  if (!tracksById || typeof tracksById !== "object") {
+    return {} as Record<string, AmbientTrackRecord>;
+  }
+
+  const nextTracksById: Record<string, AmbientTrackRecord> = {};
+
+  Object.entries(tracksById).forEach(([trackId, value]) => {
+    if (!value || typeof value !== "object") return;
+
+    const candidate = value as Partial<AmbientTrackRecord> & { uri?: string | null };
+    const relativePath =
+      typeof candidate.relativePath === "string" && isRelativeDocumentPath(candidate.relativePath)
+        ? candidate.relativePath
+        : toLegacyAmbientRelativePath(candidate.uri);
+
+    if (!relativePath) return;
+
+    nextTracksById[trackId] = {
+      id: typeof candidate.id === "string" && candidate.id.trim().length > 0 ? candidate.id : trackId,
+      relativePath,
+      fileName:
+        typeof candidate.fileName === "string" && candidate.fileName.trim().length > 0
+          ? candidate.fileName
+          : "Ambient Track",
+      volume: clampAmbientVolume(
+        typeof candidate.volume === "number" ? candidate.volume : DEFAULT_AMBIENT_VOLUME,
+      ),
+      importedAt: typeof candidate.importedAt === "number" ? candidate.importedAt : 0,
+    };
+  });
+
+  return nextTracksById;
+};
+
+const normalizeTrackOrder = (trackOrder: unknown, tracksById: Record<string, AmbientTrackRecord>) => {
+  const validTrackIds = new Set(Object.keys(tracksById));
+  const orderedTrackIds = Array.isArray(trackOrder)
+    ? trackOrder.filter(
+        (trackId): trackId is string => typeof trackId === "string" && validTrackIds.has(trackId),
+      )
+    : [];
+  const remainingTrackIds = Object.keys(tracksById).filter((trackId) => !orderedTrackIds.includes(trackId));
+  return [...orderedTrackIds, ...remainingTrackIds];
+};
+
+const normalizeBookAttachments = (
+  attachments: unknown,
+  tracksById: Record<string, AmbientTrackRecord>,
+  fallbackSelectedTrackId?: string | null,
+  fallbackSelectedLibraryItemId?: string | null,
+) => {
+  const validTrackIds = new Set(Object.keys(tracksById));
+  const nextAttachments: Record<string, string> = {};
+
+  if (attachments && typeof attachments === "object") {
+    Object.entries(attachments).forEach(([libraryItemId, trackId]) => {
+      if (typeof libraryItemId !== "string" || libraryItemId.trim().length === 0) return;
+      if (typeof trackId !== "string" || !validTrackIds.has(trackId)) return;
+      nextAttachments[libraryItemId] = trackId;
+    });
+  }
+
+  if (
+    fallbackSelectedTrackId &&
+    fallbackSelectedLibraryItemId &&
+    validTrackIds.has(fallbackSelectedTrackId) &&
+    !nextAttachments[fallbackSelectedLibraryItemId]
+  ) {
+    nextAttachments[fallbackSelectedLibraryItemId] = fallbackSelectedTrackId;
+  }
+
+  return nextAttachments;
+};
 
 export const ambientStore = createStore<AmbientStoreState>()(
   persist(
     (set) => ({
-      ...getBaseState(),
+      ...getBasePersistedState(),
+      ...getBaseRuntimeState(),
       actions: {
         setEnabled: (isEnabled) =>
           set((state) => {
@@ -189,22 +207,24 @@ export const ambientStore = createStore<AmbientStoreState>()(
         removeTrack: (trackId) =>
           set((state) => {
             if (!state.tracksById[trackId]) return state;
+
             const nextTracksById = { ...state.tracksById };
             delete nextTracksById[trackId];
-            const isSelected = state.selectedTrackId === trackId;
+            const isActiveTrack = state.activeTrackId === trackId;
 
             return {
               tracksById: nextTracksById,
               trackOrder: state.trackOrder.filter((candidateId) => candidateId !== trackId),
-              selectedTrackId: isSelected ? null : state.selectedTrackId,
-              playbackState: isSelected ? "idle" : state.playbackState,
-              selectedLibraryItemId: isSelected ? null : state.selectedLibraryItemId,
+              activeTrackId: isActiveTrack ? null : state.activeTrackId,
+              activeLibraryItemId: isActiveTrack ? null : state.activeLibraryItemId,
+              playbackState: isActiveTrack ? "idle" : state.playbackState,
             };
           }),
         setTrackVolume: (trackId, volume) =>
           set((state) => {
             const existingTrack = state.tracksById[trackId];
             if (!existingTrack) return state;
+
             return {
               tracksById: {
                 ...state.tracksById,
@@ -215,72 +235,159 @@ export const ambientStore = createStore<AmbientStoreState>()(
               },
             };
           }),
-        selectTrack: (selectedTrackId) =>
+        attachTrackToBook: (trackId, libraryItemId) =>
           set((state) => {
-            if (selectedTrackId && !state.tracksById[selectedTrackId]) return state;
-            return { selectedTrackId };
+            if (!state.tracksById[trackId]) return state;
+            if (!libraryItemId.trim()) return state;
+            if (state.attachedTrackIdByLibraryItemId[libraryItemId] === trackId) return state;
+
+            return {
+              attachedTrackIdByLibraryItemId: {
+                ...state.attachedTrackIdByLibraryItemId,
+                [libraryItemId]: trackId,
+              },
+            };
           }),
-        clearSelection: () =>
+        detachTrackFromBook: (libraryItemId) =>
           set((state) => {
+            if (!state.attachedTrackIdByLibraryItemId[libraryItemId]) return state;
+
+            const nextAttachments = { ...state.attachedTrackIdByLibraryItemId };
+            delete nextAttachments[libraryItemId];
+            const isActiveBook = state.activeLibraryItemId === libraryItemId;
+
+            return {
+              attachedTrackIdByLibraryItemId: nextAttachments,
+              activeTrackId: isActiveBook ? null : state.activeTrackId,
+              activeLibraryItemId: isActiveBook ? null : state.activeLibraryItemId,
+              playbackState: isActiveBook ? "idle" : state.playbackState,
+            };
+          }),
+        removeTrackFromAllBookAttachments: (trackId) =>
+          set((state) => {
+            const nextAttachments = Object.fromEntries(
+              Object.entries(state.attachedTrackIdByLibraryItemId).filter(
+                ([, attachedTrackId]) => attachedTrackId !== trackId,
+              ),
+            );
+            const isActiveTrack = state.activeTrackId === trackId;
+
             if (
-              state.selectedTrackId === null &&
-              state.playbackState === "idle" &&
-              state.selectedLibraryItemId === null
+              Object.keys(nextAttachments).length ===
+                Object.keys(state.attachedTrackIdByLibraryItemId).length &&
+              !isActiveTrack
             ) {
               return state;
             }
+
             return {
-              selectedTrackId: null,
+              attachedTrackIdByLibraryItemId: nextAttachments,
+              activeTrackId: isActiveTrack ? null : state.activeTrackId,
+              activeLibraryItemId: isActiveTrack ? null : state.activeLibraryItemId,
+              playbackState: isActiveTrack ? "idle" : state.playbackState,
+            };
+          }),
+        setActiveSession: (activeTrackId, activeLibraryItemId, playbackState) =>
+          set((state) => {
+            const normalizedTrackId =
+              activeTrackId && state.tracksById[activeTrackId] ? activeTrackId : null;
+            const normalizedLibraryItemId =
+              normalizedTrackId && activeLibraryItemId ? activeLibraryItemId : null;
+            const normalizedPlaybackState =
+              normalizedTrackId && normalizedLibraryItemId ? playbackState : "idle";
+
+            if (
+              state.activeTrackId === normalizedTrackId &&
+              state.activeLibraryItemId === normalizedLibraryItemId &&
+              state.playbackState === normalizedPlaybackState
+            ) {
+              return state;
+            }
+
+            return {
+              activeTrackId: normalizedTrackId,
+              activeLibraryItemId: normalizedLibraryItemId,
+              playbackState: normalizedPlaybackState,
+            };
+          }),
+        clearActiveSession: () =>
+          set((state) => {
+            if (
+              state.activeTrackId === null &&
+              state.activeLibraryItemId === null &&
+              state.playbackState === "idle"
+            ) {
+              return state;
+            }
+
+            return {
+              activeTrackId: null,
+              activeLibraryItemId: null,
               playbackState: "idle",
-              selectedLibraryItemId: null,
             };
           }),
         setPlaybackState: (playbackState) =>
           set((state) => {
+            if (state.activeTrackId === null || state.activeLibraryItemId === null) {
+              if (state.playbackState === "idle") return state;
+              return { playbackState: "idle" };
+            }
             if (state.playbackState === playbackState) return state;
             return { playbackState };
-          }),
-        syncSelectedLibraryItem: (selectedLibraryItemId) =>
-          set((state) => {
-            if (state.selectedLibraryItemId === selectedLibraryItemId) return state;
-            return { selectedLibraryItemId };
           }),
       },
     }),
     {
       name: "ambient-store",
       storage: createJSONStorage(() => mmkvStorage),
-      version: 1,
+      version: 2,
       partialize: (state) => ({
         isEnabled: state.isEnabled,
-        tracksById: toPersistedAmbientTracks(state.tracksById),
+        tracksById: state.tracksById,
         trackOrder: state.trackOrder,
-        selectedTrackId: state.selectedTrackId,
-        playbackState: state.playbackState,
-        selectedLibraryItemId: state.selectedLibraryItemId,
+        attachedTrackIdByLibraryItemId: state.attachedTrackIdByLibraryItemId,
       }),
       merge: (persistedState, currentState) => {
         const typedState =
           persistedState && typeof persistedState === "object"
-            ? (persistedState as Partial<AmbientStoreState>)
+            ? (persistedState as LegacyAmbientState)
             : {};
-        const tracksById = hydratePersistedAmbientTracks(typedState.tracksById);
-        const trackOrder = (typedState.trackOrder ?? []).filter((trackId) =>
-          Boolean(tracksById[trackId]),
+        const tracksById = normalizePersistedAmbientTracks(typedState.tracksById);
+        const trackOrder = normalizeTrackOrder(typedState.trackOrder, tracksById);
+        const attachedTrackIdByLibraryItemId = normalizeBookAttachments(
+          typedState.attachedTrackIdByLibraryItemId,
+          tracksById,
+          typedState.selectedTrackId,
+          typedState.selectedLibraryItemId,
         );
-        const selectedTrackId =
-          typedState.selectedTrackId && tracksById[typedState.selectedTrackId]
-            ? typedState.selectedTrackId
-            : null;
 
         return {
           ...currentState,
           isEnabled: typedState.isEnabled ?? false,
           tracksById,
           trackOrder,
-          selectedTrackId,
-          playbackState: selectedTrackId ? (typedState.playbackState ?? "idle") : "idle",
-          selectedLibraryItemId: selectedTrackId ? (typedState.selectedLibraryItemId ?? null) : null,
+          attachedTrackIdByLibraryItemId,
+          ...getBaseRuntimeState(),
+        };
+      },
+      migrate: (persistedState) => {
+        const typedState =
+          persistedState && typeof persistedState === "object"
+            ? (persistedState as LegacyAmbientState)
+            : {};
+        const tracksById = normalizePersistedAmbientTracks(typedState.tracksById);
+
+        return {
+          ...getBasePersistedState(),
+          isEnabled: typedState.isEnabled ?? false,
+          tracksById,
+          trackOrder: normalizeTrackOrder(typedState.trackOrder, tracksById),
+          attachedTrackIdByLibraryItemId: normalizeBookAttachments(
+            typedState.attachedTrackIdByLibraryItemId,
+            tracksById,
+            typedState.selectedTrackId,
+            typedState.selectedLibraryItemId,
+          ),
         };
       },
     },
@@ -292,12 +399,33 @@ export const useAmbientStore = <T,>(selector: (state: AmbientStoreState) => T) =
 
 export const useAmbientActions = () => useAmbientStore((state) => state.actions);
 
+export const isAmbientTrackAvailable = (track?: AmbientTrackRecord | null) =>
+  Boolean(track?.relativePath && isRelativeDocumentPath(track.relativePath));
+
 export const selectAmbientTracks = (state: AmbientStoreState) =>
   state.trackOrder
     .map((trackId) => state.tracksById[trackId])
     .filter((track): track is AmbientTrackRecord => Boolean(track));
 
-export const selectSelectedAmbientTrack = (state: AmbientStoreState) => {
-  if (!state.selectedTrackId) return null;
-  return state.tracksById[state.selectedTrackId] ?? null;
+export const selectAvailableAmbientTracks = (state: AmbientStoreState) =>
+  selectAmbientTracks(state).filter((track) => isAmbientTrackAvailable(track));
+
+export const selectActiveAmbientTrack = (state: AmbientStoreState) => {
+  if (!state.activeTrackId) return null;
+  const track = state.tracksById[state.activeTrackId] ?? null;
+  return isAmbientTrackAvailable(track) ? track : null;
 };
+
+export const selectAttachedAmbientTrackForBook = (
+  state: AmbientStoreState,
+  libraryItemId?: string | null,
+) => {
+  if (!libraryItemId) return null;
+  const attachedTrackId = state.attachedTrackIdByLibraryItemId[libraryItemId];
+  if (!attachedTrackId) return null;
+  const track = state.tracksById[attachedTrackId] ?? null;
+  return isAmbientTrackAvailable(track) ? track : null;
+};
+
+export const selectHasAvailableAmbientTracks = (state: AmbientStoreState) =>
+  selectAvailableAmbientTracks(state).length > 0;

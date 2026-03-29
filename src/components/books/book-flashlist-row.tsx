@@ -1,6 +1,10 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import { CoverImage } from "@/components/images/cover-image";
-import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
+import {
+  resolveStoredDownloadCoverUri,
+  selectHasPlayableBookDownload,
+  useDeviceBooksStore,
+} from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { formatSeconds } from "@/utils/formatUtils";
 import type { Href } from "expo-router";
@@ -34,7 +38,7 @@ export const BookFlashListRow = ({
     selectHasPlayableBookDownload(state, book.id),
   );
   const localCoverUri = useDeviceBooksStore(
-    (state) => state.downloadedBookData[book.id]?.coverLocalUri ?? null,
+    (state) => resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
   );
   const showOfflineUnavailable = isOffline && !isDownloaded;
   const resolvedSeriesName = (book.seriesName ?? book.series ?? "").trim();

@@ -1,6 +1,10 @@
 import { ambientService } from "@/ambient/ambient-service";
 import { usePlaybackStore } from "@/player";
-import { selectSelectedAmbientTrack, useAmbientStore } from "@/store/store-ambient";
+import {
+  isAmbientTrackAvailable,
+  selectAttachedAmbientTrackForBook,
+  useAmbientStore,
+} from "@/store/store-ambient";
 import { useThemeColors } from "@/theme/use-app-theme";
 import Slider from "@react-native-community/slider";
 import { router } from "expo-router";
@@ -14,19 +18,34 @@ const PlayerAmbientSheet = () => {
   const themeColors = useThemeColors();
   const { width } = useWindowDimensions();
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const hasLoadedBook = usePlaybackStore(
+    (state) => Boolean(state.libraryItemId) && state.queue.length > 0,
+  );
   const isEnabled = useAmbientStore((state) => state.isEnabled);
   const trackOrder = useAmbientStore((state) => state.trackOrder);
   const tracksById = useAmbientStore((state) => state.tracksById);
-  const selectedTrack = useAmbientStore(selectSelectedAmbientTrack);
-  const ambientTracks = useMemo(
+  const attachedTrack = useAmbientStore((state) =>
+    selectAttachedAmbientTrackForBook(state, currentLibraryItemId),
+  );
+  const allTracks = useMemo(
     () => trackOrder.map((trackId) => tracksById[trackId]).filter(Boolean),
     [trackOrder, tracksById],
   );
+  const ambientTracks = useMemo(
+    () => allTracks.filter((track) => isAmbientTrackAvailable(track)),
+    [allTracks],
+  );
+  const totalTrackCount = allTracks.length;
+  const canAttachTrack = Boolean(currentLibraryItemId) && hasLoadedBook;
   const sliderWidth = Math.max(220, width - 96);
   const helperText = useMemo(() => {
+    if (!canAttachTrack) return "Load a book before attaching ambient audio.";
     if (ambientTracks.length > 0) return "Choose a track to start looped ambient playback.";
+    if (totalTrackCount > 0) {
+      return "Your saved ambient tracks are from an older build and are unavailable. Re-import them from Settings > Ambient Audio.";
+    }
     return "Import tracks from Settings > Ambient Audio before using ambient playback here.";
-  }, [ambientTracks.length]);
+  }, [ambientTracks.length, canAttachTrack, totalTrackCount]);
 
   return (
     <View
@@ -68,12 +87,13 @@ const PlayerAmbientSheet = () => {
           >
             {ambientTracks.length ? (
               ambientTracks.map((track, index) => {
-                const isSelected = selectedTrack?.id === track.id;
+                const isSelected = attachedTrack?.id === track.id;
                 return (
                   <Pressable
                     key={track.id}
+                    disabled={!canAttachTrack}
                     onPress={() => {
-                      ambientService.playTrack(track.id, currentLibraryItemId);
+                      ambientService.attachTrackToBook(track.id, currentLibraryItemId);
                       router.back();
                     }}
                     style={({ pressed }) => ({
@@ -85,7 +105,7 @@ const PlayerAmbientSheet = () => {
                       alignItems: "center",
                       gap: 12,
                       backgroundColor: isSelected ? themeColors.bg : themeColors.surface,
-                      opacity: pressed ? 0.82 : 1,
+                      opacity: !canAttachTrack ? 0.45 : pressed ? 0.82 : 1,
                     })}
                   >
                     <View
@@ -136,14 +156,16 @@ const PlayerAmbientSheet = () => {
                   No ambient tracks available
                 </Text>
                 <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-                  Open Settings and import ambient audio from your device or iCloud Files.
+                  {totalTrackCount > 0
+                    ? "Re-import ambient audio from Settings > Ambient Audio to use it in this build."
+                    : "Open Settings and import ambient audio from your device or iCloud Files."}
                 </Text>
               </View>
             )}
           </View>
         ) : null}
 
-        {isEnabled && selectedTrack ? (
+        {isEnabled && attachedTrack ? (
           <View
             style={{
               borderRadius: 18,
@@ -161,7 +183,7 @@ const PlayerAmbientSheet = () => {
                 Ambient Volume
               </Text>
               <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-                {selectedTrack.fileName} · {formatVolumeLabel(selectedTrack.volume)}
+                {attachedTrack.fileName} · {formatVolumeLabel(attachedTrack.volume)}
               </Text>
             </View>
             <Slider
@@ -172,8 +194,8 @@ const PlayerAmbientSheet = () => {
               minimumValue={0}
               maximumValue={1}
               step={0.01}
-              value={selectedTrack.volume}
-              onValueChange={(value) => ambientService.setTrackVolume(selectedTrack.id, value)}
+              value={attachedTrack.volume}
+              onValueChange={(value) => ambientService.setTrackVolume(attachedTrack.id, value)}
             />
           </View>
         ) : null}
