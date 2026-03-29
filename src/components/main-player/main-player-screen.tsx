@@ -17,8 +17,8 @@ import { useUniwind } from "uniwind";
 import BookControls from "../bookComponents/book-controls";
 import BookImage from "../bookComponents/book-image";
 import BookTimeSlider from "../bookComponents/book-time-slider";
-import MainPlayerAmbientControl from "./main-player-ambient-control";
 import MainPlayerActionsBar from "./main-player-actions-bar";
+import MainPlayerAmbientControl from "./main-player-ambient-control";
 
 const MainPlayerScreen = () => {
   const themeColors = useThemeColors();
@@ -56,8 +56,7 @@ const MainPlayerScreen = () => {
     localCoverUri,
     variant: "full",
   });
-  const backgroundSource =
-    coverURL || localCoverUri ? backgroundImage.source : DEFAULT_BOOK_COVER;
+  const backgroundSource = coverURL || localCoverUri ? backgroundImage.source : DEFAULT_BOOK_COVER;
   const chapters = bookData?.media?.chapters ?? [];
   const fallbackDurationMs = Math.max(
     0,
@@ -200,7 +199,7 @@ const MainPlayerScreen = () => {
                 Start playback from Home to load a book.
               </Text>
             ) : null}
-            <Text
+            {/* <Text
               selectable
               style={{
                 fontSize: 12,
@@ -210,7 +209,7 @@ const MainPlayerScreen = () => {
               }}
             >
               {skipSummaryLabel}
-            </Text>
+            </Text> */}
           </View>
         </View>
 

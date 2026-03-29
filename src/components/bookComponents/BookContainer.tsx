@@ -582,7 +582,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
                 >
                   {playbackSourceLabel}
                 </Text>
-                <Text
+                {/* <Text
                   selectable
                   style={{
                     color: themeColors.textMuted,
@@ -593,7 +593,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
                   }}
                 >
                   {skipSummaryLabel}
-                </Text>
+                </Text> */}
               </View>
             </View>
             <View className="h-[10]" />
