@@ -111,6 +111,7 @@ const BookKeyDetails = ({
           alignItems: "center",
           justifyContent: "space-between",
           gap: 10,
+          flexWrap: "wrap",
           marginBottom: 2,
         }}
       >
