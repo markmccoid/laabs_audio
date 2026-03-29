@@ -1,7 +1,8 @@
 import { usePlaybackRateGesture } from "@/hooks/use-playback-rate-gesture";
+import SliderValueBubble from "@/components/sliders/slider-value-bubble";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView } from "expo-symbols";
-import { Text, View } from "react-native";
+import { View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   interpolate,
@@ -31,11 +32,7 @@ const BookRateSetter = ({ libraryItemId }: Props) => {
   }));
 
   const bubbleAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: bubbleProgress.value,
-    transform: [
-      { translateX: interpolate(bubbleProgress.value, [0, 1], [0, 86]) },
-      { scale: interpolate(bubbleProgress.value, [0, 1], [0.85, 1]) },
-    ],
+    transform: [{ translateY: dragOffsetY.value * 0.08 }],
   }));
 
   if (!isTargetLoaded) {
@@ -51,34 +48,23 @@ const BookRateSetter = ({ libraryItemId }: Props) => {
         justifyContent: "center",
       }}
     >
-      <Animated.View
-        style={[
-          {
+      <Animated.View style={bubbleAnimatedStyle}>
+        <SliderValueBubble
+          label={displayRate.toFixed(2)}
+          progress={bubbleProgress}
+          placement="side-pop"
+          minWidth={118}
+          popoutDistance={86}
+          style={{
             position: "absolute",
             left: 54,
-            borderRadius: 18,
-            borderCurve: "continuous",
-            paddingHorizontal: 18,
-            paddingVertical: 10,
-            backgroundColor: themeColors.accent,
-            minWidth: 118,
-            alignItems: "center",
-            boxShadow: "0 12px 20px rgba(15, 23, 42, 0.2)",
-          },
-          bubbleAnimatedStyle,
-        ]}
-      >
-        <Text
-          selectable
-          style={{
+          }}
+          labelStyle={{
             color: themeColors.accentForeground,
             fontSize: 30,
             fontWeight: "700",
-            fontVariant: ["tabular-nums"],
           }}
-        >
-          {displayRate.toFixed(2)}
-        </Text>
+        />
       </Animated.View>
 
       <GestureDetector gesture={gesture}>

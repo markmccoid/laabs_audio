@@ -1,4 +1,5 @@
 import { ambientService } from "@/ambient/ambient-service";
+import SliderWithBubble from "@/components/sliders/slider-with-bubble";
 import { usePlaybackStore } from "@/player";
 import {
   isAmbientTrackAvailable,
@@ -6,10 +7,9 @@ import {
   useAmbientStore,
 } from "@/store/store-ambient";
 import { useThemeColors } from "@/theme/use-app-theme";
-import Slider from "@react-native-community/slider";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 
 const formatVolumeLabel = (volume: number) => `${Math.round(volume * 100)}%`;
@@ -38,6 +38,7 @@ const PlayerAmbientSheet = () => {
   const totalTrackCount = allTracks.length;
   const canAttachTrack = Boolean(currentLibraryItemId) && hasLoadedBook;
   const sliderWidth = Math.max(220, width - 96);
+  const [draftVolume, setDraftVolume] = useState(attachedTrack?.volume ?? 0);
   const helperText = useMemo(() => {
     if (!canAttachTrack) return "Load a book before attaching ambient audio.";
     if (ambientTracks.length > 0) return "Choose a track to start looped ambient playback.";
@@ -46,6 +47,10 @@ const PlayerAmbientSheet = () => {
     }
     return "Import tracks from Settings > Ambient Audio before using ambient playback here.";
   }, [ambientTracks.length, canAttachTrack, totalTrackCount]);
+
+  useEffect(() => {
+    setDraftVolume(attachedTrack?.volume ?? 0);
+  }, [attachedTrack?.id, attachedTrack?.volume]);
 
   return (
     <View
@@ -183,10 +188,12 @@ const PlayerAmbientSheet = () => {
                 Ambient Volume
               </Text>
               <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-                {attachedTrack.fileName} · {formatVolumeLabel(attachedTrack.volume)}
+                {attachedTrack.fileName} · {formatVolumeLabel(draftVolume)}
               </Text>
             </View>
-            <Slider
+            <SliderWithBubble
+              bubbleLabel={formatVolumeLabel(draftVolume)}
+              bubbleMinWidth={76}
               style={{ width: sliderWidth, alignSelf: "center" }}
               minimumTrackTintColor={themeColors.accent}
               maximumTrackTintColor={themeColors.border}
@@ -194,8 +201,12 @@ const PlayerAmbientSheet = () => {
               minimumValue={0}
               maximumValue={1}
               step={0.01}
-              value={attachedTrack.volume}
-              onValueChange={(value) => ambientService.setTrackVolume(attachedTrack.id, value)}
+              value={draftVolume}
+              onValueChange={(value: number) => setDraftVolume(value)}
+              onSlidingComplete={(value: number) => {
+                setDraftVolume(value);
+                ambientService.setTrackVolume(attachedTrack.id, value);
+              }}
             />
           </View>
         ) : null}
