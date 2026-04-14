@@ -154,9 +154,50 @@ import { playbackApi } from "../api/playback-api";
 const session = await playbackApi.getPlayInfo(itemId);
 ```
 
+## `src/api/playlists-api.ts`
+
+**Purpose**: Read and mutate Audiobookshelf playlists that are projected into Home playlist shelves.
+
+**Key exports**
+- `playlistsApi.getLibraryPlaylists(libraryId?)`
+- `playlistsApi.getPlaylist(playlistId)`
+- `playlistsApi.createPlaylist({ libraryId, name, description, items })`
+- `playlistsApi.renamePlaylist(playlistId, name)`
+- `playlistsApi.setPlaylistItems(playlistId, orderedLibraryItemIds)`
+- `playlistsApi.batchAddItems(playlistId, libraryItemIds)`
+- `playlistsApi.batchRemoveItems(playlistId, libraryItemIds)`
+- `playlistsApi.deletePlaylist(playlistId)`
+
+**Usage**
+```ts
+import { playlistsApi } from "../api/playlists-api";
+
+const playlists = await playlistsApi.getLibraryPlaylists();
+await playlistsApi.batchAddItems(playlistId, [libraryItemId]);
+```
+
+## `src/api/series-api.ts`
+
+**Purpose**: Fetch a series with server progress included.
+
+**Key exports**
+- `seriesApi.getSeriesWithProgress(seriesId)`
+
+**Usage**
+```ts
+import { seriesApi } from "../api/series-api";
+
+const series = await seriesApi.getSeriesWithProgress(seriesId);
+```
+
 ## `src/api/track-builder.ts`
 
-**Purpose**: Converts an `AudiobookSession` into TrackPlayer-ready metadata.
+**Purpose**: Legacy TrackPlayer-era helper kept in the repo for reference only.
+
+Current status:
+- imports `react-native-track-player`
+- is not used by the live playback path
+- should not be the starting point for current audio-engine work
 
 **Key exports**
 - `buildTrackPlayerTracks(playbackData)`
@@ -226,19 +267,4 @@ import { downloadsApi } from "../api/downloads-api";
 
 const spec = await downloadsApi.getDownloadSpec(itemId, fileIno);
 await downloadsApi.downloadEbook(itemId, fileIno, "book.epub");
-```
-
-## `src/api/image-utils.ts`
-
-**Purpose**: Lightweight helpers for validating image URLs.
-
-**Key exports**
-- `getImageSize(uri)`
-- `getCoverUri(coverUrl)`
-
-**Usage**
-```ts
-import { getCoverUri } from "../api/image-utils";
-
-const { coverUrl } = await getCoverUri(urls.coverFull);
 ```

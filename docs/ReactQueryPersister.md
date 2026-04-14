@@ -25,6 +25,7 @@ To prevent startup cache misses, all observers of persisted keys must carry the 
 
 - `["libraries"]`
 - `["library", libraryId, "books"]`
+- `["user", userKey, "library", libraryId, "playlists"]`
 - `["library", libraryId, "filterData"]`
 - `["library", libraryId, "booksInProgress"]`
 - `["user", userKey, "serverState"]`
@@ -34,6 +35,7 @@ To prevent startup cache misses, all observers of persisted keys must carry the 
 
 - Libraries query (`useLibrariesQuery`)
 - Library books (`useGetBooks`)
+- Library playlists (`useHomeShelves`)
 - User server state (`useGetUserServerState`)
 - Library filter data (`useGetFilterData`)
 
@@ -50,12 +52,13 @@ Prefetch is stale-aware (5 minute `staleTime`), so it only fetches when cached d
 
 ## Home Manual Refresh
 
-Home pull-to-refresh invalidates and refetches both persisted keys:
+Home pull-to-refresh invalidates and refetches the main persisted Home keys:
 
 - `queryKeys.libraryBooks(activeLibraryId)`
 - `queryKeys.userServerState(activeLibraryUserKey)`
+- `queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId)`
 
-This guarantees users can fetch newly added books and latest progress on demand.
+This guarantees users can fetch newly added books, latest progress, and playlist shelf changes on demand.
 
 ## Files
 

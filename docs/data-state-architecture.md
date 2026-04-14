@@ -18,8 +18,10 @@ This document defines where audiobook data lives after the data restructure.
 - Examples:
   - progress / currentTime / isFinished
   - server bookmarks
+  - library playlist contents and metadata
 - Query key:
   - `["user", userKey, "serverState"]`
+  - `["user", userKey, "library", libraryId, "playlists"]`
 
 3. Device client state (Zustand `device-books-store`)
 - Owner: device/app
@@ -29,6 +31,8 @@ This document defines where audiobook data lives after the data restructure.
   - custom local covers
   - offline progress sync queue (`pendingProgressByUser`)
   - offline bookmark create/delete queue
+  - playlist shelf projections for Home (`playlistShelvesByScope`)
+  - offline playlist mutation queue (`pendingPlaylistOpsByUser`)
   - local bookmark notes
   - per-user-book playback rate
 
@@ -54,9 +58,10 @@ This document defines where audiobook data lives after the data restructure.
 Manual refresh on Home explicitly refetches:
 - library catalog (`["library", libraryId, "books"]`)
 - user progress/bookmarks (`["user", userKey, "serverState"]`)
+- library playlists (`["user", userKey, "library", libraryId, "playlists"]`)
 
 Behavior:
-- Invalidates both keys first, then fetches both from server.
+- Invalidates those keys first, then fetches fresh data from server.
 - Updates React Query cache + MMKV persisted snapshot.
 - Shows a visible offline message if user is offline.
 
@@ -88,6 +93,16 @@ Genre and tag filtering also run after that merge boundary. Each filter group ha
 Those two groups are still combined with a top-level `AND`, so the effective search expression is:
 - `(selected genres with genreOperator) AND (selected tags with tagOperator)`
 
+## Home Shelf Derivation
+
+`useHomeShelves()` is the merge boundary for Home shelf rendering:
+
+- derived shelves come from catalog + user progress
+- custom shelves come from `device-books-store`
+- playlist shelves come from the persisted playlists query plus device-side optimistic state
+
+Playlist shelves are scoped by `activeLibraryUserKey + activeLibraryId`, then projected into Home alongside derived and custom shelves.
+
 ## Playback Write-Through
 
 Playback loop behavior:
@@ -113,6 +128,7 @@ Flush order (from `useAuthBootstrap`):
 1. `syncPendingProgress()`
 2. `syncPendingBookmarks()`
 3. `syncPendingBookmarkDeletes()`
+4. `syncPendingPlaylistOps()`
 
 Queue invariants:
 

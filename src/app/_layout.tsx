@@ -51,8 +51,8 @@ const BOOK_UTILITY_SHEETS = new Set([
 ]);
 
 const logStartupDebug = (event: string, payload?: Record<string, unknown>) => {
-  if (!__DEV__) return;
-  console.log("[startup-layout]", event, payload ?? {});
+  void event;
+  void payload;
 };
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);

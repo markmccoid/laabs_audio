@@ -9,10 +9,7 @@ import {
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router, usePathname } from "expo-router";
 import { Pressable, Text, View } from "react-native";
-const logDownloadControls = (event: string, payload?: Record<string, unknown>) => {
-  if (!__DEV__) return;
-  console.log(`[download-controls] ${event}`, payload ?? {});
-};
+const logDownloadControls = (_event: string, _payload?: Record<string, unknown>) => {};
 
 const formatPercent = (value: number | undefined) => {
   if (!Number.isFinite(value)) return "0%";

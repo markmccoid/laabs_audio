@@ -26,11 +26,7 @@ export class AbsOfflineError extends AbsApiError {
   }
 }
 
-const log = (...args: unknown[]) => {
-  if (__DEV__) {
-    console.log(...args);
-  }
-};
+const log = (..._args: unknown[]) => {};
 
 const parseJson = async <T>(response: Response): Promise<T> => {
   if (response.status === 204) {

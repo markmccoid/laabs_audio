@@ -44,6 +44,7 @@ To learn more about developing your project with Expo, look at the following res
 
 ## Project Docs
 
+- `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/repo-onboarding.md`
 - `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/data-state-architecture.md`
 - `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/ReactQueryPersister.md`
 - `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/docs/abs-data-hooks.md`

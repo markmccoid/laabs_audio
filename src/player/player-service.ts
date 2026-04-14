@@ -46,22 +46,6 @@ const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
 const clampPlaybackRate = (rate: number) =>
   Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, rate));
-const truncateForLog = (value: string, max = 140) =>
-  value.length > max ? `${value.slice(0, max)}...` : value;
-const toQueueLogEntry = (track: PlaybackQueueItem, index: number) => ({
-  index,
-  id: track.id,
-  sessionId: track.sessionId,
-  trackIndex: track.trackIndex,
-  title: track.title,
-  artworkUri: track.artworkUri ? truncateForLog(track.artworkUri) : null,
-  isLocal: Boolean(track.source.isLocal),
-  uri: track.source.uri ? truncateForLog(track.source.uri) : null,
-  sourceModule:
-    typeof track.source.sourceModule === "number" ? track.source.sourceModule : undefined,
-  startOffsetMs: track.startOffsetMs,
-  durationMs: track.durationMs,
-});
 
 const pickNewestProgress = <
   T extends { libraryItemId?: string; mediaItemId?: string; lastUpdate?: number },
@@ -101,24 +85,13 @@ class PlayerService {
       const positionMs = await this.engine.getPositionMs();
       lastPositionMs = positionMs;
       if (positionMs >= initialTrackPositionMs + LOCAL_PLAYBACK_PROGRESS_MIN_DELTA_MS) {
-        if (__DEV__) {
-          console.log("[player-service] downloaded:progress-confirmed", {
-            initialTrackPositionMs,
-            positionMs,
-          });
-        }
         return;
       }
     }
 
     const snapshot = this.engine.getDebugSnapshot();
-    if (__DEV__) {
-      console.log("[player-service] downloaded:no-progress-after-play", {
-        initialTrackPositionMs,
-        lastPositionMs,
-        snapshot,
-      });
-    }
+    void snapshot;
+    void lastPositionMs;
     throw new Error("Downloaded playback did not advance after play");
   }
 
@@ -144,27 +117,13 @@ class PlayerService {
   }
 
   private logQueue(context: string, queue: PlaybackQueueItem[]) {
-    if (!__DEV__) return;
-    console.log(`[player-service] queue:${context}`, {
-      trackCount: queue.length,
-      tracks: queue.map((track, index) => toQueueLogEntry(track, index)),
-    });
+    void context;
+    void queue;
   }
 
   private logPlaybackResult(event: "started" | "failed", details?: Record<string, unknown>) {
-    if (!__DEV__) return;
-    const state = playbackStore.getState();
-    const activeTrack = state.queue[state.currentTrackIndex];
-    const mode = activeTrack?.source.isLocal ? "downloaded" : "streaming";
-    console.log("[player-service] playback:result", {
-      event,
-      mode,
-      libraryItemId: state.libraryItemId,
-      sessionId: state.sessionId,
-      currentTrackIndex: state.currentTrackIndex,
-      track: activeTrack ? toQueueLogEntry(activeTrack, state.currentTrackIndex) : null,
-      ...details,
-    });
+    void event;
+    void details;
   }
 
   async loadBook(
@@ -210,7 +169,6 @@ class PlayerService {
       } else {
         // Fallback to streamed playback when no valid local download metadata is available.
         const session = await playbackApi.getPlayInfo(libraryItemId);
-        console.log("SessionInfo for", session.libraryItemId, session.displayTitle);
         resolvedLibraryItemId = session.libraryItem.id;
         resolvedSessionId = session.id;
         const builtQueue = buildPlaybackQueue(session);
@@ -562,13 +520,6 @@ class PlayerService {
     const details = state.downloadedDetailsById[libraryItemId];
     const downloadInfo = state.downloadedBookData[libraryItemId];
     if (!details || !downloadInfo?.audioTracks?.length) {
-      if (__DEV__) {
-        console.log("[player-service] downloaded:missing-or-empty", {
-          libraryItemId,
-          hasDetails: Boolean(details),
-          downloadedTrackCount: downloadInfo?.audioTracks?.length ?? 0,
-        });
-      }
       return null;
     }
 
@@ -641,13 +592,6 @@ class PlayerService {
         }),
       );
     if (!queue.length) {
-      if (__DEV__) {
-        console.log("[player-service] downloaded:no-playable-tracks", {
-          libraryItemId,
-          downloadedTrackCount: downloadInfo.audioTracks.length,
-          normalizedTrackCount: normalizedTracks.length,
-        });
-      }
       return null;
     }
 
@@ -668,16 +612,6 @@ class PlayerService {
     const chapterIndex = buildChapterIndex(details.media.chapters, audioTracks);
     const fallbackDurationMs = queue.reduce((total, track) => total + track.durationMs, 0);
     const durationMs = secondsToMs(details.media.duration) || fallbackDurationMs;
-    if (__DEV__) {
-      console.log("[player-service] downloaded:resolved", {
-        libraryItemId,
-        detailsAudioFileCount: details.media.audioFiles.length,
-        downloadedTrackCount: downloadInfo.audioTracks.length,
-        normalizedTrackCount: normalizedTracks.length,
-        queueTrackCount: queue.length,
-        durationMs,
-      });
-    }
 
     return {
       libraryItemId,
@@ -742,13 +676,6 @@ class PlayerService {
         await this.engine.waitForPlaying({ timeoutMs: 15000 });
       }
 
-      if (__DEV__) {
-        console.log("[player-service] play:engine-snapshot", {
-          mode: shouldVerifyDownloadedPlayback ? "downloaded" : "streaming",
-          snapshot: this.engine.getDebugSnapshot(),
-        });
-      }
-
       if (shouldVerifyDownloadedPlayback) {
         await this.waitForDownloadedPlaybackProgress();
       }
@@ -776,23 +703,12 @@ class PlayerService {
       if (shouldFallbackToStreaming) {
         this.localStreamFallbackInFlight = true;
         try {
-          if (__DEV__) {
-            console.log("[player-service] play:fallback-to-streaming", {
-              libraryItemId: currentState.libraryItemId,
-              reason: message,
-            });
-          }
           await this.loadBook(currentState.libraryItemId as string, { autoPlay: true }, {
             preferDownloaded: false,
           });
           return;
         } catch (fallbackError) {
-          if (__DEV__) {
-            console.log("[player-service] play:fallback-failed", {
-              libraryItemId: currentState.libraryItemId,
-              error: fallbackError,
-            });
-          }
+          void fallbackError;
         } finally {
           this.localStreamFallbackInFlight = false;
         }
@@ -1122,15 +1038,6 @@ class PlayerService {
         track.source.uri ?? track.source.sourceModule ?? "unknown"
       }`,
     );
-    if (__DEV__) {
-      console.log("[player-service] loadTrack", {
-        index,
-        initialPositionMs: options?.initialPositionMs ?? 0,
-        autoPlay: Boolean(options?.autoPlay),
-        sessionId: state.sessionId,
-        track: toQueueLogEntry(track, index),
-      });
-    }
 
     await this.engine.load(track, {
       initialPositionMs: options?.initialPositionMs ?? 0,

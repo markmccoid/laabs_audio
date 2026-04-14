@@ -27,6 +27,8 @@ This document describes the authentication flow for Audiobookshelf in this app. 
   - per-user-book playback rates
   - offline progress sync queue
   - offline bookmark create/delete queues
+  - playlist shelf projections + suppressed playlist state
+  - offline playlist operation queue
   - local bookmark notes
 
 ## State Model (auth-store)
@@ -68,6 +70,7 @@ This document describes the authentication flow for Audiobookshelf in this app. 
   1. pending progress sync
   2. pending bookmark creates
   3. pending bookmark deletes
+  4. pending playlist ops
 
 ## Authenticated API Call Flow
 

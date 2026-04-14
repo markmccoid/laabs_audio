@@ -364,9 +364,7 @@ export const authStore = createStore<AuthState>()(
         logout: async () => {
           log("logout:start");
           const state = get();
-          console.log("LOGOUT START", state.isOnline, state.serverUrl, state.refreshToken);
           if (state.isOnline && state.serverUrl && state.refreshToken) {
-            console.log("LOGOUT logout called");
             await authService.logout(state.serverUrl, state.refreshToken);
           }
 
@@ -385,7 +383,6 @@ export const authStore = createStore<AuthState>()(
             lastAuthError: null,
             loginRequired: false,
           }));
-          console.log("LOGOUT logout DOPNE");
           log("logout:done");
         },
       },

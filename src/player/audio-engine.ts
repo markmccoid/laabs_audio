@@ -305,13 +305,6 @@ export const createAudioEngine = (): AudioEngine => {
       // Resolve source + artwork into URLs AudioPro accepts.
       const url = await resolveSourceUri(track.source);
       const artwork = await resolveArtworkUri(track);
-      if (__DEV__) {
-        console.log("[audio-engine] load:resolved-track-urls", {
-          trackId: track.id,
-          artworkUri: artwork,
-          audioUri: url,
-        });
-      }
       const audioTrack: AudioProTrack = {
         id: track.id,
         url,

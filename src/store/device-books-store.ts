@@ -38,10 +38,7 @@ const clampBookPlaybackRate = (value: number) =>
   Math.max(MIN_BOOK_PLAYBACK_RATE, Math.min(MAX_BOOK_PLAYBACK_RATE, value));
 const DOWNLOAD_PROGRESS_UI_UPDATE_INTERVAL_MS = 250;
 const DOWNLOAD_PROGRESS_UI_MIN_PERCENT_STEP = 2;
-const logDownload = (event: string, payload?: Record<string, unknown>) => {
-  if (!__DEV__) return;
-  console.log(`[device-books-store] download:${event}`, payload ?? {});
-};
+const logDownload = (_event: string, _payload?: Record<string, unknown>) => {};
 
 export type DownloadTrack = {
   ino: string;
