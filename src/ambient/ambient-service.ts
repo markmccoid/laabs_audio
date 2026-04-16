@@ -9,9 +9,11 @@ import {
   toDocumentRelativePath,
 } from "@/store/fileSystemAccess";
 import {
+  type AmbientPlaybackState,
   ambientStore,
   DEFAULT_AMBIENT_VOLUME,
   isAmbientTrackAvailable,
+  selectAmbientResumeStateForBook,
   selectAttachedAmbientTrackForBook,
 } from "@/store/store-ambient";
 
@@ -47,9 +49,73 @@ const resolveAmbientTrackUri = (relativePath?: string | null) =>
   resolveDocumentRelativePath(relativePath);
 
 const shouldAmbientBePlaying = (playbackState: PlaybackState) => playbackState === "playing";
+const clampAmbientPositionMs = (value: number) => Math.max(0, Math.round(value));
 
 const stopAmbientNative = () => {
   AudioPro.ambientStop();
+};
+
+const ambientSessionProgress = {
+  activeTrackId: null as string | null,
+  activeLibraryItemId: null as string | null,
+  positionMs: 0,
+  startedAtMs: null as number | null,
+};
+
+const resetAmbientSessionProgress = () => {
+  ambientSessionProgress.activeTrackId = null;
+  ambientSessionProgress.activeLibraryItemId = null;
+  ambientSessionProgress.positionMs = 0;
+  ambientSessionProgress.startedAtMs = null;
+};
+
+const startAmbientSessionProgress = ({
+  trackId,
+  libraryItemId,
+  positionMs,
+  playbackState,
+}: {
+  trackId: string;
+  libraryItemId: string;
+  positionMs: number;
+  playbackState: AmbientPlaybackState;
+}) => {
+  ambientSessionProgress.activeTrackId = trackId;
+  ambientSessionProgress.activeLibraryItemId = libraryItemId;
+  ambientSessionProgress.positionMs = clampAmbientPositionMs(positionMs);
+  ambientSessionProgress.startedAtMs = playbackState === "playing" ? Date.now() : null;
+};
+
+const getTrackedAmbientPositionMs = () => {
+  if (!ambientSessionProgress.activeTrackId || !ambientSessionProgress.activeLibraryItemId) {
+    return 0;
+  }
+
+  const elapsedMs =
+    ambientSessionProgress.startedAtMs === null
+      ? 0
+      : Math.max(0, Date.now() - ambientSessionProgress.startedAtMs);
+
+  return clampAmbientPositionMs(ambientSessionProgress.positionMs + elapsedMs);
+};
+
+const pauseAmbientSessionProgress = () => {
+  if (!ambientSessionProgress.activeTrackId || !ambientSessionProgress.activeLibraryItemId) {
+    return 0;
+  }
+
+  const positionMs = getTrackedAmbientPositionMs();
+  ambientSessionProgress.positionMs = positionMs;
+  ambientSessionProgress.startedAtMs = null;
+  return positionMs;
+};
+
+const resumeAmbientSessionProgress = () => {
+  if (!ambientSessionProgress.activeTrackId || !ambientSessionProgress.activeLibraryItemId) {
+    return;
+  }
+
+  ambientSessionProgress.startedAtMs = Date.now();
 };
 
 const getActiveSession = () => {
@@ -59,6 +125,19 @@ const getActiveSession = () => {
     activeLibraryItemId: state.activeLibraryItemId,
     playbackState: state.playbackState,
   };
+};
+
+const persistActiveSessionPosition = () => {
+  const { activeTrackId, activeLibraryItemId } = getActiveSession();
+  if (!activeTrackId || !activeLibraryItemId) return 0;
+
+  const positionMs = pauseAmbientSessionProgress();
+  ambientStore.getState().actions.setResumeStateForBook(
+    activeLibraryItemId,
+    activeTrackId,
+    positionMs,
+  );
+  return positionMs;
 };
 
 const loadTrackForBookSession = (
@@ -77,20 +156,41 @@ const loadTrackForBookSession = (
     throw new Error("Ambient track path is unavailable in this build.");
   }
 
+  const savedResumeState = selectAmbientResumeStateForBook(state, libraryItemId);
+  const resumePositionMs =
+    savedResumeState?.trackId === trackId ? clampAmbientPositionMs(savedResumeState.positionMs) : 0;
+
   stopAmbientNative();
   AudioPro.ambientPlay({
     url: ensurePlayableUri(trackUri),
     loop: true,
   });
+  if (resumePositionMs > 0) {
+    AudioPro.ambientSeekTo(resumePositionMs);
+  }
   AudioPro.ambientSetVolume(track.volume);
 
   const actions = ambientStore.getState().actions;
   if (shouldAmbientBePlaying(playbackState)) {
+    startAmbientSessionProgress({
+      trackId,
+      libraryItemId,
+      positionMs: resumePositionMs,
+      playbackState: "playing",
+    });
+    actions.setResumeStateForBook(libraryItemId, trackId, resumePositionMs);
     actions.setActiveSession(trackId, libraryItemId, "playing");
     return true;
   }
 
   AudioPro.ambientPause();
+  startAmbientSessionProgress({
+    trackId,
+    libraryItemId,
+    positionMs: resumePositionMs,
+    playbackState: "paused",
+  });
+  actions.setResumeStateForBook(libraryItemId, trackId, resumePositionMs);
   actions.setActiveSession(trackId, libraryItemId, "paused");
   return true;
 };
@@ -98,7 +198,9 @@ const loadTrackForBookSession = (
 export const ambientService = {
   setEnabled(enabled: boolean) {
     if (!enabled) {
+      persistActiveSessionPosition();
       stopAmbientNative();
+      resetAmbientSessionProgress();
       const actions = ambientStore.getState().actions;
       actions.clearActiveSession();
       actions.setEnabled(false);
@@ -154,8 +256,10 @@ export const ambientService = {
 
     const actions = ambientStore.getState().actions;
     actions.removeTrackFromAllBookAttachments(trackId);
+    actions.clearResumeStateForTrack(trackId);
     actions.removeTrack(trackId);
     if (isActiveTrack) {
+      resetAmbientSessionProgress();
       actions.clearActiveSession();
     }
   },
@@ -181,6 +285,7 @@ export const ambientService = {
     const actions = ambientStore.getState().actions;
     actions.detachTrackFromBook(libraryItemId);
     if (activeLibraryItemId === libraryItemId) {
+      resetAmbientSessionProgress();
       actions.clearActiveSession();
     }
   },
@@ -195,6 +300,7 @@ export const ambientService = {
     if (!attachedTrack) {
       if (state.activeLibraryItemId === libraryItemId) {
         stopAmbientNative();
+        resetAmbientSessionProgress();
         state.actions.clearActiveSession();
       }
       return false;
@@ -209,17 +315,19 @@ export const ambientService = {
     if (isSameSession) {
       if (shouldAmbientBePlaying(bookPlaybackState)) {
         if (ambientPlaybackState === "paused") {
-          AudioPro.ambientResume();
-          state.actions.setPlaybackState("playing");
+          this.resumeTrack();
         }
         return true;
       }
 
       if (ambientPlaybackState === "playing") {
-        AudioPro.ambientPause();
-        state.actions.setPlaybackState("paused");
+        this.pauseTrack();
       }
       return true;
+    }
+
+    if (activeTrackId && activeLibraryItemId) {
+      this.saveProgressAndStopActiveTrack();
     }
 
     return loadTrackForBookSession(attachedTrack.id, libraryItemId, bookPlaybackState);
@@ -229,7 +337,14 @@ export const ambientService = {
     const { activeTrackId, activeLibraryItemId } = getActiveSession();
     if (!activeTrackId || !activeLibraryItemId) return;
 
+    const positionMs = persistActiveSessionPosition();
     AudioPro.ambientPause();
+    startAmbientSessionProgress({
+      trackId: activeTrackId,
+      libraryItemId: activeLibraryItemId,
+      positionMs,
+      playbackState: "paused",
+    });
     ambientStore.getState().actions.setPlaybackState("paused");
   },
 
@@ -238,11 +353,20 @@ export const ambientService = {
     if (!activeTrackId || !activeLibraryItemId) return;
 
     AudioPro.ambientResume();
+    resumeAmbientSessionProgress();
     ambientStore.getState().actions.setPlaybackState("playing");
+  },
+
+  saveProgressAndStopActiveTrack() {
+    persistActiveSessionPosition();
+    stopAmbientNative();
+    resetAmbientSessionProgress();
+    ambientStore.getState().actions.clearActiveSession();
   },
 
   stopActiveTrack() {
     stopAmbientNative();
+    resetAmbientSessionProgress();
     ambientStore.getState().actions.clearActiveSession();
   },
 

@@ -82,9 +82,8 @@ Persisted fields:
 - `isEnabled`
 - `tracksById`
 - `trackOrder`
-- `selectedTrackId`
-- `playbackState`
-- `selectedLibraryItemId`
+- `attachedTrackIdByLibraryItemId`
+- `resumeStateByLibraryItemId`
 
 Track metadata:
 
@@ -93,6 +92,11 @@ Track metadata:
 - `fileName`
 - `volume`
 - `importedAt`
+
+Per-book resume metadata:
+
+- `trackId`
+- `positionMs`
 
 Default behavior:
 
@@ -126,6 +130,7 @@ Ambient playback uses:
 - `AudioPro.ambientPlay({ url, loop: true })`
 - `AudioPro.ambientPause()`
 - `AudioPro.ambientResume()`
+- `AudioPro.ambientSeekTo(positionMs)`
 - `AudioPro.ambientStop()`
 - `AudioPro.ambientSetVolume(volume)`
 
@@ -147,9 +152,10 @@ The coordinator watches audiobook playback state and current book identity.
 Required behavior:
 
 - pausing the book pauses ambient playback
+- pausing ambient playback saves the current per-book ambient position
 - resuming the book resumes ambient playback when appropriate
-- stopping the book clears ambient playback
-- changing books clears ambient playback
+- stopping or unloading the book saves ambient position before clearing playback
+- changing books saves the previous book's ambient position before loading the next session
 
 ### Routes and UI Files
 
@@ -166,7 +172,7 @@ Key route and UI files:
 - only local Files / iCloud import is supported
 - no remote ambient catalog exists yet
 - ambient controls only exist on the main-player screen
-- ambient selection is tied to the currently active book session
+- ambient selection and ambient resume position are tied to the active book
 - disabling ambient removes it from the main player until re-enabled
 
 ## Maintenance Notes

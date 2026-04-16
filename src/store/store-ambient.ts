@@ -20,11 +20,17 @@ export type AmbientTrackRecord = {
   importedAt: number;
 };
 
+export type AmbientResumeStateRecord = {
+  trackId: string;
+  positionMs: number;
+};
+
 type PersistedAmbientState = {
   isEnabled: boolean;
   tracksById: Record<string, AmbientTrackRecord>;
   trackOrder: string[];
   attachedTrackIdByLibraryItemId: Record<string, string>;
+  resumeStateByLibraryItemId: Record<string, AmbientResumeStateRecord>;
 };
 
 type RuntimeAmbientState = {
@@ -51,6 +57,9 @@ export type AmbientStoreState = PersistedAmbientState &
       attachTrackToBook: (trackId: string, libraryItemId: string) => void;
       detachTrackFromBook: (libraryItemId: string) => void;
       removeTrackFromAllBookAttachments: (trackId: string) => void;
+      setResumeStateForBook: (libraryItemId: string, trackId: string, positionMs: number) => void;
+      clearResumeStateForBook: (libraryItemId: string) => void;
+      clearResumeStateForTrack: (trackId: string) => void;
       setActiveSession: (
         trackId: string | null,
         libraryItemId: string | null,
@@ -62,6 +71,7 @@ export type AmbientStoreState = PersistedAmbientState &
   };
 
 const clampAmbientVolume = (value: number) => Math.max(0, Math.min(1, value));
+const clampAmbientPosition = (value: number) => Math.max(0, Math.round(value));
 
 const extractFileNameFromUri = (uri: string) => {
   const normalized = uri.split(/[?#]/, 1)[0] ?? uri;
@@ -96,6 +106,7 @@ const getBasePersistedState = (): PersistedAmbientState => ({
   tracksById: {},
   trackOrder: [],
   attachedTrackIdByLibraryItemId: {},
+  resumeStateByLibraryItemId: {},
 });
 
 const getBaseRuntimeState = (): RuntimeAmbientState => ({
@@ -179,6 +190,37 @@ const normalizeBookAttachments = (
   return nextAttachments;
 };
 
+const normalizeResumeStates = (
+  resumeStates: unknown,
+  tracksById: Record<string, AmbientTrackRecord>,
+  attachedTrackIdByLibraryItemId: Record<string, string>,
+) => {
+  const validTrackIds = new Set(Object.keys(tracksById));
+  const nextResumeStates: Record<string, AmbientResumeStateRecord> = {};
+
+  if (!resumeStates || typeof resumeStates !== "object") {
+    return nextResumeStates;
+  }
+
+  Object.entries(resumeStates).forEach(([libraryItemId, value]) => {
+    if (typeof libraryItemId !== "string" || libraryItemId.trim().length === 0) return;
+    if (!value || typeof value !== "object") return;
+
+    const candidate = value as Partial<AmbientResumeStateRecord>;
+    if (typeof candidate.trackId !== "string" || !validTrackIds.has(candidate.trackId)) return;
+    if (attachedTrackIdByLibraryItemId[libraryItemId] !== candidate.trackId) return;
+
+    nextResumeStates[libraryItemId] = {
+      trackId: candidate.trackId,
+      positionMs: clampAmbientPosition(
+        typeof candidate.positionMs === "number" ? candidate.positionMs : 0,
+      ),
+    };
+  });
+
+  return nextResumeStates;
+};
+
 export const ambientStore = createStore<AmbientStoreState>()(
   persist(
     (set) => ({
@@ -239,13 +281,18 @@ export const ambientStore = createStore<AmbientStoreState>()(
           set((state) => {
             if (!state.tracksById[trackId]) return state;
             if (!libraryItemId.trim()) return state;
-            if (state.attachedTrackIdByLibraryItemId[libraryItemId] === trackId) return state;
+            const existingTrackId = state.attachedTrackIdByLibraryItemId[libraryItemId];
+            if (existingTrackId === trackId) return state;
+
+            const nextResumeStates = { ...state.resumeStateByLibraryItemId };
+            delete nextResumeStates[libraryItemId];
 
             return {
               attachedTrackIdByLibraryItemId: {
                 ...state.attachedTrackIdByLibraryItemId,
                 [libraryItemId]: trackId,
               },
+              resumeStateByLibraryItemId: nextResumeStates,
             };
           }),
         detachTrackFromBook: (libraryItemId) =>
@@ -255,9 +302,12 @@ export const ambientStore = createStore<AmbientStoreState>()(
             const nextAttachments = { ...state.attachedTrackIdByLibraryItemId };
             delete nextAttachments[libraryItemId];
             const isActiveBook = state.activeLibraryItemId === libraryItemId;
+            const nextResumeStates = { ...state.resumeStateByLibraryItemId };
+            delete nextResumeStates[libraryItemId];
 
             return {
               attachedTrackIdByLibraryItemId: nextAttachments,
+              resumeStateByLibraryItemId: nextResumeStates,
               activeTrackId: isActiveBook ? null : state.activeTrackId,
               activeLibraryItemId: isActiveBook ? null : state.activeLibraryItemId,
               playbackState: isActiveBook ? "idle" : state.playbackState,
@@ -270,11 +320,19 @@ export const ambientStore = createStore<AmbientStoreState>()(
                 ([, attachedTrackId]) => attachedTrackId !== trackId,
               ),
             );
+            const nextResumeStates = Object.fromEntries(
+              Object.entries(state.resumeStateByLibraryItemId).filter(
+                ([libraryItemId, resumeState]) =>
+                  resumeState.trackId !== trackId && nextAttachments[libraryItemId] === resumeState.trackId,
+              ),
+            );
             const isActiveTrack = state.activeTrackId === trackId;
 
             if (
               Object.keys(nextAttachments).length ===
                 Object.keys(state.attachedTrackIdByLibraryItemId).length &&
+              Object.keys(nextResumeStates).length ===
+                Object.keys(state.resumeStateByLibraryItemId).length &&
               !isActiveTrack
             ) {
               return state;
@@ -282,10 +340,62 @@ export const ambientStore = createStore<AmbientStoreState>()(
 
             return {
               attachedTrackIdByLibraryItemId: nextAttachments,
+              resumeStateByLibraryItemId: nextResumeStates,
               activeTrackId: isActiveTrack ? null : state.activeTrackId,
               activeLibraryItemId: isActiveTrack ? null : state.activeLibraryItemId,
               playbackState: isActiveTrack ? "idle" : state.playbackState,
             };
+          }),
+        setResumeStateForBook: (libraryItemId, trackId, positionMs) =>
+          set((state) => {
+            if (!libraryItemId.trim()) return state;
+            if (state.attachedTrackIdByLibraryItemId[libraryItemId] !== trackId) return state;
+            if (!state.tracksById[trackId]) return state;
+
+            const nextResumeState = {
+              trackId,
+              positionMs: clampAmbientPosition(positionMs),
+            };
+            const currentResumeState = state.resumeStateByLibraryItemId[libraryItemId];
+
+            if (
+              currentResumeState?.trackId === nextResumeState.trackId &&
+              currentResumeState.positionMs === nextResumeState.positionMs
+            ) {
+              return state;
+            }
+
+            return {
+              resumeStateByLibraryItemId: {
+                ...state.resumeStateByLibraryItemId,
+                [libraryItemId]: nextResumeState,
+              },
+            };
+          }),
+        clearResumeStateForBook: (libraryItemId) =>
+          set((state) => {
+            if (!state.resumeStateByLibraryItemId[libraryItemId]) return state;
+
+            const nextResumeStates = { ...state.resumeStateByLibraryItemId };
+            delete nextResumeStates[libraryItemId];
+            return { resumeStateByLibraryItemId: nextResumeStates };
+          }),
+        clearResumeStateForTrack: (trackId) =>
+          set((state) => {
+            const nextResumeStates = Object.fromEntries(
+              Object.entries(state.resumeStateByLibraryItemId).filter(
+                ([, resumeState]) => resumeState.trackId !== trackId,
+              ),
+            );
+
+            if (
+              Object.keys(nextResumeStates).length ===
+              Object.keys(state.resumeStateByLibraryItemId).length
+            ) {
+              return state;
+            }
+
+            return { resumeStateByLibraryItemId: nextResumeStates };
           }),
         setActiveSession: (activeTrackId, activeLibraryItemId, playbackState) =>
           set((state) => {
@@ -340,12 +450,13 @@ export const ambientStore = createStore<AmbientStoreState>()(
     {
       name: "ambient-store",
       storage: createJSONStorage(() => mmkvStorage),
-      version: 2,
+      version: 3,
       partialize: (state) => ({
         isEnabled: state.isEnabled,
         tracksById: state.tracksById,
         trackOrder: state.trackOrder,
         attachedTrackIdByLibraryItemId: state.attachedTrackIdByLibraryItemId,
+        resumeStateByLibraryItemId: state.resumeStateByLibraryItemId,
       }),
       merge: (persistedState, currentState) => {
         const typedState =
@@ -360,6 +471,11 @@ export const ambientStore = createStore<AmbientStoreState>()(
           typedState.selectedTrackId,
           typedState.selectedLibraryItemId,
         );
+        const resumeStateByLibraryItemId = normalizeResumeStates(
+          typedState.resumeStateByLibraryItemId,
+          tracksById,
+          attachedTrackIdByLibraryItemId,
+        );
 
         return {
           ...currentState,
@@ -367,6 +483,7 @@ export const ambientStore = createStore<AmbientStoreState>()(
           tracksById,
           trackOrder,
           attachedTrackIdByLibraryItemId,
+          resumeStateByLibraryItemId,
           ...getBaseRuntimeState(),
         };
       },
@@ -387,6 +504,16 @@ export const ambientStore = createStore<AmbientStoreState>()(
             tracksById,
             typedState.selectedTrackId,
             typedState.selectedLibraryItemId,
+          ),
+          resumeStateByLibraryItemId: normalizeResumeStates(
+            typedState.resumeStateByLibraryItemId,
+            tracksById,
+            normalizeBookAttachments(
+              typedState.attachedTrackIdByLibraryItemId,
+              tracksById,
+              typedState.selectedTrackId,
+              typedState.selectedLibraryItemId,
+            ),
           ),
         };
       },
@@ -425,6 +552,19 @@ export const selectAttachedAmbientTrackForBook = (
   if (!attachedTrackId) return null;
   const track = state.tracksById[attachedTrackId] ?? null;
   return isAmbientTrackAvailable(track) ? track : null;
+};
+
+export const selectAmbientResumeStateForBook = (
+  state: AmbientStoreState,
+  libraryItemId?: string | null,
+) => {
+  if (!libraryItemId) return null;
+  const resumeState = state.resumeStateByLibraryItemId[libraryItemId];
+  if (!resumeState) return null;
+  const attachedTrackId = state.attachedTrackIdByLibraryItemId[libraryItemId];
+  if (attachedTrackId !== resumeState.trackId) return null;
+  if (!state.tracksById[resumeState.trackId]) return null;
+  return resumeState;
 };
 
 export const selectHasAvailableAmbientTracks = (state: AmbientStoreState) =>

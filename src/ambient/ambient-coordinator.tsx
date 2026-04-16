@@ -20,21 +20,21 @@ export const AmbientCoordinator = () => {
   useEffect(() => {
     if (!isEnabled) {
       if (activeTrackId || activeLibraryItemId || ambientPlaybackState !== "idle") {
-        ambientService.stopActiveTrack();
+        ambientService.saveProgressAndStopActiveTrack();
       }
       return;
     }
 
     if (!hasLoadedBook || !libraryItemId) {
       if (activeTrackId || activeLibraryItemId || ambientPlaybackState !== "idle") {
-        ambientService.stopActiveTrack();
+        ambientService.saveProgressAndStopActiveTrack();
       }
       return;
     }
 
     if (!attachedTrackIdForLoadedBook) {
       if (activeLibraryItemId === libraryItemId || activeTrackId || ambientPlaybackState !== "idle") {
-        ambientService.stopActiveTrack();
+        ambientService.saveProgressAndStopActiveTrack();
       }
       return;
     }
