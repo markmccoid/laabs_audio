@@ -7,6 +7,7 @@ import type { PlaybackQueueItem, PlaybackState, ResolvedChapter } from "./types"
 export type PlaybackStoreState = {
   playbackState: PlaybackState;
   libraryItemId: string | null;
+  bookTitle: string | null;
   sessionId: string | null;
   queue: PlaybackQueueItem[];
   chapterIndex: ResolvedChapter[];
@@ -34,6 +35,7 @@ export type PlaybackStoreState = {
     setError: (message: string | null) => void;
     endSession: (payload: {
       libraryItemId: string;
+      bookTitle: string | null;
       positionMs: number;
       trackPositionMs: number;
       durationMs: number;
@@ -43,6 +45,7 @@ export type PlaybackStoreState = {
     }) => void;
     setSession: (payload: {
       libraryItemId: string;
+      bookTitle: string | null;
       sessionId: string;
       queue: PlaybackQueueItem[];
       durationMs: number;
@@ -71,6 +74,7 @@ export type PlaybackStoreState = {
 const getBaseState = () => ({
   playbackState: "idle" as PlaybackState,
   libraryItemId: null,
+  bookTitle: null,
   sessionId: null,
   queue: [] as PlaybackQueueItem[],
   chapterIndex: [] as ResolvedChapter[],
@@ -98,6 +102,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
         setError: (error) => set({ error }),
         endSession: ({
           libraryItemId,
+          bookTitle,
           positionMs,
           trackPositionMs,
           durationMs,
@@ -108,6 +113,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
           set({
             playbackState: "ended",
             libraryItemId,
+            bookTitle,
             sessionId: null,
             queue: [],
             chapterIndex: [],
@@ -120,9 +126,10 @@ export const playbackStore = createStore<PlaybackStoreState>()(
             error: null,
             debugStatus: null,
           }),
-        setSession: ({ libraryItemId, sessionId, queue, durationMs, chapterIndex }) =>
+        setSession: ({ libraryItemId, bookTitle, sessionId, queue, durationMs, chapterIndex }) =>
           set({
             libraryItemId,
+            bookTitle,
             sessionId,
             queue,
             durationMs,
@@ -169,6 +176,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
       },
       partialize: (state) => ({
         libraryItemId: state.libraryItemId,
+        bookTitle: state.bookTitle,
         currentTrackIndex: state.currentTrackIndex,
         positionMs: state.positionMs,
         rate: state.rate,

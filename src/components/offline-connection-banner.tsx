@@ -7,9 +7,9 @@ import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { librariesApi } from "../api/libraries-api";
 import { libraryItemsApi } from "../api/library-items-api";
-import { meApi } from "../api/me-api";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
+import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import { useThemeColors } from "../theme/use-app-theme";
 
 export const OfflineConnectionBanner = () => {
@@ -64,7 +64,7 @@ export const OfflineConnectionBanner = () => {
         refreshes.push(
           queryClient.fetchQuery({
             queryKey: queryKeys.userServerState(activeLibraryUserKey),
-            queryFn: () => meApi.getUserServerState(),
+            queryFn: () => fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
             meta: { persist: true },
           }),
         );

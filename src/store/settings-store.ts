@@ -115,6 +115,7 @@ export type SettingsState = {
   autoCreateDarkAccent: boolean;
   lightAccentColorOverride: string | null;
   darkAccentColorOverride: string | null;
+  progressLoggingEnabled: boolean;
   useTokenWithCoverImages: boolean;
   showFavoriteBadgeOnCovers: boolean;
   showFinishedBadgeOnCovers: boolean;
@@ -133,6 +134,7 @@ export type SettingsState = {
     resetLightAccentColorOverride: () => void;
     setDarkAccentColorOverride: (color: string | null) => void;
     resetDarkAccentColorOverride: () => void;
+    setProgressLoggingEnabled: (enabled: boolean) => void;
     setUseTokenWithCoverImages: (enabled: boolean) => void;
     setShowFavoriteBadgeOnCovers: (enabled: boolean) => void;
     setShowFinishedBadgeOnCovers: (enabled: boolean) => void;
@@ -165,6 +167,7 @@ export const settingsStore = createStore<SettingsState>()(
       autoCreateDarkAccent: false,
       lightAccentColorOverride: null,
       darkAccentColorOverride: null,
+      progressLoggingEnabled: true,
       useTokenWithCoverImages: false,
       showFavoriteBadgeOnCovers: true,
       showFinishedBadgeOnCovers: true,
@@ -205,6 +208,8 @@ export const settingsStore = createStore<SettingsState>()(
             ),
           }),
         resetDarkAccentColorOverride: () => set({ darkAccentColorOverride: null }),
+        setProgressLoggingEnabled: (progressLoggingEnabled) =>
+          set({ progressLoggingEnabled }),
         setUseTokenWithCoverImages: (useTokenWithCoverImages) =>
           set({ useTokenWithCoverImages }),
         setShowFavoriteBadgeOnCovers: (showFavoriteBadgeOnCovers) =>
@@ -386,11 +391,12 @@ export const settingsStore = createStore<SettingsState>()(
         autoCreateDarkAccent: state.autoCreateDarkAccent,
         lightAccentColorOverride: state.lightAccentColorOverride,
         darkAccentColorOverride: state.darkAccentColorOverride,
+        progressLoggingEnabled: state.progressLoggingEnabled,
         useTokenWithCoverImages: state.useTokenWithCoverImages,
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 9,
+      version: 10,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -405,6 +411,7 @@ export const settingsStore = createStore<SettingsState>()(
             autoCreateDarkAccent: false,
             lightAccentColorOverride: null,
             darkAccentColorOverride: null,
+            progressLoggingEnabled: true,
             useTokenWithCoverImages: false,
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
@@ -450,6 +457,10 @@ export const settingsStore = createStore<SettingsState>()(
                   DEFAULT_DARK_ACCENT_COLOR,
                 )
               : null,
+          progressLoggingEnabled:
+            version >= 10
+              ? state.progressLoggingEnabled ?? true
+              : true,
           useTokenWithCoverImages:
             version >= 6
               ? state.useTokenWithCoverImages ?? false

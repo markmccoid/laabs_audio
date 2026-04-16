@@ -11,7 +11,6 @@ import { Toaster } from "react-native-sonner";
 import { Uniwind } from "uniwind";
 import { AmbientCoordinator } from "../ambient/ambient-coordinator";
 import { libraryItemsApi } from "../api/library-items-api";
-import { meApi } from "../api/me-api";
 import { useAuthStore } from "../auth/auth-store";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
 import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
@@ -23,6 +22,7 @@ import { playerService } from "../player/player-service";
 import { SleepTimerCoordinator } from "../player/sleep-timer-coordinator";
 import { FIVE_MINUTES_MS, queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
+import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import { mmkvQueryPersister } from "../store/mmkv-query-persister";
 import {
   useApplyAccentThemeOverrides,
@@ -459,7 +459,7 @@ export default function RootLayout() {
             tracePrefetch(
               "user server state",
               queryKeys.userServerState(activeLibraryUserKey),
-              () => meApi.getUserServerState(),
+              () => fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
             ),
           );
         }

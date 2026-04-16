@@ -2,7 +2,7 @@ import { useAuthStore } from "@/auth/auth-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import React from "react";
+import React, { type ComponentProps } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 type SettingsRowProps = {
@@ -10,12 +10,13 @@ type SettingsRowProps = {
     | "/(tabs)/settings/ambient-audio"
     | "/(tabs)/settings/authentication"
     | "/(tabs)/settings/bookshelves"
+    | "/(tabs)/settings/progress-logs"
     | "/(tabs)/settings/playback"
     | "/(tabs)/settings/system"
     | "/(tabs)/settings/testRoute";
   title: string;
   subtitle: string;
-  icon: string;
+  icon: ComponentProps<typeof SymbolView>["name"];
   isLast?: boolean;
 };
 
@@ -157,12 +158,18 @@ export const SettingsHomeScreen = () => {
               subtitle="App-level behavior for images and cover handling"
               icon="gearshape.2"
             />
+            <SettingsRow
+              href="/(tabs)/settings/progress-logs"
+              title="Progress Logs"
+              subtitle="Inspect restore, queue, and sync diagnostics"
+              icon="list.bullet.rectangle.portrait"
+              isLast
+            />
             {/* <SettingsRow
               href="/(tabs)/settings/testRoute"
               title="Testng"
               subtitle="Testomg"
               icon="gearshape.2"
-              isLast
             /> */}
           </SettingsGroup>
         ) : null}

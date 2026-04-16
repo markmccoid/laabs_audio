@@ -1,10 +1,10 @@
 import { libraryItemsApi } from "@/api/library-items-api";
-import { meApi } from "@/api/me-api";
 import { playlistsApi } from "@/api/playlists-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { type HomeShelf, useHomeShelves } from "@/hooks/use-home-shelves";
 import { useLibrarySelection } from "@/hooks/use-library-selection";
 import { queryKeys } from "@/query/query-keys";
+import { fetchReconciledUserServerState } from "@/query/user-server-state-reconcile";
 import {
   HOME_PREVIEW_SIZE_LARGE,
   HOME_PREVIEW_SIZE_MEDIUM,
@@ -87,7 +87,7 @@ const HomeShelvesScreen = () => {
         }),
         queryClient.fetchQuery({
           queryKey: queryKeys.userServerState(activeLibraryUserKey),
-          queryFn: () => meApi.getUserServerState(),
+          queryFn: () => fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
           meta: { persist: true },
         }),
         queryClient.fetchQuery({

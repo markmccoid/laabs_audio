@@ -16,6 +16,10 @@ import { playlistsApi, type PlaylistSummary } from "../api/playlists-api";
 import { authStore } from "../auth/auth-store";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
+import {
+  progressLogStore,
+  type ProgressLogSessionKind,
+} from "./progress-log-store";
 import type { Bookmark } from "../types/absTypes";
 import { mmkvStorage } from "./mmkv-storage";
 import {
@@ -218,6 +222,9 @@ export type PendingProgressSync = {
   currentTime: number;
   isFinished: boolean;
   updatedAt: number;
+  title?: string | null;
+  sessionKind?: ProgressLogSessionKind | null;
+  trigger?: string | null;
 };
 
 export type HomeDerivedShelfId = "continueListening" | "recentlyAdded" | "discover" | "downloaded";
@@ -337,7 +344,12 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
     queueProgressSync: (
       libraryItemId: string,
       payload: { currentTime: number; isFinished: boolean; updatedAt?: number },
-      options?: { userKey?: string | null },
+      options?: {
+        userKey?: string | null;
+        title?: string | null;
+        sessionKind?: ProgressLogSessionKind;
+        trigger?: string;
+      },
     ) => void;
     clearPendingProgressSync: (
       libraryItemId: string,
@@ -1035,6 +1047,11 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           const currentTime = Math.max(0, Math.floor(payload.currentTime));
           const isFinished = Boolean(payload.isFinished);
           const updatedAt = payload.updatedAt ?? Date.now();
+          const title = options?.title?.trim() || null;
+          const sessionKind = options?.sessionKind ?? null;
+          const trigger = options?.trigger?.trim() || null;
+          let queueSizeForUser = 0;
+          let queueNote: string | undefined;
 
           set((state) => {
             const queueByItemId = state.pendingProgressByUser[userKey] ?? {};
@@ -1046,6 +1063,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               !previous.isFinished &&
               previous.currentTime > ZERO_PROGRESS_REGRESSION_GUARD_SECONDS;
             if (shouldKeepQueuedProgressFloor) {
+              queueNote = "Skipped stale zero-progress queue write";
               return state;
             }
             if (
@@ -1054,24 +1072,49 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               previous.isFinished === isFinished &&
               previous.updatedAt >= updatedAt
             ) {
+              queueNote = "Skipped duplicate or older queue write";
               return state;
             }
+            const nextQueuedEntry: PendingProgressSync = {
+              libraryItemId,
+              currentTime,
+              isFinished,
+              updatedAt,
+              title: title ?? previous?.title ?? null,
+              sessionKind: sessionKind ?? previous?.sessionKind ?? null,
+              trigger: trigger ?? previous?.trigger ?? null,
+            };
+            queueSizeForUser = Object.keys(queueByItemId).length + (previous ? 0 : 1);
+            queueNote = previous ? "Replaced existing queued progress" : "Queued progress";
             return {
               ...state,
               pendingProgressByUser: {
                 ...state.pendingProgressByUser,
                 [userKey]: {
                   ...queueByItemId,
-                  [libraryItemId]: {
-                    libraryItemId,
-                    currentTime,
-                    isFinished,
-                    updatedAt,
-                  },
+                  [libraryItemId]: nextQueuedEntry,
                 },
               },
             };
           });
+
+          const queuedEntry = get().pendingProgressByUser[userKey]?.[libraryItemId];
+          if (queuedEntry && queueNote && !queueNote.startsWith("Skipped")) {
+            progressLogStore.getState().actions.appendEntry({
+              eventType: "queue_sync",
+              trigger: trigger ?? "unknown",
+              action: "queued",
+              libraryItemId,
+              title: queuedEntry.title ?? null,
+              sessionKind: queuedEntry.sessionKind ?? "unknown",
+              currentTimeSeconds: queuedEntry.currentTime,
+              isFinished: queuedEntry.isFinished,
+              queuedAt: queuedEntry.updatedAt,
+              queueSizeForUser,
+              originTrigger: queuedEntry.trigger ?? null,
+              note: queueNote,
+            });
+          }
         },
 
         clearPendingProgressSync: (libraryItemId, options) => {
@@ -1154,6 +1197,20 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                     knownCurrentTimeSeconds,
                   });
                 }
+                progressLogStore.getState().actions.appendEntry({
+                  eventType: "queue_sync",
+                  trigger: "reconnect_flush",
+                  action: "flush_skipped",
+                  libraryItemId: queuedProgress.libraryItemId,
+                  title: queuedProgress.title ?? null,
+                  sessionKind: queuedProgress.sessionKind ?? "unknown",
+                  currentTimeSeconds: queuedProgress.currentTime,
+                  isFinished: queuedProgress.isFinished,
+                  queuedAt: queuedProgress.updatedAt,
+                  queueSizeForUser: queuedEntries.length,
+                  originTrigger: queuedProgress.trigger ?? null,
+                  note: "Skipped stale zero-progress flush because newer progress already existed",
+                });
                 resolvedLibraryItemIds.push(queuedProgress.libraryItemId);
                 continue;
               }
@@ -1162,8 +1219,36 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 currentTime: queuedProgress.currentTime,
                 isFinished: queuedProgress.isFinished,
               });
+              progressLogStore.getState().actions.appendEntry({
+                eventType: "queue_sync",
+                trigger: "reconnect_flush",
+                action: "flush_succeeded",
+                libraryItemId: queuedProgress.libraryItemId,
+                title: queuedProgress.title ?? null,
+                sessionKind: queuedProgress.sessionKind ?? "unknown",
+                currentTimeSeconds: queuedProgress.currentTime,
+                isFinished: queuedProgress.isFinished,
+                queuedAt: queuedProgress.updatedAt,
+                queueSizeForUser: queuedEntries.length,
+                originTrigger: queuedProgress.trigger ?? null,
+                note: "Queued progress synced back to the server",
+              });
               resolvedLibraryItemIds.push(queuedProgress.libraryItemId);
-            } catch {
+            } catch (error) {
+              progressLogStore.getState().actions.appendEntry({
+                eventType: "queue_sync",
+                trigger: "reconnect_flush",
+                action: "flush_failed",
+                libraryItemId: queuedProgress.libraryItemId,
+                title: queuedProgress.title ?? null,
+                sessionKind: queuedProgress.sessionKind ?? "unknown",
+                currentTimeSeconds: queuedProgress.currentTime,
+                isFinished: queuedProgress.isFinished,
+                queuedAt: queuedProgress.updatedAt,
+                queueSizeForUser: queuedEntries.length,
+                originTrigger: queuedProgress.trigger ?? null,
+                errorMessage: error instanceof Error ? error.message : "Unknown queue sync error",
+              });
               // Keep pending for retry
             }
           }

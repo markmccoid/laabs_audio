@@ -10,6 +10,7 @@ import { buildCoverUrls } from "../api/cover-urls";
 import { authStore } from "../auth/auth-store";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
+import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import {
   DEFAULT_BOOK_PLAYBACK_RATE,
   deviceBooksStore,
@@ -17,8 +18,18 @@ import {
   resolveStoredDownloadTrackUri,
   selectBookPlaybackRate,
   selectBookPlaybackRateIfStored,
+  type PendingProgressSync,
   type DownloadTrack,
 } from "../store/device-books-store";
+import {
+  progressLogStore,
+  type ProgressLogSessionKind,
+  type ProgressResolutionCandidate,
+  type ProgressResolutionSource,
+  type ServerProgressFetchResult,
+  type ProgressSyncOutcome,
+  type ProgressSyncPath,
+} from "../store/progress-log-store";
 import { settingsStore } from "../store/settings-store";
 import type { AudioTrack } from "../types/absTypes";
 import { createAudioEngine } from "./audio-engine";
@@ -40,7 +51,26 @@ const INITIAL_INTERVAL_SYNC_GUARD_WINDOW_SECONDS = 20;
 const LOCAL_PLAYBACK_PROGRESS_TIMEOUT_MS = 4000;
 const LOCAL_PLAYBACK_PROGRESS_POLL_INTERVAL_MS = 250;
 const LOCAL_PLAYBACK_PROGRESS_MIN_DELTA_MS = 250;
+const STALE_ZERO_PROGRESS_GUARD_SECONDS = 5;
+const LOAD_PROGRESS_FETCH_TIMEOUT_MS = 350;
 type ProgressSyncReason = "interval" | "pause" | "seek" | "close";
+type CachedUserServerStateSource =
+  | "unavailable"
+  | "cache_hit"
+  | "fetch_success"
+  | "fetch_failed"
+  | "skipped_fetch";
+type FreshServerProgressFetchResultPayload =
+  | {
+      status: "applied" | "ignored_as_stale";
+      progress: Awaited<ReturnType<typeof meApi.getProgress>>;
+      cachedCurrentTimeSeconds: number;
+      cachedLastUpdate: number;
+    }
+  | {
+      status: "failed";
+      errorMessage: string;
+    };
 
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
@@ -56,6 +86,14 @@ const pickNewestProgress = <
     if (!latest) return current;
     const latestUpdate = Math.max(0, Math.floor(latest.lastUpdate ?? 0));
     const currentUpdate = Math.max(0, Math.floor(current.lastUpdate ?? 0));
+    return currentUpdate >= latestUpdate ? current : latest;
+  }, null);
+
+const pickNewestQueuedProgress = (entries: PendingProgressSync[]) =>
+  entries.reduce<PendingProgressSync | null>((latest, current) => {
+    if (!latest) return current;
+    const latestUpdate = Math.max(0, Math.floor(latest.updatedAt ?? 0));
+    const currentUpdate = Math.max(0, Math.floor(current.updatedAt ?? 0));
     return currentUpdate >= latestUpdate ? current : latest;
   }, null);
 
@@ -154,6 +192,7 @@ class PlayerService {
       const shouldUseDownloadedAudio = Boolean(downloadedSession);
       attemptedDownloadedAudio = shouldUseDownloadedAudio;
       let resolvedLibraryItemId = libraryItemId;
+      let resolvedBookTitle: string | null = null;
       let resolvedSessionId = LOCAL_SESSION_ID;
       let queue: PlaybackQueueItem[] = [];
       let durationMs = 0;
@@ -161,6 +200,7 @@ class PlayerService {
 
       if (downloadedSession) {
         resolvedLibraryItemId = downloadedSession.libraryItemId;
+        resolvedBookTitle = downloadedSession.bookTitle;
         resolvedSessionId = downloadedSession.sessionId;
         queue = downloadedSession.queue;
         durationMs = downloadedSession.durationMs;
@@ -170,6 +210,7 @@ class PlayerService {
         // Fallback to streamed playback when no valid local download metadata is available.
         const session = await playbackApi.getPlayInfo(libraryItemId);
         resolvedLibraryItemId = session.libraryItem.id;
+        resolvedBookTitle = session.libraryItem.media.metadata.title || "Unknown";
         resolvedSessionId = session.id;
         const builtQueue = buildPlaybackQueue(session);
         queue = builtQueue.queue;
@@ -178,16 +219,32 @@ class PlayerService {
         this.logQueue("streaming", queue);
       }
 
+      const sessionKind = shouldUseDownloadedAudio ? "downloaded" : "streamed";
+      const freshServerProgressRequest = this.startFreshServerProgressFetch({
+        libraryItemId: resolvedLibraryItemId,
+        bookTitle: resolvedBookTitle,
+        sessionKind,
+      });
       const rateCandidateIds = this.buildCandidateIds(resolvedLibraryItemId, libraryItemId);
       const storedBookRate = this.resolveStoredBookRate(rateCandidateIds);
-      const cachedUserServerState = await this.getCachedUserServerState({
-        fetchIfMissing: !shouldUseDownloadedAudio,
+      const freshServerProgress = await this.awaitFreshServerProgressForLoad({
+        request: freshServerProgressRequest,
+        libraryItemId: resolvedLibraryItemId,
+        bookTitle: resolvedBookTitle,
+        sessionKind,
       });
-      const resumePositionMs = this.resolveResumePositionMs(rateCandidateIds, cachedUserServerState);
-      if (!shouldUseDownloadedAudio) {
-        // Keep remote progress cache fresh for streamed sessions.
-        this.reconcileBookProgressFromServer(resolvedLibraryItemId);
-      }
+      const cachedUserServerState = await this.getCachedUserServerState({
+        fetchIfMissing: false,
+      });
+      const resumePositionMs = this.resolveResumePositionMs({
+        candidateIds: rateCandidateIds,
+        cachedUserServerState: cachedUserServerState.state,
+        freshServerProgress,
+        libraryItemId: resolvedLibraryItemId,
+        bookTitle: resolvedBookTitle,
+        sessionKind,
+        serverStateSource: cachedUserServerState.source,
+      });
 
       this.listenedMs = 0;
       this.lastSyncAttemptAt = 0;
@@ -196,6 +253,7 @@ class PlayerService {
 
       playbackStore.getState().actions.setSession({
         libraryItemId: resolvedLibraryItemId,
+        bookTitle: resolvedBookTitle,
         sessionId: resolvedSessionId,
         queue,
         durationMs,
@@ -296,6 +354,7 @@ class PlayerService {
 
     playbackStore.getState().actions.setSession({
       libraryItemId: payload.libraryItemId,
+      bookTitle: payload.title,
       sessionId: LOCAL_SESSION_ID,
       queue,
       durationMs,
@@ -416,6 +475,200 @@ class PlayerService {
     );
   }
 
+  private resolveSessionKind(sessionId: string | null): ProgressLogSessionKind {
+    if (!sessionId) return "unknown";
+    return sessionId === LOCAL_SESSION_ID ? "downloaded" : "streamed";
+  }
+
+  private resolveBookTitle(state: Pick<PlaybackStoreState, "bookTitle" | "queue">) {
+    return state.bookTitle ?? state.queue[0]?.title ?? null;
+  }
+
+  private shouldFetchFreshServerProgressForLoad() {
+    const authState = authStore.getState();
+    return authState.status === "authenticated" && authState.isOnline !== false;
+  }
+
+  private logFreshServerProgressFetch(payload: {
+    libraryItemId: string;
+    bookTitle: string | null;
+    sessionKind: ProgressLogSessionKind;
+    trigger: string;
+    result: ServerProgressFetchResult;
+    fetchedCurrentTimeSeconds: number | null;
+    cachedCurrentTimeSeconds: number | null;
+    fetchedLastUpdate: number | null;
+    cachedLastUpdate: number | null;
+    errorMessage?: string;
+    note?: string;
+  }) {
+    progressLogStore.getState().actions.appendEntry({
+      eventType: "server_progress_fetch",
+      trigger: payload.trigger,
+      libraryItemId: payload.libraryItemId,
+      title: payload.bookTitle,
+      sessionKind: payload.sessionKind,
+      result: payload.result,
+      fetchedCurrentTimeSeconds: payload.fetchedCurrentTimeSeconds,
+      cachedCurrentTimeSeconds: payload.cachedCurrentTimeSeconds,
+      fetchedLastUpdate: payload.fetchedLastUpdate,
+      cachedLastUpdate: payload.cachedLastUpdate,
+      errorMessage: payload.errorMessage,
+      note: payload.note,
+    });
+  }
+
+  private applyServerProgressSnapshotToCache(
+    libraryItemId: string,
+    serverProgress: Awaited<ReturnType<typeof meApi.getProgress>>,
+  ) {
+    if (typeof serverProgress.currentTime !== "number") {
+      return {
+        status: "applied" as const,
+        progress: serverProgress,
+        cachedCurrentTimeSeconds: 0,
+        cachedLastUpdate: 0,
+      };
+    }
+
+    const resolvedLibraryItemId = serverProgress.libraryItemId || libraryItemId;
+    const cachedProgress = this.getCachedProgressForLibraryItem(resolvedLibraryItemId);
+    const cachedCurrentTimeSeconds = Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0));
+    const serverCurrentTimeSeconds = Math.max(0, Math.floor(serverProgress.currentTime));
+    const serverLastUpdate = Math.max(0, Math.floor(serverProgress.lastUpdate ?? 0));
+    const cachedLastUpdate = Math.max(0, Math.floor(cachedProgress?.lastUpdate ?? 0));
+    const serverSnapshotIsOlder =
+      cachedLastUpdate > 0 && serverLastUpdate > 0 && serverLastUpdate < cachedLastUpdate;
+    const serverWouldRegressProgress =
+      cachedCurrentTimeSeconds >
+      serverCurrentTimeSeconds + PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS;
+    const serverFreshnessUnknown = serverLastUpdate <= 0;
+    const shouldIgnoreStaleServerSnapshot =
+      !serverProgress.isFinished &&
+      serverWouldRegressProgress &&
+      (serverSnapshotIsOlder || serverFreshnessUnknown);
+
+    if (shouldIgnoreStaleServerSnapshot) {
+      return {
+        status: "ignored_as_stale" as const,
+        progress: serverProgress,
+        cachedCurrentTimeSeconds,
+        cachedLastUpdate,
+      };
+    }
+
+    this.updateUserServerStateCache({
+      libraryItemId: resolvedLibraryItemId,
+      currentTimeSeconds: serverCurrentTimeSeconds,
+      durationSeconds: Math.max(
+        Math.max(0, Math.floor(serverProgress.duration ?? 0)),
+        Math.max(0, Math.floor(cachedProgress?.duration ?? 0)),
+      ),
+      isFinished: Boolean(serverProgress.isFinished),
+    });
+
+    return {
+      status: "applied" as const,
+      progress: serverProgress,
+      cachedCurrentTimeSeconds,
+      cachedLastUpdate,
+    };
+  }
+
+  private startFreshServerProgressFetch(payload: {
+    libraryItemId: string;
+    bookTitle: string | null;
+    sessionKind: ProgressLogSessionKind;
+  }) {
+    if (!this.shouldFetchFreshServerProgressForLoad()) {
+      return null;
+    }
+
+    return meApi
+      .getProgress(payload.libraryItemId)
+      .then((serverProgress) => {
+        const result = this.applyServerProgressSnapshotToCache(
+          payload.libraryItemId,
+          serverProgress,
+        );
+        this.logFreshServerProgressFetch({
+          libraryItemId: payload.libraryItemId,
+          bookTitle: payload.bookTitle,
+          sessionKind: payload.sessionKind,
+          trigger: "load_book",
+          result: result.status,
+          fetchedCurrentTimeSeconds:
+            typeof serverProgress.currentTime === "number"
+              ? Math.max(0, Math.floor(serverProgress.currentTime))
+              : null,
+          cachedCurrentTimeSeconds: result.cachedCurrentTimeSeconds,
+          fetchedLastUpdate:
+            typeof serverProgress.lastUpdate === "number"
+              ? Math.max(0, Math.floor(serverProgress.lastUpdate))
+              : null,
+          cachedLastUpdate: result.cachedLastUpdate,
+          note:
+            result.status === "applied"
+              ? "Fresh server progress merged into the persisted query cache"
+              : "Fresh server progress was ignored because cached progress looked newer",
+        });
+        return result;
+      })
+      .catch((error) => {
+        const errorMessage =
+          error instanceof Error ? error.message : "Fresh server progress request failed";
+        this.logFreshServerProgressFetch({
+          libraryItemId: payload.libraryItemId,
+          bookTitle: payload.bookTitle,
+          sessionKind: payload.sessionKind,
+          trigger: "load_book",
+          result: "failed",
+          fetchedCurrentTimeSeconds: null,
+          cachedCurrentTimeSeconds: null,
+          fetchedLastUpdate: null,
+          cachedLastUpdate: null,
+          errorMessage,
+        });
+        return { status: "failed", errorMessage } as FreshServerProgressFetchResultPayload;
+      });
+  }
+
+  private async awaitFreshServerProgressForLoad(
+    payload: {
+      request: Promise<FreshServerProgressFetchResultPayload> | null;
+      libraryItemId: string;
+      bookTitle: string | null;
+      sessionKind: ProgressLogSessionKind;
+    },
+  ) {
+    if (!payload.request) {
+      return null;
+    }
+
+    const result = await Promise.race([
+      payload.request,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), LOAD_PROGRESS_FETCH_TIMEOUT_MS)),
+    ]);
+
+    if (!result) {
+      this.logFreshServerProgressFetch({
+        libraryItemId: payload.libraryItemId,
+        bookTitle: payload.bookTitle,
+        sessionKind: payload.sessionKind,
+        trigger: "load_book",
+        result: "timed_out",
+        fetchedCurrentTimeSeconds: null,
+        cachedCurrentTimeSeconds: null,
+        fetchedLastUpdate: null,
+        cachedLastUpdate: null,
+        note: `Fresh server progress did not return within ${LOAD_PROGRESS_FETCH_TIMEOUT_MS}ms`,
+      });
+      return null;
+    }
+
+    return result.status === "applied" ? result.progress : null;
+  }
+
   private async reconcilePlaybackRate(reason: "play" | "status-transition") {
     const state = playbackStore.getState();
     if (!state.queue.length) return;
@@ -442,33 +695,80 @@ class PlayerService {
     }
   }
 
-  private async getCachedUserServerState(options?: { fetchIfMissing?: boolean }) {
+  private async getCachedUserServerState(options?: {
+    fetchIfMissing?: boolean;
+  }): Promise<{
+    state: UserServerState | undefined;
+    source: CachedUserServerStateSource;
+  }> {
     const { fetchIfMissing = false } = options ?? {};
     const activeLibraryUserKey = authStore.getState().activeLibraryUserKey;
     if (!activeLibraryUserKey) {
-      return undefined;
+      return { state: undefined, source: "unavailable" as CachedUserServerStateSource };
     }
 
     const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
     let cachedUserServerState = queryClient.getQueryData<UserServerState>(userServerStateQueryKey);
     if (cachedUserServerState || !fetchIfMissing) {
-      return cachedUserServerState;
+      return {
+        state: cachedUserServerState,
+        source: cachedUserServerState ? "cache_hit" : "skipped_fetch",
+      };
     }
 
     try {
       cachedUserServerState = await queryClient.fetchQuery({
         queryKey: userServerStateQueryKey,
-        queryFn: () => meApi.getUserServerState(),
+        queryFn: () => fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
         meta: { persist: true },
       });
     } catch {
-      cachedUserServerState = undefined;
+      return { state: undefined, source: "fetch_failed" as CachedUserServerStateSource };
     }
 
-    return cachedUserServerState;
+    return { state: cachedUserServerState, source: "fetch_success" as CachedUserServerStateSource };
   }
 
-  private resolveResumePositionMs(candidateIds: string[], cachedUserServerState?: UserServerState) {
+  private getQueuedProgressForCandidateIds(candidateIds: string[]) {
+    const { activeLibraryUserKey, storedUsername, serverUrl } = authStore.getState();
+    const resolvedUserKey =
+      activeLibraryUserKey ??
+      (storedUsername && serverUrl ? `${storedUsername}::${serverUrl}` : null);
+    if (!resolvedUserKey) {
+      return null;
+    }
+
+    const queueByItemId = deviceBooksStore.getState().pendingProgressByUser[resolvedUserKey] ?? {};
+    const directQueuedProgress = candidateIds
+      .map((candidateId) => queueByItemId[candidateId])
+      .find((progress): progress is PendingProgressSync => Boolean(progress));
+    if (directQueuedProgress) {
+      return directQueuedProgress;
+    }
+
+    return pickNewestQueuedProgress(
+      Object.values(queueByItemId).filter((progress) => candidateIds.includes(progress.libraryItemId)),
+    );
+  }
+
+  private resolveResumePositionMs(payload: {
+    candidateIds: string[];
+    cachedUserServerState?: UserServerState;
+    freshServerProgress?: Awaited<ReturnType<typeof meApi.getProgress>> | null;
+    libraryItemId: string;
+    bookTitle: string | null;
+    sessionKind: ProgressLogSessionKind;
+    serverStateSource: CachedUserServerStateSource;
+  }) {
+    const {
+      candidateIds,
+      cachedUserServerState,
+      freshServerProgress,
+      libraryItemId,
+      bookTitle,
+      sessionKind,
+      serverStateSource,
+    } = payload;
     const progressByLibraryItemId =
       cachedUserServerState?.progressByLibraryItemId ??
       // Compatibility for older persisted query shape.
@@ -494,23 +794,172 @@ class PlayerService {
       }),
     );
     const cachedUserProgress = directCachedUserProgress ?? fallbackCachedUserProgress;
-    const localBookProgressMs =
-      typeof cachedUserProgress?.currentTime === "number"
-        ? secondsToMs(cachedUserProgress.currentTime)
-        : null;
+    const queuedProgress = this.getQueuedProgressForCandidateIds(candidateIds);
 
-    // Fallback to persisted playback position for safety when no local progress exists.
     const persisted = playbackStore.getState();
     const persistedPositionMs =
       candidateIds.some((candidateId) => persisted.libraryItemId === candidateId)
         ? persisted.positionMs
         : 0;
+    const freshServerCurrentTimeSeconds =
+      typeof freshServerProgress?.currentTime === "number"
+        ? Math.max(0, Math.floor(freshServerProgress.currentTime))
+        : null;
+    const cachedServerCurrentTimeSeconds =
+      typeof cachedUserProgress?.currentTime === "number"
+        ? Math.max(0, Math.floor(cachedUserProgress.currentTime))
+        : null;
+    const bestServerCurrentTimeSeconds = Math.max(
+      freshServerCurrentTimeSeconds ?? 0,
+      cachedServerCurrentTimeSeconds ?? 0,
+    );
+    const queuedCurrentTimeSeconds =
+      typeof queuedProgress?.currentTime === "number"
+        ? Math.max(0, Math.floor(queuedProgress.currentTime))
+        : null;
+    const persistedCurrentTimeSeconds =
+      persistedPositionMs > 0 ? msToSeconds(persistedPositionMs) : null;
+    const serverWouldBeatQueuedZero =
+      !queuedProgress?.isFinished &&
+      (queuedCurrentTimeSeconds ?? 0) <= 0 &&
+      bestServerCurrentTimeSeconds > STALE_ZERO_PROGRESS_GUARD_SECONDS;
 
-    return localBookProgressMs ?? persistedPositionMs;
+    const candidates: ProgressResolutionCandidate[] = [
+      {
+        source: "fresh_server_fetch",
+        available: freshServerCurrentTimeSeconds !== null,
+        currentTimeSeconds: freshServerCurrentTimeSeconds,
+        durationSeconds:
+          typeof freshServerProgress?.duration === "number"
+            ? Math.max(0, Math.floor(freshServerProgress.duration))
+            : null,
+        isFinished:
+          typeof freshServerProgress?.isFinished === "boolean"
+            ? freshServerProgress.isFinished
+            : null,
+        lastUpdate:
+          typeof freshServerProgress?.lastUpdate === "number"
+            ? Math.max(0, Math.floor(freshServerProgress.lastUpdate))
+            : null,
+        note:
+          freshServerCurrentTimeSeconds !== null
+            ? "Fetched from server during load before resume selection"
+            : "Fresh server progress was unavailable within the load timeout",
+      },
+      {
+        source: "persisted_query_cache",
+        available: cachedServerCurrentTimeSeconds !== null,
+        currentTimeSeconds: cachedServerCurrentTimeSeconds,
+        durationSeconds:
+          typeof cachedUserProgress?.duration === "number"
+            ? Math.max(0, Math.floor(cachedUserProgress.duration))
+            : null,
+        isFinished:
+          typeof cachedUserProgress?.isFinished === "boolean" ? cachedUserProgress.isFinished : null,
+        lastUpdate:
+          typeof cachedUserProgress?.lastUpdate === "number"
+            ? Math.max(0, Math.floor(cachedUserProgress.lastUpdate))
+            : null,
+        note:
+          serverStateSource === "cache_hit"
+            ? "Loaded from cached user server state"
+            : "No persisted React Query progress candidate was available",
+      },
+      {
+        source: "queue",
+        available: queuedCurrentTimeSeconds !== null,
+        currentTimeSeconds: queuedCurrentTimeSeconds,
+        durationSeconds: null,
+        isFinished: typeof queuedProgress?.isFinished === "boolean" ? queuedProgress.isFinished : null,
+        lastUpdate:
+          typeof queuedProgress?.updatedAt === "number"
+            ? Math.max(0, Math.floor(queuedProgress.updatedAt))
+            : null,
+        note: serverWouldBeatQueuedZero
+          ? "Ignored as a stale queued zero-progress entry"
+          : queuedProgress
+            ? "Pending local queued progress"
+            : "No queued progress candidate was available",
+      },
+      {
+        source: "persisted_playback",
+        available: persistedCurrentTimeSeconds !== null,
+        currentTimeSeconds: persistedCurrentTimeSeconds,
+        durationSeconds: persistedCurrentTimeSeconds,
+        isFinished: null,
+        lastUpdate: null,
+        note:
+          persistedCurrentTimeSeconds !== null
+            ? "Persisted playback-store resume position"
+            : "No persisted playback-store position was available",
+      },
+    ];
+
+    const selectionPool = candidates.filter(
+      (candidate) =>
+        candidate.available &&
+        !(candidate.source === "queue" && serverWouldBeatQueuedZero),
+    );
+    const selectionPriority: Record<Exclude<ProgressResolutionSource, "none">, number> = {
+      queue: 3,
+      persisted_playback: 2,
+      persisted_query_cache: 1,
+      fresh_server_fetch: 1,
+    };
+    const chosenCandidate =
+      selectionPool.reduce<ProgressResolutionCandidate | null>((best, candidate) => {
+        if (!best) return candidate;
+        const bestFinished = Boolean(best.isFinished);
+        const candidateFinished = Boolean(candidate.isFinished);
+        if (candidateFinished !== bestFinished) {
+          return candidateFinished ? candidate : best;
+        }
+
+        const bestTime = best.currentTimeSeconds ?? 0;
+        const candidateTime = candidate.currentTimeSeconds ?? 0;
+        if (candidateTime !== bestTime) {
+          return candidateTime > bestTime ? candidate : best;
+        }
+
+        return selectionPriority[candidate.source] > selectionPriority[best.source]
+          ? candidate
+          : best;
+      }, null) ?? null;
+
+    const chosenSource: ProgressResolutionSource = chosenCandidate?.source ?? "none";
+    const chosenCurrentTimeSeconds = Math.max(0, chosenCandidate?.currentTimeSeconds ?? 0);
+    const reason =
+      chosenSource === "queue"
+        ? bestServerCurrentTimeSeconds > 0 || persistedCurrentTimeSeconds !== null
+          ? "Queued local progress was the furthest non-stale resume point"
+          : "Queued local progress was the only available resume point"
+        : chosenSource === "persisted_playback"
+          ? "Persisted playback-store position was ahead of the other resume candidates"
+          : chosenSource === "fresh_server_fetch"
+            ? "Fresh server progress was the best available resume point"
+            : chosenSource === "persisted_query_cache"
+              ? "Persisted React Query progress cache was the best available resume point"
+            : "No saved progress was available";
+
+    progressLogStore.getState().actions.appendEntry({
+      eventType: "progress_resolution",
+      trigger: "load_book",
+      libraryItemId,
+      title: bookTitle,
+      sessionKind,
+      serverStateSource,
+      chosenSource,
+      chosenCurrentTimeSeconds,
+      reason,
+      candidates,
+    });
+
+    return secondsToMs(chosenCurrentTimeSeconds);
   }
 
   private resolveDownloadedSession(libraryItemId: string): {
     libraryItemId: string;
+    bookTitle: string;
     sessionId: string;
     queue: PlaybackQueueItem[];
     durationMs: number;
@@ -615,6 +1064,7 @@ class PlayerService {
 
     return {
       libraryItemId,
+      bookTitle: fallbackTitle,
       sessionId: LOCAL_SESSION_ID,
       queue,
       durationMs,
@@ -809,12 +1259,20 @@ class PlayerService {
         deviceBookActions.queueProgressSync(payload.libraryItemId, {
           currentTime: finalCurrentTimeSeconds,
           isFinished: true,
+        }, {
+          title: state.bookTitle,
+          sessionKind: this.resolveSessionKind(state.sessionId),
+          trigger: "finish_active_book",
         });
       }
     } else {
       deviceBookActions.queueProgressSync(payload.libraryItemId, {
         currentTime: finalCurrentTimeSeconds,
         isFinished: true,
+      }, {
+        title: state.bookTitle,
+        sessionKind: this.resolveSessionKind(state.sessionId),
+        trigger: "finish_active_book",
       });
     }
 
@@ -838,6 +1296,7 @@ class PlayerService {
     } finally {
       playbackStore.getState().actions.endSession({
         libraryItemId: payload.libraryItemId,
+        bookTitle: state.bookTitle,
         positionMs: finalPositionMs,
         trackPositionMs: finalTrackPositionMs,
         durationMs: finalDurationMs,
@@ -1229,21 +1688,29 @@ class PlayerService {
       deviceBooksStore.getState().actions.queueProgressSync(state.libraryItemId as string, {
         currentTime: promotedProgress.currentTimeSeconds,
         isFinished: promotedProgress.isFinished,
+      }, {
+        title: this.resolveBookTitle(state),
+        sessionKind: this.resolveSessionKind(state.sessionId),
+        trigger: `sync:${reason}`,
       });
     };
     const clearQueuedProgressSync = () => {
       deviceBooksStore.getState().actions.clearPendingProgressSync(state.libraryItemId as string);
     };
 
+    const authState = authStore.getState();
+    const online = authState.isOnline !== false;
+    const authenticated = authState.status === "authenticated";
+    const hasQueuedProgress = deviceBooksStore.getState().actions.hasPendingProgressSync();
+    const shouldCloseStreamSession = Boolean(
+      options?.closeStreamSession && state.sessionId !== LOCAL_SESSION_ID,
+    );
+    let syncedToServer = false;
+    let syncPath: ProgressSyncPath = "queue_only";
+    let syncOutcome: ProgressSyncOutcome = "queued_offline";
+    let syncErrorMessage: string | undefined;
+
     try {
-      const authState = authStore.getState();
-      const online = authState.isOnline !== false;
-      const authenticated = authState.status === "authenticated";
-      const hasQueuedProgress = deviceBooksStore.getState().actions.hasPendingProgressSync();
-      const shouldCloseStreamSession = Boolean(
-        options?.closeStreamSession && state.sessionId !== LOCAL_SESSION_ID,
-      );
-      let syncedToServer = false;
 
       if (online && authenticated) {
         if (shouldCloseStreamSession) {
@@ -1271,12 +1738,14 @@ class PlayerService {
           state.sessionId === LOCAL_SESSION_ID || hasQueuedProgress;
 
         if (shouldUseProgressUpdateApi) {
+          syncPath = "direct_progress_update";
           await meApi.updateProgress(state.libraryItemId, {
             currentTime: promotedProgress.currentTimeSeconds,
             isFinished: promotedProgress.isFinished,
           });
           syncedToServer = true;
         } else {
+          syncPath = "session_sync";
           const syncResult = await sessionsApi.syncSession(state.sessionId, {
             timeListened: timeListenedSeconds,
             currentTime: promotedProgress.currentTimeSeconds,
@@ -1286,6 +1755,7 @@ class PlayerService {
             syncedToServer = true;
           } else {
             // Session may have closed server-side. Persist progress via direct update.
+            syncPath = "session_sync_then_direct_progress_update";
             await meApi.updateProgress(state.libraryItemId, {
               currentTime: promotedProgress.currentTimeSeconds,
               isFinished: promotedProgress.isFinished,
@@ -1296,6 +1766,7 @@ class PlayerService {
       }
 
       if (syncedToServer) {
+        syncOutcome = "synced_to_server";
         clearQueuedProgressSync();
         this.lastSyncAt = Date.now();
         playbackStore.getState().actions.setLastSyncAt(this.lastSyncAt);
@@ -1310,6 +1781,8 @@ class PlayerService {
         isFinished: promotedProgress.isFinished,
       });
     } catch (error) {
+      syncOutcome = "queued_after_error";
+      syncErrorMessage = error instanceof Error ? error.message : "Unknown sync error";
       queueProgressSync();
       this.updateUserServerStateCache({
         libraryItemId: state.libraryItemId,
@@ -1326,6 +1799,27 @@ class PlayerService {
         });
       }
     }
+
+    progressLogStore.getState().actions.appendEntry({
+      eventType: "progress_sync_point",
+      trigger: reason,
+      libraryItemId: state.libraryItemId,
+      title: this.resolveBookTitle(state),
+      sessionKind: this.resolveSessionKind(state.sessionId),
+      syncPath: syncedToServer ? syncPath : online && authenticated ? syncPath : "queue_only",
+      outcome: syncOutcome,
+      currentTimeSeconds: promotedProgress.currentTimeSeconds,
+      durationSeconds: promotedProgress.durationSeconds,
+      timeListenedSeconds,
+      isFinished: promotedProgress.isFinished,
+      online,
+      authenticated,
+      hadQueuedProgress: hasQueuedProgress,
+      forcedDirectProgressUpdate: Boolean(options?.forceDirectProgressUpdate),
+      closedStreamSession: shouldCloseStreamSession,
+      preventedRegression: promotedProgress.preventedRegression,
+      errorMessage: syncErrorMessage,
+    });
   }
 
   private touchUserServerStateCacheForPlayStart() {
@@ -1389,45 +1883,6 @@ class PlayerService {
         (progress) => progress?.libraryItemId === libraryItemId,
       ),
     );
-  }
-
-  private reconcileBookProgressFromServer(libraryItemId: string) {
-    meApi
-      .getProgress(libraryItemId)
-      .then((serverProgress) => {
-        if (typeof serverProgress.currentTime !== "number") return;
-        const resolvedLibraryItemId = serverProgress.libraryItemId || libraryItemId;
-        const cachedProgress = this.getCachedProgressForLibraryItem(resolvedLibraryItemId);
-        const cachedCurrentTimeSeconds = Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0));
-        const serverCurrentTimeSeconds = Math.max(0, Math.floor(serverProgress.currentTime));
-        const serverLastUpdate = Math.max(0, Math.floor(serverProgress.lastUpdate ?? 0));
-        const cachedLastUpdate = Math.max(0, Math.floor(cachedProgress?.lastUpdate ?? 0));
-        const serverSnapshotIsOlder =
-          cachedLastUpdate > 0 && serverLastUpdate > 0 && serverLastUpdate < cachedLastUpdate;
-        const serverWouldRegressProgress =
-          cachedCurrentTimeSeconds >
-          serverCurrentTimeSeconds + PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS;
-        const serverFreshnessUnknown = serverLastUpdate <= 0;
-        const shouldIgnoreStaleServerSnapshot =
-          !serverProgress.isFinished &&
-          serverWouldRegressProgress &&
-          (serverSnapshotIsOlder || serverFreshnessUnknown);
-
-        if (shouldIgnoreStaleServerSnapshot) {
-          return;
-        }
-
-        this.updateUserServerStateCache({
-          libraryItemId: resolvedLibraryItemId,
-          currentTimeSeconds: serverCurrentTimeSeconds,
-          durationSeconds: Math.max(
-            Math.max(0, Math.floor(serverProgress.duration ?? 0)),
-            Math.max(0, Math.floor(cachedProgress?.duration ?? 0)),
-          ),
-          isFinished: Boolean(serverProgress.isFinished),
-        });
-      })
-      .catch(() => undefined);
   }
 
   private updateUserServerStateCache(payload: {

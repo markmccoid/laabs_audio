@@ -228,6 +228,9 @@ export const useShelfBookCardMenuActions = ({
     queueProgressSync(book.id, {
       currentTime: durationSeconds,
       isFinished: true,
+    }, {
+      title: book.title,
+      trigger: "mark_read_offline",
     });
     toast.success("Marked read offline");
   };
@@ -271,6 +274,9 @@ export const useShelfBookCardMenuActions = ({
     queueProgressSync(book.id, {
       currentTime: 0,
       isFinished: false,
+    }, {
+      title: book.title,
+      trigger: "mark_unread_offline",
     });
     toast.success("Marked unread offline");
   };

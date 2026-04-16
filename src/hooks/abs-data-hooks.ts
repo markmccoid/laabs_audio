@@ -19,6 +19,7 @@ import {
 } from "../api/me-api";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
+import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import type { Bookmark } from "../types/absTypes";
 import {
   useFavoriteFilter,
@@ -326,10 +327,11 @@ export const useGetBooks = () => {
 export const useGetUserServerState = () => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const queryClient = useQueryClient();
 
   return useQuery({
     queryKey: queryKeys.userServerState(activeLibraryUserKey),
-    queryFn: () => meApi.getUserServerState(),
+    queryFn: () => fetchReconciledUserServerState(queryClient, activeLibraryUserKey as string),
     enabled: status === "authenticated" && !!activeLibraryUserKey,
     meta: { persist: true },
   });

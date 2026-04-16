@@ -93,6 +93,10 @@ export const useAuthBootstrap = () => {
       queueProgressSync(playbackState.libraryItemId, {
         currentTime,
         isFinished,
+      }, {
+        title: playbackState.bookTitle,
+        sessionKind: playbackState.sessionId === "local" ? "downloaded" : "streamed",
+        trigger: "background_app_state",
       });
     });
 
