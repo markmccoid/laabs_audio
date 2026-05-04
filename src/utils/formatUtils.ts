@@ -18,6 +18,13 @@ export const formatBytes = (bytes: number) => {
   return finalBytes;
 };
 
+export const formatMegabytes = (bytes: number | null | undefined, fractionDigits = 2) => {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) {
+    return "Unknown size";
+  }
+  return `${(bytes / 1048576).toFixed(fractionDigits)} MB`;
+};
+
 export const formatSeconds = (
   secondsIn: number,
   type?: "minimal" | "verbose" | "verbose_no_seconds" | "compact" | "minimal-no-seconds",

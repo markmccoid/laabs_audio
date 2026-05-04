@@ -2,7 +2,12 @@ import {
   useDeviceBooksActions,
   useDeviceBooksStore,
   type DownloadLifecycleEvent,
+  type DownloadProgress,
+  type DownloadStage,
 } from "@/store/device-books-store";
+import { formatMegabytes } from "@/utils/formatUtils";
+import { getBookDetailHref, type BookDetailRouteSource } from "@/navigation/book-links";
+import { router } from "expo-router";
 import { useEffect, useRef } from "react";
 import { Text } from "react-native";
 import { toast } from "react-native-sonner";
@@ -11,11 +16,7 @@ const ACTIVE_DOWNLOAD_TOAST_ID = "active-download";
 
 const clampPercent = (value: number | undefined) => Math.max(0, Math.min(100, Math.round(value ?? 0)));
 
-const buildLoadingTitle = (
-  title: string | null,
-  phase: "preparing" | "downloading" | "cancelling",
-  progress?: number,
-) => {
+const buildLoadingTitle = (title: string | null, phase: DownloadStage, progress?: number) => {
   const resolvedTitle = title?.trim() ? title.trim() : "Downloading book";
   if (phase === "cancelling") {
     return (
@@ -28,6 +29,56 @@ const buildLoadingTitle = (
     <Text selectable numberOfLines={1}>
       {`${clampPercent(progress)}% · ${resolvedTitle}`}
     </Text>
+  );
+};
+
+const buildLoadingDescription = (progress?: DownloadProgress) => {
+  if (!progress) {
+    return (
+      <Text selectable numberOfLines={1}>
+        Preparing download...
+      </Text>
+    );
+  }
+
+  if (progress.stage === "finalizing") {
+    return (
+      <Text selectable numberOfLines={1}>
+        Finalizing download...
+      </Text>
+    );
+  }
+
+  const currentFileName = progress.currentFileName?.trim();
+  if (!currentFileName) {
+    return (
+      <Text selectable numberOfLines={1}>
+        Preparing download...
+      </Text>
+    );
+  }
+
+  const filePosition =
+    progress.numberOfFiles > 1 && progress.currentFileIndex > 0
+      ? `File ${progress.currentFileIndex}/${progress.numberOfFiles} · `
+      : "";
+
+  return (
+    <Text selectable numberOfLines={2}>
+      {`${filePosition}${currentFileName} · ${formatMegabytes(progress.currentFileSize)}`}
+    </Text>
+  );
+};
+
+const openDownloadSheetFromToast = (
+  libraryItemId: string,
+  sourceBookRoute?: BookDetailRouteSource | null,
+) => {
+  router.push(
+    getBookDetailHref(libraryItemId, {
+      openDownloadSheet: String(Date.now()),
+      routeSource: sourceBookRoute,
+    }),
   );
 };
 
@@ -79,12 +130,19 @@ export const ActiveDownloadToastCoordinator = () => {
       activeDownloadSession.phase,
       downloadProgress?.progress,
     );
+    const description = buildLoadingDescription(downloadProgress);
     const toastId = `${ACTIVE_DOWNLOAD_TOAST_ID}-${activeDownloadSession.libraryItemId}-${activeDownloadSession.startedAt}`;
     currentToastIdRef.current = toastId;
+    const canOpen = Boolean(activeDownloadSession.libraryItemId);
     const canCancel = !(activeDownloadSession.phase === "cancelling" || cancelRequestedRef.current);
     const signature = JSON.stringify({
       toastId,
-      title,
+      phase: activeDownloadSession.phase,
+      progress: downloadProgress?.progress ?? null,
+      currentFileName: downloadProgress?.currentFileName ?? null,
+      currentFileSize: downloadProgress?.currentFileSize ?? null,
+      stage: downloadProgress?.stage ?? null,
+      canOpen,
       canCancel,
     });
 
@@ -99,7 +157,19 @@ export const ActiveDownloadToastCoordinator = () => {
       duration: Number.POSITIVE_INFINITY,
       dismissible: false,
       important: true,
-      action: canCancel
+      description,
+      action: canOpen
+        ? {
+            label: "Open",
+            onClick: () => {
+              openDownloadSheetFromToast(
+                activeDownloadSession.libraryItemId,
+                activeDownloadSession.sourceBookRoute,
+              );
+            },
+          }
+        : undefined,
+      cancel: canCancel
         ? {
             label: "Cancel",
             onClick: () => {
@@ -109,10 +179,29 @@ export const ActiveDownloadToastCoordinator = () => {
               toast.update(toastId, {
                 type: "loading",
                 title: buildLoadingTitle(activeDownloadSession.title, "cancelling"),
+                description: buildLoadingDescription(
+                  downloadProgress
+                    ? {
+                        ...downloadProgress,
+                        stage: "cancelling",
+                      }
+                    : undefined,
+                ),
                 duration: Number.POSITIVE_INFINITY,
                 dismissible: false,
                 important: true,
-                action: undefined,
+                action: canOpen
+                  ? {
+                      label: "Open",
+                      onClick: () => {
+                        openDownloadSheetFromToast(
+                          activeDownloadSession.libraryItemId,
+                          activeDownloadSession.sourceBookRoute,
+                        );
+                      },
+                    }
+                  : undefined,
+                cancel: undefined,
               });
               void cancelDownload();
             },
@@ -124,6 +213,7 @@ export const ActiveDownloadToastCoordinator = () => {
       toast.update(toastId, {
         type: "loading",
         title,
+        description,
         ...options,
       });
       return;
@@ -154,6 +244,7 @@ export const ActiveDownloadToastCoordinator = () => {
       dismissible: true,
       important: false,
       action: undefined,
+      cancel: undefined,
     });
 
     if (!didUpdate) {
@@ -162,6 +253,8 @@ export const ActiveDownloadToastCoordinator = () => {
         description: nextToast.description,
         duration: nextToast.duration,
         dismissible: true,
+        action: undefined,
+        cancel: undefined,
       });
     }
 

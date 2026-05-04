@@ -21,6 +21,7 @@ import {
   type ProgressLogSessionKind,
 } from "./progress-log-store";
 import type { Bookmark } from "../types/absTypes";
+import type { BookDetailRouteSource } from "../navigation/book-links";
 import { mmkvStorage } from "./mmkv-storage";
 import {
   BOOK_DOWNLOADS_DIRECTORY,
@@ -180,22 +181,97 @@ const hasValidRelativeDownloadTrack = (track?: Pick<DownloadTrack, "relativePath
 const hasPlayableDownloadAudio = (downloadInfo?: DownloadInfo | null) =>
   Boolean(downloadInfo?.audioTracks?.some((track) => hasValidRelativeDownloadTrack(track)));
 
+export type DownloadStage = "preparing" | "downloading" | "finalizing" | "cancelling";
+
 export type DownloadProgress = {
   libraryItemId: string;
-  currentFileProcessing: string;
+  stage: DownloadStage;
   progress: number;
   received: number;
   total: number;
+  currentFileName: string | null;
+  currentFileSize: number;
+  currentFileIndex: number;
   numberOfFiles: number;
-  numberOfFilesDownloaded: number;
-  downloadCompleted: boolean;
+  completedFiles: number;
 };
 
 export type ActiveDownloadSession = {
   libraryItemId: string;
   title: string | null;
-  phase: "preparing" | "downloading" | "cancelling";
+  phase: DownloadStage;
   startedAt: number;
+  sourceBookRoute?: BookDetailRouteSource | null;
+};
+
+const clampDownloadPercent = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
+
+const isKnownDownloadByteSize = (value: number | null | undefined): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0;
+
+type BuildDownloadProgressParams = {
+  libraryItemId: string;
+  stage: DownloadStage;
+  currentFileName: string | null;
+  currentFileSize: number;
+  currentFileIndex: number;
+  numberOfFiles: number;
+  completedFiles: number;
+  completedBytes: number;
+  currentFileReceived: number;
+  currentFileTotal: number;
+  totalAudioBytes: number;
+  useByteWeightedProgress: boolean;
+};
+
+const buildDownloadProgress = ({
+  libraryItemId,
+  stage,
+  currentFileName,
+  currentFileSize,
+  currentFileIndex,
+  numberOfFiles,
+  completedFiles,
+  completedBytes,
+  currentFileReceived,
+  currentFileTotal,
+  totalAudioBytes,
+  useByteWeightedProgress,
+}: BuildDownloadProgressParams): DownloadProgress => {
+  const resolvedFileSize = isKnownDownloadByteSize(currentFileTotal)
+    ? currentFileTotal
+    : currentFileSize;
+  const resolvedCurrentReceived = Math.max(
+    0,
+    Math.min(currentFileReceived, resolvedFileSize || currentFileReceived),
+  );
+
+  const rawPercent = (() => {
+    if (numberOfFiles <= 0) {
+      return 0;
+    }
+    if (useByteWeightedProgress && totalAudioBytes > 0) {
+      return ((completedBytes + resolvedCurrentReceived) / totalAudioBytes) * 100;
+    }
+    const fileFraction =
+      resolvedFileSize > 0 ? resolvedCurrentReceived / resolvedFileSize : 0;
+    return ((completedFiles + fileFraction) / numberOfFiles) * 100;
+  })();
+
+  const progress = clampDownloadPercent(stage === "finalizing" ? Math.min(rawPercent, 99) : rawPercent);
+
+  return {
+    libraryItemId,
+    stage,
+    progress: stage === "finalizing" ? Math.min(progress, 99) : progress,
+    received: useByteWeightedProgress ? Math.min(totalAudioBytes, completedBytes + resolvedCurrentReceived) : 0,
+    total: useByteWeightedProgress ? totalAudioBytes : 0,
+    currentFileName,
+    currentFileSize: resolvedFileSize,
+    currentFileIndex: Math.max(0, Math.min(numberOfFiles, currentFileIndex)),
+    numberOfFiles,
+    completedFiles: Math.max(0, Math.min(numberOfFiles, completedFiles)),
+  };
 };
 
 export type DownloadLifecycleEvent = {
@@ -445,7 +521,7 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
     deleteDownloadedBookData: (libraryItemId: string) => Promise<void>;
     downloadBook: (
       libraryItemId: string,
-      options?: { summary?: LibraryItemSummary },
+      options?: { summary?: LibraryItemSummary; sourceBookRoute?: BookDetailRouteSource | null },
     ) => Promise<void>;
     cancelDownload: () => Promise<void>;
     setActiveDownloadSession: (session?: ActiveDownloadSession) => void;
@@ -2506,7 +2582,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             logDownload("start:ignored-already-downloading", {
               libraryItemId,
               phase: activeSession.phase,
-              currentFile: activeProgress?.currentFileProcessing ?? null,
+              currentFile: activeProgress?.currentFileName ?? null,
               progress: activeProgress?.progress ?? 0,
             });
             return;
@@ -2535,12 +2611,14 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           const isTokenActive = () => get().downloadToken === myToken;
           const startedAt = Date.now();
           const initialTitle = options?.summary?.title ?? null;
+          const sourceBookRoute = options?.sourceBookRoute ?? null;
           let resolvedTitle = initialTitle;
           get().actions.setActiveDownloadSession({
             libraryItemId,
             title: initialTitle,
             phase: "preparing",
             startedAt,
+            sourceBookRoute,
           });
 
           try {
@@ -2556,6 +2634,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               title: resolvedTitle,
               phase: "preparing",
               startedAt,
+              sourceBookRoute,
             });
 
             const downloadDir = await ensureDownloadDir(libraryItemId);
@@ -2567,6 +2646,14 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             const audioTracks: DownloadTrack[] = [];
             const filesToCleanUp: string[] = [];
             const totalFiles = details.audioFiles.length;
+            const totalAudioBytes = details.audioFiles.reduce((sum, audioFile) => {
+              const size = audioFile.metadata?.size;
+              return isKnownDownloadByteSize(size) ? sum + size : sum;
+            }, 0);
+            const useByteWeightedProgress = details.audioFiles.every((audioFile) =>
+              isKnownDownloadByteSize(audioFile.metadata?.size),
+            );
+            let completedBytes = 0;
             logDownload("details:fetched", {
               libraryItemId,
               token: myToken,
@@ -2576,6 +2663,10 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
 
             for (let i = 0; i < details.audioFiles.length; i += 1) {
               const audioFile = details.audioFiles[i];
+              const currentFileName = audioFile.metadata.filename;
+              const currentFileSize = isKnownDownloadByteSize(audioFile.metadata.size)
+                ? audioFile.metadata.size
+                : 0;
               if (!isTokenActive()) {
                 logDownload("token:stale-before-file", {
                   libraryItemId,
@@ -2592,7 +2683,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 fileIndex: i + 1,
                 totalFiles,
                 ino: audioFile.ino,
-                filename: audioFile.metadata.filename,
+                filename: currentFileName,
               });
 
               const { url, authHeader } = await downloadsApi.getDownloadSpec(
@@ -2611,16 +2702,21 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
 
               const startOffset = audioFile.startOffset ?? 0;
 
-              // Initialize progress state for the current file
               get().actions.setDownloadProgress({
-                libraryItemId,
-                currentFileProcessing: audioFile.metadata.filename,
-                progress: 0,
-                received: 0,
-                total: audioFile.metadata.size ?? 0,
-                numberOfFiles: totalFiles,
-                numberOfFilesDownloaded: i + 1,
-                downloadCompleted: false,
+                ...buildDownloadProgress({
+                  libraryItemId,
+                  stage: "preparing",
+                  currentFileName,
+                  currentFileSize,
+                  currentFileIndex: i + 1,
+                  numberOfFiles: totalFiles,
+                  completedFiles: i,
+                  completedBytes,
+                  currentFileReceived: 0,
+                  currentFileTotal: currentFileSize,
+                  totalAudioBytes,
+                  useByteWeightedProgress,
+                }),
               });
 
               let lastLoggedPercent = -1;
@@ -2629,7 +2725,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               try {
                 const { task, cancelDownload, cleanFileName, fileUri } = downloadFileBlob(
                   url,
-                  audioFile.metadata.filename,
+                  currentFileName,
                   (received, total) => {
                     if (!isTokenActive()) return;
                     const currentSession = get().activeDownloadSession;
@@ -2676,14 +2772,20 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                     lastUiPercent = percent;
                     lastUiUpdateAt = now;
                     get().actions.setDownloadProgress({
-                      libraryItemId,
-                      currentFileProcessing: audioFile.metadata.filename,
-                      progress: percent,
-                      received,
-                      total,
-                      numberOfFiles: totalFiles,
-                      numberOfFilesDownloaded: i + 1,
-                      downloadCompleted: false,
+                      ...buildDownloadProgress({
+                        libraryItemId,
+                        stage: "downloading",
+                        currentFileName,
+                        currentFileSize,
+                        currentFileIndex: i + 1,
+                        numberOfFiles: totalFiles,
+                        completedFiles: i,
+                        completedBytes,
+                        currentFileReceived: received,
+                        currentFileTotal: total,
+                        totalAudioBytes,
+                        useByteWeightedProgress,
+                      }),
                     });
                   },
                   { directory: downloadDir, headers: authHeader },
@@ -2709,7 +2811,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
 
                 audioTracks.push({
                   ino: audioFile.ino,
-                  filename: audioFile.metadata.filename,
+                  filename: currentFileName,
                   cleanFileName,
                   duration: audioFile.duration,
                   startOffset,
@@ -2739,17 +2841,24 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 throw error;
               }
 
+              completedBytes += currentFileSize;
               get().actions.setDownloadedBookData(libraryItemId, { audioTracks: [...audioTracks] });
 
               get().actions.setDownloadProgress({
-                libraryItemId,
-                currentFileProcessing: audioFile.metadata.filename,
-                progress: 100,
-                received: audioFile.metadata.size ?? 0,
-                total: audioFile.metadata.size ?? 0,
-                numberOfFiles: totalFiles,
-                numberOfFilesDownloaded: i + 1,
-                downloadCompleted: i + 1 === totalFiles,
+                ...buildDownloadProgress({
+                  libraryItemId,
+                  stage: i + 1 === totalFiles ? "finalizing" : "downloading",
+                  currentFileName,
+                  currentFileSize,
+                  currentFileIndex: i + 1,
+                  numberOfFiles: totalFiles,
+                  completedFiles: i + 1,
+                  completedBytes,
+                  currentFileReceived: 0,
+                  currentFileTotal: currentFileSize,
+                  totalAudioBytes,
+                  useByteWeightedProgress,
+                }),
               });
             }
 
@@ -2758,6 +2867,13 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               return;
             }
 
+            get().actions.setActiveDownloadSession({
+              libraryItemId,
+              title: resolvedTitle,
+              phase: "finalizing",
+              startedAt,
+              sourceBookRoute,
+            });
             logDownload("cover:start", { libraryItemId, token: myToken });
             const coverRelativePath = await downloadCoverImage(libraryItemId);
             if (!isTokenActive()) {
@@ -2823,14 +2939,21 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
 
         cancelDownload: async () => {
           const activeSession = get().activeDownloadSession;
+          const activeProgress = get().downloadProgress;
           const cancelledLibraryItemId =
-            activeSession?.libraryItemId ?? get().downloadProgress?.libraryItemId;
+            activeSession?.libraryItemId ?? activeProgress?.libraryItemId;
           const cancelledTitle = activeSession?.title ?? null;
           const cancelledStartedAt = activeSession?.startedAt ?? Date.now();
           if (activeSession) {
             get().actions.setActiveDownloadSession({
               ...activeSession,
               phase: "cancelling",
+            });
+          }
+          if (activeProgress) {
+            get().actions.setDownloadProgress({
+              ...activeProgress,
+              stage: "cancelling",
             });
           }
           const nextToken = get().actions.incrementDownloadToken();
@@ -2889,13 +3012,15 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           const current = get().downloadProgress;
           if (
             current?.libraryItemId === progress?.libraryItemId &&
-            current?.currentFileProcessing === progress?.currentFileProcessing &&
+            current?.stage === progress?.stage &&
             current?.progress === progress?.progress &&
             current?.received === progress?.received &&
             current?.total === progress?.total &&
+            current?.currentFileName === progress?.currentFileName &&
+            current?.currentFileSize === progress?.currentFileSize &&
+            current?.currentFileIndex === progress?.currentFileIndex &&
             current?.numberOfFiles === progress?.numberOfFiles &&
-            current?.numberOfFilesDownloaded === progress?.numberOfFilesDownloaded &&
-            current?.downloadCompleted === progress?.downloadCompleted
+            current?.completedFiles === progress?.completedFiles
           ) {
             return;
           }

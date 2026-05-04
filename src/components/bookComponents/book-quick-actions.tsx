@@ -1,14 +1,14 @@
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import {
   selectIsAnotherDownloadActive,
-  selectIsAnyDownloadActive,
   selectIsBookActivelyDownloading,
   selectIsBookFullyDownloaded,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Bookmark } from "@/types/absTypes";
-import { router } from "expo-router";
+import type { BookDetailRouteSource } from "@/navigation/book-links";
+import { router, useSegments } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -112,8 +112,8 @@ const DownloadQuickActionIcon = ({
 
 export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   const themeColors = useThemeColors();
+  const segments = useSegments();
   const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
-  const isAnyDownloadActive = useDeviceBooksStore(selectIsAnyDownloadActive);
   const { data: userServerState } = useGetUserServerState();
   const isDownloaded = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
@@ -140,6 +140,7 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   const progressPercent = isDownloading ? clampPercent(downloadProgress?.progress ?? 0) : 0;
   const bookmarkCount = bookmarks.length;
   const bookmarkBadgeLabel = bookmarkCount > 99 ? "99+" : String(bookmarkCount);
+  const sourceBookRoute: BookDetailRouteSource = segments[1] === "search" ? "search" : "home";
 
   const openBookshelves = () => {
     if (!libraryItemId) return;
@@ -151,10 +152,10 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
 
   const openDownloads = () => {
     if (!libraryItemId) return;
-    if (isAnyDownloadActive) return;
+    if (isAnotherDownloadActive) return;
     router.push({
       pathname: "/book-downloads",
-      params: { libraryItemId },
+      params: { libraryItemId, sourceBookRoute },
     });
   };
 
@@ -199,11 +200,11 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
 
       <Pressable
         onPress={openDownloads}
-        disabled={!libraryItemId || isAnyDownloadActive}
+        disabled={!libraryItemId || isAnotherDownloadActive}
         accessibilityRole="button"
         accessibilityLabel={
           isDownloading
-            ? "Download in progress"
+            ? "Open active download status"
             : isAnotherDownloadActive
               ? "Another book is downloading"
               : "Open download options"

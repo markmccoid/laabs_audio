@@ -1,10 +1,33 @@
 import * as Linking from "expo-linking";
 import type { Href } from "expo-router";
 
+export type BookDetailRouteSource = "home" | "search";
+
+type BookDetailHrefOptions = {
+  openDownloadSheet?: boolean | string;
+  routeSource?: BookDetailRouteSource | null;
+};
+
+export const OPEN_DOWNLOAD_SHEET_PARAM = "openDownloadSheet";
+
 // Returns the internal Expo Router href object for navigation to the Home book detail screen.
-export const getBookDetailHref = (libraryItemId: string): Href => ({
-  pathname: "/(tabs)/(home)/[libraryItemId]",
-  params: { libraryItemId },
+export const getBookDetailHref = (
+  libraryItemId: string,
+  options?: BookDetailHrefOptions,
+): Href => ({
+  pathname:
+    options?.routeSource === "search"
+      ? "/(tabs)/search/[libraryItemId]"
+      : "/(tabs)/(home)/[libraryItemId]",
+  params: {
+    libraryItemId,
+    ...(options?.openDownloadSheet
+      ? {
+          [OPEN_DOWNLOAD_SHEET_PARAM]:
+            options.openDownloadSheet === true ? "1" : options.openDownloadSheet,
+        }
+      : null),
+  },
 });
 
 // Returns the public deep link that can be shared outside the app.

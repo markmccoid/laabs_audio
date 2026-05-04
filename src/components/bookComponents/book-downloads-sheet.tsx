@@ -1,6 +1,7 @@
 import { downloadsApi } from "@/api/downloads-api";
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import { useCachedBookSummary, useGetItemDetails } from "@/hooks/abs-data-hooks";
+import type { BookDetailRouteSource } from "@/navigation/book-links";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { formatBytes } from "@/utils/formatUtils";
 import { Stack, useLocalSearchParams } from "expo-router";
@@ -42,10 +43,19 @@ const normalizeFilenameWithExt = (
 export const BookDownloadsSheet = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
-  const { libraryItemId: libraryItemIdParam } = useLocalSearchParams<{
+  const {
+    libraryItemId: libraryItemIdParam,
+    sourceBookRoute: sourceBookRouteParamRaw,
+  } = useLocalSearchParams<{
     libraryItemId?: string | string[];
+    sourceBookRoute?: string | string[];
   }>();
   const libraryItemId = resolveParam(libraryItemIdParam);
+  const sourceBookRouteParam = resolveParam(sourceBookRouteParamRaw);
+  const sourceBookRoute: BookDetailRouteSource | null =
+    sourceBookRouteParam === "search" || sourceBookRouteParam === "home"
+      ? sourceBookRouteParam
+      : null;
   const cachedSummary = useCachedBookSummary(libraryItemId);
   const { data: bookData, isLoading } = useGetItemDetails(libraryItemId);
   const [activeEbookIno, setActiveEbookIno] = useState<string | null>(null);
@@ -167,7 +177,12 @@ export const BookDownloadsSheet = () => {
         )}
       </View>
 
-      <DownloadControls libraryItemId={libraryItemId} summary={summary} context="sheet" />
+      <DownloadControls
+        libraryItemId={libraryItemId}
+        summary={summary}
+        context="sheet"
+        sourceBookRoute={sourceBookRoute}
+      />
 
       {libraryItemId && ebookFiles.length > 0 ? (
         <View

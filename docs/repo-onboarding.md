@@ -15,7 +15,8 @@ Read these in order before changing architecture:
 5. [offline-handling.md](./offline-handling.md)
 6. [progress-sync-queue.md](./progress-sync-queue.md)
 7. [bookshelves-concept-flow-code.md](./bookshelves-concept-flow-code.md)
-8. [ReactQueryPersister.md](./ReactQueryPersister.md)
+8. [download-ux.md](./download-ux.md)
+9. [ReactQueryPersister.md](./ReactQueryPersister.md)
 
 Then inspect these code entry points:
 
