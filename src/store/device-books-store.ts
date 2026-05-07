@@ -49,6 +49,7 @@ const clampBookPlaybackRate = (value: number) =>
   Math.max(MIN_BOOK_PLAYBACK_RATE, Math.min(MAX_BOOK_PLAYBACK_RATE, value));
 const DOWNLOAD_PROGRESS_UI_UPDATE_INTERVAL_MS = 250;
 const DOWNLOAD_PROGRESS_UI_MIN_PERCENT_STEP = 2;
+const MAX_PARALLEL_BOOK_FILE_DOWNLOADS = 3;
 const logDownload = (_event: string, _payload?: Record<string, unknown>) => {};
 
 export type DownloadTrack = {
@@ -215,68 +216,80 @@ const clampDownloadPercent = (value: number) => Math.max(0, Math.min(100, Math.r
 const isKnownDownloadByteSize = (value: number | null | undefined): value is number =>
   typeof value === "number" && Number.isFinite(value) && value > 0;
 
-type BuildDownloadProgressParams = {
-  libraryItemId: string;
-  stage: DownloadStage;
-  currentFileName: string | null;
+type DownloadFileProgressSnapshot = {
+  currentFileName: string;
   currentFileSize: number;
-  currentFileIndex: number;
-  numberOfFiles: number;
-  completedFiles: number;
-  completedBytes: number;
-  currentFileReceived: number;
-  currentFileTotal: number;
-  totalAudioBytes: number;
-  useByteWeightedProgress: boolean;
+  received: number;
+  total: number;
+  active: boolean;
+  completed: boolean;
 };
 
-const buildDownloadProgress = ({
+const buildAggregateDownloadProgress = ({
   libraryItemId,
   stage,
-  currentFileName,
-  currentFileSize,
-  currentFileIndex,
-  numberOfFiles,
-  completedFiles,
-  completedBytes,
-  currentFileReceived,
-  currentFileTotal,
+  fileProgress,
+  fallbackFileIndex,
   totalAudioBytes,
   useByteWeightedProgress,
-}: BuildDownloadProgressParams): DownloadProgress => {
-  const resolvedFileSize = isKnownDownloadByteSize(currentFileTotal)
-    ? currentFileTotal
-    : currentFileSize;
-  const resolvedCurrentReceived = Math.max(
-    0,
-    Math.min(currentFileReceived, resolvedFileSize || currentFileReceived),
-  );
+}: {
+  libraryItemId: string;
+  stage: DownloadStage;
+  fileProgress: DownloadFileProgressSnapshot[];
+  fallbackFileIndex: number;
+  totalAudioBytes: number;
+  useByteWeightedProgress: boolean;
+}): DownloadProgress => {
+  const totalFiles = fileProgress.length;
+  const activeFiles = fileProgress.filter((file) => file.active && !file.completed);
+  const displayFile =
+    activeFiles.length === 1
+      ? activeFiles[0]
+      : fileProgress[fallbackFileIndex] ?? fileProgress.find((file) => !file.completed);
+  const completedFiles = fileProgress.filter((file) => file.completed).length;
+
+  const receivedBytes = fileProgress.reduce((sum, file) => {
+    const resolvedTotal = isKnownDownloadByteSize(file.total) ? file.total : file.currentFileSize;
+    const received = file.completed
+      ? resolvedTotal || file.received
+      : Math.min(file.received, resolvedTotal || file.received);
+    return sum + Math.max(0, received);
+  }, 0);
 
   const rawPercent = (() => {
-    if (numberOfFiles <= 0) {
-      return 0;
-    }
+    if (totalFiles <= 0) return 0;
     if (useByteWeightedProgress && totalAudioBytes > 0) {
-      return ((completedBytes + resolvedCurrentReceived) / totalAudioBytes) * 100;
+      return (receivedBytes / totalAudioBytes) * 100;
     }
-    const fileFraction =
-      resolvedFileSize > 0 ? resolvedCurrentReceived / resolvedFileSize : 0;
-    return ((completedFiles + fileFraction) / numberOfFiles) * 100;
+    const fileUnits = fileProgress.reduce((sum, file) => {
+      if (file.completed) return sum + 1;
+      const resolvedTotal = isKnownDownloadByteSize(file.total) ? file.total : file.currentFileSize;
+      if (resolvedTotal <= 0) return sum;
+      return sum + Math.max(0, Math.min(1, file.received / resolvedTotal));
+    }, 0);
+    return (fileUnits / totalFiles) * 100;
   })();
 
+  const displayFileIndex = Math.max(0, fileProgress.indexOf(displayFile ?? fileProgress[0]));
   const progress = clampDownloadPercent(stage === "finalizing" ? Math.min(rawPercent, 99) : rawPercent);
 
   return {
     libraryItemId,
     stage,
     progress: stage === "finalizing" ? Math.min(progress, 99) : progress,
-    received: useByteWeightedProgress ? Math.min(totalAudioBytes, completedBytes + resolvedCurrentReceived) : 0,
+    received: useByteWeightedProgress ? Math.min(totalAudioBytes, receivedBytes) : 0,
     total: useByteWeightedProgress ? totalAudioBytes : 0,
-    currentFileName,
-    currentFileSize: resolvedFileSize,
-    currentFileIndex: Math.max(0, Math.min(numberOfFiles, currentFileIndex)),
-    numberOfFiles,
-    completedFiles: Math.max(0, Math.min(numberOfFiles, completedFiles)),
+    currentFileName:
+      activeFiles.length > 1
+        ? `${activeFiles.length} files downloading`
+        : (displayFile?.currentFileName ?? null),
+    currentFileSize:
+      activeFiles.length > 1
+        ? activeFiles.reduce((sum, file) => sum + file.currentFileSize, 0)
+        : (displayFile?.currentFileSize ?? 0),
+    currentFileIndex: totalFiles > 0 ? displayFileIndex + 1 : 0,
+    numberOfFiles: totalFiles,
+    completedFiles,
   };
 };
 
@@ -2680,8 +2693,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               return;
             }
 
-            const audioTracks: DownloadTrack[] = [];
+            const audioTracksByIndex: (DownloadTrack | undefined)[] = [];
             const filesToCleanUp: string[] = [];
+            const activeCancelFns = new Set<() => Promise<void>>();
             const totalFiles = details.audioFiles.length;
             const totalAudioBytes = details.audioFiles.reduce((sum, audioFile) => {
               const size = audioFile.metadata?.size;
@@ -2690,7 +2704,41 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             const useByteWeightedProgress = details.audioFiles.every((audioFile) =>
               isKnownDownloadByteSize(audioFile.metadata?.size),
             );
-            let completedBytes = 0;
+            const fileProgress: DownloadFileProgressSnapshot[] = details.audioFiles.map((audioFile) => {
+              const currentFileSize = isKnownDownloadByteSize(audioFile.metadata.size)
+                ? audioFile.metadata.size
+                : 0;
+              return {
+                currentFileName: audioFile.metadata.filename,
+                currentFileSize,
+                received: 0,
+                total: currentFileSize,
+                active: false,
+                completed: false,
+              };
+            });
+            const syncAggregateProgress = (stage: DownloadStage, fallbackFileIndex: number) => {
+              get().actions.setDownloadProgress({
+                ...buildAggregateDownloadProgress({
+                  libraryItemId,
+                  stage,
+                  fileProgress,
+                  fallbackFileIndex,
+                  totalAudioBytes,
+                  useByteWeightedProgress,
+                }),
+              });
+            };
+            const cleanupDownloadedFiles = async () => {
+              for (const file of filesToCleanUp) {
+                await deleteFileIfExists(file);
+              }
+            };
+            const cancelActiveDownloads = async () => {
+              const cancelFns = Array.from(activeCancelFns);
+              await Promise.allSettled(cancelFns.map((cancelDownload) => cancelDownload()));
+              await cleanupDownloadedFiles();
+            };
             logDownload("details:fetched", {
               libraryItemId,
               token: myToken,
@@ -2698,7 +2746,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               downloadDir,
             });
 
-            for (let i = 0; i < details.audioFiles.length; i += 1) {
+            let downloadError: unknown = null;
+            let nextAudioFileIndex = 0;
+            const downloadAudioFile = async (i: number) => {
               const audioFile = details.audioFiles[i];
               const currentFileName = audioFile.metadata.filename;
               const currentFileSize = isKnownDownloadByteSize(audioFile.metadata.size)
@@ -2739,26 +2789,18 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
 
               const startOffset = audioFile.startOffset ?? 0;
 
-              get().actions.setDownloadProgress({
-                ...buildDownloadProgress({
-                  libraryItemId,
-                  stage: "preparing",
-                  currentFileName,
-                  currentFileSize,
-                  currentFileIndex: i + 1,
-                  numberOfFiles: totalFiles,
-                  completedFiles: i,
-                  completedBytes,
-                  currentFileReceived: 0,
-                  currentFileTotal: currentFileSize,
-                  totalAudioBytes,
-                  useByteWeightedProgress,
-                }),
-              });
+              fileProgress[i] = {
+                ...fileProgress[i],
+                active: true,
+                received: 0,
+                total: currentFileSize,
+              };
+              syncAggregateProgress("preparing", i);
 
               let lastLoggedPercent = -1;
               let lastUiPercent = -1;
               let lastUiUpdateAt = 0;
+              let cancelDownloadForFile: (() => Promise<void>) | null = null;
               try {
                 const { task, cancelDownload, cleanFileName, fileUri } = downloadFileBlob(
                   url,
@@ -2808,32 +2850,21 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
 
                     lastUiPercent = percent;
                     lastUiUpdateAt = now;
-                    get().actions.setDownloadProgress({
-                      ...buildDownloadProgress({
-                        libraryItemId,
-                        stage: "downloading",
-                        currentFileName,
-                        currentFileSize,
-                        currentFileIndex: i + 1,
-                        numberOfFiles: totalFiles,
-                        completedFiles: i,
-                        completedBytes,
-                        currentFileReceived: received,
-                        currentFileTotal: total,
-                        totalAudioBytes,
-                        useByteWeightedProgress,
-                      }),
-                    });
+                    fileProgress[i] = {
+                      ...fileProgress[i],
+                      received,
+                      total,
+                    };
+                    syncAggregateProgress("downloading", i);
                   },
                   { directory: downloadDir, headers: authHeader },
                 );
                 filesToCleanUp.push(fileUri);
+                cancelDownloadForFile = cancelDownload;
+                activeCancelFns.add(cancelDownload);
 
                 get().actions.setActiveCancelFn(async () => {
-                  await cancelDownload();
-                  for (const file of filesToCleanUp) {
-                    await deleteFileIfExists(file);
-                  }
+                  await cancelActiveDownloads();
                 });
 
                 const result = await task;
@@ -2846,14 +2877,14 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                   throw new Error("Unable to persist downloaded track path.");
                 }
 
-                audioTracks.push({
+                audioTracksByIndex[i] = {
                   ino: audioFile.ino,
                   filename: currentFileName,
                   cleanFileName,
                   duration: audioFile.duration,
                   startOffset,
                   relativePath,
-                });
+                };
                 logDownload("file:complete", {
                   libraryItemId,
                   token: myToken,
@@ -2871,32 +2902,55 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                   });
                   return;
                 }
-                for (const file of filesToCleanUp) {
-                  await deleteFileIfExists(file);
+                if (!downloadError) {
+                  downloadError = error;
+                  await cancelActiveDownloads();
                 }
                 get().actions.clearDownloadedData(libraryItemId);
                 throw error;
+              } finally {
+                if (cancelDownloadForFile) {
+                  activeCancelFns.delete(cancelDownloadForFile);
+                }
               }
 
-              completedBytes += currentFileSize;
-              get().actions.setDownloadedBookData(libraryItemId, { audioTracks: [...audioTracks] });
-
-              get().actions.setDownloadProgress({
-                ...buildDownloadProgress({
-                  libraryItemId,
-                  stage: i + 1 === totalFiles ? "finalizing" : "downloading",
-                  currentFileName,
-                  currentFileSize,
-                  currentFileIndex: i + 1,
-                  numberOfFiles: totalFiles,
-                  completedFiles: i + 1,
-                  completedBytes,
-                  currentFileReceived: 0,
-                  currentFileTotal: currentFileSize,
-                  totalAudioBytes,
-                  useByteWeightedProgress,
-                }),
+              fileProgress[i] = {
+                ...fileProgress[i],
+                active: false,
+                completed: true,
+                received: currentFileSize || fileProgress[i].received,
+                total: currentFileSize || fileProgress[i].total,
+              };
+              get().actions.setDownloadedBookData(libraryItemId, {
+                audioTracks: audioTracksByIndex.filter((track): track is DownloadTrack =>
+                  Boolean(track),
+                ),
               });
+              syncAggregateProgress(i + 1 === totalFiles ? "finalizing" : "downloading", i);
+            };
+
+            const workerCount = Math.min(MAX_PARALLEL_BOOK_FILE_DOWNLOADS, totalFiles);
+            const downloadWorkers = Array.from({ length: workerCount }, async () => {
+              while (!downloadError) {
+                const fileIndex = nextAudioFileIndex;
+                nextAudioFileIndex += 1;
+                if (fileIndex >= details.audioFiles.length) {
+                  return;
+                }
+                await downloadAudioFile(fileIndex);
+              }
+            });
+            await Promise.all(downloadWorkers);
+
+            if (downloadError) {
+              throw downloadError;
+            }
+
+            const audioTracks = audioTracksByIndex.filter((track): track is DownloadTrack =>
+              Boolean(track),
+            );
+            if (audioTracks.length !== totalFiles) {
+              throw new Error("Download failed before all audio files completed.");
             }
 
             if (!isTokenActive()) {
