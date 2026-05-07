@@ -37,6 +37,12 @@ export const DEFAULT_BOOK_PLAYBACK_RATE = 1;
 const MIN_BOOK_PLAYBACK_RATE = 0.25;
 const MAX_BOOK_PLAYBACK_RATE = 2.0;
 const ZERO_PROGRESS_REGRESSION_GUARD_SECONDS = 5;
+const PROGRESS_FLOOR_QUEUE_TRIGGERS = new Set([
+  "background_app_state",
+  "sync:interval",
+  "sync:pause",
+  "sync:close",
+]);
 const GLOBAL_PLAYBACK_RATE_KEY = "__global__";
 
 const clampBookPlaybackRate = (value: number) =>
@@ -701,6 +707,9 @@ const getCachedProgressForLibraryItem = (
   );
 };
 
+const shouldProtectProgressFloorForQueueTrigger = (trigger?: string | null) =>
+  Boolean(trigger && PROGRESS_FLOOR_QUEUE_TRIGGERS.has(trigger));
+
 const ensureUserServerStateIsPersisted = (userKey: string) => {
   queryClient.setQueryDefaults(queryKeys.userServerState(userKey), {
     meta: { persist: true },
@@ -1126,16 +1135,32 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           const title = options?.title?.trim() || null;
           const sessionKind = options?.sessionKind ?? null;
           const trigger = options?.trigger?.trim() || null;
+          const cachedProgress = getCachedProgressForLibraryItem(userKey, libraryItemId);
+          const cachedCurrentTime = Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0));
+          const shouldProtectProgressFloor =
+            shouldProtectProgressFloorForQueueTrigger(trigger) &&
+            !isFinished &&
+            !cachedProgress?.isFinished;
           let queueSizeForUser = 0;
           let queueNote: string | undefined;
 
           set((state) => {
             const queueByItemId = state.pendingProgressByUser[userKey] ?? {};
             const previous = queueByItemId[libraryItemId];
+            const progressFloor = shouldProtectProgressFloor
+              ? Math.max(
+                  cachedCurrentTime,
+                  previous && !previous.isFinished ? previous.currentTime : 0,
+                )
+              : 0;
+            const queuedCurrentTime =
+              progressFloor > currentTime + ZERO_PROGRESS_REGRESSION_GUARD_SECONDS
+                ? progressFloor
+                : currentTime;
             const shouldKeepQueuedProgressFloor =
               Boolean(previous) &&
               !isFinished &&
-              currentTime <= 0 &&
+              queuedCurrentTime <= 0 &&
               !previous.isFinished &&
               previous.currentTime > ZERO_PROGRESS_REGRESSION_GUARD_SECONDS;
             if (shouldKeepQueuedProgressFloor) {
@@ -1144,7 +1169,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             }
             if (
               previous &&
-              previous.currentTime === currentTime &&
+              previous.currentTime === queuedCurrentTime &&
               previous.isFinished === isFinished &&
               previous.updatedAt >= updatedAt
             ) {
@@ -1153,7 +1178,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             }
             const nextQueuedEntry: PendingProgressSync = {
               libraryItemId,
-              currentTime,
+              currentTime: queuedCurrentTime,
               isFinished,
               updatedAt,
               title: title ?? previous?.title ?? null,
@@ -1161,7 +1186,12 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               trigger: trigger ?? previous?.trigger ?? null,
             };
             queueSizeForUser = Object.keys(queueByItemId).length + (previous ? 0 : 1);
-            queueNote = previous ? "Replaced existing queued progress" : "Queued progress";
+            queueNote =
+              queuedCurrentTime !== currentTime
+                ? "Preserved newer local progress for automatic queue write"
+                : previous
+                  ? "Replaced existing queued progress"
+                  : "Queued progress";
             return {
               ...state,
               pendingProgressByUser: {
@@ -1265,9 +1295,14 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 !queuedProgress.isFinished &&
                 queuedProgress.currentTime <= 0 &&
                 knownCurrentTimeSeconds > ZERO_PROGRESS_REGRESSION_GUARD_SECONDS;
-              if (shouldSkipStaleZeroProgress) {
+              const shouldSkipStaleAutomaticProgress =
+                !queuedProgress.isFinished &&
+                shouldProtectProgressFloorForQueueTrigger(queuedProgress.trigger) &&
+                knownCurrentTimeSeconds >
+                  queuedProgress.currentTime + ZERO_PROGRESS_REGRESSION_GUARD_SECONDS;
+              if (shouldSkipStaleZeroProgress || shouldSkipStaleAutomaticProgress) {
                 if (__DEV__) {
-                  console.warn("[device-books-store] progress:skip-stale-zero-sync", {
+                  console.warn("[device-books-store] progress:skip-stale-sync", {
                     libraryItemId: queuedProgress.libraryItemId,
                     queuedCurrentTime: queuedProgress.currentTime,
                     knownCurrentTimeSeconds,
@@ -1285,7 +1320,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                   queuedAt: queuedProgress.updatedAt,
                   queueSizeForUser: queuedEntries.length,
                   originTrigger: queuedProgress.trigger ?? null,
-                  note: "Skipped stale zero-progress flush because newer progress already existed",
+                  note: shouldSkipStaleAutomaticProgress
+                    ? "Skipped stale automatic progress flush because newer progress already existed"
+                    : "Skipped stale zero-progress flush because newer progress already existed",
                 });
                 resolvedLibraryItemIds.push(queuedProgress.libraryItemId);
                 continue;

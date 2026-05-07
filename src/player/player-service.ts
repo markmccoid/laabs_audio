@@ -47,7 +47,6 @@ const MIN_PLAYBACK_RATE = 0.25;
 const MAX_PLAYBACK_RATE = 2.0;
 const LOCAL_SESSION_ID = "local";
 const PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS = 5;
-const INITIAL_INTERVAL_SYNC_GUARD_WINDOW_SECONDS = 20;
 const LOCAL_PLAYBACK_PROGRESS_TIMEOUT_MS = 4000;
 const LOCAL_PLAYBACK_PROGRESS_POLL_INTERVAL_MS = 250;
 const LOCAL_PLAYBACK_PROGRESS_MIN_DELTA_MS = 250;
@@ -1624,10 +1623,10 @@ class PlayerService {
     const cachedProgress = this.getCachedProgressForLibraryItem(payload.libraryItemId);
     const previousCurrentTimeSeconds = Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0));
     const shouldPreventTransientRegression =
-      payload.reason === "interval" &&
-      payload.timeListenedSeconds <= INITIAL_INTERVAL_SYNC_GUARD_WINDOW_SECONDS &&
+      payload.reason !== "seek" &&
       !payload.isFinished &&
       Boolean(cachedProgress) &&
+      !cachedProgress?.isFinished &&
       previousCurrentTimeSeconds >
         payload.currentTimeSeconds + PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS;
 
