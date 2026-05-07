@@ -694,9 +694,18 @@ export const useGetItemDetails = (itemId?: string) => {
       error: null,
     };
   }
+  const shouldUseDownloadedFallback = Boolean(downloadedFallback && !details);
+  const resolvedData = shouldUseDownloadedFallback ? downloadedFallback : data;
   // console.log("useGetItemDetails coveruri", data?.coverUri);
   // console.log("useGetItemDetails FULL", data?.coverFull);
-  return { data, isPending, isError, isLoading, error, ...rest };
+  return {
+    data: resolvedData,
+    isPending: shouldUseDownloadedFallback ? false : isPending,
+    isError: shouldUseDownloadedFallback ? false : isError,
+    isLoading: shouldUseDownloadedFallback ? false : isLoading,
+    error: shouldUseDownloadedFallback ? null : error,
+    ...rest,
+  };
 };
 
 //# ----------------------------------------------
