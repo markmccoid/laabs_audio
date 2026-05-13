@@ -4,6 +4,7 @@ import { useDeviceBooksActions } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -13,6 +14,9 @@ const resolveParam = (value: string | string[] | undefined) =>
 export const BookBookshelvesSheet = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
+  const [optimisticSelectionByShelfId, setOptimisticSelectionByShelfId] = useState<
+    Record<string, boolean>
+  >({});
   const { libraryItemId: libraryItemIdParam } = useLocalSearchParams<{
     libraryItemId?: string | string[];
   }>();
@@ -29,33 +33,59 @@ export const BookBookshelvesSheet = () => {
   type SelectableShelf = (typeof customShelves)[number] | (typeof playlistShelves)[number];
 
   const canMutate = Boolean(libraryItemId && activeLibraryId && activeLibraryUserKey);
+  const shelves = useMemo(
+    () => (libraryItemId ? [...customShelves, ...playlistShelves] : []),
+    [customShelves, libraryItemId, playlistShelves],
+  );
+
+  useEffect(() => {
+    setOptimisticSelectionByShelfId({});
+  }, [libraryItemId]);
 
   const openBookshelfSettings = () => {
     router.push("/(tabs)/settings/bookshelves");
   };
 
+  const clearOptimisticSelection = (shelfId: string, expectedSelected: boolean) => {
+    setOptimisticSelectionByShelfId((current) => {
+      if (current[shelfId] !== expectedSelected) return current;
+      const { [shelfId]: _cleared, ...remaining } = current;
+      return remaining;
+    });
+  };
+
   const toggleMembership = (shelf: SelectableShelf, currentlySelected: boolean) => {
     if (!libraryItemId || !canMutate) return;
     const scopeOptions = { userKey: activeLibraryUserKey, libraryId: activeLibraryId };
+    const nextSelected = !currentlySelected;
+
+    setOptimisticSelectionByShelfId((current) => ({
+      ...current,
+      [shelf.id]: nextSelected,
+    }));
 
     if (shelf.kind === "custom") {
       if (currentlySelected) {
         removeBookFromCustomShelf(shelf.id, libraryItemId, scopeOptions);
-        return;
+      } else {
+        addBookToCustomShelf(shelf.id, libraryItemId, scopeOptions);
       }
-      addBookToCustomShelf(shelf.id, libraryItemId, scopeOptions);
+      setTimeout(() => clearOptimisticSelection(shelf.id, nextSelected), 150);
       return;
     }
 
-    if (currentlySelected) {
-      void removeBooksFromPlaylistShelfOptimistic(shelf.id, [libraryItemId], scopeOptions);
-      return;
-    }
-    void addBooksToPlaylistShelfOptimistic(shelf.id, [libraryItemId], scopeOptions);
+    const operation = currentlySelected
+      ? removeBooksFromPlaylistShelfOptimistic(shelf.id, [libraryItemId], scopeOptions)
+      : addBooksToPlaylistShelfOptimistic(shelf.id, [libraryItemId], scopeOptions);
+
+    void operation.finally(() => {
+      clearOptimisticSelection(shelf.id, nextSelected);
+    });
   };
 
   const renderShelf = (shelf: SelectableShelf) => {
-    const isSelected = Boolean(libraryItemId && shelf.bookIds.includes(libraryItemId));
+    const storedSelected = Boolean(libraryItemId && shelf.bookIds.includes(libraryItemId));
+    const isSelected = optimisticSelectionByShelfId[shelf.id] ?? storedSelected;
     const typePill =
       shelf.kind === "custom"
         ? {
@@ -124,8 +154,6 @@ export const BookBookshelvesSheet = () => {
       </Pressable>
     );
   };
-
-  const shelves = libraryItemId ? [...customShelves, ...playlistShelves] : [];
 
   return (
     <ScrollView
