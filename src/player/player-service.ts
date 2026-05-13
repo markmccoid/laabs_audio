@@ -41,6 +41,7 @@ import type { PitchCorrectionQuality, PlaybackQueueItem } from "./types";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_LISTEN_DELTA_MS = 5000;
+const PAUSE_SYNC_DEDUPE_WINDOW_MS = 2000;
 const DEBUG_PLAYBACK_EVENTS = false;
 const CHAPTER_RESTART_THRESHOLD_MS = 3000;
 const MIN_PLAYBACK_RATE = 0.25;
@@ -52,7 +53,7 @@ const LOCAL_PLAYBACK_PROGRESS_POLL_INTERVAL_MS = 250;
 const LOCAL_PLAYBACK_PROGRESS_MIN_DELTA_MS = 250;
 const STALE_ZERO_PROGRESS_GUARD_SECONDS = 5;
 const LOAD_PROGRESS_FETCH_TIMEOUT_MS = 350;
-type ProgressSyncReason = "interval" | "pause" | "seek" | "close";
+type ProgressSyncReason = "interval" | "pause" | "external_pause" | "seek" | "close";
 type CachedUserServerStateSource =
   | "unavailable"
   | "cache_hit"
@@ -109,6 +110,8 @@ class PlayerService {
   private listenedMs = 0;
   private lastSyncAttemptAt = 0;
   private lastSyncAt = 0;
+  private lastPauseSyncSignature: string | null = null;
+  private lastPauseSyncAt = 0;
   private initialized = false;
   private localStreamFallbackInFlight = false;
 
@@ -1178,12 +1181,48 @@ class PlayerService {
     }
   }
 
+  private getPauseSyncSignature(state: PlaybackStoreState) {
+    if (!state.libraryItemId || !state.sessionId) return null;
+    const currentTimeSeconds = msToSeconds(state.positionMs);
+    const isFinished =
+      state.durationMs > 0 && state.positionMs >= state.durationMs - secondsToMs(3);
+    return `${state.libraryItemId}:${currentTimeSeconds}:${isFinished ? "finished" : "active"}`;
+  }
+
+  private async syncPauseLikeProgress(
+    reason: Extract<ProgressSyncReason, "pause" | "external_pause">,
+    options?: {
+      state?: PlaybackStoreState;
+    },
+  ) {
+    const state = options?.state ?? playbackStore.getState();
+    const signature = this.getPauseSyncSignature(state);
+    const now = Date.now();
+    if (!signature) {
+      return { syncAttempted: false, dedupeSkipped: false };
+    }
+
+    const dedupeSkipped = Boolean(
+      signature === this.lastPauseSyncSignature &&
+        now - this.lastPauseSyncAt <= PAUSE_SYNC_DEDUPE_WINDOW_MS,
+    );
+
+    if (dedupeSkipped) {
+      return { syncAttempted: false, dedupeSkipped };
+    }
+
+    this.lastPauseSyncSignature = signature;
+    this.lastPauseSyncAt = now;
+    await this.syncProgress(reason, { state });
+    return { syncAttempted: true, dedupeSkipped: false };
+  }
+
   async pause() {
     this.logDebug("pause");
     await this.engine.pause();
     this.logSnapshot("after pause");
     playbackStore.getState().actions.setPlaybackState("paused");
-    await this.syncProgress("pause");
+    await this.syncPauseLikeProgress("pause", { state: playbackStore.getState() });
   }
 
   async stop() {
@@ -1551,6 +1590,8 @@ class PlayerService {
       positionMs,
       trackPositionMs,
     };
+    const previousPlaybackState = state.playbackState;
+    let didTransitionToNonPlaying = false;
 
     // Keep store playbackState aligned with engine state.
     if (status.isPlaying && state.playbackState !== "playing") {
@@ -1560,6 +1601,7 @@ class PlayerService {
       void this.reconcilePlaybackRate("status-transition");
     } else if (!status.isPlaying && state.playbackState === "playing") {
       updates.playbackState = "paused";
+      didTransitionToNonPlaying = true;
     }
 
     if (status.durationMs > 0 && status.durationMs !== state.trackDurationMs) {
@@ -1579,7 +1621,7 @@ class PlayerService {
     playbackStore.getState().actions.applyStatusUpdate(updates);
 
     // Accumulate listening time for sync (ignore large jumps).
-    if (status.isPlaying) {
+    if (status.isPlaying || didTransitionToNonPlaying) {
       const delta = positionMs - this.lastTrackedPositionMs;
       if (delta > 0 && delta <= MAX_LISTEN_DELTA_MS) {
         this.listenedMs += delta;
@@ -1587,6 +1629,37 @@ class PlayerService {
     }
 
     this.lastTrackedPositionMs = positionMs;
+
+    let externalPauseSyncResult: { syncAttempted: boolean; dedupeSkipped: boolean } | null = null;
+    if (didTransitionToNonPlaying && !status.didJustFinish) {
+      externalPauseSyncResult = await this.syncPauseLikeProgress("external_pause", {
+        state: playbackStore.getState(),
+      });
+    }
+
+    if (updates.playbackState) {
+      progressLogStore.getState().actions.appendEntry({
+        eventType: "playback_state_transition",
+        trigger: didTransitionToNonPlaying ? "native_non_playing_status" : "native_playing_status",
+        libraryItemId: state.libraryItemId,
+        title: this.resolveBookTitle(state),
+        sessionKind: this.resolveSessionKind(state.sessionId),
+        fromPlaybackState: previousPlaybackState,
+        toPlaybackState: updates.playbackState,
+        engineIsPlaying: status.isPlaying,
+        positionSeconds: msToSeconds(positionMs),
+        trackPositionSeconds: msToSeconds(trackPositionMs),
+        durationSeconds: msToSeconds(state.durationMs),
+        syncAttempted: Boolean(externalPauseSyncResult?.syncAttempted),
+        syncReason: externalPauseSyncResult ? "external_pause" : undefined,
+        dedupeSkipped: Boolean(externalPauseSyncResult?.dedupeSkipped),
+        note: didTransitionToNonPlaying
+          ? externalPauseSyncResult?.dedupeSkipped
+            ? "External pause sync skipped because an equivalent pause sync just ran"
+            : "Native engine reported playback stopped without a manual pause path"
+          : "Native engine reported playback resumed outside the direct play() path",
+      });
+    }
 
     if (status.didJustFinish) {
       await this.handleTrackEnded();

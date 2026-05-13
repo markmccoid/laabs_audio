@@ -72,7 +72,9 @@ const formatEventTypeLabel = (eventType: ProgressLogEventType) =>
       ? "Progress Choice"
       : eventType === "server_progress_fetch"
         ? "Server Fetch"
-        : "Queue Sync";
+        : eventType === "playback_state_transition"
+          ? "Playback State"
+          : "Queue Sync";
 
 const getEventBadgeColors = (
   themeColors: ReturnType<typeof useThemeColors>,
@@ -96,6 +98,12 @@ const getEventBadgeColors = (
         backgroundColor: "#ede9fe",
         borderColor: "#c4b5fd",
         textColor: "#6d28d9",
+      };
+    case "playback_state_transition":
+      return {
+        backgroundColor: "#e0f2fe",
+        borderColor: "#7dd3fc",
+        textColor: "#0369a1",
       };
     case "queue_sync":
     default:
@@ -329,6 +337,27 @@ const LogCard = ({ entry }: { entry: ProgressLogEntry }) => {
       ];
     }
 
+    if (entry.eventType === "playback_state_transition") {
+      return [
+        <StatusBadge
+          key={`${entry.id}-transition`}
+          label={`${entry.fromPlaybackState} -> ${entry.toPlaybackState}`}
+          tone={entry.toPlaybackState === "playing" ? "good" : "info"}
+        />,
+        <StatusBadge
+          key={`${entry.id}-sync`}
+          label={
+            entry.syncAttempted
+              ? "Sync Attempted"
+              : entry.dedupeSkipped
+                ? "Sync Deduped"
+                : "No Sync"
+          }
+          tone={entry.syncAttempted ? "warning" : entry.dedupeSkipped ? "neutral" : "info"}
+        />,
+      ];
+    }
+
     return [
       <StatusBadge
         key={`${entry.id}-action`}
@@ -391,6 +420,16 @@ const LogCard = ({ entry }: { entry: ProgressLogEntry }) => {
         `fetchedLastUpdate=${entry.fetchedLastUpdate ? formatTimestamp(entry.fetchedLastUpdate) : "n/a"} | cachedLastUpdate=${entry.cachedLastUpdate ? formatTimestamp(entry.cachedLastUpdate) : "n/a"}`,
         entry.note ? `note=${entry.note}` : null,
         entry.errorMessage ? `error=${entry.errorMessage}` : null,
+      ].filter((value): value is string => Boolean(value));
+    }
+
+    if (entry.eventType === "playback_state_transition") {
+      return [
+        `trigger=${entry.trigger}`,
+        `from=${entry.fromPlaybackState} | to=${entry.toPlaybackState} | enginePlaying=${entry.engineIsPlaying ? "yes" : "no"}`,
+        `position=${formatSeconds(entry.positionSeconds)} | track=${formatSeconds(entry.trackPositionSeconds)} | duration=${formatSeconds(entry.durationSeconds)}`,
+        `syncAttempted=${entry.syncAttempted ? "yes" : "no"} | syncReason=${entry.syncReason ?? "none"} | dedupeSkipped=${entry.dedupeSkipped ? "yes" : "no"}`,
+        entry.note ? `note=${entry.note}` : null,
       ].filter((value): value is string => Boolean(value));
     }
 
@@ -502,7 +541,9 @@ export const SettingsProgressLogsScreen = () => {
             ? `${entry.chosenSource} ${entry.reason} ${entry.serverStateSource}`
             : entry.eventType === "server_progress_fetch"
               ? `${entry.result} ${entry.note ?? ""} ${entry.errorMessage ?? ""}`
-            : `${entry.action} ${entry.originTrigger ?? ""} ${entry.note ?? ""} ${entry.errorMessage ?? ""}`,
+              : entry.eventType === "playback_state_transition"
+                ? `${entry.fromPlaybackState} ${entry.toPlaybackState} ${entry.syncReason ?? ""} ${entry.note ?? ""}`
+                : `${entry.action} ${entry.originTrigger ?? ""} ${entry.note ?? ""} ${entry.errorMessage ?? ""}`,
       ]
         .join(" ")
         .toLowerCase();
@@ -738,6 +779,12 @@ export const SettingsProgressLogsScreen = () => {
                   <FilterChip
                     label="Queue Sync"
                     value="queue_sync"
+                    selectedValue={eventTypeFilter}
+                    onPress={setEventTypeFilter}
+                  />
+                  <FilterChip
+                    label="Playback State"
+                    value="playback_state_transition"
                     selectedValue={eventTypeFilter}
                     onPress={setEventTypeFilter}
                   />

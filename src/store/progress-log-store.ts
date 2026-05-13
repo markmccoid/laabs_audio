@@ -10,7 +10,8 @@ export type ProgressLogEventType =
   | "progress_sync_point"
   | "progress_resolution"
   | "queue_sync"
-  | "server_progress_fetch";
+  | "server_progress_fetch"
+  | "playback_state_transition";
 export type ProgressLogSessionKind = "streamed" | "downloaded" | "unknown";
 export type ProgressSyncPath =
   | "session_sync"
@@ -113,17 +114,34 @@ export type ServerProgressFetchLogEntry = ProgressLogBase & {
   note?: string;
 };
 
+export type PlaybackStateTransitionLogEntry = ProgressLogBase & {
+  eventType: "playback_state_transition";
+  trigger: string;
+  fromPlaybackState: string;
+  toPlaybackState: string;
+  engineIsPlaying: boolean;
+  positionSeconds: number;
+  trackPositionSeconds: number;
+  durationSeconds: number;
+  syncAttempted: boolean;
+  syncReason?: string;
+  dedupeSkipped: boolean;
+  note?: string;
+};
+
 export type ProgressLogEntry =
   | ProgressSyncPointLogEntry
   | ProgressResolutionLogEntry
   | QueueSyncLogEntry
-  | ServerProgressFetchLogEntry;
+  | ServerProgressFetchLogEntry
+  | PlaybackStateTransitionLogEntry;
 
 type ProgressLogEntryInput =
   | (Omit<ProgressSyncPointLogEntry, "id" | "timestamp"> & { timestamp?: number })
   | (Omit<ProgressResolutionLogEntry, "id" | "timestamp"> & { timestamp?: number })
   | (Omit<QueueSyncLogEntry, "id" | "timestamp"> & { timestamp?: number })
-  | (Omit<ServerProgressFetchLogEntry, "id" | "timestamp"> & { timestamp?: number });
+  | (Omit<ServerProgressFetchLogEntry, "id" | "timestamp"> & { timestamp?: number })
+  | (Omit<PlaybackStateTransitionLogEntry, "id" | "timestamp"> & { timestamp?: number });
 
 export type ProgressLogState = {
   entries: ProgressLogEntry[];

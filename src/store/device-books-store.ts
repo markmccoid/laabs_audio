@@ -41,6 +41,7 @@ const PROGRESS_FLOOR_QUEUE_TRIGGERS = new Set([
   "background_app_state",
   "sync:interval",
   "sync:pause",
+  "sync:external_pause",
   "sync:close",
 ]);
 const GLOBAL_PLAYBACK_RATE_KEY = "__global__";

@@ -1,9 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo } from "react";
 import type { LibraryItemSummary, LibraryItemsSummary } from "../api/library-items-api";
-import type { UserBookProgress, UserServerState } from "../api/me-api";
+import {
+  normalizeUserProgressByLibraryItemId,
+  type UserBookProgress,
+  type UserServerState,
+} from "../api/me-api";
 import { playlistsApi } from "../api/playlists-api";
 import { useAuthStore } from "../auth/auth-store";
+import { usePlaybackStore } from "../player/playback-store";
 import { queryKeys } from "../query/query-keys";
 import {
   resolveStoredDownloadCoverUri,
@@ -12,6 +17,7 @@ import {
   toHomeShelfScopeKey,
   useDeviceBooksStore,
   type HomeDerivedShelfId,
+  type PendingProgressSync,
   type PlaylistShelfSyncState,
 } from "../store/device-books-store";
 import { toDownloadedBookSummary } from "../store/downloaded-book-helpers";
@@ -77,11 +83,12 @@ const EMPTY_CUSTOM_SHELVES: {
   updatedAt: number;
 }[] = [];
 const EMPTY_CATALOG: LibraryItemsSummary = [];
-const EMPTY_PROGRESS_BY_BOOK: Record<string, UserBookProgress> = {};
+const EMPTY_PENDING_PROGRESS: Record<string, PendingProgressSync> = {};
 const EMPTY_FAVORITES_BY_BOOK: Record<string, true> = {};
 const EMPTY_ORDER: string[] = [];
 const EMPTY_SHELF_SETTINGS_BY_ID: Record<string, HomeShelfSettings> = {};
 const PERSIST_META = { persist: true } as const;
+const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
 
 const reorderByIds = <T extends { id: string }>(items: T[], orderedIds: string[]) => {
   if (!items.length || !orderedIds.length) return items;
@@ -136,6 +143,51 @@ const seededShuffle = <T,>(items: T[], seedKey: string) => {
   return result;
 };
 
+const buildLocalProgress = (payload: {
+  libraryItemId: string;
+  currentTime: number;
+  duration: number;
+  isFinished: boolean;
+  updatedAt: number;
+  previous?: UserBookProgress | null;
+}): UserBookProgress => {
+  const currentTime = Math.max(0, Math.floor(payload.currentTime));
+  const duration = Math.max(
+    0,
+    Math.floor(payload.duration || payload.previous?.duration || 0),
+  );
+  const progressPercent =
+    duration > 0
+      ? Math.max(0, Math.min(1, currentTime / duration))
+      : (payload.previous?.progressPercent ?? 0);
+
+  return {
+    progressId: payload.previous?.progressId ?? `${payload.libraryItemId}:local`,
+    libraryItemId: payload.libraryItemId,
+    mediaItemId: payload.previous?.mediaItemId,
+    duration,
+    progressPercent,
+    currentTime,
+    isFinished: payload.isFinished,
+    hideFromContinueListening: payload.previous?.hideFromContinueListening ?? false,
+    startedAt: payload.previous?.startedAt ?? payload.updatedAt,
+    finishedAt: payload.isFinished ? (payload.previous?.finishedAt ?? payload.updatedAt) : null,
+    lastUpdate: Math.max(payload.updatedAt, payload.previous?.lastUpdate ?? 0),
+  };
+};
+
+const preferDisplayProgress = (
+  current: UserBookProgress | undefined,
+  candidate: UserBookProgress,
+) => {
+  if (!current) return candidate;
+  if (candidate.isFinished && !current.isFinished) return candidate;
+  if (current.isFinished && !candidate.isFinished) return current;
+  if (candidate.currentTime > current.currentTime) return candidate;
+  if (candidate.currentTime < current.currentTime) return current;
+  return candidate.lastUpdate >= current.lastUpdate ? candidate : current;
+};
+
 export const useHomeShelves = () => {
   const queryClient = useQueryClient();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
@@ -143,6 +195,9 @@ export const useHomeShelves = () => {
   const authStatus = useAuthStore((state) => state.status);
   const isOnline = useAuthStore((state) => state.isOnline);
   const homeScopeKey = toHomeShelfScopeKey(activeLibraryUserKey, activeLibraryId);
+  const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const playbackPositionMs = usePlaybackStore((state) => state.positionMs);
+  const playbackDurationMs = usePlaybackStore((state) => state.durationMs);
 
   const libraryBooksQueryKey = queryKeys.libraryBooks(activeLibraryId);
   const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
@@ -194,6 +249,11 @@ export const useHomeShelves = () => {
   const suppressedPlaylistIds = useDeviceBooksStore((state) =>
     selectSuppressedPlaylistIdsByScope(state, homeScopeKey),
   );
+  const pendingProgressByItemId = useDeviceBooksStore((state) =>
+    activeLibraryUserKey
+      ? state.pendingProgressByUser[activeLibraryUserKey] ?? EMPTY_PENDING_PROGRESS
+      : EMPTY_PENDING_PROGRESS,
+  );
   const upsertPlaylistsFromServer = useDeviceBooksStore((state) => state.actions.upsertPlaylistsFromServer);
   const markMissingPlaylists = useDeviceBooksStore((state) => state.actions.markMissingPlaylists);
   const downloadedDetailsById = useDeviceBooksStore((state) => state.downloadedDetailsById);
@@ -228,26 +288,65 @@ export const useHomeShelves = () => {
     return map;
   }, [catalog]);
 
-  const rawProgressByLibraryItemId = useMemo(
-    () =>
-      userServerState?.progressByLibraryItemId ??
-      (userServerState as LegacyUserServerState | undefined)?.progressByBookId ??
-      EMPTY_PROGRESS_BY_BOOK,
-    [userServerState],
-  );
-
   const progressByBookId = useMemo(() => {
-    const normalizedProgress: Record<string, UserBookProgress> = {};
-    Object.values(rawProgressByLibraryItemId).forEach((progress) => {
-      const libraryItemId = progress?.libraryItemId;
-      if (!libraryItemId) return;
-      const existing = normalizedProgress[libraryItemId];
-      if (!existing || progress.lastUpdate >= existing.lastUpdate) {
-        normalizedProgress[libraryItemId] = progress;
-      }
+    const normalizedProgress = {
+      ...normalizeUserProgressByLibraryItemId(
+        userServerState as LegacyUserServerState | undefined,
+      ),
+    };
+
+    Object.values(pendingProgressByItemId).forEach((pendingProgress) => {
+      if (!pendingProgress?.libraryItemId) return;
+      const previous = normalizedProgress[pendingProgress.libraryItemId];
+      const book = catalogById.get(pendingProgress.libraryItemId);
+      const candidate = buildLocalProgress({
+        libraryItemId: pendingProgress.libraryItemId,
+        currentTime: pendingProgress.currentTime,
+        duration: previous?.duration ?? book?.duration ?? 0,
+        isFinished: pendingProgress.isFinished,
+        updatedAt: pendingProgress.updatedAt,
+        previous,
+      });
+
+      normalizedProgress[pendingProgress.libraryItemId] = preferDisplayProgress(
+        previous,
+        candidate,
+      );
     });
+
+    if (playbackLibraryItemId) {
+      const playbackCurrentTime = msToSeconds(playbackPositionMs);
+      if (playbackCurrentTime > 0) {
+        const previous = normalizedProgress[playbackLibraryItemId];
+        const book = catalogById.get(playbackLibraryItemId);
+        const playbackDuration = Math.max(
+          msToSeconds(playbackDurationMs),
+          previous?.duration ?? 0,
+          book?.duration ?? 0,
+        );
+        const candidate = buildLocalProgress({
+          libraryItemId: playbackLibraryItemId,
+          currentTime: playbackCurrentTime,
+          duration: playbackDuration,
+          isFinished:
+            playbackDuration > 0 && playbackCurrentTime >= Math.max(0, playbackDuration - 3),
+          updatedAt: Date.now(),
+          previous,
+        });
+
+        normalizedProgress[playbackLibraryItemId] = preferDisplayProgress(previous, candidate);
+      }
+    }
+
     return normalizedProgress;
-  }, [rawProgressByLibraryItemId]);
+  }, [
+    catalogById,
+    pendingProgressByItemId,
+    playbackDurationMs,
+    playbackLibraryItemId,
+    playbackPositionMs,
+    userServerState,
+  ]);
 
   const favoriteByBookId = useMemo(
     () =>
