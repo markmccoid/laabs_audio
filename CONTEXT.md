@@ -47,6 +47,14 @@ _Avoid_: Orphaned bookmark
 A clip-only view for previewing, trimming, editing, exporting, or transcribing a clip bookmark.
 _Avoid_: Clip page, clip editor
 
+**Clip Range**:
+The selected start-to-end span of a Clip Bookmark inside Clip Detail.
+_Avoid_: Trim range
+
+**Trim Window**:
+The bounded span of audiobook time visible in Clip Detail while editing a Clip Bookmark's start and end positions.
+_Avoid_: Five minute window, scrubber window
+
 ## Relationships
 
 - A **Bookmark** is either a **Point Bookmark** or a **Clip Bookmark**.
@@ -54,6 +62,8 @@ _Avoid_: Clip page, clip editor
 - A **Clip Bookmark** has a start **Bookmark Position** and an end position.
 - A **Clip Bookmark** uses its start **Bookmark Position** for ordering and navigation.
 - A **Clip Bookmark** has a bounded duration so clips remain practical to play, export, and transcribe.
+- A **Clip Range** is the selected audio span of a Clip Bookmark.
+- A **Clip Range** must fit within the Trim Window while being edited.
 - Every **Bookmark** has a **Bookmark Title** before it can be saved.
 - A **Bookmark** may change between **Point Bookmark** and **Clip Bookmark** without becoming a different **Bookmark**.
 - Choosing a **Bookmark** from the bookmark viewer sets the **Listening Position** to that bookmark's **Bookmark Position**.
@@ -62,6 +72,9 @@ _Avoid_: Clip page, clip editor
 - The app stores **Preview Position** in transient preview state, not in the main playback state.
 - A **Clip Detail** belongs to exactly one **Clip Bookmark**.
 - A **Clip Bookmark** is edited from its **Clip Detail**.
+- A **Trim Window** is a fixed-duration editing viewport unless the audiobook is shorter than that duration.
+- A **Trim Window** translates a Clip Bookmark's start and end positions together without changing the clip duration.
+- Moving a **Trim Window** updates the draft Clip Bookmark positions but does not drive clip preview playback.
 - Playback inside **Clip Detail** must not accidentally change the user's intended **Listening Position**.
 - When clip preview ends or Clip Detail closes, LAABS Audio restores the **Listening Position**.
 - Choosing a **Bookmark** is an explicit navigation action and takes precedence over clip preview restoration.
@@ -87,3 +100,5 @@ _Avoid_: Clip page, clip editor
 - "orphaned bookmark" was used to mean a local bookmark whose server counterpart is missing; resolved: the canonical term is **Unmatched Bookmark**.
 - "clip name" and "bookmark name" were used for the user-facing label; resolved: the canonical term is **Bookmark Title**.
 - "clip details page" was used for the clip-only preview/edit surface; resolved: the canonical term is **Clip Detail**.
+- "trim range" was used ambiguously for both the selected clip span and visible editing span; resolved: the selected span is **Clip Range**.
+- "five minute window" and "scrubber window" were used for the visible editing span; resolved: the canonical term is **Trim Window**.

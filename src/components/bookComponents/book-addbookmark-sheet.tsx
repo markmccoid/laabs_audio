@@ -9,13 +9,13 @@ import { useMemo, useState } from "react";
 import { Keyboard, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
+import { MAX_CLIP_DURATION_SECONDS, MIN_CLIP_DURATION_SECONDS } from "./clip-timing";
 
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
 const STEP_SECONDS = 5;
 const DEFAULT_CLIP_DURATION_SECONDS = 30;
-const MAX_CLIP_DURATION_SECONDS = 10 * 60;
 
 export const BookAddBookmarkSheet = () => {
   const themeColors = useThemeColors();
@@ -47,10 +47,10 @@ export const BookAddBookmarkSheet = () => {
   const isClip = bookmarkKind === "clip";
   const clipDurationSeconds = clipEndTimeSeconds - bookmarkTimeSeconds;
   const clipValidationMessage =
-    isClip && clipEndTimeSeconds <= bookmarkTimeSeconds
+    isClip && clipDurationSeconds < MIN_CLIP_DURATION_SECONDS
       ? "Clip end must be after start."
       : isClip && clipDurationSeconds > MAX_CLIP_DURATION_SECONDS
-        ? "Clip cannot be longer than 10 minutes."
+        ? "Clip cannot be longer than 5 minutes."
         : isClip && durationSeconds > 0 && clipEndTimeSeconds > durationSeconds
           ? "Clip end cannot be past the end of the book."
           : null;
@@ -67,15 +67,28 @@ export const BookAddBookmarkSheet = () => {
   const adjustTime = (delta: number) => {
     setBookmarkTimeSeconds((current) => {
       const nextStart = Math.max(0, current + delta);
-      if (isClip && clipEndTimeSeconds <= nextStart) {
-        setClipEndTimeSeconds(nextStart + DEFAULT_CLIP_DURATION_SECONDS);
+      if (isClip) {
+        const durationCap = durationSeconds > 0 ? durationSeconds : Number.MAX_SAFE_INTEGER;
+        if (clipEndTimeSeconds <= nextStart) {
+          setClipEndTimeSeconds(
+            Math.min(nextStart + DEFAULT_CLIP_DURATION_SECONDS, durationCap),
+          );
+        } else if (clipEndTimeSeconds - nextStart > MAX_CLIP_DURATION_SECONDS) {
+          setClipEndTimeSeconds(Math.min(nextStart + MAX_CLIP_DURATION_SECONDS, durationCap));
+        }
       }
       return nextStart;
     });
   };
 
   const adjustClipEndTime = (delta: number) => {
-    setClipEndTimeSeconds((current) => Math.max(0, current + delta));
+    setClipEndTimeSeconds((current) => {
+      const durationCap = durationSeconds > 0 ? durationSeconds : Number.MAX_SAFE_INTEGER;
+      return Math.max(
+        bookmarkTimeSeconds + MIN_CLIP_DURATION_SECONDS,
+        Math.min(current + delta, durationCap, bookmarkTimeSeconds + MAX_CLIP_DURATION_SECONDS),
+      );
+    });
   };
 
   const handleSave = async () => {

@@ -7,13 +7,21 @@ import type { Bookmark } from "@/types/absTypes";
 import { formatSeconds } from "@/utils/formatUtils";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Keyboard, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
+import { ClipRangeScrubber } from "./clip-range-scrubber";
+import {
+  clampSeconds,
+  getTrimWindowDurationSeconds,
+  getTrimWindowStartForClip,
+  MAX_CLIP_DURATION_SECONDS,
+  MIN_CLIP_DURATION_SECONDS,
+} from "./clip-timing";
+import { ClipTrimWindowSlider } from "./clip-trim-window-slider";
 
 const STEP_SECONDS = 5;
-const MAX_CLIP_DURATION_SECONDS = 10 * 60;
 
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
@@ -30,11 +38,10 @@ export const BookClipDetailSheet = () => {
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const serverUrl = useAuthStore((state) => state.serverUrl);
-  const { libraryItemId: libraryItemIdParam, bookmarkId: bookmarkIdParam } =
-    useLocalSearchParams<{
-      libraryItemId?: string | string[];
-      bookmarkId?: string | string[];
-    }>();
+  const { libraryItemId: libraryItemIdParam, bookmarkId: bookmarkIdParam } = useLocalSearchParams<{
+    libraryItemId?: string | string[];
+    bookmarkId?: string | string[];
+  }>();
   const libraryItemId = resolveParam(libraryItemIdParam);
   const bookmarkId = resolveParam(bookmarkIdParam);
   const resolvedUserKey = useMemo(
@@ -42,7 +49,9 @@ export const BookClipDetailSheet = () => {
     [activeLibraryUserKey, serverUrl, storedUsername],
   );
   const bookmark = useDeviceBooksStore((state) =>
-    resolvedUserKey && bookmarkId ? state.localBookmarksByUser[resolvedUserKey]?.[bookmarkId] : null,
+    resolvedUserKey && bookmarkId
+      ? state.localBookmarksByUser[resolvedUserKey]?.[bookmarkId]
+      : null,
   );
   const { data: itemDetails } = useGetItemDetails(libraryItemId);
 
@@ -50,7 +59,14 @@ export const BookClipDetailSheet = () => {
   const [note, setNote] = useState("");
   const [startSeconds, setStartSeconds] = useState(0);
   const [endSeconds, setEndSeconds] = useState(0);
+  const [trimWindowStartSeconds, setTrimWindowStartSeconds] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const trimWindowDragStartRef = useRef({
+    trimWindowStartSeconds: 0,
+    startSeconds: 0,
+    endSeconds: 0,
+  });
   const previewStatus = useClipPreviewStore((state) => state.status);
   const previewBookmarkId = useClipPreviewStore((state) => state.bookmarkId);
   const previewPositionMs = useClipPreviewStore((state) => state.positionMs);
@@ -61,7 +77,14 @@ export const BookClipDetailSheet = () => {
     setNote(bookmark.note?.trim() ?? "");
     setStartSeconds(bookmark.startTimeSeconds);
     setEndSeconds(bookmark.endTimeSeconds ?? bookmark.startTimeSeconds + 30);
-  }, [bookmark]);
+    setTrimWindowStartSeconds(
+      getTrimWindowStartForClip({
+        startSeconds: bookmark.startTimeSeconds,
+        endSeconds: bookmark.endTimeSeconds ?? bookmark.startTimeSeconds + 30,
+        bookDurationSeconds: itemDetails?.bookDuration ?? 0,
+      }),
+    );
+  }, [bookmark, itemDetails?.bookDuration]);
 
   useEffect(() => {
     return () => {
@@ -70,24 +93,29 @@ export const BookClipDetailSheet = () => {
   }, []);
 
   const durationSeconds = itemDetails?.bookDuration ?? 0;
+  const trimWindowDurationSeconds = getTrimWindowDurationSeconds(durationSeconds);
+  const trimWindowEndSeconds = trimWindowStartSeconds + trimWindowDurationSeconds;
   const clipDurationSeconds = endSeconds - startSeconds;
   const validationMessage =
-    endSeconds <= startSeconds
+    clipDurationSeconds < MIN_CLIP_DURATION_SECONDS
       ? "Clip end must be after start."
       : clipDurationSeconds > MAX_CLIP_DURATION_SECONDS
-        ? "Clip cannot be longer than 10 minutes."
+        ? "Clip cannot be longer than 5 minutes."
+        : startSeconds < trimWindowStartSeconds || endSeconds > trimWindowEndSeconds
+          ? "Clip range must fit inside the trim window."
         : durationSeconds > 0 && endSeconds > durationSeconds
           ? "Clip end cannot be past the end of the book."
           : null;
   const trimmedTitle = title.trim();
   const savedNote = bookmark?.note?.trim() ?? "";
-  const savedEndSeconds = bookmark?.endTimeSeconds ?? (bookmark ? bookmark.startTimeSeconds + 30 : 0);
+  const savedEndSeconds =
+    bookmark?.endTimeSeconds ?? (bookmark ? bookmark.startTimeSeconds + 30 : 0);
   const hasDirtyDraft = Boolean(
     bookmark &&
-      (trimmedTitle !== bookmark.title.trim() ||
-        note.trim() !== savedNote ||
-        startSeconds !== bookmark.startTimeSeconds ||
-        endSeconds !== savedEndSeconds),
+    (trimmedTitle !== bookmark.title.trim() ||
+      note.trim() !== savedNote ||
+      startSeconds !== bookmark.startTimeSeconds ||
+      endSeconds !== savedEndSeconds),
   );
   const canSave = Boolean(
     bookmark && libraryItemId && trimmedTitle && hasDirtyDraft && !validationMessage && !isSaving,
@@ -109,13 +137,55 @@ export const BookClipDetailSheet = () => {
         ? "Stop Preview"
         : "Preview Clip"
     : "Preview Clip";
+  const handleDraftEditStart = useCallback(() => {
+    if (!isPreviewing) return;
+    void playerService.restoreListeningPositionAfterPreview();
+  }, [isPreviewing]);
 
   const adjustStart = (delta: number) => {
-    setStartSeconds((current) => Math.max(0, current + delta));
+    handleDraftEditStart();
+    setStartSeconds((current) =>
+      clampSeconds(
+        current + delta,
+        Math.max(trimWindowStartSeconds, endSeconds - MAX_CLIP_DURATION_SECONDS),
+        endSeconds - MIN_CLIP_DURATION_SECONDS,
+      ),
+    );
   };
 
   const adjustEnd = (delta: number) => {
-    setEndSeconds((current) => Math.max(0, current + delta));
+    handleDraftEditStart();
+    setEndSeconds((current) => {
+      const durationCap = durationSeconds > 0 ? durationSeconds : Number.MAX_SAFE_INTEGER;
+      return clampSeconds(
+        current + delta,
+        startSeconds + MIN_CLIP_DURATION_SECONDS,
+        Math.min(trimWindowEndSeconds, durationCap, startSeconds + MAX_CLIP_DURATION_SECONDS),
+      );
+    });
+  };
+
+  const handleTrimWindowDragStart = () => {
+    trimWindowDragStartRef.current = {
+      trimWindowStartSeconds,
+      startSeconds,
+      endSeconds,
+    };
+  };
+
+  const handleTrimWindowChange = (
+    nextWindowStartSeconds: number,
+    gestureStartWindowSeconds: number,
+  ) => {
+    const maxWindowStartSeconds =
+      durationSeconds > 0 ? Math.max(0, durationSeconds - trimWindowDurationSeconds) : 0;
+    const clampedWindowStartSeconds = clampSeconds(nextWindowStartSeconds, 0, maxWindowStartSeconds);
+    const dragStart = trimWindowDragStartRef.current;
+    const deltaSeconds = clampedWindowStartSeconds - gestureStartWindowSeconds;
+    if (deltaSeconds === 0) return;
+    setTrimWindowStartSeconds(clampedWindowStartSeconds);
+    setStartSeconds(dragStart.startSeconds + deltaSeconds);
+    setEndSeconds(dragStart.endSeconds + deltaSeconds);
   };
 
   const handlePreview = async () => {
@@ -255,6 +325,7 @@ export const BookClipDetailSheet = () => {
   return (
     <ScrollView
       style={{ flex: 1 }}
+      scrollEnabled={!isScrubbing}
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
@@ -341,7 +412,10 @@ export const BookClipDetailSheet = () => {
       ) : (
         <>
           <View style={{ gap: 6 }}>
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}>
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}
+            >
               Bookmark Title
             </Text>
             <TextInput
@@ -365,6 +439,27 @@ export const BookClipDetailSheet = () => {
           </View>
 
           <View style={{ gap: 8 }}>
+            <ClipRangeScrubber
+              startSeconds={startSeconds}
+              endSeconds={endSeconds}
+              trimWindowStartSeconds={trimWindowStartSeconds}
+              trimWindowDurationSeconds={trimWindowDurationSeconds}
+              disabled={isSaving}
+              onChangeStart={setStartSeconds}
+              onChangeEnd={setEndSeconds}
+              onScrubbingChange={setIsScrubbing}
+              onEditStart={handleDraftEditStart}
+            />
+            <ClipTrimWindowSlider
+              trimWindowStartSeconds={trimWindowStartSeconds}
+              trimWindowDurationSeconds={trimWindowDurationSeconds}
+              bookDurationSeconds={durationSeconds}
+              disabled={isSaving}
+              onChangeTrimWindowStart={handleTrimWindowChange}
+              onDragStart={handleTrimWindowDragStart}
+              onScrubbingChange={setIsScrubbing}
+              onEditStart={handleDraftEditStart}
+            />
             <View style={{ flexDirection: "row", gap: 8 }}>
               {renderTimePanel(
                 "Start Time",
@@ -384,7 +479,16 @@ export const BookClipDetailSheet = () => {
                 {validationMessage}
               </Text>
             ) : (
-              <Text selectable style={{ color: themeColors.textMuted, fontSize: 12, textAlign: "center" }}>
+              <Text
+                selectable
+                style={{
+                  color: themeColors.text,
+                  fontSize: 16,
+                  fontWeight: "700",
+                  textAlign: "center",
+                  fontVariant: ["tabular-nums"],
+                }}
+              >
                 Clip Duration: {formatSeconds(clipDurationSeconds, "compact", true, true)}
               </Text>
             )}
@@ -426,8 +530,9 @@ export const BookClipDetailSheet = () => {
             <Text
               selectable
               style={{
-                color: themeColors.textMuted,
-                fontSize: 12,
+                color: themeColors.text,
+                fontSize: 16,
+                fontWeight: "700",
                 textAlign: "center",
                 fontVariant: ["tabular-nums"],
               }}
@@ -437,7 +542,10 @@ export const BookClipDetailSheet = () => {
           ) : null}
 
           <View style={{ gap: 6 }}>
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}>
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}
+            >
               Local Note
             </Text>
             <TextInput
