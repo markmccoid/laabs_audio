@@ -1,15 +1,17 @@
-import { usePlaybackStore } from "@/player";
+import { playerService, useClipPreviewStore, usePlaybackStore } from "@/player";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { useDeviceBooksActions } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Bookmark } from "@/types/absTypes";
 import { formatSeconds } from "@/utils/formatUtils";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useMemo, useState } from "react";
+import { SymbolView } from "expo-symbols";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Keyboard, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
-import { MAX_CLIP_DURATION_SECONDS, MIN_CLIP_DURATION_SECONDS } from "./clip-timing";
+import { ClipRangeEditor } from "./clip-range-editor";
+import { useClipRangeDraft } from "./use-clip-range-draft";
 
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
@@ -35,71 +37,74 @@ export const BookAddBookmarkSheet = () => {
   const [bookmarkName, setBookmarkName] = useState("");
   const [bookmarkNote, setBookmarkNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const hasActivatedClipRef = useRef(false);
   const [bookmarkTimeSeconds, setBookmarkTimeSeconds] = useState(() =>
     Math.max(0, Math.round(playbackPositionMs / 1000)),
-  );
-  const [clipEndTimeSeconds, setClipEndTimeSeconds] = useState(() =>
-    Math.max(0, Math.round(playbackPositionMs / 1000) + DEFAULT_CLIP_DURATION_SECONDS),
   );
   const trimmedBookmarkName = bookmarkName.trim();
   const durationSeconds =
     itemDetails?.bookDuration ?? (playbackDurationMs > 0 ? Math.floor(playbackDurationMs / 1000) : 0);
   const isClip = bookmarkKind === "clip";
-  const clipDurationSeconds = clipEndTimeSeconds - bookmarkTimeSeconds;
-  const clipValidationMessage =
-    isClip && clipDurationSeconds < MIN_CLIP_DURATION_SECONDS
-      ? "Clip end must be after start."
-      : isClip && clipDurationSeconds > MAX_CLIP_DURATION_SECONDS
-        ? "Clip cannot be longer than 5 minutes."
-        : isClip && durationSeconds > 0 && clipEndTimeSeconds > durationSeconds
-          ? "Clip end cannot be past the end of the book."
-          : null;
+  const draftPreviewId = libraryItemId ? `draft:add-clip:${libraryItemId}` : null;
+  const previewStatus = useClipPreviewStore((state) => state.status);
+  const previewBookmarkId = useClipPreviewStore((state) => state.bookmarkId);
+  const previewPositionMs = useClipPreviewStore((state) => state.positionMs);
+  const isThisDraftPreview =
+    Boolean(draftPreviewId) &&
+    previewBookmarkId === draftPreviewId &&
+    previewStatus !== "idle" &&
+    previewStatus !== "error";
+  const isPreviewing = isThisDraftPreview && previewStatus !== "ended";
+  const handleDraftEditStart = useCallback(() => {
+    if (!isPreviewing) return;
+    void playerService.restoreListeningPositionAfterPreview();
+  }, [isPreviewing]);
+  const clipDraft = useClipRangeDraft({
+    initialStartSeconds: Math.max(0, Math.round(playbackPositionMs / 1000)),
+    initialEndSeconds: Math.max(
+      0,
+      Math.round(playbackPositionMs / 1000) + DEFAULT_CLIP_DURATION_SECONDS,
+    ),
+    bookDurationSeconds: durationSeconds,
+    onEditStart: handleDraftEditStart,
+  });
+  const previewPositionSeconds = Math.max(
+    clipDraft.startSeconds,
+    Math.min(clipDraft.endSeconds, Math.round(previewPositionMs / 1000)),
+  );
+  const previewButtonLabel = isThisDraftPreview
+    ? previewStatus === "loading"
+      ? "Loading..."
+      : isPreviewing
+        ? "Stop Preview"
+        : "Preview Clip"
+    : "Preview Clip";
 
   const bookmarkTimeLabel = useMemo(
     () => formatSeconds(bookmarkTimeSeconds, "compact", true, true) ?? "00:00",
     [bookmarkTimeSeconds],
   );
-  const clipEndTimeLabel = useMemo(
-    () => formatSeconds(clipEndTimeSeconds, "compact", true, true) ?? "00:00",
-    [clipEndTimeSeconds],
-  );
+
+  useEffect(() => {
+    return () => {
+      void playerService.restoreListeningPositionAfterPreview();
+    };
+  }, []);
 
   const adjustTime = (delta: number) => {
-    setBookmarkTimeSeconds((current) => {
-      const nextStart = Math.max(0, current + delta);
-      if (isClip) {
-        const durationCap = durationSeconds > 0 ? durationSeconds : Number.MAX_SAFE_INTEGER;
-        if (clipEndTimeSeconds <= nextStart) {
-          setClipEndTimeSeconds(
-            Math.min(nextStart + DEFAULT_CLIP_DURATION_SECONDS, durationCap),
-          );
-        } else if (clipEndTimeSeconds - nextStart > MAX_CLIP_DURATION_SECONDS) {
-          setClipEndTimeSeconds(Math.min(nextStart + MAX_CLIP_DURATION_SECONDS, durationCap));
-        }
-      }
-      return nextStart;
-    });
-  };
-
-  const adjustClipEndTime = (delta: number) => {
-    setClipEndTimeSeconds((current) => {
-      const durationCap = durationSeconds > 0 ? durationSeconds : Number.MAX_SAFE_INTEGER;
-      return Math.max(
-        bookmarkTimeSeconds + MIN_CLIP_DURATION_SECONDS,
-        Math.min(current + delta, durationCap, bookmarkTimeSeconds + MAX_CLIP_DURATION_SECONDS),
-      );
-    });
+    setBookmarkTimeSeconds((current) => Math.max(0, current + delta));
   };
 
   const handleSave = async () => {
     if (!libraryItemId || isSaving) return;
     if (!trimmedBookmarkName) return;
-    if (clipValidationMessage) return;
+    if (isClip && clipDraft.validationMessage) return;
     const localNote = bookmarkNote.trim();
 
     const bookmarkPayload: Bookmark = {
       libraryItemId,
-      time: bookmarkTimeSeconds,
+      time: isClip ? clipDraft.startSeconds : bookmarkTimeSeconds,
       title: trimmedBookmarkName,
       createdAt: Date.now(),
       ...(localNote.length > 0 ? { notes: localNote } : {}),
@@ -107,9 +112,10 @@ export const BookAddBookmarkSheet = () => {
 
     setIsSaving(true);
     try {
+      await playerService.restoreListeningPositionAfterPreview();
       await addBookmark(libraryItemId, bookmarkPayload, {
         localNote: localNote.length > 0 ? localNote : null,
-        endTimeSeconds: isClip ? clipEndTimeSeconds : null,
+        endTimeSeconds: isClip ? clipDraft.endSeconds : null,
       });
       Keyboard.dismiss();
       toast.success("Bookmark added");
@@ -123,7 +129,13 @@ export const BookAddBookmarkSheet = () => {
   };
 
   const canSave =
-    Boolean(libraryItemId) && Boolean(trimmedBookmarkName) && !clipValidationMessage && !isSaving;
+    Boolean(libraryItemId) &&
+    Boolean(trimmedBookmarkName) &&
+    !(isClip && clipDraft.validationMessage) &&
+    !isSaving;
+  const canPreviewClip = Boolean(
+    isClip && libraryItemId && draftPreviewId && trimmedBookmarkName && !clipDraft.validationMessage && !isSaving,
+  );
   const timePanelBorderColor = themeColors.border;
   const timePanelFillColor = themeColors.bg;
 
@@ -218,9 +230,30 @@ export const BookAddBookmarkSheet = () => {
     </View>
   );
 
+  const handlePreview = async () => {
+    if (!libraryItemId || !draftPreviewId || !canPreviewClip) return;
+    try {
+      if (isPreviewing) {
+        await playerService.restoreListeningPositionAfterPreview();
+        return;
+      }
+      await playerService.restoreListeningPositionAfterPreview();
+      await playerService.playClipPreview({
+        libraryItemId,
+        bookmarkId: draftPreviewId,
+        startTimeSeconds: clipDraft.startSeconds,
+        endTimeSeconds: clipDraft.endSeconds,
+      });
+    } catch (error) {
+      console.warn("[BookAddBookmarkSheet] Failed to preview clip", error);
+      toast.error("Unable to preview clip");
+    }
+  };
+
   return (
     <ScrollView
       style={{ flex: 1 }}
+      scrollEnabled={!isScrubbing}
       contentInsetAdjustmentBehavior="automatic"
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
@@ -313,8 +346,12 @@ export const BookAddBookmarkSheet = () => {
               accessibilityLabel={kind === "point" ? "Save as bookmark" : "Save as clip"}
               onPress={() => {
                 setBookmarkKind(kind);
-                if (kind === "clip" && clipEndTimeSeconds <= bookmarkTimeSeconds) {
-                  setClipEndTimeSeconds(bookmarkTimeSeconds + DEFAULT_CLIP_DURATION_SECONDS);
+                if (kind === "clip" && !hasActivatedClipRef.current) {
+                  hasActivatedClipRef.current = true;
+                  clipDraft.resetDraft(
+                    bookmarkTimeSeconds,
+                    bookmarkTimeSeconds + DEFAULT_CLIP_DURATION_SECONDS,
+                  );
                 }
               }}
               disabled={isSaving}
@@ -345,35 +382,80 @@ export const BookAddBookmarkSheet = () => {
         })}
       </View>
 
-      <View style={{ gap: 8 }}>
-        <View style={{ flexDirection: isClip ? "row" : "column", gap: 8 }}>
+      {isClip ? (
+        <>
+          <ClipRangeEditor
+            draft={clipDraft}
+            bookDurationSeconds={durationSeconds}
+            disabled={isSaving}
+            onScrubbingChange={setIsScrubbing}
+          />
+          {trimmedBookmarkName ? (
+            <>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={isPreviewing ? "Stop clip preview" : "Preview clip"}
+                onPress={() => {
+                  void handlePreview();
+                }}
+                disabled={!canPreviewClip}
+                style={({ pressed }) => ({
+                  borderRadius: 14,
+                  borderCurve: "continuous",
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  backgroundColor: themeColors.surface,
+                  paddingHorizontal: 14,
+                  paddingVertical: 14,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  opacity: !canPreviewClip ? 0.5 : pressed ? 0.8 : 1,
+                })}
+              >
+                <SymbolView
+                  name={isPreviewing ? "pause.fill" : "play.fill"}
+                  tintColor={themeColors.accent}
+                  size={16}
+                />
+                <Text
+                  selectable
+                  style={{ color: themeColors.text, fontSize: 14, fontWeight: "700" }}
+                >
+                  {previewButtonLabel}
+                </Text>
+              </Pressable>
+
+              {isThisDraftPreview ? (
+                <Text
+                  selectable
+                  style={{
+                    color: themeColors.text,
+                    fontSize: 16,
+                    fontWeight: "700",
+                    textAlign: "center",
+                    fontVariant: ["tabular-nums"],
+                  }}
+                >
+                  Preview Position: {formatSeconds(previewPositionSeconds, "compact", true, true)}
+                </Text>
+              ) : null}
+            </>
+          ) : null}
+        </>
+      ) : (
+        <View style={{ gap: 8 }}>
+          <View style={{ flexDirection: "column", gap: 8 }}>
           {renderTimePanel({
-            label: isClip ? "Start Time" : "Position",
+            label: "Position",
             value: bookmarkTimeLabel,
             onDecrease: () => adjustTime(-STEP_SECONDS),
             onIncrease: () => adjustTime(STEP_SECONDS),
           })}
-          {isClip
-            ? renderTimePanel({
-                label: "End Time",
-                value: clipEndTimeLabel,
-                onDecrease: () => adjustClipEndTime(-STEP_SECONDS),
-                onIncrease: () => adjustClipEndTime(STEP_SECONDS),
-              })
-            : null}
+          </View>
         </View>
-        {isClip ? (
-          clipValidationMessage ? (
-            <Text selectable style={{ color: "#dc2626", fontSize: 12, textAlign: "center" }}>
-              {clipValidationMessage}
-            </Text>
-          ) : (
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 12, textAlign: "center" }}>
-              Clip Duration: {formatSeconds(clipDurationSeconds, "compact", true, true)}
-            </Text>
-          )
-        ) : null}
-      </View>
+      )}
 
       <View style={{ gap: 6 }}>
         <Text selectable style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}>
