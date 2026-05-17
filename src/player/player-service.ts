@@ -34,6 +34,7 @@ import { settingsStore } from "../store/settings-store";
 import type { AudioTrack } from "../types/absTypes";
 import { createAudioEngine } from "./audio-engine";
 import { buildChapterIndex, findChapterForPosition, findTrackForPosition } from "./chapters";
+import { clipPreviewStore } from "./clip-preview-store";
 import type { PlaybackStoreState } from "./playback-store";
 import { playbackStore } from "./playback-store";
 import { buildPlaybackQueue } from "./queue";
@@ -53,6 +54,8 @@ const LOCAL_PLAYBACK_PROGRESS_POLL_INTERVAL_MS = 250;
 const LOCAL_PLAYBACK_PROGRESS_MIN_DELTA_MS = 250;
 const STALE_ZERO_PROGRESS_GUARD_SECONDS = 5;
 const LOAD_PROGRESS_FETCH_TIMEOUT_MS = 350;
+const POST_PREVIEW_STATUS_GUARD_MS = 2000;
+const POST_PREVIEW_RESTORED_POSITION_TOLERANCE_MS = 1500;
 type ProgressSyncReason = "interval" | "pause" | "external_pause" | "seek" | "close";
 type CachedUserServerStateSource =
   | "unavailable"
@@ -71,6 +74,23 @@ type FreshServerProgressFetchResultPayload =
       status: "failed";
       errorMessage: string;
     };
+
+type ClipPreviewRestoreState = {
+  libraryItemId: string | null;
+  positionMs: number;
+  playbackState: PlaybackStoreState["playbackState"];
+  queueWasLoaded: boolean;
+};
+
+type ClipPreviewSession = {
+  libraryItemId: string;
+  bookmarkId: string | null;
+  startMs: number;
+  endMs: number;
+  restoreState: ClipPreviewRestoreState;
+  currentTrackIndex: number;
+  stoppedAtEnd: boolean;
+};
 
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
@@ -114,6 +134,13 @@ class PlayerService {
   private lastPauseSyncAt = 0;
   private initialized = false;
   private localStreamFallbackInFlight = false;
+  private clipPreviewSession: ClipPreviewSession | null = null;
+  private postPreviewStatusGuard:
+    | {
+        untilMs: number;
+        restoredPositionMs: number;
+      }
+    | null = null;
 
   private async waitForDownloadedPlaybackProgress() {
     const startedAt = Date.now();
@@ -143,7 +170,11 @@ class PlayerService {
         void this.handleTrackEnded();
       },
       onError: (error) => {
-        playbackStore.getState().actions.setError(error.message);
+        if (this.clipPreviewSession) {
+          clipPreviewStore.getState().actions.setError(error.message);
+        } else {
+          playbackStore.getState().actions.setError(error.message);
+        }
         this.logDebug(`engine error: ${error.message}`);
       },
       onStatus: (status) => {
@@ -1109,12 +1140,17 @@ class PlayerService {
     };
   }
 
-  async play() {
+  async play(options?: {
+    touchProgressCache?: boolean;
+    updatePlaybackStore?: boolean;
+    disableLocalStreamFallback?: boolean;
+  }) {
     this.logDebug("play");
     const state = playbackStore.getState();
     if (!state.queue.length) return;
     const currentTrack = state.queue[state.currentTrackIndex];
-    const shouldVerifyDownloadedPlayback = Boolean(currentTrack?.source.isLocal);
+    const shouldVerifyDownloadedPlayback =
+      options?.updatePlaybackStore !== false && Boolean(currentTrack?.source.isLocal);
 
     try {
       await this.engine.play();
@@ -1136,11 +1172,15 @@ class PlayerService {
       await this.reconcilePlaybackRate("play");
 
       this.logSnapshot("after play");
-      playbackStore.getState().actions.setPlaybackState("playing");
-      playbackStore.getState().actions.setError(null);
+      if (options?.updatePlaybackStore !== false) {
+        playbackStore.getState().actions.setPlaybackState("playing");
+        playbackStore.getState().actions.setError(null);
+      }
       // Arm interval sync from play start so we do not flush transient 0s immediately.
       this.lastSyncAttemptAt = Date.now();
-      this.touchUserServerStateCacheForPlayStart();
+      if (options?.updatePlaybackStore !== false && options?.touchProgressCache !== false) {
+        this.touchUserServerStateCacheForPlayStart();
+      }
       this.logPlaybackResult("started");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start playback";
@@ -1149,6 +1189,7 @@ class PlayerService {
         currentState.sessionId === LOCAL_SESSION_ID &&
         Boolean(currentState.libraryItemId) &&
         !this.localStreamFallbackInFlight &&
+        options?.disableLocalStreamFallback !== true &&
         authStore.getState().status === "authenticated" &&
         authStore.getState().isOnline !== false;
 
@@ -1166,18 +1207,23 @@ class PlayerService {
         }
       }
 
-      const finalState = playbackStore.getState();
-      if (finalState.queue.length > 0) {
-        playbackStore.getState().actions.setPlaybackState("ready");
-      } else {
-        playbackStore.getState().actions.setPlaybackState("error");
+      if (options?.updatePlaybackStore !== false) {
+        const finalState = playbackStore.getState();
+        if (finalState.queue.length > 0) {
+          playbackStore.getState().actions.setPlaybackState("ready");
+        } else {
+          playbackStore.getState().actions.setPlaybackState("error");
+        }
+        playbackStore.getState().actions.setError(message);
       }
-      playbackStore.getState().actions.setError(message);
       this.logPlaybackResult("failed", {
         reason: message,
         mode: currentState.sessionId === LOCAL_SESSION_ID ? "downloaded" : "streaming",
         snapshot: this.engine.getDebugSnapshot(),
       });
+      if (options?.updatePlaybackStore === false) {
+        throw error;
+      }
     }
   }
 
@@ -1217,12 +1263,16 @@ class PlayerService {
     return { syncAttempted: true, dedupeSkipped: false };
   }
 
-  async pause() {
+  async pause(options?: { syncProgress?: boolean; updatePlaybackStore?: boolean }) {
     this.logDebug("pause");
     await this.engine.pause();
     this.logSnapshot("after pause");
-    playbackStore.getState().actions.setPlaybackState("paused");
-    await this.syncPauseLikeProgress("pause", { state: playbackStore.getState() });
+    if (options?.updatePlaybackStore !== false) {
+      playbackStore.getState().actions.setPlaybackState("paused");
+    }
+    if (options?.updatePlaybackStore !== false && options?.syncProgress !== false) {
+      await this.syncPauseLikeProgress("pause", { state: playbackStore.getState() });
+    }
   }
 
   async stop() {
@@ -1367,7 +1417,7 @@ class PlayerService {
     await this.play();
   }
 
-  async seekTo(positionMs: number) {
+  async seekTo(positionMs: number, options?: { syncProgress?: boolean }) {
     const state = playbackStore.getState();
     if (!state.queue.length) return;
     this.logDebug(`seekTo: ${positionMs}`);
@@ -1397,7 +1447,9 @@ class PlayerService {
     const chapterAtPosition = findChapterForPosition(state.chapterIndex, boundedPosition);
     playbackStore.getState().actions.setCurrentChapter(chapterAtPosition?.id ?? null);
     this.lastTrackedPositionMs = boundedPosition;
-    await this.syncProgress("seek");
+    if (options?.syncProgress !== false) {
+      await this.syncProgress("seek");
+    }
   }
 
   async skipBy(seconds: number, goBackwards: boolean = false) {
@@ -1408,6 +1460,219 @@ class PlayerService {
       skipMs = -skipMs;
     }
     await this.seekTo(state.positionMs + skipMs);
+  }
+
+  async playClipPreview(payload: {
+    libraryItemId: string;
+    bookmarkId?: string | null;
+    startTimeSeconds: number;
+    endTimeSeconds: number;
+  }) {
+    const startMs = secondsToMs(payload.startTimeSeconds);
+    const endMs = secondsToMs(payload.endTimeSeconds);
+    if (endMs <= startMs) {
+      throw new Error("Clip end must be after clip start");
+    }
+
+    const stateBeforePreview = playbackStore.getState();
+    const isTargetBookLoaded =
+      stateBeforePreview.libraryItemId === payload.libraryItemId &&
+      stateBeforePreview.queue.length > 0;
+    if (!isTargetBookLoaded) {
+      throw new Error("Load this book before previewing clips");
+    }
+
+    const restoreState: ClipPreviewRestoreState = {
+      libraryItemId: stateBeforePreview.libraryItemId,
+      positionMs: stateBeforePreview.positionMs,
+      playbackState: stateBeforePreview.playbackState,
+      queueWasLoaded: stateBeforePreview.queue.length > 0,
+    };
+    if (stateBeforePreview.playbackState === "playing") {
+      playbackStore.getState().actions.setPlaybackState("paused");
+    }
+    const startTrack = findTrackForPosition(stateBeforePreview.queue, startMs);
+    if (!startTrack) {
+      throw new Error("Unable to resolve clip start position");
+    }
+    this.clipPreviewSession = {
+      libraryItemId: payload.libraryItemId,
+      bookmarkId: payload.bookmarkId ?? null,
+      startMs,
+      endMs,
+      restoreState,
+      currentTrackIndex: stateBeforePreview.currentTrackIndex,
+      stoppedAtEnd: false,
+    };
+    clipPreviewStore.getState().actions.startLoading({
+      libraryItemId: payload.libraryItemId,
+      bookmarkId: payload.bookmarkId ?? null,
+      startMs,
+      endMs,
+    });
+
+    try {
+      await this.seekPreviewEngineTo(startMs);
+      await this.play({
+        touchProgressCache: false,
+        updatePlaybackStore: false,
+        disableLocalStreamFallback: true,
+      });
+      clipPreviewStore.getState().actions.setPlaying();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to preview clip";
+      clipPreviewStore.getState().actions.setError(message);
+      throw error;
+    }
+  }
+
+  private async seekPreviewEngineTo(positionMs: number) {
+    const previewSession = this.clipPreviewSession;
+    if (!previewSession) return;
+
+    const state = playbackStore.getState();
+    if (state.libraryItemId !== previewSession.libraryItemId || !state.queue.length) {
+      throw new Error("Clip preview requires the book to be loaded");
+    }
+
+    const maxPosition = state.durationMs > 0 ? state.durationMs : positionMs;
+    const boundedPosition = Math.max(0, Math.min(positionMs, maxPosition));
+    const targetTrack = findTrackForPosition(state.queue, boundedPosition);
+    if (!targetTrack) {
+      throw new Error("Unable to resolve clip preview position");
+    }
+
+    const targetIndex = state.queue.indexOf(targetTrack);
+    const trackPositionMs = Math.max(0, boundedPosition - targetTrack.startOffsetMs);
+    if (targetIndex !== previewSession.currentTrackIndex) {
+      this.clipPreviewSession = {
+        ...previewSession,
+        currentTrackIndex: targetIndex,
+      };
+      await this.engine.load(targetTrack, {
+        initialPositionMs: trackPositionMs,
+        rate: state.rate,
+        pitchCorrectionQuality: settingsStore.getState().pitchCorrectionQuality,
+      });
+    } else {
+      await this.engine.seek(trackPositionMs);
+    }
+
+    clipPreviewStore.getState().actions.setPosition(boundedPosition);
+  }
+
+  private async restoreEngineToListeningPosition(
+    restoreState: ClipPreviewRestoreState,
+    options?: { currentEngineTrackIndex?: number },
+  ) {
+    if (!restoreState.libraryItemId || !restoreState.queueWasLoaded) {
+      await this.engine.pause();
+      return;
+    }
+
+    const state = playbackStore.getState();
+    if (state.libraryItemId !== restoreState.libraryItemId || !state.queue.length) {
+      await this.engine.pause();
+      return;
+    }
+
+    const maxPosition = state.durationMs > 0 ? state.durationMs : restoreState.positionMs;
+    const boundedPosition = Math.max(0, Math.min(restoreState.positionMs, maxPosition));
+    const targetTrack = findTrackForPosition(state.queue, boundedPosition);
+    if (!targetTrack) {
+      await this.engine.pause();
+      return;
+    }
+
+    const targetIndex = state.queue.indexOf(targetTrack);
+    const trackPositionMs = Math.max(0, boundedPosition - targetTrack.startOffsetMs);
+    const currentEngineTrackIndex = options?.currentEngineTrackIndex ?? state.currentTrackIndex;
+    await this.engine.pause();
+    if (targetIndex !== currentEngineTrackIndex) {
+      await this.engine.load(targetTrack, {
+        initialPositionMs: trackPositionMs,
+        rate: state.rate,
+        pitchCorrectionQuality: settingsStore.getState().pitchCorrectionQuality,
+      });
+    } else {
+      await this.engine.seek(trackPositionMs);
+    }
+  }
+
+  private resolvePostPreviewPlaybackState(restoreState: ClipPreviewRestoreState) {
+    return restoreState.playbackState === "playing" ? "paused" : restoreState.playbackState;
+  }
+
+  private restorePlaybackStoreToListeningPosition(restoreState: ClipPreviewRestoreState) {
+    if (!restoreState.libraryItemId || !restoreState.queueWasLoaded) {
+      return null;
+    }
+
+    const state = playbackStore.getState();
+    if (state.libraryItemId !== restoreState.libraryItemId || !state.queue.length) {
+      return null;
+    }
+
+    const maxPosition = state.durationMs > 0 ? state.durationMs : restoreState.positionMs;
+    const boundedPosition = Math.max(0, Math.min(restoreState.positionMs, maxPosition));
+    const targetTrack = findTrackForPosition(state.queue, boundedPosition);
+    if (!targetTrack) {
+      return null;
+    }
+
+    const targetIndex = state.queue.indexOf(targetTrack);
+    const trackPositionMs = Math.max(0, boundedPosition - targetTrack.startOffsetMs);
+    if (targetIndex !== state.currentTrackIndex) {
+      playbackStore.getState().actions.setCurrentTrack(targetIndex, targetTrack.durationMs);
+    }
+    playbackStore.getState().actions.setPosition({
+      positionMs: boundedPosition,
+      trackPositionMs,
+    });
+    const chapterAtPosition = findChapterForPosition(state.chapterIndex, boundedPosition);
+    playbackStore.getState().actions.setCurrentChapter(chapterAtPosition?.id ?? null);
+    playbackStore
+      .getState()
+      .actions.setPlaybackState(this.resolvePostPreviewPlaybackState(restoreState));
+    this.lastTrackedPositionMs = boundedPosition;
+    return boundedPosition;
+  }
+
+  async restoreListeningPositionAfterPreview() {
+    const previewSession = this.clipPreviewSession;
+    if (!previewSession) return;
+
+    try {
+      await this.restoreEngineToListeningPosition(previewSession.restoreState, {
+        currentEngineTrackIndex: previewSession.currentTrackIndex,
+      });
+    } finally {
+      const restoredPositionMs = this.restorePlaybackStoreToListeningPosition(
+        previewSession.restoreState,
+      );
+      if (restoredPositionMs !== null) {
+        this.postPreviewStatusGuard = {
+          untilMs: Date.now() + POST_PREVIEW_STATUS_GUARD_MS,
+          restoredPositionMs,
+        };
+      }
+      this.clipPreviewSession = null;
+      clipPreviewStore.getState().actions.reset();
+    }
+  }
+
+  async cancelPreviewForExplicitNavigation() {
+    const previewSession = this.clipPreviewSession;
+    if (!previewSession) return;
+
+    try {
+      await this.engine.pause();
+    } catch {
+      // Ignore cancellation pause failures; explicit navigation is about to take over.
+    } finally {
+      this.clipPreviewSession = null;
+      clipPreviewStore.getState().actions.reset();
+    }
   }
 
   async setRate(rate: number) {
@@ -1581,11 +1846,17 @@ class PlayerService {
 
     const state = playbackStore.getState();
     if (!state.queue.length) return;
+    const handledAsClipPreview = await this.handleClipPreviewStatus(status, state);
+    if (handledAsClipPreview) return;
+
     const currentTrack = state.queue[state.currentTrackIndex];
     if (!currentTrack) return;
 
     const trackPositionMs = Math.max(0, status.positionMs);
     const positionMs = currentTrack.startOffsetMs + trackPositionMs;
+    if (this.shouldIgnorePostPreviewStatus(positionMs)) {
+      return;
+    }
     const updates: Parameters<PlaybackStoreState["actions"]["applyStatusUpdate"]>[0] = {
       positionMs,
       trackPositionMs,
@@ -1672,7 +1943,118 @@ class PlayerService {
     }
   }
 
+  private shouldIgnorePostPreviewStatus(positionMs: number) {
+    const guard = this.postPreviewStatusGuard;
+    if (!guard) {
+      return false;
+    }
+
+    if (Date.now() > guard.untilMs) {
+      this.postPreviewStatusGuard = null;
+      return false;
+    }
+
+    const isRestoredPosition =
+      Math.abs(positionMs - guard.restoredPositionMs) <= POST_PREVIEW_RESTORED_POSITION_TOLERANCE_MS;
+    if (isRestoredPosition) {
+      this.postPreviewStatusGuard = null;
+      return false;
+    }
+
+    return true;
+  }
+
+  private async handleClipPreviewStatus(
+    status: {
+      positionMs: number;
+      durationMs: number;
+      isPlaying: boolean;
+      didJustFinish: boolean;
+    },
+    state: PlaybackStoreState,
+  ) {
+    const previewSession = this.clipPreviewSession;
+    if (!previewSession) return false;
+    if (state.libraryItemId !== previewSession.libraryItemId || !state.queue.length) {
+      return true;
+    }
+
+    if (previewSession.stoppedAtEnd) {
+      return true;
+    }
+
+    const currentPreviewTrack = state.queue[previewSession.currentTrackIndex];
+    if (!currentPreviewTrack) {
+      return true;
+    }
+
+    const trackPositionMs = Math.max(0, status.positionMs);
+    const positionMs = currentPreviewTrack.startOffsetMs + trackPositionMs;
+    const boundedPositionMs = Math.min(positionMs, previewSession.endMs);
+    clipPreviewStore.getState().actions.setPosition(boundedPositionMs);
+
+    if (boundedPositionMs >= previewSession.endMs) {
+      const endedSession = {
+        ...previewSession,
+        stoppedAtEnd: true,
+      };
+      this.clipPreviewSession = endedSession;
+      clipPreviewStore.getState().actions.setEnded();
+      try {
+        await this.restoreEngineToListeningPosition(endedSession.restoreState, {
+          currentEngineTrackIndex: endedSession.currentTrackIndex,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unable to restore playback";
+        clipPreviewStore.getState().actions.setError(message);
+      }
+      return true;
+    }
+
+    if (status.didJustFinish) {
+      const nextTrackIndex = previewSession.currentTrackIndex + 1;
+      const nextTrack = state.queue[nextTrackIndex];
+      if (!nextTrack || nextTrack.startOffsetMs >= previewSession.endMs) {
+        const endedSession = {
+          ...previewSession,
+          stoppedAtEnd: true,
+        };
+        this.clipPreviewSession = endedSession;
+        clipPreviewStore.getState().actions.setEnded();
+        await this.restoreEngineToListeningPosition(endedSession.restoreState, {
+          currentEngineTrackIndex: endedSession.currentTrackIndex,
+        });
+        return true;
+      }
+
+      this.clipPreviewSession = {
+        ...previewSession,
+        currentTrackIndex: nextTrackIndex,
+      };
+      await this.engine.load(nextTrack, {
+        initialPositionMs: 0,
+        rate: state.rate,
+        pitchCorrectionQuality: settingsStore.getState().pitchCorrectionQuality,
+      });
+      clipPreviewStore.getState().actions.setPosition(nextTrack.startOffsetMs);
+      await this.engine.play();
+      clipPreviewStore.getState().actions.setPlaying();
+      return true;
+    }
+
+    if (status.isPlaying) {
+      clipPreviewStore.getState().actions.setPlaying();
+    } else {
+      clipPreviewStore.getState().actions.setPaused();
+    }
+
+    return true;
+  }
+
   private async handleTrackEnded() {
+    if (this.clipPreviewSession) {
+      return;
+    }
     const state = playbackStore.getState();
     if (!state.queue.length) return;
 

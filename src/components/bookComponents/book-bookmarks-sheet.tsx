@@ -1,15 +1,18 @@
 import { useAuthStore } from "@/auth/auth-store";
 import { useGetItemDetails, useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore } from "@/player";
-import { useDeviceBooksActions, useDeviceBooksStore } from "@/store/device-books-store";
+import {
+  useDeviceBooksActions,
+  useDeviceBooksStore,
+  type LocalBookmarkRecord,
+} from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import type { Bookmark } from "@/types/absTypes";
 import { formatSeconds } from "@/utils/formatUtils";
 import * as FileSystem from "expo-file-system/legacy";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import * as Sharing from "expo-sharing";
 import { SymbolView } from "expo-symbols";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -44,20 +47,35 @@ const toCsvField = (value: string | number) => {
 type BookmarkExportRow = {
   libraryItemId: string;
   bookName: string;
-  positionSeconds: number;
-  bookmarkName: string;
+  kind: "point" | "clip";
+  startTimeSeconds: number;
+  endTimeSeconds: number | null;
+  bookmarkTitle: string;
   notes: string;
+  serverStatus: string;
 };
 
 const toBookmarksCsv = (rows: BookmarkExportRow[]) => {
-  const header = ["libraryItemId", "bookName", "positionSeconds", "bookmarkName", "notes"];
+  const header = [
+    "libraryItemId",
+    "bookName",
+    "kind",
+    "startTimeSeconds",
+    "endTimeSeconds",
+    "bookmarkTitle",
+    "notes",
+    "serverStatus",
+  ];
   const lines = rows.map((row) =>
     [
       toCsvField(row.libraryItemId),
       toCsvField(row.bookName),
-      toCsvField(row.positionSeconds),
-      toCsvField(row.bookmarkName),
+      toCsvField(row.kind),
+      toCsvField(row.startTimeSeconds),
+      toCsvField(row.endTimeSeconds ?? ""),
+      toCsvField(row.bookmarkTitle),
       toCsvField(row.notes),
+      toCsvField(row.serverStatus),
     ].join(","),
   );
   return [header.join(","), ...lines].join("\n");
@@ -72,76 +90,56 @@ export const BookBookmarksSheet = () => {
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const serverUrl = useAuthStore((state) => state.serverUrl);
-  const bookmarkNotesByUserBookTime = useDeviceBooksStore(
-    (state) => state.bookmarkNotesByUserBookTime,
-  );
-  const { addBookmark, deleteBookmark, setBookmarkLocalNote } = useDeviceBooksActions();
-  const { data: userServerState } = useGetUserServerState();
+  const { addBookmark, deleteBookmark } = useDeviceBooksActions();
+  useGetUserServerState();
   const { libraryItemId: libraryItemIdParam } = useLocalSearchParams<{
     libraryItemId?: string | string[];
   }>();
   const libraryItemId = resolveParam(libraryItemIdParam);
   const { data: itemDetails } = useGetItemDetails(libraryItemId);
   const bookName = itemDetails?.title ?? itemDetails?.media?.metadata?.title ?? "";
-  const [pendingBookmarkTime, setPendingBookmarkTime] = useState<number | null>(null);
-  const [bookmarkTitleOverrides, setBookmarkTitleOverrides] = useState<Record<string, string>>({});
-  const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
+  const [pendingBookmarkId, setPendingBookmarkId] = useState<string | null>(null);
+  const [editingBookmark, setEditingBookmark] = useState<LocalBookmarkRecord | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [editingNote, setEditingNote] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [pendingDeleteTime, setPendingDeleteTime] = useState<number | null>(null);
-
-  const bookmarks = useMemo(() => {
-    const bookmarksByLibraryItemId =
-      userServerState?.bookmarksByLibraryItemId ??
-      (
-        userServerState as typeof userServerState & {
-          bookmarksByBookId?: Record<string, Bookmark[]>;
-        }
-      )?.bookmarksByBookId ??
-      {};
-    const libraryBookmarks = libraryItemId ? (bookmarksByLibraryItemId[libraryItemId] ?? []) : [];
-    return [...libraryBookmarks].sort((a, b) => a.time - b.time);
-  }, [libraryItemId, userServerState]);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const resolvedUserKey = useMemo(
     () => activeLibraryUserKey ?? getUserKey(storedUsername, serverUrl),
     [activeLibraryUserKey, serverUrl, storedUsername],
   );
 
-  const localNotesByBookmarkTime = useMemo(() => {
-    if (!libraryItemId || !resolvedUserKey) return {};
-    const notesByTime: Record<string, string> = {};
-    bookmarks.forEach((bookmark) => {
-      const key = `${resolvedUserKey}::${libraryItemId}::${bookmark.time}`;
-      const note = bookmarkNotesByUserBookTime[key]?.trim() ?? "";
-      if (!note) return;
-      notesByTime[String(bookmark.time)] = note;
-    });
-    return notesByTime;
-  }, [bookmarkNotesByUserBookTime, bookmarks, libraryItemId, resolvedUserKey]);
+  const localBookmarksForUser = useDeviceBooksStore((state) =>
+    resolvedUserKey ? state.localBookmarksByUser[resolvedUserKey] : undefined,
+  );
+  const bookmarks = useMemo(() => {
+    if (!libraryItemId) return [];
+    return Object.values(localBookmarksForUser ?? {})
+      .filter((bookmark) => bookmark.libraryItemId === libraryItemId)
+      .sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+  }, [libraryItemId, localBookmarksForUser]);
 
-  const getBookmarkDisplayTitle = (bookmark: Bookmark) => {
-    const overriddenTitle = bookmarkTitleOverrides[String(bookmark.time)]?.trim();
-    if (overriddenTitle) {
-      return overriddenTitle;
-    }
-    const bookmarkTitle = bookmark.title?.trim();
-    if (bookmarkTitle) {
-      return bookmarkTitle;
-    }
-    return `Bookmark ${getBookmarkTimeLabel(bookmark.time)}`;
-  };
+  const getBookmarkDisplayTitle = (bookmark: LocalBookmarkRecord) => bookmark.title.trim();
+
+  useEffect(() => {
+    return () => {
+      void playerService.restoreListeningPositionAfterPreview();
+    };
+  }, []);
 
   const buildExportRows = (): BookmarkExportRow[] => {
     if (!libraryItemId) return [];
     return bookmarks.map((bookmark) => ({
       libraryItemId,
       bookName,
-      positionSeconds: bookmark.time,
-      bookmarkName: getBookmarkDisplayTitle(bookmark),
-      notes: localNotesByBookmarkTime[String(bookmark.time)] ?? "",
+      kind: bookmark.kind,
+      startTimeSeconds: bookmark.startTimeSeconds,
+      endTimeSeconds: bookmark.kind === "clip" ? (bookmark.endTimeSeconds ?? null) : null,
+      bookmarkTitle: getBookmarkDisplayTitle(bookmark),
+      notes: bookmark.note?.trim() ?? "",
+      serverStatus: bookmark.serverLink.status,
     }));
   };
 
@@ -234,10 +232,10 @@ export const BookBookmarksSheet = () => {
     setEditingNote("");
   };
 
-  const openEditModal = (bookmark: Bookmark) => {
+  const openEditModal = (bookmark: LocalBookmarkRecord) => {
     setEditingBookmark(bookmark);
     setEditingTitle(getBookmarkDisplayTitle(bookmark));
-    setEditingNote(localNotesByBookmarkTime[String(bookmark.time)] ?? "");
+    setEditingNote(bookmark.note?.trim() ?? "");
   };
 
   const closeEditModal = () => {
@@ -245,16 +243,18 @@ export const BookBookmarksSheet = () => {
     resetEditState();
   };
 
-  const handleBookmarkPress = async (bookmark: Bookmark) => {
+  const handleBookmarkPress = async (bookmark: LocalBookmarkRecord) => {
     if (!libraryItemId) return;
-    const targetPositionMs = secondsToMs(bookmark.time);
+    const targetPositionMs = secondsToMs(bookmark.startTimeSeconds);
     const isViewedBookActive = activeLibraryItemId === libraryItemId && queueLength > 0;
     const isViewedBookPlaying = isViewedBookActive && playbackState === "playing";
 
-    setPendingBookmarkTime(bookmark.time);
+    setPendingBookmarkId(bookmark.id);
     try {
+      await playerService.cancelPreviewForExplicitNavigation();
       if (isViewedBookPlaying) {
         await playerService.seekTo(targetPositionMs);
+        await playerService.play({ touchProgressCache: false });
       } else if (isViewedBookActive) {
         await playerService.seekTo(targetPositionMs);
       } else {
@@ -265,18 +265,33 @@ export const BookBookmarksSheet = () => {
     } catch (error) {
       console.warn("[BookBookmarksSheet] Failed to jump to bookmark", error);
     } finally {
-      setPendingBookmarkTime(null);
+      setPendingBookmarkId(null);
       router.back();
     }
   };
 
+  const openSecondaryAction = (bookmark: LocalBookmarkRecord) => {
+    if (!libraryItemId) return;
+    if (bookmark.kind === "clip") {
+      router.push({
+        pathname: "/book-bookmarks/clip-detail",
+        params: {
+          libraryItemId,
+          bookmarkId: bookmark.id,
+        },
+      });
+      return;
+    }
+    openEditModal(bookmark);
+  };
+
   const handleSaveEdit = async () => {
     if (!editingBookmark || !libraryItemId || isSavingEdit) return;
-    const fallbackTitle = `Bookmark ${getBookmarkTimeLabel(editingBookmark.time)}`;
-    const nextTitle = editingTitle.trim() || fallbackTitle;
+    const nextTitle = editingTitle.trim();
+    if (!nextTitle) return;
     const nextNote = editingNote.trim();
     const currentTitle = getBookmarkDisplayTitle(editingBookmark);
-    const currentNote = (localNotesByBookmarkTime[String(editingBookmark.time)] ?? "").trim();
+    const currentNote = (editingBookmark.note ?? "").trim();
     const titleChanged = nextTitle !== currentTitle;
     const noteChanged = nextNote !== currentNote;
 
@@ -287,26 +302,21 @@ export const BookBookmarksSheet = () => {
 
     setIsSavingEdit(true);
     try {
-      if (titleChanged) {
-        await addBookmark(
+      await addBookmark(
+        libraryItemId,
+        {
           libraryItemId,
-          {
-            ...editingBookmark,
-            title: nextTitle,
-          },
-          { localNote: nextNote },
-        );
-        setBookmarkTitleOverrides((previous) => ({
-          ...previous,
-          [String(editingBookmark.time)]: nextTitle,
-        }));
-      } else if (noteChanged) {
-        setBookmarkLocalNote(
-          libraryItemId,
-          editingBookmark.time,
-          nextNote.length > 0 ? nextNote : null,
-        );
-      }
+          time: editingBookmark.startTimeSeconds,
+          title: nextTitle,
+          createdAt: editingBookmark.createdAt,
+        },
+        {
+          localBookmarkId: editingBookmark.id,
+          localNote: nextNote.length > 0 ? nextNote : null,
+          endTimeSeconds:
+            editingBookmark.kind === "clip" ? (editingBookmark.endTimeSeconds ?? null) : null,
+        },
+      );
       resetEditState();
     } catch (error) {
       console.warn("[BookBookmarksSheet] Failed to save bookmark edits", error);
@@ -315,27 +325,29 @@ export const BookBookmarksSheet = () => {
     }
   };
 
-  const handleDeleteBookmark = async (bookmark: Bookmark) => {
-    if (!libraryItemId || pendingDeleteTime !== null) return;
+  const handleDeleteBookmark = async (bookmark: LocalBookmarkRecord) => {
+    if (!libraryItemId || pendingDeleteId !== null) return;
 
-    setPendingDeleteTime(bookmark.time);
+    setPendingDeleteId(bookmark.id);
     try {
-      await deleteBookmark(libraryItemId, bookmark.time);
+      await deleteBookmark(libraryItemId, bookmark.startTimeSeconds, {
+        localBookmarkId: bookmark.id,
+      });
       toast.success("Bookmark deleted");
-      if (editingBookmark?.time === bookmark.time) {
+      if (editingBookmark?.id === bookmark.id) {
         resetEditState();
       }
     } catch (error) {
       console.warn("[BookBookmarksSheet] Failed to delete bookmark", error);
       toast.error("Unable to delete bookmark");
     } finally {
-      setPendingDeleteTime(null);
+      setPendingDeleteId(null);
     }
   };
 
-  const openDeleteConfirm = (bookmark: Bookmark) => {
-    if (pendingDeleteTime !== null) return;
-    const timeLabel = getBookmarkTimeLabel(bookmark.time);
+  const openDeleteConfirm = (bookmark: LocalBookmarkRecord) => {
+    if (pendingDeleteId !== null) return;
+    const timeLabel = getBookmarkTimeLabel(bookmark.startTimeSeconds);
     const title = getBookmarkDisplayTitle(bookmark);
 
     Alert.alert("Delete bookmark?", `Delete "${title}" at ${timeLabel}?`, [
@@ -384,9 +396,7 @@ export const BookBookmarksSheet = () => {
       </View>
       <FlatList
         data={libraryItemId ? bookmarks : []}
-        keyExtractor={(bookmark) =>
-          `${bookmark.libraryItemId}-${bookmark.time}-${bookmark.createdAt}`
-        }
+        keyExtractor={(bookmark) => bookmark.id}
         style={{ flex: 1 }}
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{
@@ -396,18 +406,29 @@ export const BookBookmarksSheet = () => {
           gap: 10,
         }}
         renderItem={({ item: bookmark }) => {
-          const timeLabel = getBookmarkTimeLabel(bookmark.time);
+          const timeLabel =
+            bookmark.kind === "clip" && typeof bookmark.endTimeSeconds === "number"
+              ? `${getBookmarkTimeLabel(bookmark.startTimeSeconds)} - ${getBookmarkTimeLabel(
+                  bookmark.endTimeSeconds,
+                )}`
+              : getBookmarkTimeLabel(bookmark.startTimeSeconds);
           const title = getBookmarkDisplayTitle(bookmark);
-          const hasLocalNote = Boolean(localNotesByBookmarkTime[String(bookmark.time)]?.length);
-          const isPending = pendingBookmarkTime === bookmark.time;
-          const isDeleting = pendingDeleteTime === bookmark.time;
+          const note = bookmark.note?.trim() ?? "";
+          const hasLocalNote = Boolean(note.length);
+          const isPending = pendingBookmarkId === bookmark.id;
+          const isDeleting = pendingDeleteId === bookmark.id;
           const isActionDisabled = isPending || isDeleting;
+          const primaryActionLabel = `Go to bookmark at ${timeLabel}`;
+          const secondaryActionLabel =
+            bookmark.kind === "clip"
+              ? `View clip detail at ${timeLabel}`
+              : `Edit bookmark at ${timeLabel}`;
 
           return (
             <View style={{ flexDirection: "row", alignItems: "stretch", gap: 8 }}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Go to bookmark at ${timeLabel}`}
+                accessibilityLabel={primaryActionLabel}
                 onPress={() => {
                   void handleBookmarkPress(bookmark);
                 }}
@@ -465,38 +486,32 @@ export const BookBookmarksSheet = () => {
                       {hasLocalNote ? (
                         <View className="flex-row flex-1 mx-1">
                           <Text className="flex-1 text-xs" numberOfLines={1}>
-                            {localNotesByBookmarkTime[String(bookmark.time)]}
+                            {note}
                           </Text>
                         </View>
-                      ) : // <View
-                      //   style={{
-                      //     flexDirection: "row",
-                      //     alignItems: "center",
-                      //     gap: 4,
-                      //     borderRadius: 999,
-                      //     borderCurve: "continuous",
-                      //     borderWidth: 1,
-                      //     borderColor: themeColors.border,
-                      //     backgroundColor: themeColors.bg,
-                      //     paddingHorizontal: 7,
-                      //     paddingVertical: 2,
-                      //   }}
-                      // >
-                      //   <SymbolView
-                      //     name="note.text"
-                      //     tintColor={themeColors.textMuted}
-                      //     size={10}
-                      //   />
-                      //   <Text selectable style={{ color: themeColors.textMuted, fontSize: 10 }}>
-                      //     Note
-                      //   </Text>
-                      // </View>
-                      null}
+                      ) : null}
+                      {bookmark.kind === "clip" || bookmark.serverLink.status !== "matched" ? (
+                        <View
+                          style={{
+                            borderRadius: 999,
+                            borderCurve: "continuous",
+                            borderWidth: 1,
+                            borderColor: themeColors.border,
+                            backgroundColor: themeColors.bg,
+                            paddingHorizontal: 7,
+                            paddingVertical: 2,
+                          }}
+                        >
+                          <Text selectable style={{ color: themeColors.textMuted, fontSize: 10 }}>
+                            {bookmark.serverLink.status !== "matched" ? "Unmatched" : "Clip"}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
                   </View>
                 </View>
                 <SymbolView
-                  name={isPending || isDeleting ? "hourglass" : "play.fill"}
+                  name={isPending || isDeleting ? "hourglass" : "arrow.right"}
                   tintColor={themeColors.textMuted}
                   size={14}
                 />
@@ -505,8 +520,8 @@ export const BookBookmarksSheet = () => {
               <View style={{ width: 44, gap: 8 }}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`Edit bookmark at ${timeLabel}`}
-                  onPress={() => openEditModal(bookmark)}
+                  accessibilityLabel={secondaryActionLabel}
+                  onPress={() => openSecondaryAction(bookmark)}
                   disabled={isActionDisabled}
                   style={({ pressed }) => ({
                     flex: 1,
@@ -520,7 +535,11 @@ export const BookBookmarksSheet = () => {
                     opacity: pressed || isActionDisabled ? 0.8 : 1,
                   })}
                 >
-                  <SymbolView name="square.and.pencil" tintColor={themeColors.textMuted} size={15} />
+                  <SymbolView
+                    name={bookmark.kind === "clip" ? "slider.horizontal.3" : "square.and.pencil"}
+                    tintColor={themeColors.textMuted}
+                    size={15}
+                  />
                 </Pressable>
 
                 <Pressable
@@ -621,7 +640,7 @@ export const BookBookmarksSheet = () => {
                     selectable
                     style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}
                   >
-                    Bookmark Name
+                    Bookmark Title
                   </Text>
                   <TextInput
                     value={editingTitle}

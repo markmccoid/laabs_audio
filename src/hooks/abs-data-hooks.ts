@@ -32,7 +32,11 @@ import {
   useTagOperator,
   useTags,
 } from "../store/store-filters";
-import { resolveStoredDownloadCoverUri, useDeviceBooksStore } from "../store/device-books-store";
+import {
+  deviceBooksStore,
+  resolveStoredDownloadCoverUri,
+  useDeviceBooksStore,
+} from "../store/device-books-store";
 import {
   resolveBookCoverUri,
   toDownloadedBookSummary,
@@ -329,12 +333,21 @@ export const useGetUserServerState = () => {
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const queryClient = useQueryClient();
 
-  return useQuery({
+  const query = useQuery({
     queryKey: queryKeys.userServerState(activeLibraryUserKey),
     queryFn: () => fetchReconciledUserServerState(queryClient, activeLibraryUserKey as string),
     enabled: status === "authenticated" && !!activeLibraryUserKey,
     meta: { persist: true },
   });
+
+  useEffect(() => {
+    if (!activeLibraryUserKey || !query.data) return;
+    deviceBooksStore
+      .getState()
+      .actions.reconcileLocalBookmarksFromServer(activeLibraryUserKey, query.data);
+  }, [activeLibraryUserKey, query.data]);
+
+  return query;
 };
 
 export const useReconcileBookProgress = (libraryItemId?: string) => {

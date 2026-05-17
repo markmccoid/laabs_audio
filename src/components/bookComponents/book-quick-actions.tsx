@@ -6,11 +6,9 @@ import {
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import type { Bookmark } from "@/types/absTypes";
 import type { BookDetailRouteSource } from "@/navigation/book-links";
 import { router, useSegments } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useMemo } from "react";
 import { Pressable, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 
@@ -114,7 +112,7 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   const themeColors = useThemeColors();
   const segments = useSegments();
   const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
-  const { data: userServerState } = useGetUserServerState();
+  useGetUserServerState();
   const isDownloaded = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
     return selectIsBookFullyDownloaded(state, libraryItemId);
@@ -122,23 +120,21 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   const isAnotherDownloadActive = useDeviceBooksStore((state) =>
     selectIsAnotherDownloadActive(state, libraryItemId),
   );
-  const bookmarks = useMemo(() => {
-    const bookmarksByLibraryItemId =
-      userServerState?.bookmarksByLibraryItemId ??
-      (
-        userServerState as typeof userServerState & {
-          bookmarksByBookId?: Record<string, Bookmark[]>;
-        }
-      )?.bookmarksByBookId ??
-      {};
-    return libraryItemId ? (bookmarksByLibraryItemId[libraryItemId] ?? []) : [];
-  }, [libraryItemId, userServerState]);
+  const bookmarkCount = useDeviceBooksStore((state) => {
+    if (!libraryItemId) return 0;
+    return Object.values(state.localBookmarksByUser).reduce(
+      (count, recordsById) =>
+        count +
+        Object.values(recordsById).filter((bookmark) => bookmark.libraryItemId === libraryItemId)
+          .length,
+      0,
+    );
+  });
 
   const isDownloading = useDeviceBooksStore((state) =>
     selectIsBookActivelyDownloading(state, libraryItemId),
   );
   const progressPercent = isDownloading ? clampPercent(downloadProgress?.progress ?? 0) : 0;
-  const bookmarkCount = bookmarks.length;
   const bookmarkBadgeLabel = bookmarkCount > 99 ? "99+" : String(bookmarkCount);
   const sourceBookRoute: BookDetailRouteSource = segments[1] === "search" ? "search" : "home";
 

@@ -138,11 +138,15 @@ export const fetchReconciledUserServerState = async (
     deviceBooksStore.getState().pendingProgressByUser[activeLibraryUserKey] ?? {};
   const playbackState = playbackStore.getState();
 
-  return reconcileUserServerState(previousState, incomingState, {
+  const reconciledState = reconcileUserServerState(previousState, incomingState, {
     now: Date.now(),
     preserveMissingProgressMs: MISSING_PROGRESS_PRESERVE_MS,
     playbackLibraryItemId: playbackState.libraryItemId ?? null,
     playbackPositionSeconds: Math.max(0, Math.floor(playbackState.positionMs / 1000)),
     queuedLibraryItemIds: new Set(Object.keys(queuedProgressByLibraryItemId)),
   });
+  deviceBooksStore
+    .getState()
+    .actions.reconcileLocalBookmarksFromServer(activeLibraryUserKey, reconciledState);
+  return reconciledState;
 };

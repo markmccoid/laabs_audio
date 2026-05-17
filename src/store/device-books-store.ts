@@ -306,11 +306,33 @@ export type DownloadLifecycleEvent = {
 type PendingBookmarkCreate = {
   libraryItemId: string;
   bookmark: Bookmark;
+  localBookmarkId?: string | null;
+  replaceBookmarkTime?: number | null;
 };
 
 type PendingBookmarkDelete = {
   libraryItemId: string;
   bookmarkTime: number;
+};
+
+export type LocalBookmarkKind = "point" | "clip";
+export type LocalBookmarkServerLinkStatus = "matched" | "unmatched" | "pendingCreate";
+
+export type LocalBookmarkRecord = {
+  id: string;
+  libraryItemId: string;
+  kind: LocalBookmarkKind;
+  startTimeSeconds: number;
+  endTimeSeconds?: number;
+  title: string;
+  note?: string | null;
+  createdAt: number;
+  updatedAt: number;
+  serverLink: {
+    status: LocalBookmarkServerLinkStatus;
+    timeSeconds: number | null;
+    lastMatchedAt: number | null;
+  };
 };
 
 export type PendingProgressSync = {
@@ -395,6 +417,7 @@ type DeviceBooksPersistedState = {
   customCoversById: Record<string, string | null>;
   playbackRatesByUserBook: Record<string, number>;
   bookmarkNotesByUserBookTime: Record<string, string>;
+  localBookmarksByUser: Record<string, Record<string, LocalBookmarkRecord>>;
   pendingBookmarkCreatesByUser: Record<string, Record<string, PendingBookmarkCreate>>;
   pendingBookmarkDeletesByUser: Record<string, Record<string, PendingBookmarkDelete>>;
   pendingProgressByUser: Record<string, Record<string, PendingProgressSync>>;
@@ -430,13 +453,22 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
     addBookmark: (
       libraryItemId: string,
       bookmark: Bookmark,
-      options?: { localNote?: string | null; userKey?: string | null },
+      options?: {
+        localNote?: string | null;
+        userKey?: string | null;
+        localBookmarkId?: string | null;
+        endTimeSeconds?: number | null;
+      },
     ) => Promise<void>;
     deleteBookmark: (
       libraryItemId: string,
       bookmarkTime: number,
-      options?: { userKey?: string | null },
+      options?: { userKey?: string | null; localBookmarkId?: string | null },
     ) => Promise<void>;
+    reconcileLocalBookmarksFromServer: (
+      userKey: string,
+      serverState: UserServerState,
+    ) => void;
     queueProgressSync: (
       libraryItemId: string,
       payload: { currentTime: number; isFinished: boolean; updatedAt?: number },
@@ -560,6 +592,7 @@ const createDefaultPersistedState = (): DeviceBooksPersistedState => ({
   customCoversById: {},
   playbackRatesByUserBook: {},
   bookmarkNotesByUserBookTime: {},
+  localBookmarksByUser: {},
   pendingBookmarkCreatesByUser: {},
   pendingBookmarkDeletesByUser: {},
   pendingProgressByUser: {},
@@ -647,6 +680,79 @@ const toUserBookmarkKey = (userKey: string, libraryItemId: string, bookmarkTime:
 
 const toPendingBookmarkId = (libraryItemId: string, bookmarkTime: number | string) =>
   `${libraryItemId}::${bookmarkTime}`;
+
+const createLocalBookmarkId = () =>
+  `bookmark_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+const normalizeBookmarkSeconds = (value: number) => Math.max(0, Math.floor(value));
+
+const toBookmarkPayload = (record: LocalBookmarkRecord): Bookmark => ({
+  libraryItemId: record.libraryItemId,
+  time: record.startTimeSeconds,
+  title: record.title,
+  createdAt: record.createdAt,
+});
+
+const findLocalBookmarkByServerTime = (
+  records: Record<string, LocalBookmarkRecord>,
+  libraryItemId: string,
+  timeSeconds: number,
+) =>
+  Object.values(records).find(
+    (record) =>
+      record.libraryItemId === libraryItemId &&
+      (record.serverLink.timeSeconds === timeSeconds ||
+        record.startTimeSeconds === timeSeconds),
+  ) ?? null;
+
+const findLocalBookmarkByStartTime = (
+  records: Record<string, LocalBookmarkRecord>,
+  libraryItemId: string,
+  timeSeconds: number,
+) =>
+  Object.values(records).find(
+    (record) => record.libraryItemId === libraryItemId && record.startTimeSeconds === timeSeconds,
+  ) ?? null;
+
+const areLocalBookmarkRecordsEqual = (
+  left: LocalBookmarkRecord,
+  right: LocalBookmarkRecord,
+) =>
+  left.id === right.id &&
+  left.libraryItemId === right.libraryItemId &&
+  left.kind === right.kind &&
+  left.startTimeSeconds === right.startTimeSeconds &&
+  left.endTimeSeconds === right.endTimeSeconds &&
+  left.title === right.title &&
+  (left.note ?? null) === (right.note ?? null) &&
+  left.createdAt === right.createdAt &&
+  left.updatedAt === right.updatedAt &&
+  left.serverLink.status === right.serverLink.status &&
+  left.serverLink.timeSeconds === right.serverLink.timeSeconds &&
+  left.serverLink.lastMatchedAt === right.serverLink.lastMatchedAt;
+
+const arePendingBookmarkCreatesEqual = (
+  left: Record<string, PendingBookmarkCreate>,
+  right: Record<string, PendingBookmarkCreate>,
+) => {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => {
+    const leftCreate = left[key];
+    const rightCreate = right[key];
+    return (
+      Boolean(rightCreate) &&
+      leftCreate.libraryItemId === rightCreate.libraryItemId &&
+      leftCreate.localBookmarkId === rightCreate.localBookmarkId &&
+      leftCreate.bookmark.libraryItemId === rightCreate.bookmark.libraryItemId &&
+      leftCreate.bookmark.time === rightCreate.bookmark.time &&
+      leftCreate.bookmark.title === rightCreate.bookmark.title &&
+      leftCreate.bookmark.createdAt === rightCreate.bookmark.createdAt &&
+      (leftCreate.replaceBookmarkTime ?? null) === (rightCreate.replaceBookmarkTime ?? null)
+    );
+  });
+};
 
 const findPlaybackRateKeyByLibraryItemId = (
   playbackRatesByUserBook: Record<string, number>,
@@ -925,6 +1031,7 @@ const mergePersistedDeviceBooksState = (
     playbackRatesByUserBook: typedState.playbackRatesByUserBook ?? base.playbackRatesByUserBook,
     bookmarkNotesByUserBookTime:
       typedState.bookmarkNotesByUserBookTime ?? base.bookmarkNotesByUserBookTime,
+    localBookmarksByUser: typedState.localBookmarksByUser ?? base.localBookmarksByUser,
     pendingBookmarkCreatesByUser:
       typedState.pendingBookmarkCreatesByUser ?? base.pendingBookmarkCreatesByUser,
     pendingBookmarkDeletesByUser:
@@ -980,11 +1087,32 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           const key = toUserBookmarkKey(userKey, libraryItemId, bookmarkTime);
           const nextNote = localNote?.trim() ?? "";
           set((state) => {
+            const recordsForUser = state.localBookmarksByUser[userKey] ?? {};
+            const matchingRecord = findLocalBookmarkByStartTime(
+              recordsForUser,
+              libraryItemId,
+              normalizeBookmarkSeconds(Number(bookmarkTime)),
+            );
+            const nextLocalBookmarksByUser = matchingRecord
+              ? {
+                  ...state.localBookmarksByUser,
+                  [userKey]: {
+                    ...recordsForUser,
+                    [matchingRecord.id]: {
+                      ...matchingRecord,
+                      note: nextNote.length > 0 ? nextNote : null,
+                      updatedAt: Date.now(),
+                    },
+                  },
+                }
+              : state.localBookmarksByUser;
+
             if (nextNote.length === 0) {
               const { [key]: _, ...rest } = state.bookmarkNotesByUserBookTime;
               return {
                 ...state,
                 bookmarkNotesByUserBookTime: rest,
+                localBookmarksByUser: nextLocalBookmarksByUser,
               };
             }
             return {
@@ -993,6 +1121,146 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 ...state.bookmarkNotesByUserBookTime,
                 [key]: nextNote,
               },
+              localBookmarksByUser: nextLocalBookmarksByUser,
+            };
+          });
+        },
+
+        reconcileLocalBookmarksFromServer: (userKey, serverState) => {
+          if (!userKey) return;
+          const now = Date.now();
+          const serverBookmarks = Object.values(serverState.bookmarksByLibraryItemId ?? {}).flat();
+
+          set((state) => {
+            const previousRecords = state.localBookmarksByUser[userKey] ?? {};
+            const nextRecords: Record<string, LocalBookmarkRecord> = { ...previousRecords };
+            const matchedRecordIds = new Set<string>();
+            const matchedPendingIds = new Set<string>();
+            let recordsChanged = false;
+
+            serverBookmarks.forEach((serverBookmark) => {
+              if (!serverBookmark.libraryItemId) return;
+              const startTimeSeconds = normalizeBookmarkSeconds(serverBookmark.time);
+              const existingRecord =
+                findLocalBookmarkByServerTime(
+                  nextRecords,
+                  serverBookmark.libraryItemId,
+                  startTimeSeconds,
+                ) ?? null;
+              const legacyNoteKey = toUserBookmarkKey(
+                userKey,
+                serverBookmark.libraryItemId,
+                startTimeSeconds,
+              );
+              const legacyNote = state.bookmarkNotesByUserBookTime[legacyNoteKey] ?? null;
+
+              if (existingRecord) {
+                const nextRecord: LocalBookmarkRecord = {
+                  ...existingRecord,
+                  startTimeSeconds,
+                  title: serverBookmark.title,
+                  note: existingRecord.note ?? legacyNote,
+                  updatedAt: Math.max(existingRecord.updatedAt, serverBookmark.createdAt ?? now),
+                  serverLink: {
+                    status: "matched",
+                    timeSeconds: startTimeSeconds,
+                    lastMatchedAt:
+                      existingRecord.serverLink.status === "matched" &&
+                      existingRecord.serverLink.timeSeconds === startTimeSeconds
+                        ? existingRecord.serverLink.lastMatchedAt
+                        : now,
+                  },
+                };
+                if (!areLocalBookmarkRecordsEqual(existingRecord, nextRecord)) {
+                  nextRecords[existingRecord.id] = nextRecord;
+                  recordsChanged = true;
+                }
+                matchedRecordIds.add(existingRecord.id);
+                matchedPendingIds.add(
+                  toPendingBookmarkId(serverBookmark.libraryItemId, startTimeSeconds),
+                );
+                return;
+              }
+
+              const id = createLocalBookmarkId();
+              nextRecords[id] = {
+                id,
+                libraryItemId: serverBookmark.libraryItemId,
+                kind: "point",
+                startTimeSeconds,
+                title: serverBookmark.title,
+                note: legacyNote,
+                createdAt: serverBookmark.createdAt ?? now,
+                updatedAt: now,
+                serverLink: {
+                  status: "matched",
+                  timeSeconds: startTimeSeconds,
+                  lastMatchedAt: now,
+                },
+              };
+              recordsChanged = true;
+              matchedRecordIds.add(id);
+              matchedPendingIds.add(toPendingBookmarkId(serverBookmark.libraryItemId, startTimeSeconds));
+            });
+
+            const queueForUser = state.pendingBookmarkCreatesByUser[userKey] ?? {};
+            const nextCreates = Object.entries(queueForUser).reduce<
+              Record<string, PendingBookmarkCreate>
+            >((acc, [pendingId, pendingCreate]) => {
+              if (!matchedPendingIds.has(pendingId)) {
+                acc[pendingId] = pendingCreate;
+              }
+              return acc;
+            }, {});
+
+            Object.values(nextRecords).forEach((record) => {
+              if (record.serverLink.status === "pendingCreate") {
+                return;
+              }
+              if (matchedRecordIds.has(record.id)) {
+                return;
+              }
+              const pendingId = toPendingBookmarkId(record.libraryItemId, record.startTimeSeconds);
+              const alreadyQueued = Boolean(nextCreates[pendingId]);
+              if (record.serverLink.status === "unmatched" && alreadyQueued) {
+                return;
+              }
+              const nextRecord: LocalBookmarkRecord = {
+                ...record,
+                updatedAt: now,
+                serverLink: {
+                  ...record.serverLink,
+                  status: "unmatched",
+                },
+              };
+              if (!areLocalBookmarkRecordsEqual(record, nextRecord)) {
+                nextRecords[record.id] = nextRecord;
+                recordsChanged = true;
+              }
+              if (!nextCreates[pendingId]) {
+                nextCreates[pendingId] = {
+                  libraryItemId: record.libraryItemId,
+                  bookmark: toBookmarkPayload(nextRecord),
+                  localBookmarkId: record.id,
+                };
+              }
+            });
+
+            const createsChanged = !arePendingBookmarkCreatesEqual(queueForUser, nextCreates);
+            if (!recordsChanged && !createsChanged) {
+              return state;
+            }
+
+            return {
+              ...state,
+              localBookmarksByUser: {
+                ...state.localBookmarksByUser,
+                [userKey]: nextRecords,
+              },
+              pendingBookmarkCreatesByUser: {
+                ...state.pendingBookmarkCreatesByUser,
+                [userKey]: nextCreates,
+              },
             };
           });
         },
@@ -1000,11 +1268,88 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         addBookmark: async (libraryItemId, bookmark, options) => {
           const userKey = resolveUserKey(options?.userKey);
           if (!userKey) return;
+          const now = Date.now();
+          const startTimeSeconds = normalizeBookmarkSeconds(bookmark.time);
+          const endTimeSeconds =
+            typeof options?.endTimeSeconds === "number"
+              ? normalizeBookmarkSeconds(options.endTimeSeconds)
+              : null;
+          const nextKind: LocalBookmarkKind =
+            endTimeSeconds !== null && endTimeSeconds > startTimeSeconds ? "clip" : "point";
+          let localBookmarkId = options?.localBookmarkId ?? null;
+          const recordsForUserBefore = get().localBookmarksByUser[userKey] ?? {};
+          const existingRecordBefore =
+            (localBookmarkId ? recordsForUserBefore[localBookmarkId] : null) ??
+            findLocalBookmarkByStartTime(recordsForUserBefore, libraryItemId, startTimeSeconds);
+          const previousServerTimeSeconds =
+            existingRecordBefore?.serverLink.timeSeconds ??
+            existingRecordBefore?.startTimeSeconds ??
+            null;
+          const replacedServerTimeSeconds =
+            previousServerTimeSeconds !== null && previousServerTimeSeconds !== startTimeSeconds
+              ? previousServerTimeSeconds
+              : null;
+          const previousPendingId =
+            replacedServerTimeSeconds !== null
+              ? toPendingBookmarkId(libraryItemId, replacedServerTimeSeconds)
+              : null;
+          const shouldDeletePreviousServerBookmark =
+            replacedServerTimeSeconds !== null &&
+            existingRecordBefore?.serverLink.status === "matched";
 
           if (options?.localNote !== undefined) {
             get().actions.setBookmarkLocalNote(libraryItemId, bookmark.time, options.localNote, {
               userKey,
             });
+          }
+          set((state) => {
+            const recordsForUser = state.localBookmarksByUser[userKey] ?? {};
+            const existingRecord =
+              (localBookmarkId ? recordsForUser[localBookmarkId] : null) ??
+              findLocalBookmarkByStartTime(recordsForUser, libraryItemId, startTimeSeconds);
+            const id = existingRecord?.id ?? createLocalBookmarkId();
+            localBookmarkId = id;
+            const localNote =
+              options?.localNote !== undefined
+                ? options.localNote?.trim() || null
+                : (existingRecord?.note ?? null);
+            const nextRecord: LocalBookmarkRecord = {
+              id,
+              libraryItemId,
+              kind: nextKind,
+              startTimeSeconds,
+              ...(nextKind === "clip" && endTimeSeconds !== null
+                ? { endTimeSeconds }
+                : {}),
+              title: bookmark.title,
+              note: localNote,
+              createdAt: existingRecord?.createdAt ?? bookmark.createdAt ?? now,
+              updatedAt: now,
+              serverLink: {
+                status: "pendingCreate",
+                timeSeconds:
+                  replacedServerTimeSeconds !== null
+                    ? startTimeSeconds
+                    : (existingRecord?.serverLink.timeSeconds ?? startTimeSeconds),
+                lastMatchedAt:
+                  replacedServerTimeSeconds !== null
+                    ? null
+                    : (existingRecord?.serverLink.lastMatchedAt ?? null),
+              },
+            };
+            return {
+              ...state,
+              localBookmarksByUser: {
+                ...state.localBookmarksByUser,
+                [userKey]: {
+                  ...recordsForUser,
+                  [id]: nextRecord,
+                },
+              },
+            };
+          });
+          if (replacedServerTimeSeconds !== null) {
+            removeBookmarkFromUserServerStateCache(userKey, libraryItemId, replacedServerTimeSeconds);
           }
           upsertBookmarkInUserServerStateCache(userKey, libraryItemId, bookmark);
 
@@ -1013,6 +1358,23 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           const online = authState.isOnline ?? true;
           const authed = authState.status === "authenticated";
           let shouldQueue = !(online && authed);
+          let shouldQueuePreviousDelete = shouldDeletePreviousServerBookmark && shouldQueue;
+
+          if (
+            shouldDeletePreviousServerBookmark &&
+            replacedServerTimeSeconds !== null &&
+            online &&
+            authed
+          ) {
+            try {
+              await meApi.deleteBookmark(libraryItemId, replacedServerTimeSeconds);
+            } catch (error) {
+              if (!(error instanceof AbsApiError && error.status === 404)) {
+                shouldQueuePreviousDelete = true;
+                shouldQueue = true;
+              }
+            }
+          }
 
           if (!shouldQueue) {
             try {
@@ -1024,22 +1386,57 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
 
           if (!shouldQueue) {
             set((state) => {
+              const recordsForUser = state.localBookmarksByUser[userKey] ?? {};
+              const record = localBookmarkId ? recordsForUser[localBookmarkId] : null;
+              if (!record) return state;
+              return {
+                ...state,
+                localBookmarksByUser: {
+                  ...state.localBookmarksByUser,
+                  [userKey]: {
+                    ...recordsForUser,
+                    [record.id]: {
+                      ...record,
+                      serverLink: {
+                        status: "matched",
+                        timeSeconds: startTimeSeconds,
+                        lastMatchedAt: Date.now(),
+                      },
+                    },
+                  },
+                },
+              };
+            });
+            set((state) => {
               const queueForUser = state.pendingBookmarkCreatesByUser[userKey] ?? {};
               const deleteQueueForUser = state.pendingBookmarkDeletesByUser[userKey] ?? {};
-              if (!queueForUser[pendingId] && !deleteQueueForUser[pendingId]) {
+              if (
+                !queueForUser[pendingId] &&
+                !deleteQueueForUser[pendingId] &&
+                (!previousPendingId ||
+                  (!queueForUser[previousPendingId] && !deleteQueueForUser[previousPendingId]))
+              ) {
                 return state;
               }
               const { [pendingId]: _createRemoved, ...remainingCreates } = queueForUser;
               const { [pendingId]: _deleteRemoved, ...remainingDeletes } = deleteQueueForUser;
+              const {
+                [previousPendingId ?? ""]: _previousCreateRemoved,
+                ...remainingCreatesWithoutPrevious
+              } = remainingCreates;
+              const {
+                [previousPendingId ?? ""]: _previousDeleteRemoved,
+                ...remainingDeletesWithoutPrevious
+              } = remainingDeletes;
               return {
                 ...state,
                 pendingBookmarkCreatesByUser: {
                   ...state.pendingBookmarkCreatesByUser,
-                  [userKey]: remainingCreates,
+                  [userKey]: remainingCreatesWithoutPrevious,
                 },
                 pendingBookmarkDeletesByUser: {
                   ...state.pendingBookmarkDeletesByUser,
-                  [userKey]: remainingDeletes,
+                  [userKey]: remainingDeletesWithoutPrevious,
                 },
               };
             });
@@ -1050,21 +1447,38 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             const queueForUser = state.pendingBookmarkCreatesByUser[userKey] ?? {};
             const deleteQueueForUser = state.pendingBookmarkDeletesByUser[userKey] ?? {};
             const { [pendingId]: _deleteRemoved, ...remainingDeletes } = deleteQueueForUser;
+            const {
+              [previousPendingId ?? ""]: _previousCreateRemoved,
+              ...queueWithoutPreviousCreate
+            } = queueForUser;
             return {
               ...state,
               pendingBookmarkCreatesByUser: {
                 ...state.pendingBookmarkCreatesByUser,
                 [userKey]: {
-                  ...queueForUser,
+                  ...queueWithoutPreviousCreate,
                   [pendingId]: {
                     libraryItemId,
                     bookmark,
+                    localBookmarkId,
+                    replaceBookmarkTime: shouldQueuePreviousDelete
+                      ? replacedServerTimeSeconds
+                      : null,
                   },
                 },
               },
               pendingBookmarkDeletesByUser: {
                 ...state.pendingBookmarkDeletesByUser,
-                [userKey]: remainingDeletes,
+                [userKey]:
+                  shouldQueuePreviousDelete && replacedServerTimeSeconds !== null && previousPendingId
+                    ? {
+                        ...remainingDeletes,
+                        [previousPendingId]: {
+                          libraryItemId,
+                          bookmarkTime: replacedServerTimeSeconds,
+                        },
+                      }
+                    : remainingDeletes,
               },
             };
           });
@@ -1077,6 +1491,31 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           const pendingId = toPendingBookmarkId(libraryItemId, bookmarkTime);
           get().actions.setBookmarkLocalNote(libraryItemId, bookmarkTime, null, { userKey });
           removeBookmarkFromUserServerStateCache(userKey, libraryItemId, bookmarkTime);
+          set((state) => {
+            const recordsForUser = state.localBookmarksByUser[userKey] ?? {};
+            const record =
+              (options?.localBookmarkId ? recordsForUser[options.localBookmarkId] : null) ??
+              findLocalBookmarkByStartTime(
+                recordsForUser,
+                libraryItemId,
+                normalizeBookmarkSeconds(bookmarkTime),
+              );
+            if (!record) return state;
+            const { [record.id]: _removedRecord, ...remainingRecords } = recordsForUser;
+            const createsForUser = state.pendingBookmarkCreatesByUser[userKey] ?? {};
+            const { [pendingId]: _removedCreate, ...remainingCreates } = createsForUser;
+            return {
+              ...state,
+              localBookmarksByUser: {
+                ...state.localBookmarksByUser,
+                [userKey]: remainingRecords,
+              },
+              pendingBookmarkCreatesByUser: {
+                ...state.pendingBookmarkCreatesByUser,
+                [userKey]: remainingCreates,
+              },
+            };
+          });
 
           const authState = authStore.getState();
           const online = authState.isOnline ?? true;
@@ -1413,8 +1852,31 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           if (!createEntries.length) return;
 
           const succeededIds: string[] = [];
+          const succeededReplacementDeleteIds: string[] = [];
           for (const [pendingId, pendingCreate] of createEntries) {
             try {
+              if (typeof pendingCreate.replaceBookmarkTime === "number") {
+                const replacementDeleteId = toPendingBookmarkId(
+                  pendingCreate.libraryItemId,
+                  pendingCreate.replaceBookmarkTime,
+                );
+                const pendingReplacementDelete =
+                  get().pendingBookmarkDeletesByUser[userKey]?.[replacementDeleteId];
+                if (pendingReplacementDelete) {
+                  try {
+                    await meApi.deleteBookmark(
+                      pendingReplacementDelete.libraryItemId,
+                      pendingReplacementDelete.bookmarkTime,
+                    );
+                    succeededReplacementDeleteIds.push(replacementDeleteId);
+                  } catch (error) {
+                    if (!(error instanceof AbsApiError && error.status === 404)) {
+                      continue;
+                    }
+                    succeededReplacementDeleteIds.push(replacementDeleteId);
+                  }
+                }
+              }
               await meApi.saveBookmark(pendingCreate.libraryItemId, pendingCreate.bookmark);
               succeededIds.push(pendingId);
             } catch {
@@ -1428,14 +1890,40 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             const creates = state.pendingBookmarkCreatesByUser[userKey] ?? {};
             if (!Object.keys(creates).length) return state;
             const nextCreates = { ...creates };
+            const deletes = state.pendingBookmarkDeletesByUser[userKey] ?? {};
+            const nextDeletes = { ...deletes };
+            const recordsForUser = state.localBookmarksByUser[userKey] ?? {};
+            const nextRecords = { ...recordsForUser };
             for (const id of succeededIds) {
+              const pendingCreate = creates[id];
+              if (pendingCreate?.localBookmarkId && nextRecords[pendingCreate.localBookmarkId]) {
+                nextRecords[pendingCreate.localBookmarkId] = {
+                  ...nextRecords[pendingCreate.localBookmarkId],
+                  serverLink: {
+                    status: "matched",
+                    timeSeconds: pendingCreate.bookmark.time,
+                    lastMatchedAt: Date.now(),
+                  },
+                };
+              }
               delete nextCreates[id];
+            }
+            for (const id of succeededReplacementDeleteIds) {
+              delete nextDeletes[id];
             }
             return {
               ...state,
+              localBookmarksByUser: {
+                ...state.localBookmarksByUser,
+                [userKey]: nextRecords,
+              },
               pendingBookmarkCreatesByUser: {
                 ...state.pendingBookmarkCreatesByUser,
                 [userKey]: nextCreates,
+              },
+              pendingBookmarkDeletesByUser: {
+                ...state.pendingBookmarkDeletesByUser,
+                [userKey]: nextDeletes,
               },
             };
           });
@@ -3144,6 +3632,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         customCoversById: state.customCoversById,
         playbackRatesByUserBook: state.playbackRatesByUserBook,
         bookmarkNotesByUserBookTime: state.bookmarkNotesByUserBookTime,
+        localBookmarksByUser: state.localBookmarksByUser,
         pendingBookmarkCreatesByUser: state.pendingBookmarkCreatesByUser,
         pendingBookmarkDeletesByUser: state.pendingBookmarkDeletesByUser,
         pendingProgressByUser: state.pendingProgressByUser,
@@ -3153,7 +3642,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         pendingPlaylistOpsByUser: state.pendingPlaylistOpsByUser,
         homeShelfVisibilityByScope: state.homeShelfVisibilityByScope,
       }),
-      version: 6,
+      version: 7,
       merge: (persistedState, currentState) =>
         mergePersistedDeviceBooksState(persistedState, currentState),
       migrate: (persistedState, version) => {
@@ -3224,6 +3713,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         return {
           ...base,
           ...typedState,
+          localBookmarksByUser: typedState.localBookmarksByUser ?? {},
           customShelvesByScope: typedState.customShelvesByScope ?? {},
           playlistShelvesByScope: typedState.playlistShelvesByScope ?? {},
           suppressedPlaylistIdsByScope: typedState.suppressedPlaylistIdsByScope ?? {},
@@ -3290,6 +3780,18 @@ export const selectBookmarkLocalNote = (
   if (!resolvedUserKey) return null;
   const key = toUserBookmarkKey(resolvedUserKey, libraryItemId, bookmarkTime);
   return state.bookmarkNotesByUserBookTime[key] ?? null;
+};
+
+export const selectLocalBookmarksForBook = (
+  state: DeviceBooksState,
+  libraryItemId: string,
+  userKey?: string | null,
+) => {
+  const resolvedUserKey = resolveUserKey(userKey);
+  if (!resolvedUserKey) return [];
+  return Object.values(state.localBookmarksByUser[resolvedUserKey] ?? {})
+    .filter((bookmark) => bookmark.libraryItemId === libraryItemId)
+    .sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
 };
 
 export const selectHasOfflineContent = (state: DeviceBooksState, _userKey?: string | null) => {

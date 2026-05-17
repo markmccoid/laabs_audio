@@ -1,11 +1,12 @@
 import { usePlaybackRateGesture } from "@/hooks/use-playback-rate-gesture";
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { useSleepTimerStatus } from "@/player";
+import { useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import type { Bookmark } from "@/types/absTypes";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useMemo, useRef } from "react";
+import type { ComponentProps } from "react";
+import { useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import Animated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
@@ -15,7 +16,7 @@ type MainPlayerActionsBarProps = {
 };
 
 type ActionIconButtonProps = {
-  icon: string;
+  icon: ComponentProps<typeof SymbolView>["name"];
   label: string;
   disabled?: boolean;
   onPress: () => void;
@@ -240,22 +241,18 @@ const RateActionButton = ({ libraryItemId, onPress }: RateActionButtonProps) => 
 
 const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
   const themeColors = useThemeColors();
-  const { data: userServerState } = useGetUserServerState();
+  useGetUserServerState();
   const sleepTimerStatus = useSleepTimerStatus();
-
-  const bookmarkCount = useMemo(() => {
+  const bookmarkCount = useDeviceBooksStore((state) => {
     if (!libraryItemId) return 0;
-    const bookmarksByLibraryItemId =
-      userServerState?.bookmarksByLibraryItemId ??
-      (
-        userServerState as typeof userServerState & {
-          bookmarksByBookId?: Record<string, Bookmark[]>;
-        }
-      )?.bookmarksByBookId ??
-      {};
-
-    return bookmarksByLibraryItemId[libraryItemId]?.length ?? 0;
-  }, [libraryItemId, userServerState]);
+    return Object.values(state.localBookmarksByUser).reduce(
+      (count, recordsById) =>
+        count +
+        Object.values(recordsById).filter((bookmark) => bookmark.libraryItemId === libraryItemId)
+          .length,
+      0,
+    );
+  });
 
   const openRate = () => {
     router.push("/player-rate");

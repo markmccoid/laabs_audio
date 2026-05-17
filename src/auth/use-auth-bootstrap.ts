@@ -108,8 +108,8 @@ export const useAuthBootstrap = () => {
     if (status !== "authenticated") return;
     const syncPending = async () => {
       await syncPendingProgress().catch(() => undefined);
-      await syncPendingBookmarks().catch(() => undefined);
       await syncPendingBookmarkDeletes().catch(() => undefined);
+      await syncPendingBookmarks().catch(() => undefined);
       await syncPendingPlaylistOps().catch(() => undefined);
     };
     syncPending().catch(() => undefined);
