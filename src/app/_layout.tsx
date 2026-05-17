@@ -586,7 +586,8 @@ export default function RootLayout() {
                 options={{
                   presentation: "formSheet",
                   animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.9],
+                  // sheetAllowedDetents: [0.65],
+                  sheetAllowedDetents: [0.5, 0.9],
                   sheetGrabberVisible: true,
                   sheetCornerRadius: 20,
                   contentStyle: {
@@ -665,10 +666,10 @@ export default function RootLayout() {
                 name="book-bookmarks"
                 options={{
                   headerShown: false,
-                  presentation: "formSheet",
+                  presentation: "modal",
                   animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.9],
-                  sheetInitialDetentIndex: 1,
+                  // sheetAllowedDetents: [0.45, 0.9],
+                  // sheetInitialDetentIndex: 1,
                   sheetGrabberVisible: true,
                   sheetCornerRadius: 20,
                   contentStyle: {
@@ -680,9 +681,9 @@ export default function RootLayout() {
                 name="book-addbookmark"
                 options={{
                   headerShown: false,
-                  presentation: "formSheet",
+                  presentation: "modal",
                   animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.9],
+                  // sheetAllowedDetents: [0.45, 0.9],
                   sheetGrabberVisible: true,
                   sheetCornerRadius: 20,
                   contentStyle: {

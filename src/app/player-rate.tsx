@@ -107,7 +107,9 @@ export default function PlayerRateRoute() {
           boxShadow: "0 12px 24px rgba(15, 23, 42, 0.08)",
         }}
       >
-        <View style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8 }}>
+        <View
+          style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8 }}
+        >
           <SymbolView name="hare" size={18} tintColor={themeColors.accent} />
           <Text selectable style={{ fontSize: 14, fontWeight: "600", color: themeColors.text }}>
             Audio Speed
@@ -203,7 +205,10 @@ export default function PlayerRateRoute() {
         </View>
 
         {!targetLibraryItemId ? (
-          <Text selectable style={{ textAlign: "center", fontSize: 13, color: themeColors.textMuted }}>
+          <Text
+            selectable
+            style={{ textAlign: "center", fontSize: 13, color: themeColors.textMuted }}
+          >
             No active book found.
           </Text>
         ) : null}
