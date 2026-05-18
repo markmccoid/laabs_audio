@@ -6,11 +6,28 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import type { Bookmark } from "@/types/absTypes";
 import { formatSeconds } from "@/utils/formatUtils";
 import { router, Stack, useLocalSearchParams } from "expo-router";
+import * as Sharing from "expo-sharing";
 import { SymbolView } from "expo-symbols";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Keyboard, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Animated,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
+import {
+  resolveClipExportAvailability,
+  resolveClipExportSourcePlan,
+} from "@/sharing/clip-export";
+import { deleteClipExportFile, extractClipExportFile } from "@/sharing/clip-export-extractor";
 import { ClipRangeEditor } from "./clip-range-editor";
 import { useClipRangeDraft } from "./use-clip-range-draft";
 
@@ -44,12 +61,22 @@ export const BookClipDetailSheet = () => {
       ? state.localBookmarksByUser[resolvedUserKey]?.[bookmarkId]
       : null,
   );
+  const downloadInfo = useDeviceBooksStore((state) =>
+    libraryItemId ? state.downloadedBookData[libraryItemId] : undefined,
+  );
+  const activeDownloadLibraryItemId = useDeviceBooksStore(
+    (state) => state.activeDownloadSession?.libraryItemId,
+  );
   const { data: itemDetails } = useGetItemDetails(libraryItemId);
 
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const [shouldRenderPreviewTimer, setShouldRenderPreviewTimer] = useState(false);
+  const previewTimerOpacity = useRef(new Animated.Value(0)).current;
+  const previewTimerTranslateX = useRef(new Animated.Value(-6)).current;
   const previewStatus = useClipPreviewStore((state) => state.status);
   const previewBookmarkId = useClipPreviewStore((state) => state.bookmarkId);
   const previewPositionMs = useClipPreviewStore((state) => state.positionMs);
@@ -71,12 +98,50 @@ export const BookClipDetailSheet = () => {
   const savedNote = bookmark?.note?.trim() ?? "";
   const savedEndSeconds =
     bookmark?.endTimeSeconds ?? (bookmark ? bookmark.startTimeSeconds + 30 : 0);
+  const bookTitle = itemDetails?.title ?? itemDetails?.media?.metadata?.title ?? "Book";
   const isThisClipPreview =
     Boolean(bookmarkId) &&
     previewBookmarkId === bookmarkId &&
     previewStatus !== "idle" &&
     previewStatus !== "error";
   const isPreviewing = isThisClipPreview && previewStatus !== "ended";
+
+  useEffect(() => {
+    if (isPreviewing) {
+      setShouldRenderPreviewTimer(true);
+      Animated.parallel([
+        Animated.timing(previewTimerOpacity, {
+          toValue: 1,
+          duration: 160,
+          useNativeDriver: true,
+        }),
+        Animated.timing(previewTimerTranslateX, {
+          toValue: 0,
+          duration: 160,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      return;
+    }
+
+    Animated.parallel([
+      Animated.timing(previewTimerOpacity, {
+        toValue: 0,
+        duration: 140,
+        useNativeDriver: true,
+      }),
+      Animated.timing(previewTimerTranslateX, {
+        toValue: -6,
+        duration: 140,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        setShouldRenderPreviewTimer(false);
+      }
+    });
+  }, [isPreviewing, previewTimerOpacity, previewTimerTranslateX]);
+
   const handleDraftEditStart = useCallback(() => {
     if (!isPreviewing) return;
     void playerService.restoreListeningPositionAfterPreview();
@@ -103,20 +168,51 @@ export const BookClipDetailSheet = () => {
       trimmedTitle &&
       hasDirtyDraft &&
       !clipDraft.validationMessage &&
-      !isSaving,
+      !isSaving &&
+      !isExporting,
+  );
+  const savedClipExportPlan = useMemo(() => {
+    if (!bookmark || bookmark.kind !== "clip" || !libraryItemId) return null;
+    return resolveClipExportSourcePlan({
+      libraryItemId,
+      downloadInfo,
+      range: {
+        startTimeSeconds: bookmark.startTimeSeconds,
+        endTimeSeconds: savedEndSeconds,
+      },
+    });
+  }, [bookmark, downloadInfo, libraryItemId, savedEndSeconds]);
+  const clipExportAvailability = useMemo(
+    () => resolveClipExportAvailability(savedClipExportPlan),
+    [savedClipExportPlan],
+  );
+  const activeBookDownloadInProgress =
+    Boolean(libraryItemId) && activeDownloadLibraryItemId === libraryItemId;
+  const clipExportUnavailableReason = (() => {
+    if (!bookmark || bookmark.kind !== "clip") return "Clip export is only available for clips";
+    if (hasDirtyDraft) return "Save changes before exporting";
+    if (activeBookDownloadInProgress) return "Download is still finishing";
+    if (!clipExportAvailability.available) return clipExportAvailability.reason;
+    return null;
+  })();
+  const canExportClip = Boolean(
+    bookmark &&
+      bookmark.kind === "clip" &&
+      !hasDirtyDraft &&
+      !activeBookDownloadInProgress &&
+      clipExportAvailability.available &&
+      !isSaving &&
+      !isExporting,
+  );
+  const isBusy = isSaving || isExporting;
+  const canPreviewClip = Boolean(
+    bookmark && libraryItemId && !clipDraft.validationMessage && !isBusy,
   );
   const previewPositionSeconds = Math.max(
     clipDraft.startSeconds,
     Math.min(clipDraft.endSeconds, Math.round(previewPositionMs / 1000)),
   );
-  const previewButtonLabel = isThisClipPreview
-    ? previewStatus === "loading"
-      ? "Loading..."
-      : isPreviewing
-        ? "Stop Preview"
-        : "Preview Clip"
-    : "Preview Clip";
-  const handlePreview = async () => {
+  const handlePreview = useCallback(async () => {
     if (!libraryItemId || clipDraft.validationMessage || !bookmark) return;
     try {
       if (isPreviewing) {
@@ -134,7 +230,25 @@ export const BookClipDetailSheet = () => {
       console.warn("[BookClipDetailSheet] Failed to preview clip", error);
       toast.error("Unable to preview clip");
     }
-  };
+  }, [
+    bookmark,
+    clipDraft.endSeconds,
+    clipDraft.startSeconds,
+    clipDraft.validationMessage,
+    isPreviewing,
+    libraryItemId,
+  ]);
+  const previewTapGesture = useMemo(
+    () =>
+      Gesture.Tap()
+        .runOnJS(true)
+        .enabled(canPreviewClip)
+        .onEnd((_event, success) => {
+          if (!success) return;
+          void handlePreview();
+        }),
+    [canPreviewClip, handlePreview],
+  );
 
   const handleSave = async () => {
     if (!bookmark || !libraryItemId || !canSave) return;
@@ -164,23 +278,74 @@ export const BookClipDetailSheet = () => {
     }
   };
 
+  const handleExport = async () => {
+    if (
+      !bookmark ||
+      !savedClipExportPlan ||
+      !clipExportAvailability.available ||
+      !canExportClip
+    ) {
+      if (clipExportUnavailableReason) {
+        toast.info(clipExportUnavailableReason);
+      }
+      return;
+    }
+
+    let exportFileUri: string | null = null;
+    setIsExporting(true);
+    try {
+      await playerService.restoreListeningPositionAfterPreview();
+      const result = await extractClipExportFile({
+        plan: savedClipExportPlan,
+        bookTitle,
+        bookmarkTitle: bookmark.title,
+        outputFormat: clipExportAvailability.outputFormat,
+      });
+      exportFileUri = result.fileUri;
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) {
+        toast.info("Sharing is not available on this device");
+        return;
+      }
+
+      await Sharing.shareAsync(result.fileUri, {
+        dialogTitle: "Export clip",
+        mimeType: result.mimeType,
+        UTI: result.uti,
+      });
+    } catch (error) {
+      console.warn("[BookClipDetailSheet] Failed to export clip", error);
+      toast.error("Unable to export clip");
+    } finally {
+      setIsExporting(false);
+      await deleteClipExportFile(exportFileUri);
+    }
+  };
+
   return (
-    <ScrollView
-      style={{ flex: 1 }}
-      scrollEnabled={!isScrubbing}
-      contentInsetAdjustmentBehavior="automatic"
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="interactive"
-      contentContainerStyle={{
-        flexGrow: 1,
-        gap: 14,
-        paddingHorizontal: 16,
-        paddingTop: 30,
-        paddingBottom: Math.max(24, insets.bottom + 12),
-        backgroundColor: themeColors.bg,
-      }}
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: themeColors.bg }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <Stack.Screen options={{ title: "Clip Detail" }} />
+      <ScrollView
+        style={{ flex: 1 }}
+        scrollEnabled={!isScrubbing}
+        bounces={false}
+        alwaysBounceVertical={false}
+        contentInsetAdjustmentBehavior="automatic"
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        contentContainerStyle={{
+          flexGrow: 1,
+          gap: 14,
+          paddingHorizontal: 16,
+          paddingTop: 30,
+          paddingBottom: Math.max(24, insets.bottom + 12),
+          backgroundColor: themeColors.bg,
+        }}
+      >
+        <Stack.Screen options={{ title: "Clip Detail" }} />
 
       <View className="flex-row justify-between items-center">
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
@@ -188,7 +353,7 @@ export const BookClipDetailSheet = () => {
             accessibilityRole="button"
             accessibilityLabel="Back to bookmarks"
             onPress={() => router.back()}
-            disabled={isSaving}
+            disabled={isBusy}
             style={({ pressed }) => ({
               width: 36,
               height: 36,
@@ -199,7 +364,7 @@ export const BookClipDetailSheet = () => {
               backgroundColor: themeColors.surface,
               alignItems: "center",
               justifyContent: "center",
-              opacity: isSaving ? 0.45 : pressed ? 0.8 : 1,
+              opacity: isBusy ? 0.45 : pressed ? 0.8 : 1,
             })}
           >
             <SymbolView name="chevron.left" tintColor={themeColors.text} size={17} />
@@ -263,7 +428,7 @@ export const BookClipDetailSheet = () => {
             <TextInput
               value={title}
               onChangeText={setTitle}
-              editable={!isSaving}
+              editable={!isBusy}
               placeholder="Bookmark title"
               placeholderTextColor={themeColors.textMuted}
               style={{
@@ -283,56 +448,115 @@ export const BookClipDetailSheet = () => {
           <ClipRangeEditor
             draft={clipDraft}
             bookDurationSeconds={durationSeconds}
-            disabled={isSaving}
+            disabled={isBusy}
             onScrubbingChange={setIsScrubbing}
+            rangeAccessory={
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "flex-start",
+                  gap: 10,
+                }}
+              >
+                <GestureDetector gesture={previewTapGesture}>
+                  <View
+                    accessibilityRole="button"
+                    accessibilityLabel={isPreviewing ? "Stop clip preview" : "Preview clip"}
+                    accessibilityState={{ disabled: !canPreviewClip }}
+                    onAccessibilityTap={() => {
+                      if (!canPreviewClip) return;
+                      void handlePreview();
+                    }}
+                    style={{
+                      width: 80,
+                      height: 40,
+                      borderRadius: 20,
+                      borderCurve: "continuous",
+                      borderWidth: 1,
+                      borderColor: themeColors.border,
+                      backgroundColor: themeColors.surface,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      opacity: canPreviewClip ? 1 : 0.5,
+                    }}
+                  >
+                    <SymbolView
+                      name={isPreviewing ? "pause.fill" : "play.fill"}
+                      tintColor={themeColors.accent}
+                      size={17}
+                    />
+                  </View>
+                </GestureDetector>
+                {shouldRenderPreviewTimer ? (
+                  <Animated.View
+                    style={{
+                      opacity: previewTimerOpacity,
+                      transform: [{ translateX: previewTimerTranslateX }],
+                    }}
+                  >
+                    <Text
+                      selectable
+                      style={{
+                        color: themeColors.text,
+                        fontSize: 18,
+                        fontWeight: "700",
+                        fontVariant: ["tabular-nums"],
+                      }}
+                    >
+                      {formatSeconds(previewPositionSeconds, "compact", true, true)}
+                    </Text>
+                  </Animated.View>
+                ) : null}
+              </View>
+            }
           />
 
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={isPreviewing ? "Stop clip preview" : "Preview clip"}
-            onPress={() => {
-              void handlePreview();
-            }}
-            disabled={Boolean(clipDraft.validationMessage)}
-            style={({ pressed }) => ({
-              borderRadius: 14,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: themeColors.border,
-              backgroundColor: themeColors.surface,
-              paddingHorizontal: 14,
-              paddingVertical: 14,
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              opacity: clipDraft.validationMessage ? 0.5 : pressed ? 0.8 : 1,
-            })}
-          >
-            <SymbolView
-              name={isPreviewing ? "pause.fill" : "play.fill"}
-              tintColor={themeColors.accent}
-              size={16}
-            />
-            <Text selectable style={{ color: themeColors.text, fontSize: 14, fontWeight: "700" }}>
-              {previewButtonLabel}
-            </Text>
-          </Pressable>
-
-          {isThisClipPreview ? (
-            <Text
-              selectable
-              style={{
-                color: themeColors.text,
-                fontSize: 16,
-                fontWeight: "700",
-                textAlign: "center",
-                fontVariant: ["tabular-nums"],
+          <View style={{ gap: 6 }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Export clip"
+              onPress={() => {
+                void handleExport();
               }}
+              disabled={!canExportClip}
+              style={({ pressed }) => ({
+                borderRadius: 14,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: canExportClip ? themeColors.accent : themeColors.border,
+                backgroundColor: canExportClip ? themeColors.accent : themeColors.surface,
+                paddingHorizontal: 14,
+                paddingVertical: 14,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                opacity: !canExportClip ? 0.55 : pressed ? 0.82 : 1,
+              })}
             >
-              Preview Position: {formatSeconds(previewPositionSeconds, "compact", true, true)}
-            </Text>
-          ) : null}
+              <SymbolView
+                name="square.and.arrow.up"
+                tintColor={canExportClip ? themeColors.accentForeground : themeColors.textMuted}
+                size={16}
+              />
+              <Text
+                selectable
+                style={{
+                  color: canExportClip ? themeColors.accentForeground : themeColors.textMuted,
+                  fontSize: 14,
+                  fontWeight: "700",
+                }}
+              >
+                {isExporting ? "Exporting..." : "Export Clip"}
+              </Text>
+            </Pressable>
+            {clipExportUnavailableReason ? (
+              <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
+                {clipExportUnavailableReason}
+              </Text>
+            ) : null}
+          </View>
 
           <View style={{ gap: 6 }}>
             <Text
@@ -344,7 +568,7 @@ export const BookClipDetailSheet = () => {
             <TextInput
               value={note}
               onChangeText={setNote}
-              editable={!isSaving}
+              editable={!isBusy}
               placeholder="Add an optional note"
               placeholderTextColor={themeColors.textMuted}
               multiline
@@ -365,6 +589,7 @@ export const BookClipDetailSheet = () => {
           </View>
         </>
       )}
-    </ScrollView>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };

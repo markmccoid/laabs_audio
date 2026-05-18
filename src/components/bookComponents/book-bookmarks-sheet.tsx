@@ -49,33 +49,20 @@ type BookmarkExportRow = {
   bookName: string;
   kind: "point" | "clip";
   startTimeSeconds: number;
-  endTimeSeconds: number | null;
   bookmarkTitle: string;
   notes: string;
-  serverStatus: string;
 };
 
 const toBookmarksCsv = (rows: BookmarkExportRow[]) => {
-  const header = [
-    "libraryItemId",
-    "bookName",
-    "kind",
-    "startTimeSeconds",
-    "endTimeSeconds",
-    "bookmarkTitle",
-    "notes",
-    "serverStatus",
-  ];
+  const header = ["libraryItemId", "bookName", "kind", "startTimeSeconds", "bookmarkTitle", "notes"];
   const lines = rows.map((row) =>
     [
       toCsvField(row.libraryItemId),
       toCsvField(row.bookName),
       toCsvField(row.kind),
       toCsvField(row.startTimeSeconds),
-      toCsvField(row.endTimeSeconds ?? ""),
       toCsvField(row.bookmarkTitle),
       toCsvField(row.notes),
-      toCsvField(row.serverStatus),
     ].join(","),
   );
   return [header.join(","), ...lines].join("\n");
@@ -136,10 +123,8 @@ export const BookBookmarksSheet = () => {
       bookName,
       kind: bookmark.kind,
       startTimeSeconds: bookmark.startTimeSeconds,
-      endTimeSeconds: bookmark.kind === "clip" ? (bookmark.endTimeSeconds ?? null) : null,
       bookmarkTitle: getBookmarkDisplayTitle(bookmark),
       notes: bookmark.note?.trim() ?? "",
-      serverStatus: bookmark.serverLink.status,
     }));
   };
 
@@ -363,7 +348,10 @@ export const BookBookmarksSheet = () => {
   };
 
   return (
-    <>
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: themeColors.bg }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
       <View className="px-8 pt-8" collapsable={false}>
         <Stack.Screen options={{ title: "Bookmarks" }} />
         <View className="flex-row items-center justify-between">
@@ -398,6 +386,8 @@ export const BookBookmarksSheet = () => {
         data={libraryItemId ? bookmarks : []}
         keyExtractor={(bookmark) => bookmark.id}
         style={{ flex: 1 }}
+        bounces={false}
+        alwaysBounceVertical={false}
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{
           paddingHorizontal: 16,
@@ -751,6 +741,6 @@ export const BookBookmarksSheet = () => {
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    </>
+    </KeyboardAvoidingView>
   );
 };

@@ -1,5 +1,6 @@
 import { useThemeColors } from "@/theme/use-app-theme";
 import { formatSeconds } from "@/utils/formatUtils";
+import type { ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { ClipRangeScrubber } from "./clip-range-scrubber";
 import { ClipTrimWindowSlider } from "./clip-trim-window-slider";
@@ -11,6 +12,7 @@ type Props = {
   draft: ClipRangeDraft;
   bookDurationSeconds: number;
   disabled?: boolean;
+  rangeAccessory?: ReactNode;
   onScrubbingChange?: (isScrubbing: boolean) => void;
 };
 
@@ -18,6 +20,7 @@ export const ClipRangeEditor = ({
   draft,
   bookDurationSeconds,
   disabled = false,
+  rangeAccessory,
   onScrubbingChange,
 }: Props) => {
   const themeColors = useThemeColors();
@@ -121,6 +124,7 @@ export const ClipRangeEditor = ({
         onScrubbingChange={onScrubbingChange}
         onEditStart={draft.handleEditStart}
       />
+      {rangeAccessory}
       <ClipTrimWindowSlider
         trimWindowStartSeconds={draft.trimWindowStartSeconds}
         trimWindowDurationSeconds={draft.trimWindowDurationSeconds}

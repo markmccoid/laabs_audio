@@ -47,12 +47,24 @@ _Avoid_: Orphaned bookmark
 A clip-only view for previewing, trimming, editing, exporting, or transcribing a clip bookmark.
 _Avoid_: Clip page, clip editor
 
+**Clip Editor**:
+A surface for creating or editing a Clip Bookmark's Clip Range.
+_Avoid_: Clip controls, clip form
+
+**Clip Export**:
+A user-initiated action that creates a shareable audio artifact from a Clip Bookmark's Clip Range.
+_Avoid_: Audio export, clip share
+
+**Clip Export File**:
+The audio artifact created by a Clip Export.
+_Avoid_: Shared clip, exported bookmark
+
 **Clip Range**:
-The selected start-to-end span of a Clip Bookmark inside Clip Detail.
+The selected start-to-end span of a Clip Bookmark inside a Clip Editor.
 _Avoid_: Trim range
 
 **Trim Window**:
-The bounded span of audiobook time visible in Clip Detail while editing a Clip Bookmark's start and end positions.
+The bounded span of audiobook time visible in a Clip Editor while editing a Clip Bookmark's start and end positions.
 _Avoid_: Five minute window, scrubber window
 
 ## Relationships
@@ -62,6 +74,8 @@ _Avoid_: Five minute window, scrubber window
 - A **Clip Bookmark** has a start **Bookmark Position** and an end position.
 - A **Clip Bookmark** uses its start **Bookmark Position** for ordering and navigation.
 - A **Clip Bookmark** has a bounded duration so clips remain practical to play, export, and transcribe.
+- A **Clip Export** belongs to exactly one Clip Bookmark.
+- A **Clip Export File** contains the audio from a Clip Bookmark's Clip Range.
 - A **Clip Range** is the selected audio span of a Clip Bookmark.
 - A **Clip Range** must fit within the Trim Window while being edited.
 - Every **Bookmark** has a **Bookmark Title** before it can be saved.
@@ -72,6 +86,8 @@ _Avoid_: Five minute window, scrubber window
 - The app stores **Preview Position** in transient preview state, not in the main playback state.
 - A **Clip Detail** belongs to exactly one **Clip Bookmark**.
 - A **Clip Bookmark** is edited from its **Clip Detail**.
+- A **Clip Editor** may be used before a Clip Bookmark is saved or while editing an existing Clip Bookmark.
+- Previewing an unsaved Clip Bookmark uses transient preview state rather than creating a Local Bookmark Record.
 - A **Trim Window** is a fixed-duration editing viewport unless the audiobook is shorter than that duration.
 - A **Trim Window** translates a Clip Bookmark's start and end positions together without changing the clip duration.
 - Moving a **Trim Window** updates the draft Clip Bookmark positions but does not drive clip preview playback.
@@ -100,5 +116,7 @@ _Avoid_: Five minute window, scrubber window
 - "orphaned bookmark" was used to mean a local bookmark whose server counterpart is missing; resolved: the canonical term is **Unmatched Bookmark**.
 - "clip name" and "bookmark name" were used for the user-facing label; resolved: the canonical term is **Bookmark Title**.
 - "clip details page" was used for the clip-only preview/edit surface; resolved: the canonical term is **Clip Detail**.
+- "shared clip controls" was used for the reusable create/edit surface; resolved: the canonical term is **Clip Editor**.
+- "share clip" and "export clip" were used for creating shareable audio from a Clip Bookmark; resolved: the canonical term is **Clip Export**.
 - "trim range" was used ambiguously for both the selected clip span and visible editing span; resolved: the selected span is **Clip Range**.
 - "five minute window" and "scrubber window" were used for the visible editing span; resolved: the canonical term is **Trim Window**.
