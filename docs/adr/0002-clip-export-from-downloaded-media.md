@@ -16,15 +16,15 @@ The React Native FFmpeg path is risky as the first implementation dependency. Th
 - Clip Export is available only for saved Clip Bookmarks.
 - Point Bookmarks do not have Clip Export. They remain covered by the all-bookmarks metadata export.
 - Clip Export may run for an Unmatched Bookmark when its audiobook is downloaded, because the Local Bookmark Record owns the Clip Range.
-- The first Clip Export action lives in Clip Detail, where the user can verify the Clip Range before creating a Clip Export File.
-- Clip Export uses the saved Clip Range and saved Bookmark Title. If Clip Detail has unsaved changes, Clip Export is unavailable until those changes are saved.
-- If the audiobook is not downloaded, Clip Detail should show Clip Export as unavailable with a download-required state rather than hiding the action.
+- The Clip Export action lives on the bookmark review screen, where the user can verify the saved Clip Range before creating a Clip Export File.
+- Clip Export uses the saved Clip Range and saved Bookmark Title. If the bookmark review screen has unsaved changes, Clip Export is unavailable until those changes are saved.
+- If the audiobook is not downloaded, the bookmark review screen should show Clip Export as unavailable with a download-required state rather than hiding the action for saved Clip Bookmarks.
 - Clip Export may run while another audiobook is downloading, but it is unavailable for a book whose own download is still in progress or finalizing.
-- While a Clip Export File is being generated, Clip Detail should show an exporting state and prevent duplicate export jobs or edits that would change the Clip Range.
-- The existing all-bookmarks export remains a metadata export with shared bookmark fields only: library item, book title, bookmark kind, start position, Bookmark Title, and local note. It does not create Clip Export Files.
+- While a Clip Export File is being generated, the bookmark review screen should show an exporting state and prevent duplicate export jobs or edits that would change the Clip Range.
+- The existing all-bookmarks export remains a Bookmark Backup Export. Its JSON form is the future restore-oriented format and should include Point Bookmark and Clip Bookmark metadata, including Clip Range and Local Note data. It does not create Clip Export Files.
 - Clip Export Files should use M4A by default. MP3 is an acceptable fallback if the selected extractor path cannot produce reliable M4A output on the target platforms.
 - Phase 3 Clip Export Files do not need embedded audio tags. The Bookmark Title and book title should be reflected in the generated filename and share metadata where the platform supports it.
-- Local notes are not included in the audio Clip Export share payload. They remain part of Clip Detail and metadata exports.
+- Local notes are not included in the audio Clip Export share payload. They remain part of bookmark review and Bookmark Backup Export metadata.
 - Clip Export filenames should include both book title and Bookmark Title, for example `{Book Title} - {Bookmark Title}.m4a`, sanitized for the filesystem.
 - Clip Export Files are generated on demand when the user starts Clip Export, not when Clip Detail opens.
 - After a Clip Export File is generated, the app should open the share sheet immediately rather than showing a second confirmation step.
@@ -34,8 +34,8 @@ The React Native FFmpeg path is risky as the first implementation dependency. Th
 - The app will resolve a Clip Range into local source segments before invoking any extractor.
 - Clip Export uses whole-second Clip Range boundaries, matching Bookmark Position precision.
 - The first extraction path should run in-app through native code and remain adapter-isolated. Server-side extraction is a later fallback, not the Phase 3 default.
-- The selected extraction library should be maintained, Expo-compatible through config/prebuild, acceptable for app licensing and binary distribution, and reliable for audiobook source containers. It may use FFmpeg internally if those constraints are met.
-- The first adapter uses `react-native-video-trim` headless audio trimming for single-segment Clip Exports. Cross-track concatenation remains unavailable until merge/concat behavior is validated on device with audiobook audio files.
+- The selected extraction path should be Expo-compatible through config/prebuild, acceptable for app licensing and binary distribution, and reliable for audiobook source containers.
+- The first adapter uses the local `modules/audio-trimmer` Expo module for single-segment M4A Clip Exports. Cross-track concatenation remains unavailable until merge/concat behavior is validated on device with audiobook audio files.
 - Transcoding the selected Clip Range is acceptable in Phase 3 because Clip Bookmark duration is bounded. Stream-copy can be used later when reliable for the source container.
 - A Clip Export can contain one source segment for a single-file or same-track range, or multiple source segments when the Clip Range crosses downloaded track boundaries.
 - Cross-track Clip Ranges must not be partially exported. If the selected extractor cannot concatenate source segments, the UI must show Clip Export as unavailable for that Clip Bookmark until a concatenation-capable path exists.
@@ -49,4 +49,4 @@ The React Native FFmpeg path is risky as the first implementation dependency. Th
 - Multi-track books are not ignored; the resolver must surface every source segment needed for the Clip Range.
 - Long single-file `.m4b` books are handled by seeking into one local file rather than loading the full audiobook into JavaScript memory.
 - Streamed export remains a later decision: either download first, ask Audiobookshelf for source bytes, or introduce a server-side extraction path.
-- Choosing an audio processing library is delayed until after the resolver and a small device prototype prove the exact source file inputs.
+- The local AudioTrimmer module is the selected first extraction path; it still needs device validation against real downloaded audiobook files.

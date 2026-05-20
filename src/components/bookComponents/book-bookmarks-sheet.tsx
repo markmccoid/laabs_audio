@@ -17,12 +17,9 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
-  ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -49,18 +46,33 @@ type BookmarkExportRow = {
   bookName: string;
   kind: "point" | "clip";
   startTimeSeconds: number;
+  endTimeSeconds: number | null;
   bookmarkTitle: string;
   notes: string;
+  localBookmarkId: string;
+  serverLinkStatus: string;
+  serverBookmarkTimeSeconds: number | null;
+  createdAt: number;
+  updatedAt: number;
 };
 
 const toBookmarksCsv = (rows: BookmarkExportRow[]) => {
-  const header = ["libraryItemId", "bookName", "kind", "startTimeSeconds", "bookmarkTitle", "notes"];
+  const header = [
+    "libraryItemId",
+    "bookName",
+    "kind",
+    "startTimeSeconds",
+    "endTimeSeconds",
+    "bookmarkTitle",
+    "notes",
+  ];
   const lines = rows.map((row) =>
     [
       toCsvField(row.libraryItemId),
       toCsvField(row.bookName),
       toCsvField(row.kind),
       toCsvField(row.startTimeSeconds),
+      toCsvField(row.endTimeSeconds ?? ""),
       toCsvField(row.bookmarkTitle),
       toCsvField(row.notes),
     ].join(","),
@@ -77,7 +89,7 @@ export const BookBookmarksSheet = () => {
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const serverUrl = useAuthStore((state) => state.serverUrl);
-  const { addBookmark, deleteBookmark } = useDeviceBooksActions();
+  const { deleteBookmark } = useDeviceBooksActions();
   useGetUserServerState();
   const { libraryItemId: libraryItemIdParam } = useLocalSearchParams<{
     libraryItemId?: string | string[];
@@ -86,10 +98,6 @@ export const BookBookmarksSheet = () => {
   const { data: itemDetails } = useGetItemDetails(libraryItemId);
   const bookName = itemDetails?.title ?? itemDetails?.media?.metadata?.title ?? "";
   const [pendingBookmarkId, setPendingBookmarkId] = useState<string | null>(null);
-  const [editingBookmark, setEditingBookmark] = useState<LocalBookmarkRecord | null>(null);
-  const [editingTitle, setEditingTitle] = useState("");
-  const [editingNote, setEditingNote] = useState("");
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
@@ -123,10 +131,28 @@ export const BookBookmarksSheet = () => {
       bookName,
       kind: bookmark.kind,
       startTimeSeconds: bookmark.startTimeSeconds,
+      endTimeSeconds: bookmark.kind === "clip" ? (bookmark.endTimeSeconds ?? null) : null,
       bookmarkTitle: getBookmarkDisplayTitle(bookmark),
       notes: bookmark.note?.trim() ?? "",
+      localBookmarkId: bookmark.id,
+      serverLinkStatus: bookmark.serverLink.status,
+      serverBookmarkTimeSeconds:
+        bookmark.serverLink.status === "matched" || bookmark.serverLink.status === "pendingCreate"
+          ? bookmark.serverLink.timeSeconds
+          : null,
+      createdAt: bookmark.createdAt,
+      updatedAt: bookmark.updatedAt,
     }));
   };
+
+  const buildBookmarkBackupExport = () => ({
+    schemaVersion: 1,
+    exportKind: "bookmark-backup",
+    exportedAt: new Date().toISOString(),
+    libraryItemId,
+    bookName,
+    bookmarks: buildExportRows(),
+  });
 
   const exportBookmarks = async (format: "json" | "csv") => {
     if (!libraryItemId || isExporting) return;
@@ -151,7 +177,7 @@ export const BookBookmarksSheet = () => {
       exportFileUri = `${exportDirectory}${fileName}`;
 
       const fileBody =
-        format === "json" ? JSON.stringify(rows, null, 2) : toBookmarksCsv(rows);
+        format === "json" ? JSON.stringify(buildBookmarkBackupExport(), null, 2) : toBookmarksCsv(rows);
 
       await FileSystem.writeAsStringAsync(exportFileUri, fileBody, {
         encoding: FileSystem.EncodingType.UTF8,
@@ -211,23 +237,6 @@ export const BookBookmarksSheet = () => {
     ]);
   };
 
-  const resetEditState = () => {
-    setEditingBookmark(null);
-    setEditingTitle("");
-    setEditingNote("");
-  };
-
-  const openEditModal = (bookmark: LocalBookmarkRecord) => {
-    setEditingBookmark(bookmark);
-    setEditingTitle(getBookmarkDisplayTitle(bookmark));
-    setEditingNote(bookmark.note?.trim() ?? "");
-  };
-
-  const closeEditModal = () => {
-    if (isSavingEdit) return;
-    resetEditState();
-  };
-
   const handleBookmarkPress = async (bookmark: LocalBookmarkRecord) => {
     if (!libraryItemId) return;
     const targetPositionMs = secondsToMs(bookmark.startTimeSeconds);
@@ -257,57 +266,13 @@ export const BookBookmarksSheet = () => {
 
   const openSecondaryAction = (bookmark: LocalBookmarkRecord) => {
     if (!libraryItemId) return;
-    if (bookmark.kind === "clip") {
-      router.push({
-        pathname: "/book-bookmarks/clip-detail",
-        params: {
-          libraryItemId,
-          bookmarkId: bookmark.id,
-        },
-      });
-      return;
-    }
-    openEditModal(bookmark);
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editingBookmark || !libraryItemId || isSavingEdit) return;
-    const nextTitle = editingTitle.trim();
-    if (!nextTitle) return;
-    const nextNote = editingNote.trim();
-    const currentTitle = getBookmarkDisplayTitle(editingBookmark);
-    const currentNote = (editingBookmark.note ?? "").trim();
-    const titleChanged = nextTitle !== currentTitle;
-    const noteChanged = nextNote !== currentNote;
-
-    if (!titleChanged && !noteChanged) {
-      resetEditState();
-      return;
-    }
-
-    setIsSavingEdit(true);
-    try {
-      await addBookmark(
+    router.push({
+      pathname: "/book-bookmarks/edit",
+      params: {
         libraryItemId,
-        {
-          libraryItemId,
-          time: editingBookmark.startTimeSeconds,
-          title: nextTitle,
-          createdAt: editingBookmark.createdAt,
-        },
-        {
-          localBookmarkId: editingBookmark.id,
-          localNote: nextNote.length > 0 ? nextNote : null,
-          endTimeSeconds:
-            editingBookmark.kind === "clip" ? (editingBookmark.endTimeSeconds ?? null) : null,
-        },
-      );
-      resetEditState();
-    } catch (error) {
-      console.warn("[BookBookmarksSheet] Failed to save bookmark edits", error);
-    } finally {
-      setIsSavingEdit(false);
-    }
+        bookmarkId: bookmark.id,
+      },
+    });
   };
 
   const handleDeleteBookmark = async (bookmark: LocalBookmarkRecord) => {
@@ -319,9 +284,6 @@ export const BookBookmarksSheet = () => {
         localBookmarkId: bookmark.id,
       });
       toast.success("Bookmark deleted");
-      if (editingBookmark?.id === bookmark.id) {
-        resetEditState();
-      }
     } catch (error) {
       console.warn("[BookBookmarksSheet] Failed to delete bookmark", error);
       toast.error("Unable to delete bookmark");
@@ -352,17 +314,49 @@ export const BookBookmarksSheet = () => {
       style={{ flex: 1, backgroundColor: themeColors.bg }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <View className="px-8 pt-8" collapsable={false}>
+      <View
+        collapsable={false}
+        style={{
+          paddingHorizontal: 32,
+          paddingTop: Math.max(32, insets.top + 16),
+        }}
+      >
         <Stack.Screen options={{ title: "Bookmarks" }} />
         <View className="flex-row items-center justify-between">
-          <Text className="text-xl font-bold text-text">Bookmarks</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <Text className="text-xl font-bold text-text">Bookmarks</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Export bookmarks"
+              onPress={openExportFormatPicker}
+              disabled={isExporting}
+              style={({ pressed }) => ({
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                backgroundColor: themeColors.surface,
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: pressed || isExporting ? 0.75 : 1,
+              })}
+            >
+              <SymbolView
+                name={isExporting ? "hourglass" : "square.and.arrow.up"}
+                tintColor={themeColors.textMuted}
+                size={15}
+              />
+            </Pressable>
+          </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Export bookmarks"
-            onPress={openExportFormatPicker}
+            accessibilityLabel="Close bookmarks"
+            onPress={() => router.back()}
             disabled={isExporting}
             style={({ pressed }) => ({
-              width: 34,
+              minWidth: 72,
               height: 34,
               borderRadius: 17,
               borderCurve: "continuous",
@@ -371,14 +365,13 @@ export const BookBookmarksSheet = () => {
               backgroundColor: themeColors.surface,
               alignItems: "center",
               justifyContent: "center",
+              paddingHorizontal: 12,
               opacity: pressed || isExporting ? 0.75 : 1,
             })}
           >
-            <SymbolView
-              name={isExporting ? "hourglass" : "square.and.arrow.up"}
-              tintColor={themeColors.textMuted}
-              size={15}
-            />
+            <Text selectable style={{ color: themeColors.textMuted, fontSize: 13, fontWeight: "700" }}>
+              Close
+            </Text>
           </Pressable>
         </View>
       </View>
@@ -411,7 +404,7 @@ export const BookBookmarksSheet = () => {
           const primaryActionLabel = `Go to bookmark at ${timeLabel}`;
           const secondaryActionLabel =
             bookmark.kind === "clip"
-              ? `View clip detail at ${timeLabel}`
+              ? `Edit clip at ${timeLabel}`
               : `Edit bookmark at ${timeLabel}`;
 
           return (
@@ -575,172 +568,6 @@ export const BookBookmarksSheet = () => {
           </View>
         }
       />
-
-      <Modal
-        transparent
-        visible={Boolean(editingBookmark)}
-        animationType="fade"
-        onRequestClose={closeEditModal}
-      >
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-        >
-          <View
-            style={{
-              flex: 1,
-              backgroundColor: "rgba(2, 6, 23, 0.45)",
-              justifyContent: "center",
-              paddingHorizontal: 18,
-              paddingVertical: 24,
-            }}
-          >
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close bookmark editor"
-              onPress={closeEditModal}
-              style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
-            />
-            <View
-              style={{
-                maxHeight: "85%",
-                borderRadius: 18,
-                borderCurve: "continuous",
-                borderWidth: 1,
-                borderColor: themeColors.border,
-                backgroundColor: themeColors.surface,
-                padding: 16,
-                gap: 12,
-              }}
-            >
-              <ScrollView
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ gap: 12 }}
-                showsVerticalScrollIndicator={false}
-              >
-                <Text
-                  selectable
-                  style={{ color: themeColors.text, fontSize: 18, fontWeight: "700" }}
-                >
-                  Edit Bookmark
-                </Text>
-
-                <View style={{ gap: 6 }}>
-                  <Text
-                    selectable
-                    style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}
-                  >
-                    Bookmark Title
-                  </Text>
-                  <TextInput
-                    value={editingTitle}
-                    onChangeText={setEditingTitle}
-                    editable={!isSavingEdit}
-                    placeholder="Bookmark name"
-                    placeholderTextColor={themeColors.textMuted}
-                    style={{
-                      borderRadius: 12,
-                      borderCurve: "continuous",
-                      borderWidth: 1,
-                      borderColor: themeColors.border,
-                      backgroundColor: themeColors.bg,
-                      color: themeColors.text,
-                      paddingHorizontal: 12,
-                      paddingVertical: 10,
-                      fontSize: 14,
-                    }}
-                  />
-                </View>
-
-                <View style={{ gap: 6 }}>
-                  <Text
-                    selectable
-                    style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "600" }}
-                  >
-                    Bookmark Note
-                  </Text>
-                  <TextInput
-                    value={editingNote}
-                    onChangeText={setEditingNote}
-                    editable={!isSavingEdit}
-                    placeholder="Add a local note"
-                    placeholderTextColor={themeColors.textMuted}
-                    multiline
-                    textAlignVertical="top"
-                    style={{
-                      minHeight: 96,
-                      borderRadius: 12,
-                      borderCurve: "continuous",
-                      borderWidth: 1,
-                      borderColor: themeColors.border,
-                      backgroundColor: themeColors.bg,
-                      color: themeColors.text,
-                      paddingHorizontal: 12,
-                      paddingVertical: 10,
-                      fontSize: 14,
-                    }}
-                  />
-                </View>
-              </ScrollView>
-
-              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 10 }}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Cancel edit bookmark"
-                  onPress={closeEditModal}
-                  disabled={isSavingEdit}
-                  style={({ pressed }) => ({
-                    borderRadius: 10,
-                    borderCurve: "continuous",
-                    borderWidth: 1,
-                    borderColor: themeColors.border,
-                    backgroundColor: themeColors.bg,
-                    paddingHorizontal: 14,
-                    paddingVertical: 10,
-                    opacity: pressed || isSavingEdit ? 0.8 : 1,
-                  })}
-                >
-                  <Text
-                    selectable
-                    style={{ color: themeColors.text, fontSize: 13, fontWeight: "600" }}
-                  >
-                    Cancel
-                  </Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Save bookmark changes"
-                  onPress={() => {
-                    void handleSaveEdit();
-                  }}
-                  disabled={isSavingEdit}
-                  style={({ pressed }) => ({
-                    borderRadius: 10,
-                    borderCurve: "continuous",
-                    borderWidth: 1,
-                    borderColor: themeColors.accent,
-                    backgroundColor: themeColors.accent,
-                    paddingHorizontal: 14,
-                    paddingVertical: 10,
-                    opacity: pressed || isSavingEdit ? 0.82 : 1,
-                  })}
-                >
-                  <Text
-                    selectable
-                    style={{
-                      color: themeColors.accentForeground,
-                      fontSize: 13,
-                      fontWeight: "700",
-                    }}
-                  >
-                    {isSavingEdit ? "Saving..." : "Save"}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </KeyboardAvoidingView>
   );
 };

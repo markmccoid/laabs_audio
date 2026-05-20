@@ -666,12 +666,10 @@ export default function RootLayout() {
                 name="book-bookmarks"
                 options={{
                   headerShown: false,
-                  presentation: "modal",
+                  presentation: "fullScreenModal",
                   animation: "slide_from_bottom",
-                  // sheetAllowedDetents: [0.45, 0.9],
-                  // sheetInitialDetentIndex: 1,
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
+                  gestureEnabled: false,
+                  sheetGrabberVisible: false,
                   contentStyle: {
                     backgroundColor: themeColors.surface,
                   },
@@ -681,11 +679,10 @@ export default function RootLayout() {
                 name="book-addbookmark"
                 options={{
                   headerShown: false,
-                  presentation: "modal",
+                  presentation: "fullScreenModal",
                   animation: "slide_from_bottom",
-                  // sheetAllowedDetents: [0.45, 0.9],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
+                  gestureEnabled: false,
+                  sheetGrabberVisible: false,
                   contentStyle: {
                     backgroundColor: themeColors.surface,
                   },

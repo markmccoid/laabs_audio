@@ -51,6 +51,10 @@ _Avoid_: Clip page, clip editor
 A surface for creating or editing a Clip Bookmark's Clip Range.
 _Avoid_: Clip controls, clip form
 
+**Add Bookmark Sheet**:
+The user-facing flow for creating a new Bookmark. It captures the Bookmark Title, Bookmark Position or Clip Range, and Local Note before the Bookmark is saved.
+_Avoid_: Add bookmark/clip toggle
+
 **Clip Export**:
 A user-initiated action that creates a shareable audio artifact from a Clip Bookmark's Clip Range.
 _Avoid_: Audio export, clip share
@@ -58,6 +62,10 @@ _Avoid_: Audio export, clip share
 **Clip Export File**:
 The audio artifact created by a Clip Export.
 _Avoid_: Shared clip, exported bookmark
+
+**Bookmark Backup Export**:
+A user-initiated metadata export of saved Bookmarks intended to support future restore or import.
+_Avoid_: Clip export, audio export
 
 **Clip Range**:
 The selected start-to-end span of a Clip Bookmark inside a Clip Editor.
@@ -73,24 +81,46 @@ _Avoid_: Five minute window, scrubber window
 - A **Point Bookmark** has exactly one **Bookmark Position**.
 - A **Clip Bookmark** has a start **Bookmark Position** and an end position.
 - A **Clip Bookmark** uses its start **Bookmark Position** for ordering and navigation.
+- In the **Clip Editor**, **Starting Position** is the Clip Bookmark's start **Bookmark Position**.
 - A **Clip Bookmark** has a bounded duration so clips remain practical to play, export, and transcribe.
+- A **Clip Bookmark** duration must be at least 5 seconds and no more than 1 hour.
+- The **Add Bookmark Sheet** starts with a Point Bookmark draft.
+- Continuing from the **Add Bookmark Sheet** to the **Clip Editor** converts the unsaved draft into a Clip Bookmark draft.
+- An unsaved Clip Bookmark draft may be converted back into a Point Bookmark draft before saving.
+- Converting an unsaved Clip Bookmark draft back to a Point Bookmark draft preserves the clip's **Starting Position** as the **Bookmark Position**.
+- The **Add Bookmark Sheet** and **Clip Editor** share the same unsaved Bookmark draft.
+- The **Add Bookmark Sheet** owns the final save or discard decision for the shared unsaved Bookmark draft.
+- The **Add Bookmark Sheet** may summarize a Clip Bookmark draft's Clip Range while the **Clip Editor** owns Clip Range editing.
+- Editing an existing Bookmark uses an unsaved Bookmark draft seeded from the saved **Local Bookmark Record**.
+- Editing an existing Bookmark does not change its **Local Bookmark Record** until the user saves the draft.
 - A **Clip Export** belongs to exactly one Clip Bookmark.
 - A **Clip Export File** contains the audio from a Clip Bookmark's Clip Range.
+- A **Bookmark Backup Export** may contain Point Bookmarks and Clip Bookmarks.
+- A **Bookmark Backup Export** must include enough Bookmark Title, Bookmark Position, Clip Range, and Local Note data to support future restore.
 - A **Clip Range** is the selected audio span of a Clip Bookmark.
+- A **Clip Range** must remain within the audiobook's available duration.
 - A **Clip Range** must fit within the Trim Window while being edited.
 - Every **Bookmark** has a **Bookmark Title** before it can be saved.
+- A **Clip Bookmark** uses the same **Bookmark Title** concept as a Point Bookmark; it does not have a separate clip title.
 - A **Bookmark** may change between **Point Bookmark** and **Clip Bookmark** without becoming a different **Bookmark**.
+- Editing a **Bookmark Position** changes the same Bookmark rather than creating a different Bookmark.
 - Choosing a **Bookmark** from the bookmark viewer sets the **Listening Position** to that bookmark's **Bookmark Position**.
 - Previewing a **Clip Bookmark** must not accidentally change the user's intended **Listening Position**.
 - A **Preview Position** must not replace the user's **Listening Position**.
 - The app stores **Preview Position** in transient preview state, not in the main playback state.
 - A **Clip Detail** belongs to exactly one **Clip Bookmark**.
 - A **Clip Bookmark** is edited from its **Clip Detail**.
-- A **Clip Editor** may be used before a Clip Bookmark is saved or while editing an existing Clip Bookmark.
+- A **Clip Editor** may be used to create an unsaved Clip Bookmark or to edit an existing Clip Bookmark.
+- Creating an unsaved Clip Bookmark continues from the **Add Bookmark Sheet** into the **Clip Editor** before saving.
+- Returning from the **Clip Editor** to the **Add Bookmark Sheet** preserves the unsaved Clip Bookmark draft.
+- An unsaved Clip Bookmark is not represented as a **Local Bookmark Record** until the user saves it.
 - Previewing an unsaved Clip Bookmark uses transient preview state rather than creating a Local Bookmark Record.
-- A **Trim Window** is a fixed-duration editing viewport unless the audiobook is shorter than that duration.
+- The **Clip Editor** may preview only the final five seconds of a Clip Range to help verify the end boundary.
+- A **Clip Export** is available only for a saved Clip Bookmark without unsaved draft changes.
+- A **Trim Window** is the visible editing span used to inspect and adjust a Clip Range.
 - A **Trim Window** translates a Clip Bookmark's start and end positions together without changing the clip duration.
 - Moving a **Trim Window** updates the draft Clip Bookmark positions but does not drive clip preview playback.
+- In the **Clip Editor**, the **Trim Window** may automatically keep the **Clip Range** visible while users adjust Starting Position and duration.
 - Playback inside **Clip Detail** must not accidentally change the user's intended **Listening Position**.
 - When clip preview ends or Clip Detail closes, LAABS Audio restores the **Listening Position**.
 - Choosing a **Bookmark** is an explicit navigation action and takes precedence over clip preview restoration.

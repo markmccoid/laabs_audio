@@ -93,7 +93,7 @@ export const useClipRangeDraft = ({
     clipDurationSeconds < MIN_CLIP_DURATION_SECONDS
       ? "Clip end must be after start."
       : clipDurationSeconds > MAX_CLIP_DURATION_SECONDS
-        ? "Clip cannot be longer than 5 minutes."
+        ? "Clip cannot be longer than 1 hour."
         : startSeconds < trimWindowStartSeconds || endSeconds > trimWindowEndSeconds
           ? "Clip range must fit inside the trim window."
           : bookDurationSeconds > 0 && endSeconds > bookDurationSeconds

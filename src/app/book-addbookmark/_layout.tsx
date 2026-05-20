@@ -1,22 +1,15 @@
 import { BookAddBookmarkDraftProvider } from "@/components/bookComponents/book-addbookmark-draft-context";
 import { Stack } from "expo-router";
 
-const BookBookmarksLayout = () => {
+const BookAddBookmarkLayout = () => {
   return (
     <BookAddBookmarkDraftProvider>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
-        <Stack.Screen name="edit" />
         <Stack.Screen name="clip-editor" />
-        <Stack.Screen
-          name="clip-detail"
-          options={{
-            gestureEnabled: false,
-          }}
-        />
       </Stack>
     </BookAddBookmarkDraftProvider>
   );
 };
 
-export default BookBookmarksLayout;
+export default BookAddBookmarkLayout;

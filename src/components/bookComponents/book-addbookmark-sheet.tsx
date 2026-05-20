@@ -1,12 +1,10 @@
-import { useGetItemDetails } from "@/hooks/abs-data-hooks";
-import { playerService, useClipPreviewStore, usePlaybackStore } from "@/player";
+import { playerService } from "@/player";
 import { useDeviceBooksActions } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Bookmark } from "@/types/absTypes";
-import { formatSeconds } from "@/utils/formatUtils";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -19,82 +17,26 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
-import { ClipRangeEditor } from "./clip-range-editor";
-import { useClipRangeDraft } from "./use-clip-range-draft";
-
-const resolveParam = (value: string | string[] | undefined) =>
-  Array.isArray(value) ? value[0] : value;
+import {
+  formatBookmarkDraftDuration,
+  formatBookmarkDraftTime,
+  useBookAddBookmarkDraft,
+} from "./book-addbookmark-draft-context";
 
 const STEP_SECONDS = 5;
-const DEFAULT_CLIP_DURATION_SECONDS = 30;
-
 export const BookAddBookmarkSheet = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const { addBookmark } = useDeviceBooksActions();
-  const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
-  const playbackPositionMs = usePlaybackStore((state) => state.positionMs);
-  const playbackDurationMs = usePlaybackStore((state) => state.durationMs);
-
-  const { libraryItemId: libraryItemIdParam } = useLocalSearchParams<{
-    libraryItemId?: string | string[];
-  }>();
-  const libraryItemId = resolveParam(libraryItemIdParam) ?? playbackLibraryItemId ?? undefined;
-  const { data: itemDetails } = useGetItemDetails(libraryItemId);
-
-  const [bookmarkKind, setBookmarkKind] = useState<"point" | "clip">("point");
-  const [bookmarkName, setBookmarkName] = useState("");
-  const [bookmarkNote, setBookmarkNote] = useState("");
+  const draft = useBookAddBookmarkDraft();
   const [isSaving, setIsSaving] = useState(false);
-  const [isScrubbing, setIsScrubbing] = useState(false);
-  const hasActivatedClipRef = useRef(false);
-  const [bookmarkTimeSeconds, setBookmarkTimeSeconds] = useState(() =>
-    Math.max(0, Math.round(playbackPositionMs / 1000)),
-  );
-  const trimmedBookmarkName = bookmarkName.trim();
-  const durationSeconds =
-    itemDetails?.bookDuration ??
-    (playbackDurationMs > 0 ? Math.floor(playbackDurationMs / 1000) : 0);
-  const isClip = bookmarkKind === "clip";
-  const draftPreviewId = libraryItemId ? `draft:add-clip:${libraryItemId}` : null;
-  const previewStatus = useClipPreviewStore((state) => state.status);
-  const previewBookmarkId = useClipPreviewStore((state) => state.bookmarkId);
-  const previewPositionMs = useClipPreviewStore((state) => state.positionMs);
-  const isThisDraftPreview =
-    Boolean(draftPreviewId) &&
-    previewBookmarkId === draftPreviewId &&
-    previewStatus !== "idle" &&
-    previewStatus !== "error";
-  const isPreviewing = isThisDraftPreview && previewStatus !== "ended";
-  const handleDraftEditStart = useCallback(() => {
-    if (!isPreviewing) return;
-    void playerService.restoreListeningPositionAfterPreview();
-  }, [isPreviewing]);
-  const clipDraft = useClipRangeDraft({
-    initialStartSeconds: Math.max(0, Math.round(playbackPositionMs / 1000)),
-    initialEndSeconds: Math.max(
-      0,
-      Math.round(playbackPositionMs / 1000) + DEFAULT_CLIP_DURATION_SECONDS,
-    ),
-    bookDurationSeconds: durationSeconds,
-    onEditStart: handleDraftEditStart,
-  });
-  const previewPositionSeconds = Math.max(
-    clipDraft.startSeconds,
-    Math.min(clipDraft.endSeconds, Math.round(previewPositionMs / 1000)),
-  );
-  const previewButtonLabel = isThisDraftPreview
-    ? previewStatus === "loading"
-      ? "Loading..."
-      : isPreviewing
-        ? "Stop Preview"
-        : "Preview Clip"
-    : "Preview Clip";
-
-  const bookmarkTimeLabel = useMemo(
-    () => formatSeconds(bookmarkTimeSeconds, "compact", true, true) ?? "00:00",
-    [bookmarkTimeSeconds],
-  );
+  const trimmedBookmarkName = draft.title.trim();
+  const isClipDraft = draft.kind === "clip" && draft.clipEndSeconds !== null;
+  const clipDurationSeconds = isClipDraft
+    ? Math.max(0, (draft.clipEndSeconds ?? draft.positionSeconds) - draft.positionSeconds)
+    : 0;
+  const screenTitle = isClipDraft ? "Create Clip" : "Add Bookmark";
+  const saveLabel = isClipDraft ? "Save Clip" : "Save";
 
   useEffect(() => {
     return () => {
@@ -103,18 +45,17 @@ export const BookAddBookmarkSheet = () => {
   }, []);
 
   const adjustTime = (delta: number) => {
-    setBookmarkTimeSeconds((current) => Math.max(0, current + delta));
+    draft.setPointPosition(draft.positionSeconds + delta);
   };
 
   const handleSave = async () => {
-    if (!libraryItemId || isSaving) return;
+    if (!draft.libraryItemId || isSaving) return;
     if (!trimmedBookmarkName) return;
-    if (isClip && clipDraft.validationMessage) return;
-    const localNote = bookmarkNote.trim();
+    const localNote = draft.localNote.trim();
 
     const bookmarkPayload: Bookmark = {
-      libraryItemId,
-      time: isClip ? clipDraft.startSeconds : bookmarkTimeSeconds,
+      libraryItemId: draft.libraryItemId,
+      time: draft.positionSeconds,
       title: trimmedBookmarkName,
       createdAt: Date.now(),
       ...(localNote.length > 0 ? { notes: localNote } : {}),
@@ -123,12 +64,12 @@ export const BookAddBookmarkSheet = () => {
     setIsSaving(true);
     try {
       await playerService.restoreListeningPositionAfterPreview();
-      await addBookmark(libraryItemId, bookmarkPayload, {
+      await addBookmark(draft.libraryItemId, bookmarkPayload, {
         localNote: localNote.length > 0 ? localNote : null,
-        endTimeSeconds: isClip ? clipDraft.endSeconds : null,
+        endTimeSeconds: isClipDraft ? draft.clipEndSeconds : null,
       });
       Keyboard.dismiss();
-      toast.success("Bookmark added");
+      toast.success(isClipDraft ? "Clip saved" : "Bookmark added");
       router.back();
     } catch (error) {
       console.warn("[BookAddBookmarkSheet] Failed to add bookmark", error);
@@ -138,21 +79,11 @@ export const BookAddBookmarkSheet = () => {
     }
   };
 
-  const canSave =
-    Boolean(libraryItemId) &&
-    Boolean(trimmedBookmarkName) &&
-    !(isClip && clipDraft.validationMessage) &&
-    !isSaving;
-  const canPreviewClip = Boolean(
-    isClip &&
-    libraryItemId &&
-    draftPreviewId &&
-    trimmedBookmarkName &&
-    !clipDraft.validationMessage &&
-    !isSaving,
-  );
+  const canSave = Boolean(draft.libraryItemId) && Boolean(trimmedBookmarkName) && !isSaving;
+  const canAddClip = Boolean(draft.libraryItemId) && Boolean(trimmedBookmarkName) && !isSaving;
   const timePanelBorderColor = themeColors.border;
-  const timePanelFillColor = themeColors.bg;
+  const fieldBackgroundColor = "#FFFFFF";
+  const timePanelFillColor = fieldBackgroundColor;
 
   const renderStepButton = (
     label: "-5s" | "+5s",
@@ -163,21 +94,24 @@ export const BookAddBookmarkSheet = () => {
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       onPress={onPress}
-      disabled={!libraryItemId || isSaving}
+      disabled={!draft.libraryItemId || isSaving}
       style={({ pressed }) => ({
         width: 34,
         height: 34,
         borderRadius: 17,
         borderCurve: "continuous",
-        borderWidth: 1,
-        borderColor: themeColors.border,
-        backgroundColor: themeColors.bg,
+        borderWidth: 1.5,
+        borderColor: themeColors.accent,
+        backgroundColor: themeColors.accent,
         alignItems: "center",
         justifyContent: "center",
-        opacity: !libraryItemId || isSaving ? 0.45 : pressed ? 0.78 : 1,
+        opacity: !draft.libraryItemId || isSaving ? 0.45 : pressed ? 0.78 : 1,
       })}
     >
-      <Text selectable style={{ color: themeColors.text, fontSize: 13, fontWeight: "700" }}>
+      <Text
+        selectable
+        style={{ color: themeColors.accentForeground, fontSize: 13, fontWeight: "800" }}
+      >
         {label}
       </Text>
     </Pressable>
@@ -200,11 +134,11 @@ export const BookAddBookmarkSheet = () => {
         minWidth: 0,
         borderRadius: 14,
         borderCurve: "continuous",
-        borderWidth: 1,
-        borderColor: timePanelBorderColor,
+        borderWidth: 1.5,
+        borderColor: themeColors.accent,
         backgroundColor: themeColors.surface,
-        padding: 10,
-        gap: 8,
+        padding: 12,
+        gap: 10,
       }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -226,6 +160,8 @@ export const BookAddBookmarkSheet = () => {
           minHeight: 46,
           borderRadius: 12,
           borderCurve: "continuous",
+          borderWidth: 1,
+          borderColor: timePanelBorderColor,
           backgroundColor: timePanelFillColor,
           alignItems: "center",
           justifyContent: "center",
@@ -249,24 +185,16 @@ export const BookAddBookmarkSheet = () => {
     </View>
   );
 
-  const handlePreview = async () => {
-    if (!libraryItemId || !draftPreviewId || !canPreviewClip) return;
-    try {
-      if (isPreviewing) {
-        await playerService.restoreListeningPositionAfterPreview();
-        return;
-      }
-      await playerService.restoreListeningPositionAfterPreview();
-      await playerService.playClipPreview({
-        libraryItemId,
-        bookmarkId: draftPreviewId,
-        startTimeSeconds: clipDraft.startSeconds,
-        endTimeSeconds: clipDraft.endSeconds,
-      });
-    } catch (error) {
-      console.warn("[BookAddBookmarkSheet] Failed to preview clip", error);
-      toast.error("Unable to preview clip");
-    }
+  const openClipEditor = () => {
+    if (!canAddClip) return;
+    draft.convertToClipDraft();
+    router.push("/book-addbookmark/clip-editor");
+  };
+
+  const closeDraft = async () => {
+    await playerService.restoreListeningPositionAfterPreview();
+    Keyboard.dismiss();
+    router.back();
   };
 
   return (
@@ -276,7 +204,6 @@ export const BookAddBookmarkSheet = () => {
     >
       <ScrollView
         style={{ flex: 1 }}
-        scrollEnabled={!isScrubbing}
         bounces={false}
         alwaysBounceVertical={false}
         contentInsetAdjustmentBehavior="automatic"
@@ -286,12 +213,13 @@ export const BookAddBookmarkSheet = () => {
           flexGrow: 1,
           gap: 14,
           paddingHorizontal: 16,
-          paddingTop: 30,
+          // paddingTop: Math.max(30, insets.top + 16),
+          paddingTop: 15,
           paddingBottom: Math.max(24, insets.bottom + 12),
           backgroundColor: themeColors.bg,
         }}
       >
-        <Stack.Screen options={{ title: "Add Bookmark" }} />
+        <Stack.Screen options={{ title: screenTitle }} />
 
         <View style={{ gap: 4 }}>
           <View className="flex-row justify-between items-center">
@@ -306,8 +234,32 @@ export const BookAddBookmarkSheet = () => {
                 fontWeight: "700",
               }}
             >
-              Add Bookmark/Clip
+              {screenTitle}
             </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel bookmark draft"
+              onPress={() => {
+                void closeDraft();
+              }}
+              disabled={isSaving}
+              style={({ pressed }) => ({
+                borderRadius: 12,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                backgroundColor: themeColors.surface,
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 10,
+                marginHorizontal: 10,
+                opacity: isSaving ? 0.5 : pressed ? 0.82 : 1,
+              })}
+            >
+              <Text selectable style={{ color: themeColors.text, fontSize: 14, fontWeight: "700" }}>
+                Cancel
+              </Text>
+            </Pressable>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Save bookmark"
@@ -331,7 +283,7 @@ export const BookAddBookmarkSheet = () => {
                 selectable
                 style={{ color: themeColors.accentForeground, fontSize: 14, fontWeight: "700" }}
               >
-                {isSaving ? "Saving..." : "Save"}
+                {isSaving ? "Saving..." : saveLabel}
               </Text>
             </Pressable>
           </View>
@@ -345,8 +297,8 @@ export const BookAddBookmarkSheet = () => {
             Bookmark Title
           </Text>
           <TextInput
-            value={bookmarkName}
-            onChangeText={setBookmarkName}
+            value={draft.title}
+            onChangeText={draft.setTitle}
             editable={!isSaving}
             placeholder="Enter a descriptive name"
             placeholderTextColor={themeColors.textMuted}
@@ -355,7 +307,7 @@ export const BookAddBookmarkSheet = () => {
               borderCurve: "continuous",
               borderWidth: 1,
               borderColor: themeColors.border,
-              backgroundColor: themeColors.bg,
+              backgroundColor: fieldBackgroundColor,
               color: themeColors.text,
               paddingHorizontal: 12,
               paddingVertical: 10,
@@ -364,120 +316,116 @@ export const BookAddBookmarkSheet = () => {
           />
         </View>
 
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          {(["point", "clip"] as const).map((kind) => {
-            const selected = bookmarkKind === kind;
-            return (
+        {isClipDraft ? (
+          <View
+            style={{
+              borderRadius: 14,
+              borderCurve: "continuous",
+              borderWidth: 1.5,
+              borderColor: themeColors.accent,
+              backgroundColor: themeColors.surface,
+              padding: 12,
+              gap: 12,
+            }}
+          >
+            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text
+                  selectable
+                  style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "700" }}
+                >
+                  Clip Range
+                </Text>
+                <Text
+                  selectable
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  style={{
+                    color: themeColors.text,
+                    fontSize: 18,
+                    fontWeight: "800",
+                    fontVariant: ["tabular-nums"],
+                  }}
+                >
+                  {formatBookmarkDraftTime(draft.positionSeconds)}
+                  {" -> "}
+                  {formatBookmarkDraftTime(draft.clipEndSeconds ?? draft.positionSeconds)}
+                </Text>
+              </View>
+              <View style={{ alignItems: "flex-end", gap: 4 }}>
+                <Text
+                  selectable
+                  style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "700" }}
+                >
+                  Duration
+                </Text>
+                <Text
+                  selectable
+                  style={{ color: themeColors.text, fontSize: 15, fontWeight: "800" }}
+                >
+                  {formatBookmarkDraftDuration(clipDurationSeconds)}
+                </Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: "row", gap: 8 }}>
               <Pressable
-                key={kind}
                 accessibilityRole="button"
-                accessibilityLabel={kind === "point" ? "Save as bookmark" : "Save as clip"}
-                onPress={() => {
-                  setBookmarkKind(kind);
-                  if (kind === "clip" && !hasActivatedClipRef.current) {
-                    hasActivatedClipRef.current = true;
-                    clipDraft.resetDraft(
-                      bookmarkTimeSeconds,
-                      bookmarkTimeSeconds + DEFAULT_CLIP_DURATION_SECONDS,
-                    );
-                  }
-                }}
+                accessibilityLabel="Edit clip range"
+                onPress={openClipEditor}
+                disabled={isSaving}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  borderRadius: 12,
+                  borderCurve: "continuous",
+                  backgroundColor: themeColors.accent,
+                  paddingVertical: 12,
+                  alignItems: "center",
+                  opacity: isSaving ? 0.5 : pressed ? 0.82 : 1,
+                })}
+              >
+                <Text
+                  selectable
+                  style={{
+                    color: themeColors.accentForeground,
+                    fontSize: 14,
+                    fontWeight: "800",
+                  }}
+                >
+                  Edit Clip
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Remove clip"
+                onPress={draft.removeClip}
                 disabled={isSaving}
                 style={({ pressed }) => ({
                   flex: 1,
                   borderRadius: 12,
                   borderCurve: "continuous",
                   borderWidth: 1,
-                  borderColor: selected ? themeColors.accent : themeColors.border,
-                  backgroundColor: selected ? themeColors.accent : themeColors.surface,
-                  paddingVertical: 10,
+                  borderColor: themeColors.border,
+                  backgroundColor: fieldBackgroundColor,
+                  paddingVertical: 12,
                   alignItems: "center",
-                  opacity: pressed || isSaving ? 0.8 : 1,
+                  opacity: isSaving ? 0.5 : pressed ? 0.82 : 1,
                 })}
               >
                 <Text
                   selectable
-                  style={{
-                    color: selected ? themeColors.accentForeground : themeColors.text,
-                    fontSize: 13,
-                    fontWeight: "700",
-                  }}
+                  style={{ color: themeColors.text, fontSize: 14, fontWeight: "800" }}
                 >
-                  {kind === "point" ? "Bookmark" : "Clip"}
+                  Remove Clip
                 </Text>
               </Pressable>
-            );
-          })}
-        </View>
-
-        {isClip ? (
-          <>
-            <ClipRangeEditor
-              draft={clipDraft}
-              bookDurationSeconds={durationSeconds}
-              disabled={isSaving}
-              onScrubbingChange={setIsScrubbing}
-            />
-            {trimmedBookmarkName ? (
-              <>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={isPreviewing ? "Stop clip preview" : "Preview clip"}
-                  onPress={() => {
-                    void handlePreview();
-                  }}
-                  disabled={!canPreviewClip}
-                  style={({ pressed }) => ({
-                    borderRadius: 14,
-                    borderCurve: "continuous",
-                    borderWidth: 1,
-                    borderColor: themeColors.border,
-                    backgroundColor: themeColors.surface,
-                    paddingHorizontal: 14,
-                    paddingVertical: 14,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8,
-                    opacity: !canPreviewClip ? 0.5 : pressed ? 0.8 : 1,
-                  })}
-                >
-                  <SymbolView
-                    name={isPreviewing ? "pause.fill" : "play.fill"}
-                    tintColor={themeColors.accent}
-                    size={16}
-                  />
-                  <Text
-                    selectable
-                    style={{ color: themeColors.text, fontSize: 14, fontWeight: "700" }}
-                  >
-                    {previewButtonLabel}
-                  </Text>
-                </Pressable>
-
-                {isThisDraftPreview ? (
-                  <Text
-                    selectable
-                    style={{
-                      color: themeColors.text,
-                      fontSize: 16,
-                      fontWeight: "700",
-                      textAlign: "center",
-                      fontVariant: ["tabular-nums"],
-                    }}
-                  >
-                    Preview Position: {formatSeconds(previewPositionSeconds, "compact", true, true)}
-                  </Text>
-                ) : null}
-              </>
-            ) : null}
-          </>
+            </View>
+          </View>
         ) : (
           <View style={{ gap: 8 }}>
             <View style={{ flexDirection: "column", gap: 8 }}>
               {renderTimePanel({
                 label: "Position",
-                value: bookmarkTimeLabel,
+                value: formatBookmarkDraftTime(draft.positionSeconds),
                 onDecrease: () => adjustTime(-STEP_SECONDS),
                 onIncrease: () => adjustTime(STEP_SECONDS),
               })}
@@ -493,8 +441,8 @@ export const BookAddBookmarkSheet = () => {
             Local Note
           </Text>
           <TextInput
-            value={bookmarkNote}
-            onChangeText={setBookmarkNote}
+            value={draft.localNote}
+            onChangeText={draft.setLocalNote}
             editable={!isSaving}
             placeholder="Add an optional note"
             placeholderTextColor={themeColors.textMuted}
@@ -506,7 +454,7 @@ export const BookAddBookmarkSheet = () => {
               borderCurve: "continuous",
               borderWidth: 1,
               borderColor: themeColors.border,
-              backgroundColor: themeColors.bg,
+              backgroundColor: fieldBackgroundColor,
               color: themeColors.text,
               paddingHorizontal: 12,
               paddingVertical: 10,
@@ -515,7 +463,46 @@ export const BookAddBookmarkSheet = () => {
           />
         </View>
 
-        {!libraryItemId ? (
+        {!isClipDraft ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Create clip"
+            onPress={openClipEditor}
+            disabled={!canAddClip}
+            style={({ pressed }) => ({
+              borderRadius: 14,
+              borderCurve: "continuous",
+              borderWidth: 1,
+              borderColor: canAddClip ? themeColors.accent : themeColors.border,
+              backgroundColor: canAddClip ? themeColors.accent : themeColors.surface,
+              paddingHorizontal: 14,
+              paddingVertical: 14,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              opacity: !canAddClip ? 0.5 : pressed ? 0.82 : 1,
+            })}
+          >
+            <SymbolView
+              name="waveform"
+              tintColor={canAddClip ? themeColors.accentForeground : themeColors.textMuted}
+              size={18}
+            />
+            <Text
+              selectable
+              style={{
+                color: canAddClip ? themeColors.accentForeground : themeColors.textMuted,
+                fontSize: 14,
+                fontWeight: "700",
+              }}
+            >
+              Create Clip
+            </Text>
+          </Pressable>
+        ) : null}
+
+        {!draft.libraryItemId ? (
           <View
             style={{
               borderRadius: 12,

@@ -1,6 +1,6 @@
-export const MIN_CLIP_DURATION_SECONDS = 1;
-export const TRIM_WINDOW_DURATION_SECONDS = 5 * 60;
-export const MAX_CLIP_DURATION_SECONDS = TRIM_WINDOW_DURATION_SECONDS;
+export const MIN_CLIP_DURATION_SECONDS = 5;
+export const MAX_CLIP_DURATION_SECONDS = 60 * 60;
+export const TRIM_WINDOW_DURATION_SECONDS = MAX_CLIP_DURATION_SECONDS;
 
 export const clampSeconds = (value: number, min: number, max: number) => {
   if (min > max) return min;
