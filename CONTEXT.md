@@ -19,6 +19,10 @@ _Avoid_: Advanced bookmark, audio clip
 The canonical whole-second audiobook position used for bookmark ordering and navigation.
 _Avoid_: Timestamp, location
 
+**End Position**:
+The canonical whole-second audiobook position where a Clip Bookmark's Clip Range ends.
+_Avoid_: Duration lock
+
 **Listening Position**:
 The audiobook position where normal listening should continue.
 _Avoid_: Playback cursor
@@ -79,9 +83,10 @@ _Avoid_: Five minute window, scrubber window
 
 - A **Bookmark** is either a **Point Bookmark** or a **Clip Bookmark**.
 - A **Point Bookmark** has exactly one **Bookmark Position**.
-- A **Clip Bookmark** has a start **Bookmark Position** and an end position.
+- A **Clip Bookmark** has a start **Bookmark Position** and an **End Position**.
 - A **Clip Bookmark** uses its start **Bookmark Position** for ordering and navigation.
 - In the **Clip Editor**, **Starting Position** is the Clip Bookmark's start **Bookmark Position**.
+- The **Clip Editor** may lock the **End Position** of a Clip Range while the user adjusts Starting Position.
 - A **Clip Bookmark** has a bounded duration so clips remain practical to play, export, and transcribe.
 - A **Clip Bookmark** duration must be at least 5 seconds and no more than 1 hour.
 - The **Add Bookmark Sheet** starts with a Point Bookmark draft.

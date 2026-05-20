@@ -1,12 +1,17 @@
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
-import { playerService, useClipPreviewStore, usePlaybackStore } from "@/player";
+import {
+  playerService,
+  resolveClipPreviewAvailability,
+  useClipPreviewStore,
+  usePlaybackStore,
+} from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { formatSeconds } from "@/utils/formatUtils";
 import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
 import { router, Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Animated, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
@@ -66,6 +71,8 @@ export const BookAddBookmarkClipEditorSheet = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const playbackDurationMs = usePlaybackStore((state) => state.durationMs);
+  const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const activeQueueLength = usePlaybackStore((state) => state.queue.length);
   const draft = useBookAddBookmarkDraft();
   const previewStatus = useClipPreviewStore((state) => state.status);
   const previewBookmarkId = useClipPreviewStore((state) => state.bookmarkId);
@@ -95,6 +102,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
   );
   const [startSeconds, setStartSeconds] = useState(initialRange.startSeconds);
   const [durationSeconds, setDurationSeconds] = useState(initialRange.durationSeconds);
+  const [isEndPositionLocked, setIsEndPositionLocked] = useState(false);
   const waveformMotion = useRef(new Animated.Value(0)).current;
   const previousRangeRef = useRef({
     startSeconds: initialRange.startSeconds,
@@ -102,6 +110,11 @@ export const BookAddBookmarkClipEditorSheet = () => {
   });
   const endSeconds = startSeconds + durationSeconds;
   const [previewScrubSeconds, setPreviewScrubSeconds] = useState(0);
+  const clipPreviewAvailability = resolveClipPreviewAvailability({
+    targetLibraryItemId: draft.libraryItemId,
+    activeLibraryItemId,
+    activeQueueLength,
+  });
   const draftPreviewId = draft.libraryItemId ? `draft:create-clip:${draft.libraryItemId}` : null;
   const isThisDraftPreview =
     Boolean(draftPreviewId) &&
@@ -113,6 +126,13 @@ export const BookAddBookmarkClipEditorSheet = () => {
     ? clampSeconds(Math.round(previewPositionMs / 1000) - startSeconds, 0, durationSeconds)
     : previewScrubSeconds;
   const maxStartSeconds = Math.max(0, bookDurationSeconds - MIN_CLIP_DURATION_SECONDS);
+  const lockedStartMinimumSeconds = Math.max(0, endSeconds - MAX_CLIP_DURATION_SECONDS);
+  const lockedStartMaximumSeconds = Math.max(
+    lockedStartMinimumSeconds,
+    endSeconds - MIN_CLIP_DURATION_SECONDS,
+  );
+  const startMinimumSeconds = isEndPositionLocked ? lockedStartMinimumSeconds : 0;
+  const startMaximumSeconds = isEndPositionLocked ? lockedStartMaximumSeconds : maxStartSeconds;
   const maxDurationForCurrentStart = Math.max(
     MIN_CLIP_DURATION_SECONDS,
     Math.min(MAX_CLIP_DURATION_SECONDS, bookDurationSeconds - startSeconds),
@@ -135,11 +155,13 @@ export const BookAddBookmarkClipEditorSheet = () => {
     };
   }, [bookDurationSeconds, durationSeconds, startSeconds]);
   const ticks = useMemo(
-    () =>
-      Array.from({ length: 4 }, (_, index) =>
-        Math.round(visualViewport.startSeconds + (visualViewport.durationSeconds * index) / 3),
-      ),
-    [visualViewport.durationSeconds, visualViewport.startSeconds],
+    () => [
+      Math.round(visualViewport.startSeconds),
+      startSeconds,
+      endSeconds,
+      Math.round(visualViewport.endSeconds),
+    ],
+    [endSeconds, startSeconds, visualViewport.endSeconds, visualViewport.startSeconds],
   );
   const selectionLeftPercent =
     ((startSeconds - visualViewport.startSeconds) / visualViewport.durationSeconds) * 100;
@@ -218,18 +240,28 @@ export const BookAddBookmarkClipEditorSheet = () => {
   };
 
   const setLiveStart = (nextStartSeconds: number) => {
-    const roundedStart = clampSeconds(Math.round(nextStartSeconds), 0, maxStartSeconds);
-    const nextMaxDuration = Math.max(
-      MIN_CLIP_DURATION_SECONDS,
-      Math.min(MAX_CLIP_DURATION_SECONDS, bookDurationSeconds - roundedStart),
+    const roundedStart = clampSeconds(
+      Math.round(nextStartSeconds),
+      startMinimumSeconds,
+      startMaximumSeconds,
     );
-    const nextDuration = clampSeconds(durationSeconds, MIN_CLIP_DURATION_SECONDS, nextMaxDuration);
+    const nextDuration = isEndPositionLocked
+      ? clampSeconds(endSeconds - roundedStart, MIN_CLIP_DURATION_SECONDS, MAX_CLIP_DURATION_SECONDS)
+      : clampSeconds(
+          durationSeconds,
+          MIN_CLIP_DURATION_SECONDS,
+          Math.max(
+            MIN_CLIP_DURATION_SECONDS,
+            Math.min(MAX_CLIP_DURATION_SECONDS, bookDurationSeconds - roundedStart),
+          ),
+        );
     setStartSeconds(roundedStart);
     setDurationSeconds(nextDuration);
     draft.setClipRange(roundedStart, roundedStart + nextDuration);
   };
 
   const setLiveDuration = (nextDurationSeconds: number) => {
+    setIsEndPositionLocked(false);
     const nextDuration = clampSeconds(
       Math.round(nextDurationSeconds),
       MIN_CLIP_DURATION_SECONDS,
@@ -250,6 +282,10 @@ export const BookAddBookmarkClipEditorSheet = () => {
   };
 
   const playPreview = async (options?: { lastFiveSeconds?: boolean; offsetSeconds?: number }) => {
+    if (!clipPreviewAvailability.available) {
+      toast.info(clipPreviewAvailability.reason ?? "Clip preview is unavailable.");
+      return;
+    }
     if (!draft.libraryItemId || !draftPreviewId) return;
     try {
       if (isPreviewing && !options?.lastFiveSeconds && options?.offsetSeconds === undefined) {
@@ -333,6 +369,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
     sliderValue,
     minimumValue,
     maximumValue,
+    accessory,
     onValueChange,
     onSlidingComplete,
     buttons,
@@ -342,6 +379,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
     sliderValue: number;
     minimumValue: number;
     maximumValue: number;
+    accessory?: ReactNode;
     onValueChange: (value: number) => void;
     onSlidingComplete: (value: number) => void;
     buttons: {
@@ -355,17 +393,20 @@ export const BookAddBookmarkClipEditorSheet = () => {
         <Text selectable style={{ color: themeColors.text, fontSize: 13, fontWeight: "800" }}>
           {groupTitle}
         </Text>
-        <Text
-          selectable
-          style={{
-            color: themeColors.text,
-            fontSize: 13,
-            fontWeight: "700",
-            fontVariant: ["tabular-nums"],
-          }}
-        >
-          {value}
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          {accessory}
+          <Text
+            selectable
+            style={{
+              color: themeColors.text,
+              fontSize: 13,
+              fontWeight: "700",
+              fontVariant: ["tabular-nums"],
+            }}
+          >
+            {value}
+          </Text>
+        </View>
       </View>
       <Slider
         value={sliderValue}
@@ -564,9 +605,9 @@ export const BookAddBookmarkClipEditorSheet = () => {
         </View>
 
         <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-          {ticks.map((tick) => (
+          {ticks.map((tick, index) => (
             <Text
-              key={tick}
+              key={`${index}-${tick}`}
               selectable
               style={{
                 color: themeColors.textMuted,
@@ -585,8 +626,8 @@ export const BookAddBookmarkClipEditorSheet = () => {
         title: "Starting Position",
         value: formatClock(startSeconds),
         sliderValue: startSeconds,
-        minimumValue: 0,
-        maximumValue: maxStartSeconds,
+        minimumValue: startMinimumSeconds,
+        maximumValue: startMaximumSeconds,
         onValueChange: setLiveStart,
         onSlidingComplete: (value) => {
           void updateStart(value);
@@ -607,6 +648,32 @@ export const BookAddBookmarkClipEditorSheet = () => {
         sliderValue: durationSeconds,
         minimumValue: MIN_CLIP_DURATION_SECONDS,
         maximumValue: maxDurationForCurrentStart,
+        accessory: (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={isEndPositionLocked ? "Unlock end position" : "Lock end position"}
+            accessibilityState={{ selected: isEndPositionLocked }}
+            onPress={() => setIsEndPositionLocked((current) => !current)}
+            style={({ pressed }) => ({
+              width: 30,
+              height: 30,
+              borderRadius: 15,
+              borderCurve: "continuous",
+              borderWidth: 1,
+              borderColor: isEndPositionLocked ? themeColors.accent : themeColors.border,
+              backgroundColor: isEndPositionLocked ? themeColors.accent : "#EDF2F4",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: pressed ? 0.78 : 1,
+            })}
+          >
+            <SymbolView
+              name={isEndPositionLocked ? "lock.fill" : "lock.open"}
+              tintColor={isEndPositionLocked ? themeColors.accentForeground : themeColors.textMuted}
+              size={14}
+            />
+          </Pressable>
+        ),
         onValueChange: setLiveDuration,
         onSlidingComplete: (value) => {
           void updateDuration(value);
@@ -629,7 +696,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
             onPress={() => {
               void playPreview();
             }}
-            disabled={!draft.libraryItemId}
+            accessibilityState={{ disabled: !clipPreviewAvailability.available }}
             style={({ pressed }) => ({
               width: 54,
               height: 54,
@@ -637,7 +704,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
               backgroundColor: themeColors.accent,
               alignItems: "center",
               justifyContent: "center",
-              opacity: !draft.libraryItemId ? 0.45 : pressed ? 0.8 : 1,
+              opacity: !clipPreviewAvailability.available ? 0.45 : pressed ? 0.8 : 1,
             })}
           >
             <SymbolView
@@ -653,7 +720,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
             onPress={() => {
               void playPreview({ lastFiveSeconds: true });
             }}
-            disabled={!draft.libraryItemId}
+            accessibilityState={{ disabled: !clipPreviewAvailability.available }}
             style={({ pressed }) => ({
               width: 54,
               height: 54,
@@ -663,7 +730,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
               alignItems: "center",
               justifyContent: "center",
               gap: 2,
-              opacity: !draft.libraryItemId ? 0.45 : pressed ? 0.78 : 1,
+              opacity: !clipPreviewAvailability.available ? 0.45 : pressed ? 0.78 : 1,
             })}
           >
             <SymbolView name="arrow.counterclockwise" tintColor={themeColors.accent} size={18} />
@@ -704,7 +771,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
           minimumTrackTintColor={themeColors.accent}
           maximumTrackTintColor="#D8E0E4"
           thumbTintColor={themeColors.accent}
-          disabled={!draft.libraryItemId}
+          disabled={!clipPreviewAvailability.available}
           onSlidingStart={() => {
             void stopPreview();
           }}
