@@ -19,6 +19,7 @@ The React Native FFmpeg path is risky as the first implementation dependency. Th
 - The Clip Export action lives on the bookmark review screen, where the user can verify the saved Clip Range before creating a Clip Export File.
 - Clip Export uses the saved Clip Range and saved Bookmark Title. If the bookmark review screen has unsaved changes, Clip Export is unavailable until those changes are saved.
 - If the audiobook is not downloaded, the bookmark review screen should show Clip Export as unavailable with a download-required state rather than hiding the action for saved Clip Bookmarks.
+- If local downloaded tracks exist but the app cannot build a complete source plan, the unavailable state should identify downloaded audio as unavailable rather than telling the user to download again.
 - Clip Export may run while another audiobook is downloading, but it is unavailable for a book whose own download is still in progress or finalizing.
 - While a Clip Export File is being generated, the bookmark review screen should show an exporting state and prevent duplicate export jobs or edits that would change the Clip Range.
 - The existing all-bookmarks export remains a Bookmark Backup Export. Its JSON form is the future restore-oriented format and should include Point Bookmark and Clip Bookmark metadata, including Clip Range and Local Note data. It does not create Clip Export Files.
@@ -32,6 +33,7 @@ The React Native FFmpeg path is risky as the first implementation dependency. Th
 - Failed Clip Export attempts should show an error, clean up temporary files, and allow the user to try again without keeping export history.
 - Starting Clip Export stops clip preview and restores the Listening Position before generating the Clip Export File.
 - The app will resolve a Clip Range into local source segments before invoking any extractor.
+- Clip Export should derive audiobook track timing at export-planning time from downloaded files plus current item details, preferring `media.tracks` offsets and falling back to rolling cumulative offsets. Persisted download records remain the source of local file paths, but they are not trusted as the only source for whole-book timing because older downloads may contain raw per-file metadata with missing or zeroed `startOffset` values.
 - Clip Export uses whole-second Clip Range boundaries, matching Bookmark Position precision.
 - The first extraction path should run in-app through native code and remain adapter-isolated. Server-side extraction is a later fallback, not the Phase 3 default.
 - The selected extraction path should be Expo-compatible through config/prebuild, acceptable for app licensing and binary distribution, and reliable for audiobook source containers.
@@ -46,6 +48,7 @@ The React Native FFmpeg path is risky as the first implementation dependency. Th
 ## Consequences
 
 - Users must download a book before exporting a Clip Bookmark in the first Phase 3 implementation.
+- Existing downloaded multi-file books can become exportable without forcing a re-download when their local files are valid but their persisted timing metadata is incomplete.
 - Multi-track books are not ignored; the resolver must surface every source segment needed for the Clip Range.
 - Long single-file `.m4b` books are handled by seeking into one local file rather than loading the full audiobook into JavaScript memory.
 - Streamed export remains a later decision: either download first, ask Audiobookshelf for source bytes, or introduce a server-side extraction path.

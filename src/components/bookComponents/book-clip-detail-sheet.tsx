@@ -187,15 +187,19 @@ export const BookClipDetailSheet = () => {
     return resolveClipExportSourcePlan({
       libraryItemId,
       downloadInfo,
+      itemDetails,
       range: {
         startTimeSeconds: bookmark.startTimeSeconds,
         endTimeSeconds: savedEndSeconds,
       },
     });
-  }, [bookmark, downloadInfo, libraryItemId, savedEndSeconds]);
+  }, [bookmark, downloadInfo, itemDetails, libraryItemId, savedEndSeconds]);
   const clipExportAvailability = useMemo(
-    () => resolveClipExportAvailability(savedClipExportPlan),
-    [savedClipExportPlan],
+    () =>
+      resolveClipExportAvailability(savedClipExportPlan, {
+        hasDownloadedAudio: Boolean(downloadInfo?.audioTracks.length),
+      }),
+    [downloadInfo?.audioTracks.length, savedClipExportPlan],
   );
   const activeBookDownloadInProgress =
     Boolean(libraryItemId) && activeDownloadLibraryItemId === libraryItemId;
