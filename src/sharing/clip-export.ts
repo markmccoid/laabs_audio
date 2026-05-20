@@ -32,13 +32,6 @@ export type ClipExportAvailability =
 const normalizeSeconds = (value: number) =>
   Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
 
-const getFileExtension = (value: string) => {
-  const withoutQuery = value.split(/[?#]/, 1)[0] ?? value;
-  const fileName = withoutQuery.slice(withoutQuery.lastIndexOf("/") + 1);
-  const extensionStart = fileName.lastIndexOf(".");
-  return extensionStart >= 0 ? fileName.slice(extensionStart + 1).toLowerCase() : "";
-};
-
 const sortTracksByBookOffset = (tracks: DownloadTrack[]) =>
   [...tracks].sort((a, b) => {
     if (a.startOffset !== b.startOffset) return a.startOffset - b.startOffset;
@@ -127,11 +120,6 @@ export const resolveClipExportAvailability = (
   const segment = plan.segments[0];
   if (!segment) {
     return { available: false, reason: "Downloaded audio is unavailable" };
-  }
-
-  const extension = getFileExtension(segment.track.cleanFileName || segment.track.filename);
-  if (extension === "mp3") {
-    return { available: true, outputFormat: "mp3" };
   }
 
   return { available: true, outputFormat: "m4a" };

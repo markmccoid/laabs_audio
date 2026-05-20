@@ -213,8 +213,8 @@ export const BookAddBookmarkSheet = () => {
           flexGrow: 1,
           gap: 14,
           paddingHorizontal: 16,
-          // paddingTop: Math.max(30, insets.top + 16),
-          paddingTop: 15,
+          paddingTop: Math.max(30, insets.top + 16),
+          // paddingTop: 15,
           paddingBottom: Math.max(24, insets.bottom + 12),
           backgroundColor: themeColors.bg,
         }}

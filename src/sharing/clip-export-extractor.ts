@@ -1,10 +1,6 @@
 import * as FileSystem from "expo-file-system/legacy";
-import { deleteFile, trim } from "react-native-video-trim";
-import type {
-  ClipExportOutputFormat,
-  ClipExportSourcePlan,
-  ClipExportSourceSegment,
-} from "./clip-export";
+import { extractClip } from "../../modules/audio-trimmer";
+import type { ClipExportOutputFormat, ClipExportSourcePlan } from "./clip-export";
 
 export type ClipExportExtractionInput = {
   plan: ClipExportSourcePlan;
@@ -21,10 +17,6 @@ export type ClipExportExtractionResult = {
 
 const CLIP_EXPORT_CACHE_DIRECTORY = "clip_exports";
 
-const stripFileScheme = (value: string) => value.replace(/^file:\/\//, "");
-
-const toFileUri = (value: string) => (value.startsWith("file://") ? value : `file://${value}`);
-
 const sanitizeFileSegment = (value: string) =>
   value
     .replace(/[\\/:*?"<>|]/g, "_")
@@ -32,11 +24,22 @@ const sanitizeFileSegment = (value: string) =>
     .trim()
     .slice(0, 80);
 
-const getMimeType = (format: ClipExportOutputFormat) =>
-  format === "mp3" ? "audio/mpeg" : "audio/mp4";
+const getMimeType = (_format: ClipExportOutputFormat) => "audio/mp4";
 
-const getUti = (format: ClipExportOutputFormat) =>
-  format === "mp3" ? "public.mp3" : "com.apple.m4a-audio";
+const getUti = (_format: ClipExportOutputFormat) => "com.apple.m4a-audio";
+
+export const getClipExportErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = String((error as { message?: unknown }).message ?? "").trim();
+    if (message) return message;
+  }
+
+  return "Unable to export clip";
+};
 
 const ensureClipExportCacheDirectory = async () => {
   if (!FileSystem.cacheDirectory) {
@@ -60,30 +63,6 @@ const buildOutputFileUri = async ({
   return `${directoryUri}${fileName}`;
 };
 
-const extractSingleSegment = async (
-  segment: ClipExportSourceSegment,
-  outputFormat: ClipExportOutputFormat,
-) => {
-  const result = await trim(stripFileScheme(segment.sourceUri), {
-    type: "audio",
-    outputExt: outputFormat,
-    startTime: Math.round(segment.sourceStartSeconds * 1000),
-    endTime: Math.round((segment.sourceStartSeconds + segment.durationSeconds) * 1000),
-    saveToPhoto: false,
-    removeAfterSavedToPhoto: false,
-    removeAfterFailedToSavePhoto: true,
-    enablePreciseTrimming: false,
-    removeAudio: false,
-    speed: 1,
-  });
-
-  if (!result.success || !result.outputPath) {
-    throw new Error("Clip Export extraction failed");
-  }
-
-  return toFileUri(result.outputPath);
-};
-
 export const extractClipExportFile = async ({
   plan,
   bookTitle,
@@ -94,7 +73,12 @@ export const extractClipExportFile = async ({
     throw new Error("Cross-track Clip Export is not available yet");
   }
 
-  const generatedFileUri = await extractSingleSegment(plan.segments[0], outputFormat);
+  const segment = plan.segments[0];
+  const generatedFileUri = await extractClip(
+    segment.sourceUri,
+    segment.sourceStartSeconds,
+    segment.sourceStartSeconds + segment.durationSeconds,
+  );
   const outputFileUri = await buildOutputFileUri({ bookTitle, bookmarkTitle, outputFormat });
   try {
     await FileSystem.deleteAsync(outputFileUri, { idempotent: true }).catch(() => {});
@@ -103,11 +87,7 @@ export const extractClipExportFile = async ({
       to: outputFileUri,
     });
   } finally {
-    try {
-      await deleteFile(stripFileScheme(generatedFileUri));
-    } catch {
-      await FileSystem.deleteAsync(generatedFileUri, { idempotent: true }).catch(() => {});
-    }
+    await FileSystem.deleteAsync(generatedFileUri, { idempotent: true }).catch(() => {});
   }
 
   return {

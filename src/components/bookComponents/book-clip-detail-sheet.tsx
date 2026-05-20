@@ -1,6 +1,11 @@
 import { useAuthStore } from "@/auth/auth-store";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
-import { playerService, useClipPreviewStore } from "@/player";
+import {
+  playerService,
+  resolveClipPreviewAvailability,
+  useClipPreviewStore,
+  usePlaybackStore,
+} from "@/player";
 import { useDeviceBooksActions, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Bookmark } from "@/types/absTypes";
@@ -27,7 +32,11 @@ import {
   resolveClipExportAvailability,
   resolveClipExportSourcePlan,
 } from "@/sharing/clip-export";
-import { deleteClipExportFile, extractClipExportFile } from "@/sharing/clip-export-extractor";
+import {
+  deleteClipExportFile,
+  extractClipExportFile,
+  getClipExportErrorMessage,
+} from "@/sharing/clip-export-extractor";
 import { ClipRangeEditor } from "./clip-range-editor";
 import { useClipRangeDraft } from "./use-clip-range-draft";
 
@@ -80,6 +89,8 @@ export const BookClipDetailSheet = () => {
   const previewStatus = useClipPreviewStore((state) => state.status);
   const previewBookmarkId = useClipPreviewStore((state) => state.bookmarkId);
   const previewPositionMs = useClipPreviewStore((state) => state.positionMs);
+  const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const activeQueueLength = usePlaybackStore((state) => state.queue.length);
 
   useEffect(() => {
     if (!bookmark) return;
@@ -205,15 +216,25 @@ export const BookClipDetailSheet = () => {
       !isExporting,
   );
   const isBusy = isSaving || isExporting;
-  const canPreviewClip = Boolean(
+  const clipPreviewAvailability = resolveClipPreviewAvailability({
+    targetLibraryItemId: libraryItemId,
+    activeLibraryItemId,
+    activeQueueLength,
+  });
+  const canUsePreviewControl = Boolean(
     bookmark && libraryItemId && !clipDraft.validationMessage && !isBusy,
   );
+  const canPreviewClip = canUsePreviewControl && clipPreviewAvailability.available;
   const previewPositionSeconds = Math.max(
     clipDraft.startSeconds,
     Math.min(clipDraft.endSeconds, Math.round(previewPositionMs / 1000)),
   );
   const handlePreview = useCallback(async () => {
     if (!libraryItemId || clipDraft.validationMessage || !bookmark) return;
+    if (!clipPreviewAvailability.available) {
+      toast.info(clipPreviewAvailability.reason ?? "Clip preview is unavailable.");
+      return;
+    }
     try {
       if (isPreviewing) {
         await playerService.restoreListeningPositionAfterPreview();
@@ -235,6 +256,8 @@ export const BookClipDetailSheet = () => {
     clipDraft.endSeconds,
     clipDraft.startSeconds,
     clipDraft.validationMessage,
+    clipPreviewAvailability.available,
+    clipPreviewAvailability.reason,
     isPreviewing,
     libraryItemId,
   ]);
@@ -242,12 +265,12 @@ export const BookClipDetailSheet = () => {
     () =>
       Gesture.Tap()
         .runOnJS(true)
-        .enabled(canPreviewClip)
+        .enabled(canUsePreviewControl)
         .onEnd((_event, success) => {
           if (!success) return;
           void handlePreview();
         }),
-    [canPreviewClip, handlePreview],
+    [canUsePreviewControl, handlePreview],
   );
 
   const handleSave = async () => {
@@ -316,7 +339,7 @@ export const BookClipDetailSheet = () => {
       });
     } catch (error) {
       console.warn("[BookClipDetailSheet] Failed to export clip", error);
-      toast.error("Unable to export clip");
+      toast.error(getClipExportErrorMessage(error));
     } finally {
       setIsExporting(false);
       await deleteClipExportFile(exportFileUri);
@@ -465,7 +488,7 @@ export const BookClipDetailSheet = () => {
                     accessibilityLabel={isPreviewing ? "Stop clip preview" : "Preview clip"}
                     accessibilityState={{ disabled: !canPreviewClip }}
                     onAccessibilityTap={() => {
-                      if (!canPreviewClip) return;
+                      if (!canUsePreviewControl) return;
                       void handlePreview();
                     }}
                     style={{

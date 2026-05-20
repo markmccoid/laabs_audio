@@ -35,6 +35,7 @@ import type { AudioTrack } from "../types/absTypes";
 import { createAudioEngine } from "./audio-engine";
 import { buildChapterIndex, findChapterForPosition, findTrackForPosition } from "./chapters";
 import { clipPreviewStore } from "./clip-preview-store";
+import { resolveClipPreviewAvailability } from "./clip-preview-availability";
 import type { PlaybackStoreState } from "./playback-store";
 import { playbackStore } from "./playback-store";
 import { buildPlaybackQueue } from "./queue";
@@ -1475,11 +1476,13 @@ class PlayerService {
     }
 
     const stateBeforePreview = playbackStore.getState();
-    const isTargetBookLoaded =
-      stateBeforePreview.libraryItemId === payload.libraryItemId &&
-      stateBeforePreview.queue.length > 0;
-    if (!isTargetBookLoaded) {
-      throw new Error("Load this book before previewing clips");
+    const availability = resolveClipPreviewAvailability({
+      targetLibraryItemId: payload.libraryItemId,
+      activeLibraryItemId: stateBeforePreview.libraryItemId,
+      activeQueueLength: stateBeforePreview.queue.length,
+    });
+    if (!availability.available) {
+      throw new Error(availability.reason ?? "Unable to preview clip");
     }
 
     const restoreState: ClipPreviewRestoreState = {

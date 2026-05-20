@@ -2,7 +2,11 @@ import { useAuthStore } from "@/auth/auth-store";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { playerService } from "@/player";
 import { resolveClipExportAvailability, resolveClipExportSourcePlan } from "@/sharing/clip-export";
-import { deleteClipExportFile, extractClipExportFile } from "@/sharing/clip-export-extractor";
+import {
+  deleteClipExportFile,
+  extractClipExportFile,
+  getClipExportErrorMessage,
+} from "@/sharing/clip-export-extractor";
 import {
   useDeviceBooksActions,
   useDeviceBooksStore,
@@ -217,7 +221,7 @@ export const BookBookmarkEditSheet = () => {
       });
     } catch (error) {
       console.warn("[BookBookmarkEditSheet] Failed to export clip", error);
-      toast.error("Unable to export clip");
+      toast.error(getClipExportErrorMessage(error));
     } finally {
       setIsExporting(false);
       await deleteClipExportFile(exportFileUri);
