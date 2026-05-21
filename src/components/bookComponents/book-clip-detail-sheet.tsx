@@ -37,6 +37,18 @@ import {
   extractClipExportFile,
   getClipExportErrorMessage,
 } from "@/sharing/clip-export-extractor";
+import {
+  createClipTranscriptExportFile,
+  deleteClipTranscriptExportFile,
+} from "@/sharing/clip-transcript-export";
+import {
+  resolveClipTranscriptionAvailability,
+  transcribeClipSourcePlan,
+} from "@/transcription";
+import {
+  logClipTranscriptExportFailure,
+  type ClipTranscriptExportStage,
+} from "@/transcription/clip-transcript-export-log";
 import { ClipRangeEditor } from "./clip-range-editor";
 import { useClipRangeDraft } from "./use-clip-range-draft";
 
@@ -46,6 +58,15 @@ const resolveParam = (value: string | string[] | undefined) =>
 const getUserKey = (username: string | null, serverUrl: string | null) => {
   if (!username || !serverUrl) return null;
   return `${username}::${serverUrl}`;
+};
+
+const getClipTranscriptExportErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = String((error as { message?: unknown }).message ?? "").trim();
+    if (message) return message;
+  }
+  return "Unable to export clip transcript";
 };
 
 export const BookClipDetailSheet = () => {
@@ -82,6 +103,7 @@ export const BookClipDetailSheet = () => {
   const [note, setNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingTranscript, setIsExportingTranscript] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [shouldRenderPreviewTimer, setShouldRenderPreviewTimer] = useState(false);
   const previewTimerOpacity = useRef(new Animated.Value(0)).current;
@@ -201,6 +223,13 @@ export const BookClipDetailSheet = () => {
       }),
     [downloadInfo?.audioTracks.length, savedClipExportPlan],
   );
+  const clipTranscriptionAvailability = useMemo(
+    () =>
+      resolveClipTranscriptionAvailability(savedClipExportPlan, {
+        hasDownloadedAudio: Boolean(downloadInfo?.audioTracks.length),
+      }),
+    [downloadInfo?.audioTracks.length, savedClipExportPlan],
+  );
   const activeBookDownloadInProgress =
     Boolean(libraryItemId) && activeDownloadLibraryItemId === libraryItemId;
   const clipExportUnavailableReason = (() => {
@@ -210,6 +239,14 @@ export const BookClipDetailSheet = () => {
     if (!clipExportAvailability.available) return clipExportAvailability.reason;
     return null;
   })();
+  const clipTranscriptExportUnavailableReason = (() => {
+    if (!bookmark || bookmark.kind !== "clip") return "Transcript export is only available for clips";
+    if (hasDirtyDraft) return "Save changes before exporting";
+    if (activeBookDownloadInProgress) return "Download is still finishing";
+    if (Platform.OS !== "ios") return "Clip Transcription is unavailable on this platform";
+    if (!clipTranscriptionAvailability.available) return clipTranscriptionAvailability.reason;
+    return null;
+  })();
   const canExportClip = Boolean(
     bookmark &&
       bookmark.kind === "clip" &&
@@ -217,9 +254,21 @@ export const BookClipDetailSheet = () => {
       !activeBookDownloadInProgress &&
       clipExportAvailability.available &&
       !isSaving &&
-      !isExporting,
+      !isExporting &&
+      !isExportingTranscript,
   );
-  const isBusy = isSaving || isExporting;
+  const canExportClipTranscript = Boolean(
+    bookmark &&
+      bookmark.kind === "clip" &&
+      !hasDirtyDraft &&
+      !activeBookDownloadInProgress &&
+      Platform.OS === "ios" &&
+      clipTranscriptionAvailability.available &&
+      !isSaving &&
+      !isExporting &&
+      !isExportingTranscript,
+  );
+  const isBusy = isSaving || isExporting || isExportingTranscript;
   const clipPreviewAvailability = resolveClipPreviewAvailability({
     targetLibraryItemId: libraryItemId,
     activeLibraryItemId,
@@ -347,6 +396,84 @@ export const BookClipDetailSheet = () => {
     } finally {
       setIsExporting(false);
       await deleteClipExportFile(exportFileUri);
+    }
+  };
+
+  const handleExportTranscript = async () => {
+    if (
+      !bookmark ||
+      !savedClipExportPlan ||
+      !clipTranscriptionAvailability.available ||
+      !canExportClipTranscript
+    ) {
+      if (clipTranscriptExportUnavailableReason) {
+        toast.info(clipTranscriptExportUnavailableReason);
+      }
+      return;
+    }
+
+    let exportFileUri: string | null = null;
+    let transcriptExportStage: ClipTranscriptExportStage = "unknown";
+    setIsExportingTranscript(true);
+    try {
+      transcriptExportStage = "restore_listening_position";
+      await playerService.restoreListeningPositionAfterPreview();
+      transcriptExportStage = "transcribe_clip";
+      const transcription = await transcribeClipSourcePlan({
+        plan: savedClipExportPlan,
+      });
+      if (!transcription.text.trim()) {
+        throw new Error("Clip Transcription did not return text");
+      }
+
+      transcriptExportStage = "create_export_file";
+      const result = await createClipTranscriptExportFile({
+        bookTitle,
+        bookmarkTitle: bookmark.title,
+        range: savedClipExportPlan.range,
+        transcription,
+      });
+      exportFileUri = result.fileUri;
+
+      transcriptExportStage = "check_sharing";
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) {
+        logClipTranscriptExportFailure({
+          trigger: "book_clip_detail",
+          libraryItemId,
+          bookTitle,
+          bookmarkId: bookmark.id,
+          bookmarkTitle: bookmark.title,
+          range: savedClipExportPlan.range,
+          stage: transcriptExportStage,
+          error: new Error("Sharing is not available on this device"),
+        });
+        toast.info("Sharing is not available on this device");
+        return;
+      }
+
+      transcriptExportStage = "share_export_file";
+      await Sharing.shareAsync(result.fileUri, {
+        dialogTitle: "Export clip transcript",
+        mimeType: result.mimeType,
+        UTI: result.uti,
+      });
+    } catch (error) {
+      console.warn("[BookClipDetailSheet] Failed to export clip transcript", error);
+      logClipTranscriptExportFailure({
+        trigger: "book_clip_detail",
+        libraryItemId,
+        bookTitle,
+        bookmarkId: bookmark.id,
+        bookmarkTitle: bookmark.title,
+        range: savedClipExportPlan.range,
+        stage: transcriptExportStage,
+        error,
+      });
+      toast.error(getClipTranscriptExportErrorMessage(error));
+    } finally {
+      setIsExportingTranscript(false);
+      await deleteClipTranscriptExportFile(exportFileUri);
     }
   };
 
@@ -539,10 +666,10 @@ export const BookClipDetailSheet = () => {
             }
           />
 
-          <View style={{ gap: 6 }}>
+          <View style={{ gap: 8 }}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Export clip"
+              accessibilityLabel="Export audio clip"
               onPress={() => {
                 void handleExport();
               }}
@@ -575,12 +702,60 @@ export const BookClipDetailSheet = () => {
                   fontWeight: "700",
                 }}
               >
-                {isExporting ? "Exporting..." : "Export Clip"}
+                {isExporting ? "Exporting..." : "Export Audio Clip"}
               </Text>
             </Pressable>
             {clipExportUnavailableReason ? (
               <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
                 {clipExportUnavailableReason}
+              </Text>
+            ) : null}
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Export clip transcript"
+              onPress={() => {
+                void handleExportTranscript();
+              }}
+              disabled={!canExportClipTranscript}
+              style={({ pressed }) => ({
+                borderRadius: 14,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: canExportClipTranscript ? themeColors.accent : themeColors.border,
+                backgroundColor: canExportClipTranscript ? themeColors.accent : themeColors.surface,
+                paddingHorizontal: 14,
+                paddingVertical: 14,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                opacity: !canExportClipTranscript ? 0.55 : pressed ? 0.82 : 1,
+              })}
+            >
+              <SymbolView
+                name="doc.text"
+                tintColor={
+                  canExportClipTranscript ? themeColors.accentForeground : themeColors.textMuted
+                }
+                size={16}
+              />
+              <Text
+                selectable
+                style={{
+                  color: canExportClipTranscript
+                    ? themeColors.accentForeground
+                    : themeColors.textMuted,
+                  fontSize: 14,
+                  fontWeight: "700",
+                }}
+              >
+                {isExportingTranscript ? "Exporting..." : "Export Clip Transcript"}
+              </Text>
+            </Pressable>
+            {clipTranscriptExportUnavailableReason ? (
+              <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
+                {clipTranscriptExportUnavailableReason}
               </Text>
             ) : null}
           </View>

@@ -74,7 +74,9 @@ const formatEventTypeLabel = (eventType: ProgressLogEventType) =>
         ? "Server Fetch"
         : eventType === "playback_state_transition"
           ? "Playback State"
-          : "Queue Sync";
+          : eventType === "clip_transcript_export"
+            ? "Transcript Export"
+            : "Queue Sync";
 
 const getEventBadgeColors = (
   themeColors: ReturnType<typeof useThemeColors>,
@@ -104,6 +106,12 @@ const getEventBadgeColors = (
         backgroundColor: "#e0f2fe",
         borderColor: "#7dd3fc",
         textColor: "#0369a1",
+      };
+    case "clip_transcript_export":
+      return {
+        backgroundColor: "#fee2e2",
+        borderColor: "#fca5a5",
+        textColor: "#b91c1c",
       };
     case "queue_sync":
     default:
@@ -358,6 +366,21 @@ const LogCard = ({ entry }: { entry: ProgressLogEntry }) => {
       ];
     }
 
+    if (entry.eventType === "clip_transcript_export") {
+      return [
+        <StatusBadge
+          key={`${entry.id}-result`}
+          label="Transcript Failed"
+          tone="error"
+        />,
+        <StatusBadge
+          key={`${entry.id}-stage`}
+          label={entry.stage}
+          tone="warning"
+        />,
+      ];
+    }
+
     return [
       <StatusBadge
         key={`${entry.id}-action`}
@@ -430,6 +453,18 @@ const LogCard = ({ entry }: { entry: ProgressLogEntry }) => {
         `position=${formatSeconds(entry.positionSeconds)} | track=${formatSeconds(entry.trackPositionSeconds)} | duration=${formatSeconds(entry.durationSeconds)}`,
         `syncAttempted=${entry.syncAttempted ? "yes" : "no"} | syncReason=${entry.syncReason ?? "none"} | dedupeSkipped=${entry.dedupeSkipped ? "yes" : "no"}`,
         entry.note ? `note=${entry.note}` : null,
+      ].filter((value): value is string => Boolean(value));
+    }
+
+    if (entry.eventType === "clip_transcript_export") {
+      return [
+        `trigger=${entry.trigger}`,
+        `stage=${entry.stage} | platform=${entry.platform}`,
+        `bookmark=${entry.bookmarkTitle ?? "none"} | bookmarkId=${entry.bookmarkId ?? "none"}`,
+        `range=${formatSeconds(entry.clipStartSeconds)} -> ${formatSeconds(entry.clipEndSeconds)}`,
+        entry.errorCode ? `code=${entry.errorCode}` : null,
+        entry.errorName ? `name=${entry.errorName}` : null,
+        `error=${entry.errorMessage}`,
       ].filter((value): value is string => Boolean(value));
     }
 
@@ -543,6 +578,8 @@ export const SettingsProgressLogsScreen = () => {
               ? `${entry.result} ${entry.note ?? ""} ${entry.errorMessage ?? ""}`
               : entry.eventType === "playback_state_transition"
                 ? `${entry.fromPlaybackState} ${entry.toPlaybackState} ${entry.syncReason ?? ""} ${entry.note ?? ""}`
+                : entry.eventType === "clip_transcript_export"
+                  ? `${entry.result} ${entry.stage} ${entry.bookmarkTitle ?? ""} ${entry.errorCode ?? ""} ${entry.errorName ?? ""} ${entry.errorMessage}`
                 : `${entry.action} ${entry.originTrigger ?? ""} ${entry.note ?? ""} ${entry.errorMessage ?? ""}`,
       ]
         .join(" ")
@@ -665,11 +702,11 @@ export const SettingsProgressLogsScreen = () => {
                     selectable
                     style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}
                   >
-                    Progress Diagnostics
+                    Diagnostics
                   </Text>
                   <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-                    Inspect restore, sync, queue, and reconnect decisions. Filtered export shares
-                    only the logs you are currently viewing.
+                    Inspect progress sync, playback, queue, and transcript export decisions.
+                    Filtered export shares only the logs you are currently viewing.
                   </Text>
                 </View>
                 <Switch
@@ -785,6 +822,12 @@ export const SettingsProgressLogsScreen = () => {
                   <FilterChip
                     label="Playback State"
                     value="playback_state_transition"
+                    selectedValue={eventTypeFilter}
+                    onPress={setEventTypeFilter}
+                  />
+                  <FilterChip
+                    label="Transcript Export"
+                    value="clip_transcript_export"
                     selectedValue={eventTypeFilter}
                     onPress={setEventTypeFilter}
                   />
@@ -926,7 +969,7 @@ export const SettingsProgressLogsScreen = () => {
               <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
                 {entries.length
                   ? "No log entries match the current filters."
-                  : "No progress diagnostics have been recorded yet."}
+                  : "No diagnostics have been recorded yet."}
               </Text>
             </View>
           </View>

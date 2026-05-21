@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["ClipTranscriberModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.cliptranscriber.ClipTranscriberModule"]
+  }
+}
+

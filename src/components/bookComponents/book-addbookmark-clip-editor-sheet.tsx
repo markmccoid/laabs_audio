@@ -225,17 +225,22 @@ export const BookAddBookmarkClipEditorSheet = () => {
     await playerService.restoreListeningPositionAfterPreview();
   };
 
+  const stopPreviewAtClipStart = async () => {
+    setPreviewScrubSeconds(0);
+    await stopPreview();
+  };
+
   const hapticNudge = () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
   };
 
   const updateStart = async (nextStartSeconds: number) => {
-    await stopPreview();
+    await stopPreviewAtClipStart();
     setLiveStart(nextStartSeconds);
   };
 
   const updateDuration = async (nextDurationSeconds: number) => {
-    await stopPreview();
+    await stopPreviewAtClipStart();
     setLiveDuration(nextDurationSeconds);
   };
 
@@ -418,7 +423,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
         thumbTintColor={themeColors.accent}
         disabled={false}
         onSlidingStart={() => {
-          void stopPreview();
+          void stopPreviewAtClipStart();
         }}
         onValueChange={onValueChange}
         onSlidingComplete={onSlidingComplete}

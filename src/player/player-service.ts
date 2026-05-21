@@ -1857,7 +1857,7 @@ class PlayerService {
 
     const trackPositionMs = Math.max(0, status.positionMs);
     const positionMs = currentTrack.startOffsetMs + trackPositionMs;
-    if (this.shouldIgnorePostPreviewStatus(positionMs)) {
+    if (await this.shouldIgnorePostPreviewStatus(status, positionMs)) {
       return;
     }
     const updates: Parameters<PlaybackStoreState["actions"]["applyStatusUpdate"]>[0] = {
@@ -1946,7 +1946,12 @@ class PlayerService {
     }
   }
 
-  private shouldIgnorePostPreviewStatus(positionMs: number) {
+  private async shouldIgnorePostPreviewStatus(
+    status: {
+      isPlaying: boolean;
+    },
+    positionMs: number,
+  ) {
     const guard = this.postPreviewStatusGuard;
     if (!guard) {
       return false;
@@ -1959,6 +1964,16 @@ class PlayerService {
 
     const isRestoredPosition =
       Math.abs(positionMs - guard.restoredPositionMs) <= POST_PREVIEW_RESTORED_POSITION_TOLERANCE_MS;
+    if (status.isPlaying) {
+      try {
+        await this.engine.pause();
+      } catch {
+        // Ignore pause failures here; the store must still remain in the restored paused state.
+      }
+      playbackStore.getState().actions.setPlaybackState("paused");
+      return true;
+    }
+
     if (isRestoredPosition) {
       this.postPreviewStatusGuard = null;
       return false;

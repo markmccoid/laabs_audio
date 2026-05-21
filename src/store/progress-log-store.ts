@@ -11,7 +11,8 @@ export type ProgressLogEventType =
   | "progress_resolution"
   | "queue_sync"
   | "server_progress_fetch"
-  | "playback_state_transition";
+  | "playback_state_transition"
+  | "clip_transcript_export";
 export type ProgressLogSessionKind = "streamed" | "downloaded" | "unknown";
 export type ProgressSyncPath =
   | "session_sync"
@@ -129,19 +130,42 @@ export type PlaybackStateTransitionLogEntry = ProgressLogBase & {
   note?: string;
 };
 
+export type ClipTranscriptExportLogEntry = ProgressLogBase & {
+  eventType: "clip_transcript_export";
+  trigger: string;
+  result: "failed";
+  stage:
+    | "restore_listening_position"
+    | "transcribe_clip"
+    | "create_export_file"
+    | "check_sharing"
+    | "share_export_file"
+    | "unknown";
+  bookmarkId: string | null;
+  bookmarkTitle: string | null;
+  clipStartSeconds: number | null;
+  clipEndSeconds: number | null;
+  platform: string;
+  errorName?: string;
+  errorCode?: string;
+  errorMessage: string;
+};
+
 export type ProgressLogEntry =
   | ProgressSyncPointLogEntry
   | ProgressResolutionLogEntry
   | QueueSyncLogEntry
   | ServerProgressFetchLogEntry
-  | PlaybackStateTransitionLogEntry;
+  | PlaybackStateTransitionLogEntry
+  | ClipTranscriptExportLogEntry;
 
 type ProgressLogEntryInput =
   | (Omit<ProgressSyncPointLogEntry, "id" | "timestamp"> & { timestamp?: number })
   | (Omit<ProgressResolutionLogEntry, "id" | "timestamp"> & { timestamp?: number })
   | (Omit<QueueSyncLogEntry, "id" | "timestamp"> & { timestamp?: number })
   | (Omit<ServerProgressFetchLogEntry, "id" | "timestamp"> & { timestamp?: number })
-  | (Omit<PlaybackStateTransitionLogEntry, "id" | "timestamp"> & { timestamp?: number });
+  | (Omit<PlaybackStateTransitionLogEntry, "id" | "timestamp"> & { timestamp?: number })
+  | (Omit<ClipTranscriptExportLogEntry, "id" | "timestamp"> & { timestamp?: number });
 
 export type ProgressLogState = {
   entries: ProgressLogEntry[];

@@ -67,6 +67,22 @@ _Avoid_: Audio export, clip share
 The audio artifact created by a Clip Export.
 _Avoid_: Shared clip, exported bookmark
 
+**Clip Transcription**:
+A user-initiated action that creates text from a Clip Bookmark's Clip Range.
+_Avoid_: Audio clip text, speech note
+
+**Clip Transcript Export**:
+A user-initiated action that creates a shareable text artifact from a Clip Transcription.
+_Avoid_: Transcription export, speech note export
+
+**Clip Transcript Export File**:
+The text artifact created by a Clip Transcript Export.
+_Avoid_: Transcription Source File, Clip Export File
+
+**Transcription Source File**:
+A temporary audio file created from a Clip Bookmark's Clip Range for Clip Transcription.
+_Avoid_: Clip Export File, transcription export
+
 **Bookmark Backup Export**:
 A user-initiated metadata export of saved Bookmarks intended to support future restore or import.
 _Avoid_: Clip export, audio export
@@ -100,6 +116,15 @@ _Avoid_: Five minute window, scrubber window
 - Editing an existing Bookmark does not change its **Local Bookmark Record** until the user saves the draft.
 - A **Clip Export** belongs to exactly one Clip Bookmark.
 - A **Clip Export File** contains the audio from a Clip Bookmark's Clip Range.
+- A **Clip Transcription** belongs to exactly one Clip Bookmark.
+- A **Clip Transcription** creates text from a Clip Bookmark's Clip Range.
+- A **Clip Transcription** may use a **Transcription Source File**.
+- A **Clip Transcript Export** belongs to exactly one Clip Transcription.
+- A **Clip Transcript Export File** contains text from a Clip Transcription.
+- A **Clip Transcript Export File** includes the Book Title, Bookmark Title, Clip Range, and transcribed text.
+- A **Clip Transcript Export File** is temporary and is removed after sharing finishes.
+- A **Transcription Source File** is not a **Clip Export File**.
+- A **Clip Transcript Export File** is not a **Transcription Source File**.
 - A **Bookmark Backup Export** may contain Point Bookmarks and Clip Bookmarks.
 - A **Bookmark Backup Export** must include enough Bookmark Title, Bookmark Position, Clip Range, and Local Note data to support future restore.
 - A **Clip Range** is the selected audio span of a Clip Bookmark.
@@ -122,12 +147,15 @@ _Avoid_: Five minute window, scrubber window
 - Previewing an unsaved Clip Bookmark uses transient preview state rather than creating a Local Bookmark Record.
 - The **Clip Editor** may preview only the final five seconds of a Clip Range to help verify the end boundary.
 - A **Clip Export** is available only for a saved Clip Bookmark without unsaved draft changes.
+- A **Clip Transcript Export** is available only for a saved Clip Bookmark without unsaved draft changes.
 - A **Trim Window** is the visible editing span used to inspect and adjust a Clip Range.
 - A **Trim Window** translates a Clip Bookmark's start and end positions together without changing the clip duration.
 - Moving a **Trim Window** updates the draft Clip Bookmark positions but does not drive clip preview playback.
 - In the **Clip Editor**, the **Trim Window** may automatically keep the **Clip Range** visible while users adjust Starting Position and duration.
+- Changing a **Clip Range** or **Trim Window** while previewing stops clip preview, restores the **Listening Position**, and returns the **Preview Position** to the start of the Clip Range.
 - Playback inside **Clip Detail** must not accidentally change the user's intended **Listening Position**.
 - When clip preview ends or Clip Detail closes, LAABS Audio restores the **Listening Position**.
+- Starting a **Clip Transcript Export** stops clip preview and restores the **Listening Position** before transcription begins.
 - Choosing a **Bookmark** is an explicit navigation action and takes precedence over clip preview restoration.
 - A **Local Bookmark Record** may be linked to a **Server Bookmark**.
 - Every **Bookmark** shown by LAABS Audio is represented as a **Local Bookmark Record**.
@@ -145,6 +173,15 @@ _Avoid_: Five minute window, scrubber window
 > **Dev:** "Should tapping a clip in the bookmark viewer preview the clip?"
 > **Domain expert:** "No, choosing the **Bookmark** updates the **Listening Position**. Use **Clip Detail** to preview or trim the clip."
 
+> **Dev:** "Is text created from a saved passage a separate note?"
+> **Domain expert:** "No, it is a **Clip Transcription** created from the **Clip Bookmark**'s **Clip Range**."
+
+> **Dev:** "Can the temporary audio used for transcription be treated as a Clip Export File?"
+> **Domain expert:** "No, that is a **Transcription Source File** because it exists only to support **Clip Transcription**."
+
+> **Dev:** "When the user shares transcribed clip text, is that the same as the temporary audio used for recognition?"
+> **Domain expert:** "No, sharing transcribed text creates a **Clip Transcript Export File** from a **Clip Transcription**."
+
 ## Flagged ambiguities
 
 - "advanced bookmark" was used to mean a bookmark with a start and end position; resolved: the canonical term is **Clip Bookmark**.
@@ -153,5 +190,8 @@ _Avoid_: Five minute window, scrubber window
 - "clip details page" was used for the clip-only preview/edit surface; resolved: the canonical term is **Clip Detail**.
 - "shared clip controls" was used for the reusable create/edit surface; resolved: the canonical term is **Clip Editor**.
 - "share clip" and "export clip" were used for creating shareable audio from a Clip Bookmark; resolved: the canonical term is **Clip Export**.
+- "audio clip text" and "speech note" were used for text created from a Clip Bookmark's audio; resolved: the canonical term is **Clip Transcription**.
+- "transcription export" was used for temporary audio created for transcription; resolved: the canonical term is **Transcription Source File**.
+- "export clip transcription" was used for sharing transcribed text; resolved: the canonical term is **Clip Transcript Export**.
 - "trim range" was used ambiguously for both the selected clip span and visible editing span; resolved: the selected span is **Clip Range**.
 - "five minute window" and "scrubber window" were used for the visible editing span; resolved: the canonical term is **Trim Window**.
