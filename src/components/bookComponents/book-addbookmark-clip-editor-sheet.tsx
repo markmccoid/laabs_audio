@@ -11,8 +11,8 @@ import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
 import { router, Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, Pressable, ScrollView, Text, View } from "react-native";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
 import {
@@ -22,7 +22,6 @@ import {
 import { clampSeconds, MAX_CLIP_DURATION_SECONDS, MIN_CLIP_DURATION_SECONDS } from "./clip-timing";
 
 const FALLBACK_BOOK_DURATION_SECONDS = 16 * 60 * 60;
-const WAVEFORM_BAR_COUNT = 72;
 
 const formatClock = (seconds: number) => formatSeconds(seconds, "compact", true, true) ?? "00:00";
 
@@ -34,14 +33,6 @@ const formatDuration = (seconds: number) => {
   if (hours > 0) return `${hours}h ${minutes}m ${remainingSeconds}s`;
   if (minutes > 0) return `${minutes}m ${remainingSeconds}s`;
   return `${remainingSeconds}s`;
-};
-
-const formatDurationBadge = (seconds: number) => `${formatDuration(seconds).toUpperCase()} CLIP`;
-
-const getPlaceholderPeak = (index: number, phase: number) => {
-  const shiftedIndex = index + phase;
-  const wave = Math.sin(shiftedIndex * 0.73) * 0.38 + Math.sin(shiftedIndex * 1.91) * 0.22;
-  return 16 + Math.round(Math.abs(wave) * 42) + (Math.round(shiftedIndex) % 7 === 0 ? 10 : 0);
 };
 
 const getInitialRange = ({
@@ -103,11 +94,6 @@ export const BookAddBookmarkClipEditorSheet = () => {
   const [startSeconds, setStartSeconds] = useState(initialRange.startSeconds);
   const [durationSeconds, setDurationSeconds] = useState(initialRange.durationSeconds);
   const [isEndPositionLocked, setIsEndPositionLocked] = useState(false);
-  const waveformMotion = useRef(new Animated.Value(0)).current;
-  const previousRangeRef = useRef({
-    startSeconds: initialRange.startSeconds,
-    durationSeconds: initialRange.durationSeconds,
-  });
   const endSeconds = startSeconds + durationSeconds;
   const [previewScrubSeconds, setPreviewScrubSeconds] = useState(0);
   const clipPreviewAvailability = resolveClipPreviewAvailability({
@@ -137,78 +123,11 @@ export const BookAddBookmarkClipEditorSheet = () => {
     MIN_CLIP_DURATION_SECONDS,
     Math.min(MAX_CLIP_DURATION_SECONDS, bookDurationSeconds - startSeconds),
   );
-  const visualViewport = useMemo(() => {
-    const midpoint = startSeconds + durationSeconds / 2;
-    const viewportDuration = Math.min(
-      bookDurationSeconds,
-      Math.max(durationSeconds * 1.35, Math.min(90, bookDurationSeconds)),
-    );
-    const viewportStart = clampSeconds(
-      Math.round(midpoint - viewportDuration / 2),
-      0,
-      Math.max(0, bookDurationSeconds - viewportDuration),
-    );
-    return {
-      startSeconds: viewportStart,
-      durationSeconds: viewportDuration,
-      endSeconds: viewportStart + viewportDuration,
-    };
-  }, [bookDurationSeconds, durationSeconds, startSeconds]);
-  const ticks = useMemo(
-    () => [
-      Math.round(visualViewport.startSeconds),
-      startSeconds,
-      endSeconds,
-      Math.round(visualViewport.endSeconds),
-    ],
-    [endSeconds, startSeconds, visualViewport.endSeconds, visualViewport.startSeconds],
-  );
-  const selectionLeftPercent =
-    ((startSeconds - visualViewport.startSeconds) / visualViewport.durationSeconds) * 100;
-  const selectionWidthPercent = (durationSeconds / visualViewport.durationSeconds) * 100;
-  const playheadLeftPercent =
-    isThisDraftPreview && previewPositionMs > 0
-      ? ((Math.round(previewPositionMs / 1000) - visualViewport.startSeconds) /
-          visualViewport.durationSeconds) *
-        100
-      : null;
-  const waveformPhase = startSeconds * 0.08 + durationSeconds * 0.025;
-  const waveformDirection =
-    startSeconds !== previousRangeRef.current.startSeconds
-      ? startSeconds > previousRangeRef.current.startSeconds
-        ? -1
-        : 1
-      : durationSeconds > previousRangeRef.current.durationSeconds
-        ? -1
-        : 1;
-  const waveformTranslateX = waveformMotion.interpolate({
-    inputRange: [0, 1],
-    outputRange: [waveformDirection * 10, 0],
-  });
-
   useEffect(() => {
     setDurationSeconds((current) =>
       clampSeconds(current, MIN_CLIP_DURATION_SECONDS, maxDurationForCurrentStart),
     );
   }, [maxDurationForCurrentStart]);
-
-  useEffect(() => {
-    const previousRange = previousRangeRef.current;
-    if (
-      previousRange.startSeconds === startSeconds &&
-      previousRange.durationSeconds === durationSeconds
-    ) {
-      return;
-    }
-
-    previousRangeRef.current = { startSeconds, durationSeconds };
-    waveformMotion.setValue(0);
-    Animated.timing(waveformMotion, {
-      toValue: 1,
-      duration: 160,
-      useNativeDriver: true,
-    }).start();
-  }, [durationSeconds, startSeconds, waveformMotion]);
 
   useEffect(() => {
     return () => {
@@ -439,6 +358,16 @@ export const BookAddBookmarkClipEditorSheet = () => {
     </View>
   );
 
+  const selectedRangeColumns = [
+    { label: "Start", value: formatClock(startSeconds), align: "left" as const },
+    {
+      label: "Duration",
+      value: formatDuration(durationSeconds).toUpperCase(),
+      align: "center" as const,
+    },
+    { label: "End", value: formatClock(endSeconds), align: "right" as const },
+  ];
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: themeColors.bg }}
@@ -504,125 +433,57 @@ export const BookAddBookmarkClipEditorSheet = () => {
           boxShadow: "0 18px 34px rgba(15, 23, 42, 0.12)",
         }}
       >
-        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
-          <View style={{ flex: 1, gap: 4 }}>
-            <Text
-              selectable
-              style={{ color: themeColors.textMuted, fontSize: 10, fontWeight: "800" }}
-            >
-              SELECTED RANGE
-            </Text>
-            <Text
-              selectable
-              adjustsFontSizeToFit
-              numberOfLines={1}
-              style={{
-                color: themeColors.text,
-                fontSize: 18,
-                fontWeight: "800",
-                fontVariant: ["tabular-nums"],
-              }}
-            >
-              {formatClock(startSeconds)}
-              {" -> "}
-              {formatClock(endSeconds)}
-            </Text>
-          </View>
-          <View style={{ alignItems: "flex-end", gap: 5 }}>
-            <Text
-              selectable
-              style={{ color: themeColors.textMuted, fontSize: 10, fontWeight: "800" }}
-            >
-              CLIP LENGTH
-            </Text>
+        <Text
+          selectable
+          style={{
+            color: themeColors.text,
+            fontSize: 13,
+            fontWeight: "800",
+            textAlign: "center",
+          }}
+        >
+          SELECTED RANGE
+        </Text>
+        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+          {selectedRangeColumns.map((item) => (
             <View
+              key={item.label}
               style={{
-                borderRadius: 999,
-                backgroundColor: themeColors.accent,
-                paddingHorizontal: 10,
-                paddingVertical: 5,
+                flex: 1,
+                gap: 6,
+                alignItems:
+                  item.align === "left"
+                    ? "flex-start"
+                    : item.align === "right"
+                      ? "flex-end"
+                      : "center",
               }}
             >
               <Text
                 selectable
-                style={{ color: themeColors.accentForeground, fontSize: 11, fontWeight: "900" }}
+                style={{
+                  color: themeColors.textMuted,
+                  fontSize: 10,
+                  fontWeight: "800",
+                }}
               >
-                {formatDurationBadge(durationSeconds)}
+                {item.label}
+              </Text>
+              <Text
+                selectable
+                adjustsFontSizeToFit
+                numberOfLines={1}
+                style={{
+                  color: themeColors.text,
+                  fontSize: 18,
+                  fontWeight: "800",
+                  fontVariant: ["tabular-nums"],
+                  textAlign: item.align,
+                }}
+              >
+                {item.value}
               </Text>
             </View>
-          </View>
-        </View>
-
-        <View style={{ height: 76, justifyContent: "center" }}>
-          <View
-            style={{
-              position: "absolute",
-              left: `${selectionLeftPercent}%`,
-              width: `${selectionWidthPercent}%`,
-              top: 4,
-              bottom: 4,
-              borderRadius: 14,
-              borderCurve: "continuous",
-              backgroundColor: `${themeColors.accent}20`,
-            }}
-          />
-          <Animated.View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 2,
-              transform: [{ translateX: waveformTranslateX }],
-            }}
-          >
-            {Array.from({ length: WAVEFORM_BAR_COUNT }, (_, index) => {
-              const barPositionSeconds =
-                visualViewport.startSeconds +
-                (visualViewport.durationSeconds * index) / Math.max(1, WAVEFORM_BAR_COUNT - 1);
-              const isActiveBar =
-                barPositionSeconds >= startSeconds && barPositionSeconds <= endSeconds;
-              return (
-                <View
-                  key={index}
-                  style={{
-                    flex: 1,
-                    height: getPlaceholderPeak(index, waveformPhase),
-                    borderRadius: 999,
-                    backgroundColor: isActiveBar ? themeColors.accent : "#CBD5DC",
-                    opacity: isActiveBar ? 1 : 0.72,
-                  }}
-                />
-              );
-            })}
-          </Animated.View>
-          {playheadLeftPercent !== null ? (
-            <View
-              style={{
-                position: "absolute",
-                left: `${clampSeconds(playheadLeftPercent, 0, 100)}%`,
-                top: 0,
-                bottom: 0,
-                width: 2,
-                borderRadius: 1,
-                backgroundColor: themeColors.accent,
-              }}
-            />
-          ) : null}
-        </View>
-
-        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-          {ticks.map((tick, index) => (
-            <Text
-              key={`${index}-${tick}`}
-              selectable
-              style={{
-                color: themeColors.textMuted,
-                fontSize: 10,
-                fontWeight: "700",
-                fontVariant: ["tabular-nums"],
-              }}
-            >
-              {formatClock(tick)}
-            </Text>
           ))}
         </View>
       </View>
