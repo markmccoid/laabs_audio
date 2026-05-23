@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import { router, useSegments } from "expo-router";
-import { useAuthStore } from "../auth/auth-store";
+import { useAuthActions, useAuthStore } from "../auth/auth-store";
 import { useLibrarySelection } from "../hooks/use-library-selection";
 
 // A stable key to scope library prompts/selections per user + server.
@@ -18,10 +18,12 @@ export const LibrarySelectionGate = () => {
   const serverUrl = useAuthStore((state) => state.serverUrl);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryName = useAuthStore((state) => state.activeLibraryName);
+  const { clearActiveLibrary, logout } = useAuthActions();
   const segments = useSegments();
 
   // Query + actions for fetching and storing library selection.
-  const { libraries, isLoading, isError, refetch, selectLibrary } = useLibrarySelection();
+  const { libraries, isLoading, isFetching, isFetched, isError, refetch, selectLibrary } =
+    useLibrarySelection();
 
   const userKey = useMemo(
     () => getUserKey(storedUsername, serverUrl),
@@ -31,80 +33,78 @@ export const LibrarySelectionGate = () => {
   // Track whether we've prompted or requested for the current user key.
   const promptRef = useRef<string | null>(null);
   const requestedRef = useRef<string | null>(null);
-  const previousUserKeyRef = useRef<string | null>(null);
-  const requiresPickerPromptRef = useRef(false);
 
   useEffect(() => {
     // Reset prompt/request guards whenever auth resets or user changes.
     if (status !== "authenticated") {
       promptRef.current = null;
       requestedRef.current = null;
-      previousUserKeyRef.current = null;
-      requiresPickerPromptRef.current = false;
       return;
     }
 
-    if (userKey && previousUserKeyRef.current && previousUserKeyRef.current !== userKey) {
+    if (userKey && requestedRef.current && requestedRef.current !== userKey) {
       promptRef.current = null;
       requestedRef.current = null;
-      requiresPickerPromptRef.current = true;
-    } else if (previousUserKeyRef.current === null) {
-      // On fresh authenticated entry, require picker prompt if active library is missing.
-      requiresPickerPromptRef.current = !activeLibraryId;
     }
-
-    previousUserKeyRef.current = userKey;
-  }, [activeLibraryId, status, userKey]);
+  }, [status, userKey]);
 
   useEffect(() => {
-    // If active library is cleared while authenticated, require the picker flow again.
-    if (status === "authenticated" && !loginRequired && !activeLibraryId) {
-      requiresPickerPromptRef.current = true;
-    }
-  }, [activeLibraryId, loginRequired, status]);
-
-  useEffect(() => {
-    // Fetch libraries once per user when authenticated and not already loaded.
+    // Fetch libraries once per user when authenticated. This validates persisted Library data.
     if (status !== "authenticated") return;
     if (loginRequired) return;
     if (!userKey) return;
-    if (libraries.length > 0) return;
-    if (isLoading) return;
+    if (isLoading || isFetching) return;
     if (requestedRef.current === userKey) return;
 
     requestedRef.current = userKey;
     refetch();
-  }, [isLoading, libraries.length, loginRequired, refetch, status, userKey]);
+  }, [isFetching, isLoading, loginRequired, refetch, status, userKey]);
 
   useEffect(() => {
-    // Ensure an active library exists, and prompt for selection if needed.
+    // Validate or resolve the Active Library after Libraries are known.
     if (status !== "authenticated") return;
     if (loginRequired) return;
-    if (!libraries.length) return;
-
-    const active = libraries.find((library) => library.id === activeLibraryId);
-    if (!active) {
-      // Default to the first library if none is selected or it no longer exists.
-      selectLibrary(libraries[0]);
-    } else if (!activeLibraryName) {
-      // Backfill missing display name if we have a valid ID.
-      selectLibrary(active);
+    if (!isFetched) return;
+    if (isFetching) return;
+    if (!libraries.length) {
+      if (activeLibraryId) {
+        clearActiveLibrary();
+      }
+      return;
     }
 
-    if (promptRef.current === userKey) return;
-    if (!requiresPickerPromptRef.current) return;
-
     const rootSegment = segments[0];
-    if (rootSegment === "library-picker") return;
-    if (rootSegment === "login") return;
+    const canOpenPicker = rootSegment !== "library-picker" && rootSegment !== "login";
+    const active = libraries.find((library) => library.id === activeLibraryId);
+    if (active) {
+      // Backfill missing display name if we have a valid ID.
+      if (!activeLibraryName) {
+        selectLibrary(active);
+      }
+      return;
+    }
 
-    // Open the picker after login/logout so the user confirms library selection.
+    if (activeLibraryId) {
+      clearActiveLibrary();
+    }
+
+    if (libraries.length === 1) {
+      selectLibrary(libraries[0]);
+      return;
+    }
+
+    if (!canOpenPicker) return;
+    if (promptRef.current === userKey) return;
+
+    // Multiple Libraries require explicit Library Selection before setting Active Library.
     router.push("/library-picker");
     promptRef.current = userKey;
-    requiresPickerPromptRef.current = false;
   }, [
     activeLibraryId,
     activeLibraryName,
+    clearActiveLibrary,
+    isFetched,
+    isFetching,
     libraries,
     loginRequired,
     segments,
@@ -114,6 +114,34 @@ export const LibrarySelectionGate = () => {
   ]);
 
   if (status !== "authenticated" || loginRequired) return null;
+  if (
+    isFetched &&
+    !isLoading &&
+    !isFetching &&
+    !isError &&
+    !activeLibraryId &&
+    libraries.length === 0
+  ) {
+    return (
+      <View className="absolute inset-0 z-50 items-center justify-center bg-bg px-6">
+        <View className="w-full max-w-md rounded-2xl border border-border bg-surface px-5 py-5">
+          <Text className="text-xl font-semibold text-text">No libraries available</Text>
+          <Text className="mt-2 text-sm leading-5 text-text-muted">
+            This Audiobookshelf user is signed in, but the server did not return any libraries.
+          </Text>
+          <View className="mt-5 flex-row gap-3">
+            <Pressable onPress={() => refetch()} className="rounded-full bg-accent px-4 py-2">
+              <Text className="text-sm font-semibold text-accent-foreground">Retry</Text>
+            </Pressable>
+            <Pressable onPress={() => logout()} className="rounded-full bg-bg px-4 py-2">
+              <Text className="text-sm font-semibold text-text-muted">Log out</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   if (!isError || activeLibraryId) return null;
 
   // Non-blocking retry banner when libraries failed to load and none is selected.

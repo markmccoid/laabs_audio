@@ -8,6 +8,7 @@ This document describes how offline state is detected, how network requests beha
 - Prevent streamed playback and network-dependent actions when offline.
 - Make offline state obvious without blocking navigation.
 - Provide a user-driven retry path to reduce aggressive polling.
+- Keep explicit logout distinct from temporary connectivity loss.
 
 ## Source Of Truth
 
@@ -18,6 +19,16 @@ This document describes how offline state is detected, how network requests beha
 - Files:
   - `src/auth/use-auth-bootstrap.ts`
   - `src/auth/auth-store.ts`
+
+### Downloaded-only mode
+
+Downloaded-only mode is entered after explicit logout when local downloads remain available. It is not an offline User Session:
+
+- Home shows downloaded audiobooks only.
+- Library Selection and server-scoped browsing are hidden.
+- Cached Library data may remain persisted, but it must not be exposed as a browsable User Session until the user signs in again.
+
+An offline User Session is different: the user is still signed in from a previous session, connectivity is temporarily unavailable, and the remembered Active Library may remain visible with offline indicators.
 
 ### Download availability
 

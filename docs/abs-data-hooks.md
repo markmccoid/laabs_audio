@@ -33,6 +33,8 @@ Returns:
 Notes:
 - Requires auth to be hydrated and authenticated. The underlying query is disabled otherwise.
 - `setActiveLibrary` validates the ID against the fetched list.
+- First login setup does not use the first returned Library as a temporary Active Library when multiple Libraries exist. Library Resolution chooses between zero, one, or multiple Libraries first; multiple Libraries require explicit Library Selection before library-scoped hooks should fetch Home data.
+- In downloaded-only mode after explicit logout, cached Library data may still exist but should not be exposed as browsable Library Selection.
 
 ### useGetBooks
 

@@ -50,6 +50,20 @@ After auth becomes authenticated and an active library context exists, app boots
 
 Prefetch is stale-aware (5 minute `staleTime`), so it only fetches when cached data is stale.
 
+## First Login Library Resolution
+
+First login performs a fresh Libraries query before normal browsing begins:
+
+- `queryKeys.libraries` via `librariesApi.getAll()`
+
+If exactly one Library is returned, it becomes the Active Library automatically. If multiple Libraries are returned, the app routes to Library Selection without setting a temporary Active Library. After setup Library Selection, the picker displays a loading state while prefetching:
+
+- `queryKeys.libraryBooks(activeLibraryId)`
+- `queryKeys.userServerState(activeLibraryUserKey)`
+- `queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId)`
+
+This prevents the Home screen from appearing blank or stale during the initial 2-5 second data load after choosing a Library.
+
 ## Home Manual Refresh
 
 Home pull-to-refresh invalidates and refetches the main persisted Home keys:

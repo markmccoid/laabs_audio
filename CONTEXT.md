@@ -4,6 +4,38 @@ LAABS Audio is an audiobook listening app that works with Audiobookshelf librari
 
 ## Language
 
+**Audiobookshelf Server**:
+The remote Audiobookshelf instance that owns libraries, users, audiobook catalog data, and server-side listening state.
+_Avoid_: Server URL, backend
+
+**User Session**:
+The app's authenticated relationship between one user and one Audiobookshelf Server.
+_Avoid_: Login, auth state
+
+**Library**:
+An Audiobookshelf collection of media that the user may browse and play.
+_Avoid_: Bookshelf, catalog
+
+**Active Library**:
+The one Library currently selected for browsing, shelves, search, and library-scoped audiobook queries.
+_Avoid_: Current library, selected library
+
+**Library Selection**:
+The user-facing choice of which Library becomes the Active Library for a User Session.
+_Avoid_: Library picker, library prompt
+
+**Library Resolution**:
+The post-authentication determination of whether a User Session has zero, one, or multiple Libraries.
+_Avoid_: Library fetch, picker decision
+
+**Downloaded-Only Mode**:
+The app state after an explicit logout where locally downloaded audiobooks remain available but no User Session is browsable.
+_Avoid_: Offline mode
+
+**Offline User Session**:
+A remembered User Session used while the device is offline.
+_Avoid_: Logged out, downloaded-only mode
+
 **Bookmark**:
 A saved reference to a meaningful place in an audiobook.
 
@@ -97,6 +129,22 @@ _Avoid_: Five minute window, scrubber window
 
 ## Relationships
 
+- A **User Session** belongs to exactly one **Audiobookshelf Server**.
+- A **User Session** may have access to zero, one, or many **Libraries**.
+- A **User Session** has at most one **Active Library**.
+- A **Library** is a separate scope under a **User Session**, not part of the User Session identity.
+- **Library Resolution** happens before a User Session becomes browsable.
+- An **Active Library** is chosen through **Library Selection**.
+- A first-time **User Session** is not browsable until **Library Resolution** succeeds.
+- If a **User Session** has zero Libraries, it remains valid but cannot have an **Active Library**.
+- If a **User Session** has exactly one Library, that Library may become the **Active Library** without asking the user to choose.
+- If a **User Session** has multiple Libraries, it must not have an **Active Library** until the user completes **Library Selection**.
+- A remembered **Active Library** may be used when it belongs to the same **User Session**, but it stops being valid if Audiobookshelf no longer returns that Library.
+- User-requested **Library Selection** may still show the available Libraries even when only one Library can become the **Active Library**.
+- **Library Selection** chooses the Active Library; Library-scoped audiobook, shelf, progress, and playlist data belong to the Active Library after it is chosen.
+- **Downloaded-Only Mode** is not an **Offline User Session**.
+- **Downloaded-Only Mode** shows downloaded audiobooks without **Library Selection** or server-scoped browsing.
+- An **Offline User Session** may keep its remembered **Active Library** while offline.
 - A **Bookmark** is either a **Point Bookmark** or a **Clip Bookmark**.
 - A **Point Bookmark** has exactly one **Bookmark Position**.
 - A **Clip Bookmark** has a start **Bookmark Position** and an **End Position**.
@@ -164,6 +212,9 @@ _Avoid_: Five minute window, scrubber window
 
 ## Example dialogue
 
+> **Dev:** "After sign-in, can we just pick the first collection Audiobookshelf returns?"
+> **Domain expert:** "Only when there is exactly one **Library**. If there are multiple **Libraries**, the user needs **Library Selection** before browsing."
+
 > **Dev:** "When a user saves a quote-sized passage, is that separate from bookmarks?"
 > **Domain expert:** "No, it is a **Clip Bookmark**. It appears with other **Bookmarks**, but it also has an end position."
 
@@ -184,6 +235,8 @@ _Avoid_: Five minute window, scrubber window
 
 ## Flagged ambiguities
 
+- "login" can mean either the credential submission or the broader **User Session** entry flow; resolved: use **User Session** for the authenticated relationship and describe credential submission separately when needed.
+- "library picker" refers to the implementation surface; resolved: the domain action is **Library Selection**.
 - "advanced bookmark" was used to mean a bookmark with a start and end position; resolved: the canonical term is **Clip Bookmark**.
 - "orphaned bookmark" was used to mean a local bookmark whose server counterpart is missing; resolved: the canonical term is **Unmatched Bookmark**.
 - "clip name" and "bookmark name" were used for the user-facing label; resolved: the canonical term is **Bookmark Title**.

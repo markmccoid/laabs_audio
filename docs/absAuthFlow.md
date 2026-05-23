@@ -7,6 +7,7 @@ This document describes the authentication flow for Audiobookshelf in this app. 
 - `src/auth/auth-store.ts`: Central auth state (Zustand), session refresh logic, and login/logout actions.
 - `src/auth/auth-service.ts`: Low-level HTTP calls for login/refresh/logout.
 - `src/auth/auth-storage.ts`: SecureStore persistence for credentials and tokens.
+- `src/auth/library-resolution.ts`: Post-authentication Library Resolution for first login and setup.
 - `src/api/auth-fetch.ts`: Auth-aware fetch wrapper used by all API calls.
 - `src/api/abs-client.ts`: Public API client wrapper that normalizes auth/offline errors.
 
@@ -48,6 +49,14 @@ This document describes the authentication flow for Audiobookshelf in this app. 
 3. Response is parsed into `accessToken` and `refreshToken`.
 4. `auth-storage` stores credentials and tokens in SecureStore.
 5. `auth-store` updates runtime state and transitions `status` to `authenticated`.
+6. The login route runs Library Resolution by fetching `/api/libraries`.
+7. Resolution outcomes:
+   - zero Libraries: stay in setup with an authenticated-but-not-browsable error state.
+   - one Library: set it as the Active Library without showing Library Selection.
+   - multiple Libraries: route to Library Selection without setting a temporary Active Library.
+8. After Library Selection in setup mode, the picker shows a loading state while prefetching the initial Home data for the chosen Active Library, then navigates to Home or the original deep-linked book.
+
+Library Resolution is part of first User Session entry. Normal server-scoped browsing should not begin until it produces an Active Library, except for the zero-Library state where the User Session is valid but not browsable.
 
 ## Hydration Flow
 
@@ -106,6 +115,7 @@ All API calls should go through `absClient`, which uses `authFetch`.
 2. Best-effort `authService.logout()` via `POST /logout` with `x-refresh-token`.
 3. SecureStore tokens and password are cleared.
 4. State is reset and `activeLibraryId` cleared.
+5. If downloaded content remains, the app may enter downloaded-only mode. This is not the same as an offline User Session: Library Selection and server-scoped browsing remain hidden until the user signs in again.
 
 ## Error Handling
 

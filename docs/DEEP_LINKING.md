@@ -96,9 +96,11 @@ If the app is opened from a shared book link while the user is anonymous:
 
 - root layout redirects to `/login`
 - the `libraryItemId` from the original deep link is passed as `returnToLibraryItemId`
-- after successful login, [`/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/app/login.tsx`](/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/app/login.tsx) navigates back to the book detail route
+- after successful credential login, [`/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/app/login.tsx`](/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/app/login.tsx) runs Library Resolution before navigating
+- if exactly one Library is returned, that Library becomes Active and the app navigates back to the book detail route
+- if multiple Libraries are returned, the app opens Library Selection in setup mode, keeps `returnToLibraryItemId`, shows a loading state after the user chooses, then navigates back to the book detail route
 
-That preserves the original deep-link intent through authentication.
+That preserves the original deep-link intent through authentication and Library Selection.
 
 ## Back Button On Cold Start
 

@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,6 +13,10 @@ import {
 import { SymbolView } from "expo-symbols";
 import Dropdown from "../shared/ui/organisms/dropdown";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
+import {
+  fetchLibrariesForResolution,
+  resolveLibrarySelection,
+} from "../auth/library-resolution";
 import { getBookDetailHref } from "../navigation/book-links";
 import { useThemeColors } from "../theme/use-app-theme";
 
@@ -37,8 +41,11 @@ const splitServerUrl = (value: string | null | undefined) => {
     };
   }
 
+  const protocol: ServerProtocol =
+    protocolMatch[1].toLowerCase() === "http://" ? "http://" : "https://";
+
   return {
-    protocol: protocolMatch[1].toLowerCase() === "http://" ? "http://" : "https://",
+    protocol,
     host: protocolMatch[2] ?? "",
   };
 };
@@ -53,7 +60,7 @@ export default function LoginScreen() {
   const storedServerUrl = useAuthStore((state) => state.serverUrl);
   const isOnline = useAuthStore((state) => state.isOnline);
   const lastAuthError = useAuthStore((state) => state.lastAuthError);
-  const { loginWithPassword, setLoginRequired } = useAuthActions();
+  const { loginWithPassword, setActiveLibrary, setLoginRequired } = useAuthActions();
   const themeColors = useThemeColors();
   const params = useLocalSearchParams<{ mode?: string; returnToLibraryItemId?: string | string[] }>();
 
@@ -69,20 +76,15 @@ export default function LoginScreen() {
     return typeof rawValue === "string" ? rawValue : undefined;
   }, [params.returnToLibraryItemId]);
 
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState(() => storedUsername ?? "");
   const [password, setPassword] = useState("");
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
-  const [serverProtocol, setServerProtocol] = useState<ServerProtocol>(DEFAULT_SERVER_PROTOCOL);
-  const [serverHost, setServerHost] = useState("");
+  const [serverProtocol, setServerProtocol] = useState<ServerProtocol>(
+    () => splitServerUrl(storedServerUrl).protocol,
+  );
+  const [serverHost, setServerHost] = useState(() => splitServerUrl(storedServerUrl).host);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setUsername(storedUsername ?? "");
-    const normalizedServer = splitServerUrl(storedServerUrl);
-    setServerProtocol(normalizedServer.protocol);
-    setServerHost(normalizedServer.host);
-  }, [storedServerUrl, storedUsername]);
 
   const handleClose = () => {
     setLoginRequired(false);
@@ -106,6 +108,28 @@ export default function LoginScreen() {
     setIsSubmitting(true);
     try {
       await loginWithPassword(username.trim(), password, finalServerUrl);
+
+      const response = await fetchLibrariesForResolution();
+      const resolution = resolveLibrarySelection(response.libraries);
+
+      if (resolution.status === "noLibraries") {
+        setLocalError("This Audiobookshelf user does not have any libraries available.");
+        return;
+      }
+
+      if (resolution.status === "needsLibrarySelection") {
+        router.replace({
+          pathname: "/library-picker",
+          params: {
+            mode: "setup",
+            ...(returnToLibraryItemId ? { returnToLibraryItemId } : null),
+          },
+        });
+        return;
+      }
+
+      setActiveLibrary(resolution.library);
+
       if (returnToLibraryItemId) {
         router.replace(getBookDetailHref(returnToLibraryItemId));
       } else if (isSheet) {
