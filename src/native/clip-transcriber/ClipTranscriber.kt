@@ -1,9 +1,7 @@
-package expo.modules.cliptranscriber
-
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
-class ClipTranscriberModule : Module() {
+class ClipTranscriber : Module() {
   override fun definition() = ModuleDefinition {
     Name("ClipTranscriber")
 
@@ -23,4 +21,3 @@ class ClipTranscriberModule : Module() {
     }
   }
 }
-

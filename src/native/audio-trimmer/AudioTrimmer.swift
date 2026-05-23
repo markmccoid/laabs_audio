@@ -1,14 +1,12 @@
-import ExpoModulesCore
+internal import ExpoModulesCore
 import AVFoundation
 
-public class AudioTrimmerModule: Module {
+class AudioTrimmer: Module {
   private static let fallbackAacBitRate = 64_000
 
-  public func definition() -> ModuleDefinition {
-    // This is the name your JS will use to reference the module
+  func definition() -> ModuleDefinition {
     Name("AudioTrimmer")
 
-    // Define the async function that accepts our start/end times and a Promise
     AsyncFunction("trimAudio") { (fileUrl: String, startTime: Double, endTime: Double, promise: Promise) in
       guard let sourceURL = Self.resolveFileURL(fileUrl) else {
         promise.reject("ERR_URL", "Invalid file URL provided")

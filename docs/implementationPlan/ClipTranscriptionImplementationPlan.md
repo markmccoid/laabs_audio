@@ -88,7 +88,7 @@ export function cancelClipTranscription(taskId: string): Promise<void>;
 
 ## Native iOS Module
 
-- Create `modules/clip-transcriber` as a local Expo module.
+- Create `src/native/clip-transcriber` as an Expo SDK 56 inline module.
 - Add a Swift module using `SFSpeechRecognizer`, `SFSpeechURLRecognitionRequest`, and `SFSpeechRecognitionTask`.
 - Add required iOS permission strings through the module config or app config:
   - `NSSpeechRecognitionUsageDescription`
@@ -123,4 +123,3 @@ Android is intentionally out of scope for this phase. Add a stub module or platf
 - Decide whether Android should use platform recognition, an offline model, or a server/provider API when Android support becomes relevant.
 - Decide whether cross-track Clip Transcription should wait for shared Clip Export concatenation or implement an independent ordered transcription flow.
 - Decide whether on-device-only recognition should become a user-facing privacy mode.
-

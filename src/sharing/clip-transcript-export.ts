@@ -1,5 +1,5 @@
 import * as FileSystem from "expo-file-system/legacy";
-import type { ClipTranscriptionResult } from "../../modules/clip-transcriber";
+import type { ClipTranscriptionResult } from "@/native/clip-transcriber";
 import { formatSeconds } from "@/utils/formatUtils";
 import type { ClipExportRange } from "./clip-export";
 
@@ -86,4 +86,3 @@ export const deleteClipTranscriptExportFile = async (fileUri?: string | null) =>
   if (!fileUri) return;
   await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
 };
-

@@ -1,8 +1,8 @@
 import AVFoundation
-import ExpoModulesCore
+internal import ExpoModulesCore
 import Speech
 
-public class ClipTranscriberModule: Module {
+class ClipTranscriber: Module {
   private let sessionQueue = DispatchQueue(label: "ClipTranscriber.sessions")
   private var sessions: [String: SFSpeechRecognitionTask] = [:]
   private var requests: [String: SFSpeechURLRecognitionRequest] = [:]
@@ -13,7 +13,7 @@ public class ClipTranscriberModule: Module {
     case onDevice
   }
 
-  public func definition() -> ModuleDefinition {
+  func definition() -> ModuleDefinition {
     Name("ClipTranscriber")
 
     AsyncFunction("getClipTranscriptionAvailability") { (options: [String: Any], promise: Promise) in

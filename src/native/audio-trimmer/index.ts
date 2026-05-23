@@ -1,4 +1,4 @@
-import AudioTrimmerModule from "./src/AudioTrimmerModule";
+import AudioTrimmerModule from "./AudioTrimmerModule";
 
 /**
  * Trims a local audio file and returns the URI to the new clipped file.
@@ -16,9 +16,3 @@ export async function extractClip(
   // This calls the native module we typed in Step 1
   return await AudioTrimmerModule.trimAudio(fileUri, startTime, endTime);
 }
-
-// // Reexport the native module. On web, it will be resolved to AudioTrimmerModule.web.ts
-// // and on native platforms to AudioTrimmerModule.ts
-// export { default } from './src/AudioTrimmerModule';
-// export { default as AudioTrimmerView } from './src/AudioTrimmerView';
-// export * from  './src/AudioTrimmer.types';

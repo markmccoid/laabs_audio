@@ -1,11 +1,11 @@
-import ClipTranscriberModule from "./src/ClipTranscriberModule";
+import ClipTranscriberModule from "./ClipTranscriberModule";
 import type {
   ClipTranscriptionAvailability,
   ClipTranscriptionResult,
   TranscribeClipOptions,
-} from "./src/ClipTranscriber.types";
+} from "./ClipTranscriber.types";
 
-export * from "./src/ClipTranscriber.types";
+export * from "./ClipTranscriber.types";
 
 export function getClipTranscriptionAvailability(options?: {
   localeIdentifier?: string;
@@ -20,4 +20,3 @@ export function transcribeClip(options: TranscribeClipOptions): Promise<ClipTran
 export function cancelClipTranscription(taskId: string): Promise<void> {
   return ClipTranscriberModule.cancelClipTranscription(taskId);
 }
-

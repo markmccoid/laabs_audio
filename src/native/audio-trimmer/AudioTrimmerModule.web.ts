@@ -16,4 +16,4 @@ class AudioTrimmerModule extends NativeModule<AudioTrimmerModuleEvents> {
   }
 };
 
-export default registerWebModule(AudioTrimmerModule, 'AudioTrimmerModule');
+export default registerWebModule(AudioTrimmerModule, 'AudioTrimmer');

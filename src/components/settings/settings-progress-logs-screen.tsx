@@ -7,8 +7,8 @@ import {
 } from "@/store/progress-log-store";
 import { useSettingsActions, useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { useHeaderHeight } from "@react-navigation/elements";
 import * as FileSystem from "expo-file-system/legacy";
+import { useHeaderHeight } from "expo-router/react-navigation";
 import * as Sharing from "expo-sharing";
 import { SymbolView } from "expo-symbols";
 import { useDeferredValue, useMemo, useState } from "react";

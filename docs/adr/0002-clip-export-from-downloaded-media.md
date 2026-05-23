@@ -37,7 +37,7 @@ The React Native FFmpeg path is risky as the first implementation dependency. Th
 - Clip Export uses whole-second Clip Range boundaries, matching Bookmark Position precision.
 - The first extraction path should run in-app through native code and remain adapter-isolated. Server-side extraction is a later fallback, not the Phase 3 default.
 - The selected extraction path should be Expo-compatible through config/prebuild, acceptable for app licensing and binary distribution, and reliable for audiobook source containers.
-- The first adapter uses the local `modules/audio-trimmer` Expo module for single-segment M4A Clip Exports. Cross-track concatenation remains unavailable until merge/concat behavior is validated on device with audiobook audio files.
+- The first adapter uses the `src/native/audio-trimmer` Expo SDK 56 inline module for single-segment M4A Clip Exports. Cross-track concatenation remains unavailable until merge/concat behavior is validated on device with audiobook audio files.
 - Transcoding the selected Clip Range is acceptable in Phase 3 because Clip Bookmark duration is bounded. Stream-copy can be used later when reliable for the source container.
 - A Clip Export can contain one source segment for a single-file or same-track range, or multiple source segments when the Clip Range crosses downloaded track boundaries.
 - Cross-track Clip Ranges must not be partially exported. If the selected extractor cannot concatenate source segments, the UI must show Clip Export as unavailable for that Clip Bookmark until a concatenation-capable path exists.

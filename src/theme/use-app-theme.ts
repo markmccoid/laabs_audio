@@ -1,4 +1,4 @@
-import { DarkTheme, DefaultTheme, type Theme } from "@react-navigation/native";
+import { DarkTheme, DefaultTheme, type Theme } from "expo-router/react-navigation";
 import { useMemo, useEffect } from "react";
 import { Uniwind, useCSSVariable, useUniwind } from "uniwind";
 import { useSettingsStore } from "@/store/settings-store";

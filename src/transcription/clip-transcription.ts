@@ -1,15 +1,15 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
-import { extractClip } from "../../modules/audio-trimmer";
+import { extractClip } from "@/native/audio-trimmer";
 import {
   getClipTranscriptionAvailability as getNativeClipTranscriptionAvailability,
   transcribeClip,
-} from "../../modules/clip-transcriber";
+} from "@/native/clip-transcriber";
 import type {
   ClipTranscriptionAvailability,
   ClipTranscriptionErrorCode,
   ClipTranscriptionResult,
-} from "../../modules/clip-transcriber";
+} from "@/native/clip-transcriber";
 import type { ClipExportSourcePlan } from "@/sharing/clip-export";
 
 export type ClipTranscriptionPlanAvailability =

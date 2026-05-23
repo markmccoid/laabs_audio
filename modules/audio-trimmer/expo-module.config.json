@@ -1,9 +1,0 @@
-{
-  "platforms": ["apple", "android", "web"],
-  "apple": {
-    "modules": ["AudioTrimmerModule"]
-  },
-  "android": {
-    "modules": ["expo.modules.audiotrimmer.AudioTrimmerModule"]
-  }
-}

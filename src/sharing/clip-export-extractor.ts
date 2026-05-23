@@ -1,5 +1,5 @@
 import * as FileSystem from "expo-file-system/legacy";
-import { extractClip } from "../../modules/audio-trimmer";
+import { extractClip } from "@/native/audio-trimmer";
 import type { ClipExportOutputFormat, ClipExportSourcePlan } from "./clip-export";
 
 export type ClipExportExtractionInput = {

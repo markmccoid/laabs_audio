@@ -13,9 +13,9 @@ import {
 } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Library } from "@/types/absTypes";
-import { useHeaderHeight } from "@react-navigation/elements";
 import { useQueryClient } from "@tanstack/react-query";
 import { Stack } from "expo-router";
+import { useHeaderHeight } from "expo-router/react-navigation";
 import { useCallback, useState } from "react";
 import { RefreshControl, Text, View } from "react-native";
 import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
