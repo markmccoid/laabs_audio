@@ -81,7 +81,6 @@ const BookContainer = ({ libraryItemId }: Props) => {
   useReconcileBookProgress(libraryItemId);
   const { data: bookData, error: itemLoadError, isLoading } = useGetItemDetails(libraryItemId);
   const { data: userServerState } = useGetUserServerState();
-  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const isOffline = useAuthStore((state) => state.isOnline === false);
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const playbackState = usePlaybackStore((state) => state.playbackState);
@@ -97,8 +96,6 @@ const BookContainer = ({ libraryItemId }: Props) => {
   const defaultProgressTimeDisplay = useSettingsStore(
     (state) => state.defaultBookProgressTimeDisplay,
   );
-  const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
-  const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
   const { width: viewportWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const bookTitle = bookData?.title ?? "Book";
@@ -139,10 +136,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
     () => bookData?.media?.tags ?? bookData?.tags ?? [],
     [bookData?.media?.tags, bookData?.tags],
   );
-  const favoriteByLibraryItemId =
-    userServerState?.favoritesLibraryId === activeLibraryId
-      ? (userServerState?.favoriteByLibraryItemId ?? {})
-      : {};
+  const favoriteByLibraryItemId = userServerState?.favoriteByLibraryItemId ?? {};
   const isFavorite = Boolean(libraryItemId ? favoriteByLibraryItemId[libraryItemId] : false);
   const durationSeconds = bookData?.media?.duration ?? bookData?.duration ?? 0;
   const progressByBookId = useMemo(
@@ -223,7 +217,6 @@ const BookContainer = ({ libraryItemId }: Props) => {
     }
     return hasPlayableLocalDownload ? "Local" : "Stream";
   }, [currentTrackIndex, hasPlayableLocalDownload, isOffline, isViewedBookActive, queue]);
-  const skipSummaryLabel = `Back ${seekBackwardSeconds}s / Forward ${seekForwardSeconds}s`;
   const sourceTab = useMemo<"home" | "search">(
     () => (segments.some((segment) => segment === "search") ? "search" : "home"),
     [segments],

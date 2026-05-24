@@ -36,6 +36,10 @@ _Avoid_: Offline mode
 A remembered User Session used while the device is offline.
 _Avoid_: Logged out, downloaded-only mode
 
+**Favorite**:
+A user-specific marker for a Library Item, identified in Audiobookshelf by a tag derived from the user's login name.
+_Avoid_: Global favorite, app-only favorite
+
 **Bookmark**:
 A saved reference to a meaningful place in an audiobook.
 
@@ -142,6 +146,9 @@ _Avoid_: Five minute window, scrubber window
 - A remembered **Active Library** may be used when it belongs to the same **User Session**, but it stops being valid if Audiobookshelf no longer returns that Library.
 - User-requested **Library Selection** may still show the available Libraries even when only one Library can become the **Active Library**.
 - **Library Selection** chooses the Active Library; Library-scoped audiobook, shelf, progress, and playlist data belong to the Active Library after it is chosen.
+- A **Favorite** belongs to a **User Session** and a globally unique Library Item.
+- A **Favorite** may be discovered by querying Libraries, but Library-specific discovery does not make the Favorite belong to a Library.
+- Library-scoped book lists may use User Session scoped Favorites as an overlay.
 - **Downloaded-Only Mode** is not an **Offline User Session**.
 - **Downloaded-Only Mode** shows downloaded audiobooks without **Library Selection** or server-scoped browsing.
 - An **Offline User Session** may keep its remembered **Active Library** while offline.

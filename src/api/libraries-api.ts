@@ -1,5 +1,4 @@
 import { absClient } from "./abs-client";
-import { authStore } from "../auth/auth-store";
 import type { FilterData, Library } from "../types/absTypes";
 
 export type LibrariesResponse = {
@@ -14,20 +13,21 @@ export type LibraryFilterData = {
   series: ({ id: string; name: string } & { base64encoded: string })[];
 };
 
-const resolveLibraryId = (libraryId?: string | null) =>
-  libraryId ?? authStore.getState().activeLibraryId;
+const requireLibraryId = (libraryId: string, requestName: string) => {
+  const trimmed = libraryId.trim();
+  if (!trimmed) {
+    throw new Error(`${requestName} requires a libraryId`);
+  }
+  return trimmed;
+};
 
 export const librariesApi = {
   getAll() {
     return absClient.get<LibrariesResponse>("/api/libraries");
   },
 
-  async getFilterData(libraryId?: string | null): Promise<LibraryFilterData> {
-    const libraryIdToUse = resolveLibraryId(libraryId);
-
-    if (!libraryIdToUse || typeof libraryIdToUse !== "string" || libraryIdToUse.trim() === "") {
-      throw new Error("No library ID available for filter data request");
-    }
+  async getFilterData(libraryId: string): Promise<LibraryFilterData> {
+    const libraryIdToUse = requireLibraryId(libraryId, "librariesApi.getFilterData");
 
     const response = await absClient.get<FilterData>(
       `/api/libraries/${libraryIdToUse}/filterdata`,

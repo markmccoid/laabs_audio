@@ -1,4 +1,3 @@
-import { authStore } from "../auth/auth-store";
 import type { GetLibraryItemsResponse, LibraryItem } from "../types/absTypes";
 import { absClient } from "./abs-client";
 import { buildCoverUrls } from "./cover-urls";
@@ -7,7 +6,7 @@ import { favoritesApi } from "./favorites-api";
 export type FilterType = "genres" | "tags" | "authors" | "series" | "progress";
 
 export type GetLibraryItemsParams = {
-  libraryId?: string;
+  libraryId: string;
   filterType?: FilterType;
   filterValue?: string;
   sortBy?: string;
@@ -49,18 +48,18 @@ export type FavoriteOrFinishedItem = {
   type: ("isFavorite" | "isRead")[];
 };
 
-const resolveLibraryId = (libraryId?: string | null) =>
-  libraryId ?? authStore.getState().activeLibraryId;
+const requireLibraryId = (libraryId: string, requestName: string) => {
+  const trimmed = libraryId.trim();
+  if (!trimmed) {
+    throw new Error(`${requestName} requires a libraryId`);
+  }
+  return trimmed;
+};
 
 export const libraryItemsApi = {
-  async getItems(params: GetLibraryItemsParams = {}): Promise<LibraryItemsSummary> {
+  async getItems(params: GetLibraryItemsParams): Promise<LibraryItemsSummary> {
     const { filterType, filterValue, sortBy, page, limit } = params;
-    const libraryId = resolveLibraryId(params.libraryId);
-
-    if (!libraryId || typeof libraryId !== "string" || libraryId.trim() === "") {
-      console.warn("getItems: No active library set");
-      return [];
-    }
+    const libraryId = requireLibraryId(params.libraryId, "libraryItemsApi.getItems");
 
     const query = new URLSearchParams();
 
@@ -115,12 +114,8 @@ export const libraryItemsApi = {
     });
   },
 
-  async getFinishedItems(libraryId?: string): Promise<LibraryItem[]> {
-    const libraryIdToUse = resolveLibraryId(libraryId);
-
-    if (!libraryIdToUse) {
-      return [];
-    }
+  async getFinishedItems(libraryId: string): Promise<LibraryItem[]> {
+    const libraryIdToUse = requireLibraryId(libraryId, "libraryItemsApi.getFinishedItems");
 
     const response = await absClient.get<{ results: LibraryItem[] }>(
       `/api/libraries/${libraryIdToUse}/items?filter=progress.ZmluaXNoZWQ=`,
@@ -129,12 +124,8 @@ export const libraryItemsApi = {
     return response.results;
   },
 
-  async getFavorites(libraryId?: string, favoriteTag?: string): Promise<LibraryItem[]> {
-    const libraryIdToUse = resolveLibraryId(libraryId);
-
-    if (!libraryIdToUse) {
-      return [];
-    }
+  async getFavorites(libraryId: string, favoriteTag?: string): Promise<LibraryItem[]> {
+    const libraryIdToUse = requireLibraryId(libraryId, "libraryItemsApi.getFavorites");
 
     const favoriteSearchString =
       favoriteTag ?? favoritesApi.getUserFavoriteInfo().favoriteSearchString;
@@ -146,13 +137,11 @@ export const libraryItemsApi = {
     return response.results;
   },
 
-  async getFavoritedAndFinishedItems(libraryId?: string): Promise<FavoriteOrFinishedItem[]> {
-    const libraryIdToUse = resolveLibraryId(libraryId);
-
-    if (!libraryIdToUse) {
-      console.warn("getFavoritedAndFinishedItems: No active library set");
-      return [];
-    }
+  async getFavoritedAndFinishedItems(libraryId: string): Promise<FavoriteOrFinishedItem[]> {
+    const libraryIdToUse = requireLibraryId(
+      libraryId,
+      "libraryItemsApi.getFavoritedAndFinishedItems",
+    );
 
     const [finishedItems, favoriteItems] = await Promise.all([
       libraryItemsApi.getFinishedItems(libraryIdToUse),

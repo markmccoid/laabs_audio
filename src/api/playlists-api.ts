@@ -1,4 +1,3 @@
-import { authStore } from "../auth/auth-store";
 import { absClient } from "./abs-client";
 
 export type PlaylistItemRef = {
@@ -100,16 +99,20 @@ const extractPlaylists = (payload: unknown): PlaylistSummary[] => {
   return single ? [single] : [];
 };
 
-const resolveLibraryId = (libraryId?: string | null) =>
-  libraryId ?? authStore.getState().activeLibraryId;
+const requireLibraryId = (libraryId: string, requestName: string) => {
+  const trimmed = libraryId.trim();
+  if (!trimmed) {
+    throw new Error(`${requestName} requires a libraryId`);
+  }
+  return trimmed;
+};
 
 const buildPlaylistItemPayload = (libraryItemIds: string[]) =>
   libraryItemIds.map((libraryItemId) => ({ libraryItemId }));
 
 export const playlistsApi = {
-  async getLibraryPlaylists(libraryId?: string | null): Promise<PlaylistSummary[]> {
-    const libraryIdToUse = resolveLibraryId(libraryId);
-    if (!libraryIdToUse || !libraryIdToUse.trim()) return [];
+  async getLibraryPlaylists(libraryId: string): Promise<PlaylistSummary[]> {
+    const libraryIdToUse = requireLibraryId(libraryId, "playlistsApi.getLibraryPlaylists");
 
     const payload = await absClient.get<unknown>(`/api/libraries/${libraryIdToUse}/playlists`);
     return extractPlaylists(payload).map((playlist) => ({

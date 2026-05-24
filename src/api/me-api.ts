@@ -1,8 +1,8 @@
 import { absClient } from "./abs-client";
-import { authStore } from "../auth/auth-store";
 import { buildCoverUrls } from "./cover-urls";
 import { favoritesApi } from "./favorites-api";
 import { libraryItemsApi } from "./library-items-api";
+import { librariesApi } from "./libraries-api";
 import type {
   Bookmark,
   ItemsInProgressResponse,
@@ -45,7 +45,6 @@ export type UserServerState = {
   progressByLibraryItemId: Record<string, UserBookProgress>;
   bookmarksByLibraryItemId: Record<string, Bookmark[]>;
   favoriteByLibraryItemId: Record<string, true>;
-  favoritesLibraryId: string | null;
 };
 
 type UserProgressLike = {
@@ -59,19 +58,20 @@ type UserProgressStateLike<T extends UserProgressLike> = {
   progressByBookId?: Record<string, T>;
 };
 
-export const createEmptyUserServerState = (
-  userId: string,
-  favoritesLibraryId: string | null = null,
-): UserServerState => ({
+export const createEmptyUserServerState = (userId: string): UserServerState => ({
   userId,
   progressByLibraryItemId: {},
   bookmarksByLibraryItemId: {},
   favoriteByLibraryItemId: {},
-  favoritesLibraryId,
 });
 
-const resolveLibraryId = (libraryId?: string | null) =>
-  libraryId ?? authStore.getState().activeLibraryId;
+const requireLibraryId = (libraryId: string, requestName: string) => {
+  const trimmed = libraryId.trim();
+  if (!trimmed) {
+    throw new Error(`${requestName} requires a libraryId`);
+  }
+  return trimmed;
+};
 
 const upsertProgress = (
   target: Record<string, UserBookProgress>,
@@ -113,6 +113,25 @@ export const normalizeUserProgressByLibraryItemId = <T extends UserProgressLike>
   }, {});
 };
 
+const getFavoriteItemsAcrossLibraries = async () => {
+  let librariesResponse: Awaited<ReturnType<typeof librariesApi.getAll>>;
+
+  try {
+    librariesResponse = await librariesApi.getAll();
+  } catch {
+    return [];
+  }
+
+  const { favoriteSearchString } = favoritesApi.getUserFavoriteInfo();
+  const results = await Promise.allSettled(
+    librariesResponse.libraries.map((library) =>
+      libraryItemsApi.getFavorites(library.id, favoriteSearchString),
+    ),
+  );
+
+  return results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+};
+
 export const meApi = {
   getMe() {
     return absClient.get<User>("/api/me");
@@ -149,10 +168,9 @@ export const meApi = {
   },
 
   async getUserServerState(): Promise<UserServerState> {
-    const favoritesLibraryId = resolveLibraryId();
     const [userData, favoriteItems] = await Promise.all([
       meApi.getMe(),
-      favoritesLibraryId ? libraryItemsApi.getFavorites(favoritesLibraryId) : Promise.resolve([]),
+      getFavoriteItemsAcrossLibraries(),
     ]);
     const ownedProgress = (userData.mediaProgress ?? []).filter(
       (progress) => progress.userId === userData.id,
@@ -209,17 +227,11 @@ export const meApi = {
       progressByLibraryItemId,
       bookmarksByLibraryItemId,
       favoriteByLibraryItemId: favoritesApi.buildFavoriteByLibraryItemId(favoriteItems),
-      favoritesLibraryId,
     };
   },
 
-  async getItemsInProgress(libraryId?: string): Promise<ItemsInProgressSummary> {
-    const libraryIdToUse = resolveLibraryId(libraryId);
-
-    if (!libraryIdToUse) {
-      console.warn("getItemsInProgress: No active library set");
-      return [];
-    }
+  async getItemsInProgress(libraryId: string): Promise<ItemsInProgressSummary> {
+    const libraryIdToUse = requireLibraryId(libraryId, "meApi.getItemsInProgress");
 
     const [userData, progressData, finishedItems] = await Promise.all([
       meApi.getMe(),

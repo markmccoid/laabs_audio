@@ -231,7 +231,12 @@ export const useHomeShelves = () => {
 
   const { data: libraryPlaylists } = useQuery({
     queryKey: playlistsQueryKey,
-    queryFn: () => playlistsApi.getLibraryPlaylists(activeLibraryId),
+    queryFn: () => {
+      if (!activeLibraryId) {
+        throw new Error("useHomeShelves requires an activeLibraryId for playlists");
+      }
+      return playlistsApi.getLibraryPlaylists(activeLibraryId);
+    },
     enabled:
       authStatus === "authenticated" &&
       Boolean(activeLibraryId) &&
@@ -349,11 +354,8 @@ export const useHomeShelves = () => {
   ]);
 
   const favoriteByBookId = useMemo(
-    () =>
-      userServerState?.favoritesLibraryId === activeLibraryId
-        ? (userServerState?.favoriteByLibraryItemId ?? EMPTY_FAVORITES_BY_BOOK)
-        : EMPTY_FAVORITES_BY_BOOK,
-    [activeLibraryId, userServerState],
+    () => userServerState?.favoriteByLibraryItemId ?? EMPTY_FAVORITES_BY_BOOK,
+    [userServerState],
   );
 
   const continueListening = useMemo(() => {

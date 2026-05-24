@@ -26,15 +26,11 @@ type ToggleFavoriteContext = {
 const updateFavoriteState = (
   previousState: UserServerState | undefined,
   userKey: string,
-  libraryId: string,
   libraryItemId: string,
   isFavorite: boolean,
 ): UserServerState => {
-  const baseState = previousState ?? createEmptyUserServerState(userKey, libraryId);
-  const favoriteByLibraryItemId =
-    previousState?.favoritesLibraryId === libraryId
-      ? { ...(previousState.favoriteByLibraryItemId ?? {}) }
-      : {};
+  const baseState = previousState ?? createEmptyUserServerState(userKey);
+  const favoriteByLibraryItemId = { ...(previousState?.favoriteByLibraryItemId ?? {}) };
 
   if (isFavorite) {
     favoriteByLibraryItemId[libraryItemId] = true;
@@ -45,7 +41,6 @@ const updateFavoriteState = (
   return {
     ...baseState,
     favoriteByLibraryItemId,
-    favoritesLibraryId: libraryId,
   };
 };
 
@@ -103,7 +98,6 @@ export const useFavoriteBookAction = () => {
           updateFavoriteState(
             previousState,
             activeLibraryUserKey,
-            activeLibraryId,
             libraryItemId,
             nextIsFavorite,
           ),

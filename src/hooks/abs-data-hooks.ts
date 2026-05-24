@@ -248,10 +248,7 @@ export const useGetBooks = () => {
       (userServerState as typeof userServerState & { bookmarksByBookId?: Record<string, Bookmark[]> })
         ?.bookmarksByBookId ??
       {};
-    const favoriteByLibraryItemId =
-      userServerState?.favoritesLibraryId === activeLibraryId
-        ? (userServerState?.favoriteByLibraryItemId ?? {})
-        : {};
+    const favoriteByLibraryItemId = userServerState?.favoriteByLibraryItemId ?? {};
 
     return rawData.map((book) => {
       const userProgress = progressByLibraryItemId[book.id] ?? null;
@@ -264,7 +261,7 @@ export const useGetBooks = () => {
         isFavorite: Boolean(favoriteByLibraryItemId[book.id]),
       };
     });
-  }, [activeLibraryId, rawData, userServerState]);
+  }, [rawData, userServerState]);
 
   // Always call useMemo hooks
   const filteredData = useMemo(() => {
@@ -738,7 +735,12 @@ export const useGetFilterData = () => {
   // `meta.persist` opts this key into MMKV persistence via PersistQueryClientProvider.
   const { data, isPending, isLoading, isError, isSuccess, error, ...rest } = useQuery({
     queryKey: queryKeys.libraryFilterData(activeLibraryId),
-    queryFn: () => librariesApi.getFilterData(activeLibraryId),
+    queryFn: () => {
+      if (!activeLibraryId) {
+        throw new Error("useGetFilterData requires an activeLibraryId");
+      }
+      return librariesApi.getFilterData(activeLibraryId);
+    },
     enabled: status === "authenticated" && !!activeLibraryId,
     // Filter options change infrequently; prefer serving cached MMKV-backed data.
     staleTime: FILTER_DATA_STALE_TIME_MS,
