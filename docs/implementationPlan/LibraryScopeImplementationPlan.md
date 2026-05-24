@@ -17,8 +17,8 @@
 - `booksInProgress(activeLibraryId)` remains a Library-scoped projection because it uses Library-specific catalog data such as finished items.
 - No ADR is needed unless the implementation keeps a surprising compatibility adapter.
 
-## Current Problem
-Several modules hide Library scope by falling back to `authStore.getState().activeLibraryId`.
+## Original Problem
+Several modules hid Library scope by falling back to `authStore.getState().activeLibraryId`.
 
 Known examples:
 - `libraryItemsApi.getItems`, `getFinishedItems`, `getFavorites`, and `getFavoritedAndFinishedItems`
@@ -28,7 +28,7 @@ Known examples:
 - `meApi.getItemsInProgress`
 - `device-books-store` helpers that resolve scope from auth state
 
-This makes it hard to tell whether a caller is User Session scoped or Library scoped, and it can produce stale favorite overlays when the Active Library changes.
+This made it hard to tell whether a caller was User Session scoped or Library scoped, and it could produce stale favorite overlays when the Active Library changed.
 
 ## Target Scope Model
 ### User Session Scoped
@@ -63,9 +63,9 @@ queryKeys.libraryPlaylists(activeLibraryUserKey, libraryId)
 queryKeys.booksInProgress(libraryId)
 ```
 
-## Proposed Code Changes
+## Implemented Code Changes
 ### 1. API Modules
-Update library-scoped APIs so `libraryId` is required and validated.
+Library-scoped APIs require `libraryId` and validate it.
 
 Planned signatures:
 ```ts
@@ -78,24 +78,22 @@ playlistsApi.getLibraryPlaylists(libraryId)
 meApi.getItemsInProgress(libraryId)
 ```
 
-Remove local `resolveLibraryId()` helpers from these API modules where they read auth state.
+Local `resolveLibraryId()` helpers were removed from these API modules where they read auth state.
 
 ### 2. Favorites Discovery
-Add a User Session scoped favorite discovery helper that:
-1. Reads all accessible Libraries from the libraries query or `librariesApi.getAll()`.
+`meApi.getUserServerState()` uses a User Session scoped favorite discovery helper that:
+1. Reads all accessible Libraries with `librariesApi.getAll()`.
 2. Builds the user-specific favorite tag from the stored login name.
 3. Fetches favorite-tagged items for each Library with an explicit `libraryId`.
 4. Merges successful results into `favoriteByLibraryItemId`.
-5. Ignores individual Library failures after logging or collecting them for diagnostics.
-
-Use this helper from `meApi.getUserServerState()` or from `fetchReconciledUserServerState()`.
+5. Ignores individual Library failures so successful Library favorite results still load.
 
 Preferred shape:
 ```ts
 favoriteByLibraryItemId: Record<string, true>
 ```
 
-Remove:
+Removed:
 ```ts
 favoritesLibraryId
 ```
@@ -109,7 +107,7 @@ Examples:
 - `useHomeShelves` passes `activeLibraryId` into `playlistsApi.getLibraryPlaylists`.
 - `useGetBooksInProgress` keeps `queryKeys.booksInProgress(activeLibraryId)` and passes `activeLibraryId` into `meApi.getItemsInProgress`.
 
-Update favorite overlays to read `userServerState.favoriteByLibraryItemId` directly, without checking `favoritesLibraryId`.
+Favorite overlays read `userServerState.favoriteByLibraryItemId` directly, without checking `favoritesLibraryId`.
 
 ### 4. Favorite Mutation
 Keep favorite writes independent from `libraryId`.
@@ -140,7 +138,7 @@ Required:
 - Playlist and shelf mutations should continue to pass explicit scope from components.
 - Any store helper used by background sync or multi-context code should not fall back to auth state.
 
-## Migration Order
+## Migration Completed
 1. Update `UserServerState` to remove `favoritesLibraryId` and keep a User Session scoped `favoriteByLibraryItemId`.
 2. Implement all-Library favorite discovery with partial success.
 3. Update favorite overlays in `useGetBooks`, `useHomeShelves`, `BookContainer`, and related components to remove `favoritesLibraryId` checks.
@@ -167,6 +165,5 @@ npx eslint src/components/Home/home-shelves-screen.tsx src/components/bookCompon
 
 Full project checks may remain blocked by pre-existing unrelated issues noted in the handoff.
 
-## Open Questions
-- Should partial favorite discovery failures be surfaced anywhere in development logs, or stay silent unless user-visible favorites are clearly missing?
-- Should all-Library favorite discovery reuse cached Libraries only, or always refresh Libraries before discovery during login setup?
+## Remaining Follow-Up
+- Consider adding development-only diagnostics for partial favorite discovery failures if missing favorites become hard to debug.

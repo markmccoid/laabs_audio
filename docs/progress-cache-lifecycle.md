@@ -86,7 +86,6 @@ It contains:
 - `progressByLibraryItemId`
 - `bookmarksByLibraryItemId`
 - `favoriteByLibraryItemId`
-- `favoritesLibraryId`
 
 `progressByLibraryItemId` is what most UI screens use to answer:
 
@@ -304,13 +303,14 @@ Method:
 
 What it does:
 
-1. Reads the active library id from auth state if needed.
+1. Reads the current User Session.
 2. Calls:
    - `meApi.getMe()`
-   - `libraryItemsApi.getFavorites(...)`
-3. Filters `userData.mediaProgress` down to progress owned by the current user.
-4. Converts each raw server progress entry into `UserBookProgress`.
-5. Inserts that progress into `progressByLibraryItemId`.
+   - favorite discovery across all accessible Libraries with explicit Library IDs
+3. Merges favorite-tagged items into `favoriteByLibraryItemId` by globally unique Library Item ID.
+4. Filters `userData.mediaProgress` down to progress owned by the current user.
+5. Converts each raw server progress entry into `UserBookProgress`.
+6. Inserts that progress into `progressByLibraryItemId`.
 
 Important implementation detail:
 

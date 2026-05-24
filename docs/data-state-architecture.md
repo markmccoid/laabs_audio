@@ -78,13 +78,13 @@ This keeps startup and route transitions fast while still reconciling to current
 
 `useGetBooks()` is the main merge boundary for UI lists:
 
-- pulls global books from `libraryItemsApi.getItems()`
+- pulls Library-scoped books from `libraryItemsApi.getItems({ libraryId })`
 - pulls user state from `useGetUserServerState()`
 - merges progress, bookmarks, and `isFavorite` into `LibraryItemWithUserState`
 
 UI components consume merged book objects and do not manage cross-store joins directly.
 
-Search filtering runs after that merge boundary, so favorite-only and favorite-excluded search modes operate on merged `isFavorite` state instead of raw ABS tags in the UI layer.
+Search filtering runs after that merge boundary, so favorite-only and favorite-excluded search modes operate on merged `isFavorite` state instead of raw ABS tags in the UI layer. Favorites are User Session scoped by globally unique Library Item ID; Library-scoped book lists use them as an overlay.
 
 Genre and tag filtering also run after that merge boundary. Each filter group has its own persisted logical operator in `store-filters`:
 - `genreOperator` controls whether selected genres are matched with `AND` or `OR`

@@ -4,7 +4,8 @@ This document describes the API modules under `src/api` and how to call them. Ea
 
 **Common patterns**
 - All API functions return Promises.
-- Most helpers accept a `libraryId` optional param. If omitted, they fall back to `authStore.getState().activeLibraryId`.
+- Library-scoped helpers require an explicit `libraryId`; hooks and screens read the Active Library and pass it into API modules.
+- API modules should not fall back to `authStore.getState().activeLibraryId` for normal library-scoped requests.
 - Errors are thrown as `AbsApiError`, `AbsOfflineError`, or `AbsAuthRequiredError` when relevant (see `abs-client.ts`).
 
 ## `src/api/abs-client.ts`
@@ -40,43 +41,44 @@ You should not call `authFetch` directly except in `abs-client`. Use `absClient`
 
 **Key exports**
 - `librariesApi.getAll()`
-- `librariesApi.getFilterData(libraryId?)`
+- `librariesApi.getFilterData(libraryId)`
 
 **Usage**
 ```ts
 import { librariesApi } from "../api/libraries-api";
 
 const { libraries } = await librariesApi.getAll();
-const filterData = await librariesApi.getFilterData();
+const filterData = await librariesApi.getFilterData(libraryId);
 ```
 
 ## `src/api/library-items-api.ts`
 
-**Purpose**: Global library item lists and derived metadata summaries used by screens.
+**Purpose**: Library-scoped item lists and derived metadata summaries used by screens.
 
 Notes:
-- `getItems()` returns global metadata only (title/author/cover/duration/etc.).
+- `getItems({ libraryId })` returns metadata for one Library only (title/author/cover/duration/etc.).
 - User state (progress/bookmarks/finished) is fetched separately from `meApi.getUserServerState()` and merged in hooks.
 
 **Key exports**
 - `libraryItemsApi.getItems({ libraryId, filterType, filterValue, sortBy, page, limit })`
-- `libraryItemsApi.getFinishedItems(libraryId?)`
-- `libraryItemsApi.getFavorites(libraryId?, favoriteTag?)`
-- `libraryItemsApi.getFavoritedAndFinishedItems(libraryId?)`
+- `libraryItemsApi.getFinishedItems(libraryId)`
+- `libraryItemsApi.getFavorites(libraryId, favoriteTag?)`
+- `libraryItemsApi.getFavoritedAndFinishedItems(libraryId)`
 
 **Usage**
 ```ts
 import { libraryItemsApi } from "../api/library-items-api";
 
 const items = await libraryItemsApi.getItems({
+  libraryId,
   filterType: "genres",
   filterValue: "RmFudGFzeQ==",
   sortBy: "addedAt",
 });
 
-const favorites = await libraryItemsApi.getFavorites();
-const finished = await libraryItemsApi.getFinishedItems();
-const both = await libraryItemsApi.getFavoritedAndFinishedItems();
+const favorites = await libraryItemsApi.getFavorites(libraryId);
+const finished = await libraryItemsApi.getFinishedItems(libraryId);
+const both = await libraryItemsApi.getFavoritedAndFinishedItems(libraryId);
 ```
 
 ## `src/api/items-api.ts`
@@ -107,7 +109,7 @@ await itemsApi.updateMediaTags(itemId, ["favorite"]);
 - `meApi.deleteBookmark(itemId, positionSeconds)`
 - `meApi.removeFromContinueListening(progressId)`
 - `meApi.getUserServerState()`
-- `meApi.getItemsInProgress(libraryId?)`
+- `meApi.getItemsInProgress(libraryId)`
 
 **Usage**
 ```ts
@@ -121,7 +123,7 @@ await meApi.deleteBookmark(itemId, 120);
 await meApi.removeFromContinueListening(progressId);
 const userServerState = await meApi.getUserServerState();
 
-const inProgress = await meApi.getItemsInProgress();
+const inProgress = await meApi.getItemsInProgress(libraryId);
 ```
 
 ## `src/api/sessions-api.ts`
@@ -159,7 +161,7 @@ const session = await playbackApi.getPlayInfo(itemId);
 **Purpose**: Read and mutate Audiobookshelf playlists that are projected into Home playlist shelves.
 
 **Key exports**
-- `playlistsApi.getLibraryPlaylists(libraryId?)`
+- `playlistsApi.getLibraryPlaylists(libraryId)`
 - `playlistsApi.getPlaylist(playlistId)`
 - `playlistsApi.createPlaylist({ libraryId, name, description, items })`
 - `playlistsApi.renamePlaylist(playlistId, name)`
@@ -172,7 +174,7 @@ const session = await playbackApi.getPlayInfo(itemId);
 ```ts
 import { playlistsApi } from "../api/playlists-api";
 
-const playlists = await playlistsApi.getLibraryPlaylists();
+const playlists = await playlistsApi.getLibraryPlaylists(libraryId);
 await playlistsApi.batchAddItems(playlistId, [libraryItemId]);
 ```
 

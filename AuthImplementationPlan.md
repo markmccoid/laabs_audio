@@ -91,10 +91,12 @@ Suggested Actions
 - On successful login, clear `loginRequired` and return to the main tabs.
 
 ### Active Library Selection
-- After a successful login, fetch libraries and auto-select the first one.
-- If multiple libraries are returned, present a bottom sheet picker so the user can choose.
+- After a successful login, fetch Libraries before normal browsing begins.
+- If no Libraries are returned, keep the User Session authenticated but not browsable.
+- If exactly one Library is returned, select it as the Active Library automatically.
+- If multiple Libraries are returned, present Library Selection without setting a temporary Active Library.
 - Persist both `activeLibraryId` and `activeLibraryName` for quick UI display.
-- If `activeLibraryId` is missing or not found in the returned list, default to the first library.
+- If a remembered `activeLibraryId` is no longer returned for the same User Session, clear it and require Library Resolution or Library Selection again.
 - If library fetch fails, allow entry and show a non-blocking retry prompt.
 
 ### Debugging
