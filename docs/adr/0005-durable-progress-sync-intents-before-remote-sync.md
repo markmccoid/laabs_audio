@@ -7,3 +7,4 @@ LAABS Audio writes a durable Progress Sync Intent before attempting remote sync 
 - Pause, user-initiated seek, stop, audiobook switching, natural completion, backgrounding, and interruption flows may briefly create queue churn even when the device is online.
 - Sync completion must compare intent ordering before clearing queued work.
 - Streamed playback may switch from session sync to direct progress sync while a Progress Sync Intent exists.
+- The implementation keeps these rules behind the Listening Position Sync module so playback code does not decide between session sync, direct progress update, and queued retry.

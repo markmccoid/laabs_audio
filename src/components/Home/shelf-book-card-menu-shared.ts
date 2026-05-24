@@ -20,6 +20,10 @@ import {
   type HomePlaylistShelf,
 } from "@/hooks/use-home-shelves";
 import { playerService, usePlaybackStore } from "@/player";
+import {
+  clearSyncedProgressSyncIntent,
+  recordProgressSyncIntent,
+} from "@/progress/progress-sync-intent-store";
 import { queryKeys } from "@/query/query-keys";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -120,10 +124,6 @@ export const useShelfBookCardMenuActions = ({
   const coverLocalUri = useDeviceBooksStore((state) =>
     resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
   );
-  const queueProgressSync = useDeviceBooksStore((state) => state.actions.queueProgressSync);
-  const clearPendingProgressSync = useDeviceBooksStore(
-    (state) => state.actions.clearPendingProgressSync,
-  );
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const activeQueueLength = usePlaybackStore((state) =>
@@ -213,11 +213,22 @@ export const useShelfBookCardMenuActions = ({
     }
 
     if (isOnline !== false && authStatus === "authenticated") {
+      const intent = recordProgressSyncIntent({
+        libraryItemId: book.id,
+        currentTimeSeconds: durationSeconds,
+        isFinished: true,
+        title: book.title,
+        trigger: "mark_read",
+        intentKind: "mark_finished",
+      });
       await meApi.updateProgress(book.id, {
         currentTime: durationSeconds,
         isFinished: true,
       });
-      clearPendingProgressSync(book.id);
+      clearSyncedProgressSyncIntent({
+        libraryItemId: book.id,
+        syncedThroughUpdatedAt: intent?.updatedAt ?? Date.now(),
+      });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.booksInProgress(activeLibraryId),
       });
@@ -225,12 +236,13 @@ export const useShelfBookCardMenuActions = ({
       return;
     }
 
-    queueProgressSync(book.id, {
-      currentTime: durationSeconds,
+    recordProgressSyncIntent({
+      libraryItemId: book.id,
+      currentTimeSeconds: durationSeconds,
       isFinished: true,
-    }, {
       title: book.title,
       trigger: "mark_read_offline",
+      intentKind: "mark_finished",
     });
     toast.success("Marked read offline");
   };
@@ -258,12 +270,23 @@ export const useShelfBookCardMenuActions = ({
     }
 
     if (isOnline !== false && authStatus === "authenticated") {
+      const intent = recordProgressSyncIntent({
+        libraryItemId: book.id,
+        currentTimeSeconds: 0,
+        isFinished: false,
+        title: book.title,
+        trigger: "mark_unread",
+        intentKind: "mark_unread",
+      });
       await meApi.updateProgress(book.id, {
         currentTime: 0,
         isFinished: false,
         hideFromContinueListening: progress?.hideFromContinueListening ?? false,
       });
-      clearPendingProgressSync(book.id);
+      clearSyncedProgressSyncIntent({
+        libraryItemId: book.id,
+        syncedThroughUpdatedAt: intent?.updatedAt ?? Date.now(),
+      });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.booksInProgress(activeLibraryId),
       });
@@ -271,12 +294,13 @@ export const useShelfBookCardMenuActions = ({
       return;
     }
 
-    queueProgressSync(book.id, {
-      currentTime: 0,
+    recordProgressSyncIntent({
+      libraryItemId: book.id,
+      currentTimeSeconds: 0,
       isFinished: false,
-    }, {
       title: book.title,
       trigger: "mark_unread_offline",
+      intentKind: "mark_unread",
     });
     toast.success("Marked unread offline");
   };

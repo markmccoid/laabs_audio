@@ -94,6 +94,9 @@ export type QueueSyncLogEntry = ProgressLogBase & {
   eventType: "queue_sync";
   trigger: string;
   action: QueueSyncAction;
+  intentId?: string | null;
+  intentKind?: "position_sample" | "mark_finished" | "mark_unread" | null;
+  intentStatus?: "pending" | "unmatched" | null;
   currentTimeSeconds: number;
   isFinished: boolean;
   queuedAt: number | null;

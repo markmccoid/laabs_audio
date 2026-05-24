@@ -471,6 +471,9 @@ const LogCard = ({ entry }: { entry: ProgressLogEntry }) => {
     return [
       `trigger=${entry.trigger}`,
       `action=${entry.action}`,
+      entry.intentKind ? `intent=${entry.intentKind}` : null,
+      entry.intentStatus ? `intentStatus=${entry.intentStatus}` : null,
+      entry.intentId ? `intentId=${entry.intentId}` : null,
       `current=${formatSeconds(entry.currentTimeSeconds)} | finished=${entry.isFinished ? "yes" : "no"}`,
       `queueSize=${entry.queueSizeForUser}`,
       entry.originTrigger ? `origin=${entry.originTrigger}` : null,
@@ -580,7 +583,7 @@ export const SettingsProgressLogsScreen = () => {
                 ? `${entry.fromPlaybackState} ${entry.toPlaybackState} ${entry.syncReason ?? ""} ${entry.note ?? ""}`
                 : entry.eventType === "clip_transcript_export"
                   ? `${entry.result} ${entry.stage} ${entry.bookmarkTitle ?? ""} ${entry.errorCode ?? ""} ${entry.errorName ?? ""} ${entry.errorMessage}`
-                : `${entry.action} ${entry.originTrigger ?? ""} ${entry.note ?? ""} ${entry.errorMessage ?? ""}`,
+                : `${entry.action} ${entry.intentKind ?? ""} ${entry.intentStatus ?? ""} ${entry.intentId ?? ""} ${entry.originTrigger ?? ""} ${entry.note ?? ""} ${entry.errorMessage ?? ""}`,
       ]
         .join(" ")
         .toLowerCase();

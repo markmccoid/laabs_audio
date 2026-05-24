@@ -8,6 +8,7 @@ import {
   useDeviceBooksStore,
 } from "../store/device-books-store";
 import { playbackStore } from "../player/playback-store";
+import { recordProgressSyncIntent } from "../progress/progress-sync-intent-store";
 
 const MIN_BACKGROUND_PROGRESS_SECONDS_TO_QUEUE = 1;
 
@@ -25,7 +26,6 @@ export const useAuthBootstrap = () => {
     selectHasOfflineContent(state, resolvedUserKey),
   );
   const {
-    queueProgressSync,
     syncPendingProgress,
     syncPendingBookmarks,
     syncPendingBookmarkDeletes,
@@ -90,18 +90,19 @@ export const useAuthBootstrap = () => {
         playbackState.durationMs > 0 && playbackState.positionMs >= playbackState.durationMs - 3000;
       if (currentTime < MIN_BACKGROUND_PROGRESS_SECONDS_TO_QUEUE && !isFinished) return;
 
-      queueProgressSync(playbackState.libraryItemId, {
-        currentTime,
+      recordProgressSyncIntent({
+        libraryItemId: playbackState.libraryItemId,
+        currentTimeSeconds: currentTime,
         isFinished,
-      }, {
         title: playbackState.bookTitle,
         sessionKind: playbackState.sessionId === "local" ? "downloaded" : "streamed",
         trigger: "background_app_state",
+        intentKind: isFinished ? "mark_finished" : "position_sample",
       });
     });
 
     return () => subscription.remove();
-  }, [queueProgressSync]);
+  }, []);
 
   useEffect(() => {
     if (!isOnline) return;

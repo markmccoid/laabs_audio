@@ -1,16 +1,16 @@
-import { AbsApiError } from "../api/abs-client";
 import {
   createEmptyUserServerState,
   meApi,
   type UserServerState,
 } from "../api/me-api";
 import { playbackApi } from "../api/playback-api";
-import { sessionsApi } from "../api/sessions-api";
 import { buildCoverUrls } from "../api/cover-urls";
 import { authStore } from "../auth/auth-store";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
+import { syncListeningPosition } from "../progress/listening-position-sync";
+import { chooseResumeResolutionCandidate } from "../progress/resume-resolution";
 import {
   DEFAULT_BOOK_PLAYBACK_RATE,
   deviceBooksStore,
@@ -27,8 +27,6 @@ import {
   type ProgressResolutionCandidate,
   type ProgressResolutionSource,
   type ServerProgressFetchResult,
-  type ProgressSyncOutcome,
-  type ProgressSyncPath,
 } from "../store/progress-log-store";
 import { settingsStore } from "../store/settings-store";
 import type { AudioTrack } from "../types/absTypes";
@@ -57,7 +55,14 @@ const STALE_ZERO_PROGRESS_GUARD_SECONDS = 5;
 const LOAD_PROGRESS_FETCH_TIMEOUT_MS = 350;
 const POST_PREVIEW_STATUS_GUARD_MS = 2000;
 const POST_PREVIEW_RESTORED_POSITION_TOLERANCE_MS = 1500;
-type ProgressSyncReason = "interval" | "pause" | "external_pause" | "seek" | "close";
+type ProgressSyncReason =
+  | "interval"
+  | "pause"
+  | "external_pause"
+  | "seek"
+  | "close"
+  | "finish"
+  | "natural_completion";
 type CachedUserServerStateSource =
   | "unavailable"
   | "cache_hit"
@@ -929,36 +934,9 @@ class PlayerService {
       },
     ];
 
-    const selectionPool = candidates.filter(
-      (candidate) =>
-        candidate.available &&
-        !(candidate.source === "queue" && serverWouldBeatQueuedZero),
-    );
-    const selectionPriority: Record<Exclude<ProgressResolutionSource, "none">, number> = {
-      queue: 3,
-      persisted_playback: 2,
-      persisted_query_cache: 1,
-      fresh_server_fetch: 1,
-    };
-    const chosenCandidate =
-      selectionPool.reduce<ProgressResolutionCandidate | null>((best, candidate) => {
-        if (!best) return candidate;
-        const bestFinished = Boolean(best.isFinished);
-        const candidateFinished = Boolean(candidate.isFinished);
-        if (candidateFinished !== bestFinished) {
-          return candidateFinished ? candidate : best;
-        }
-
-        const bestTime = best.currentTimeSeconds ?? 0;
-        const candidateTime = candidate.currentTimeSeconds ?? 0;
-        if (candidateTime !== bestTime) {
-          return candidateTime > bestTime ? candidate : best;
-        }
-
-        return selectionPriority[candidate.source] > selectionPriority[best.source]
-          ? candidate
-          : best;
-      }, null) ?? null;
+    const chosenCandidate = chooseResumeResolutionCandidate(candidates, {
+      ignoreQueue: serverWouldBeatQueuedZero,
+    });
 
     const chosenSource: ProgressResolutionSource = chosenCandidate?.source ?? "none";
     const chosenCurrentTimeSeconds = Math.max(0, chosenCandidate?.currentTimeSeconds ?? 0);
@@ -1304,10 +1282,7 @@ class PlayerService {
     );
     const finalChapter = findChapterForPosition(state.chapterIndex, finalPositionMs);
     const finalCurrentTimeSeconds = msToSeconds(finalPositionMs);
-    const deviceBookActions = deviceBooksStore.getState().actions;
     const authState = authStore.getState();
-    const online = authState.isOnline !== false;
-    const authenticated = authState.status === "authenticated";
     const activeLibraryId = authState.activeLibraryId;
 
     try {
@@ -1316,60 +1291,23 @@ class PlayerService {
       // Ignore pause failures; the session is being ended explicitly below.
     }
 
-    if (online && authenticated && state.sessionId && state.sessionId !== LOCAL_SESSION_ID) {
-      try {
-        await sessionsApi.closeSession(state.sessionId, {
-          timeListened: msToSeconds(this.listenedMs),
-          currentTime: finalCurrentTimeSeconds,
-          duration: finalPositionMs > 0 ? finalCurrentTimeSeconds : undefined,
-        });
-      } catch (error) {
-        if (!(error instanceof AbsApiError && error.status === 404) && __DEV__) {
-          console.warn("[player-service] finish:close-session-failed", {
-            libraryItemId: payload.libraryItemId,
-            sessionId: state.sessionId,
-            error,
-          });
-        }
-      }
-    }
-
-    deviceBookActions.clearPendingProgressSync(payload.libraryItemId);
-
-    let syncedToServer = false;
-    if (online && authenticated) {
-      try {
-        await meApi.updateProgress(payload.libraryItemId, {
-          currentTime: finalCurrentTimeSeconds,
-          isFinished: true,
-        });
-        syncedToServer = true;
-      } catch {
-        deviceBookActions.queueProgressSync(payload.libraryItemId, {
-          currentTime: finalCurrentTimeSeconds,
-          isFinished: true,
-        }, {
-          title: state.bookTitle,
-          sessionKind: this.resolveSessionKind(state.sessionId),
-          trigger: "finish_active_book",
-        });
-      }
-    } else {
-      deviceBookActions.queueProgressSync(payload.libraryItemId, {
-        currentTime: finalCurrentTimeSeconds,
-        isFinished: true,
-      }, {
-        title: state.bookTitle,
-        sessionKind: this.resolveSessionKind(state.sessionId),
-        trigger: "finish_active_book",
-      });
-    }
-
-    this.updateUserServerStateCache({
-      libraryItemId: payload.libraryItemId,
+    const syncResult = await syncListeningPosition({
+      state,
+      reason: "finish",
       currentTimeSeconds: finalCurrentTimeSeconds,
       durationSeconds: finalCurrentTimeSeconds,
+      timeListenedSeconds: msToSeconds(this.listenedMs),
       isFinished: true,
+      title: state.bookTitle,
+      sessionKind: this.resolveSessionKind(state.sessionId),
+      closeStreamSession: true,
+      forceDirectProgressUpdate: true,
+      intentKind: "mark_finished",
+      updateLocalProgress: (progress) => this.updateUserServerStateCache(progress),
+      setLastSyncAt: (timestamp) => {
+        this.lastSyncAt = timestamp;
+        playbackStore.getState().actions.setLastSyncAt(timestamp);
+      },
     });
 
     if (activeLibraryId) {
@@ -1378,7 +1316,7 @@ class PlayerService {
       });
     }
 
-    this.lastSyncAt = syncedToServer ? Date.now() : 0;
+    this.lastSyncAt = syncResult?.syncedToServer ? this.lastSyncAt : 0;
 
     try {
       await this.engine.unload();
@@ -1394,7 +1332,7 @@ class PlayerService {
         currentChapterId: finalChapter?.id ?? null,
       });
       playbackStore.getState().actions.setLastSyncAt(
-        syncedToServer ? this.lastSyncAt : null,
+        syncResult?.syncedToServer ? this.lastSyncAt : null,
       );
       this.listenedMs = 0;
       this.lastSyncAttemptAt = 0;
@@ -1711,7 +1649,14 @@ class PlayerService {
     const state = playbackStore.getState();
     const nextIndex = state.currentTrackIndex + 1;
     if (nextIndex >= state.queue.length) {
-      playbackStore.getState().actions.setPlaybackState("ended");
+      if (state.libraryItemId) {
+        await this.finishActiveBook({
+          libraryItemId: state.libraryItemId,
+          durationSeconds: msToSeconds(state.durationMs),
+        });
+      } else {
+        playbackStore.getState().actions.setPlaybackState("ended");
+      }
       return;
     }
 
@@ -2156,121 +2101,24 @@ class PlayerService {
       });
     }
 
-    const queueProgressSync = () => {
-      deviceBooksStore.getState().actions.queueProgressSync(state.libraryItemId as string, {
-        currentTime: promotedProgress.currentTimeSeconds,
-        isFinished: promotedProgress.isFinished,
-      }, {
-        title: this.resolveBookTitle(state),
-        sessionKind: this.resolveSessionKind(state.sessionId),
-        trigger: `sync:${reason}`,
-      });
-    };
-    const clearQueuedProgressSync = () => {
-      deviceBooksStore.getState().actions.clearPendingProgressSync(state.libraryItemId as string);
-    };
-
-    const authState = authStore.getState();
-    const online = authState.isOnline !== false;
-    const authenticated = authState.status === "authenticated";
-    const hasQueuedProgress = deviceBooksStore.getState().actions.hasPendingProgressSync();
-    const shouldCloseStreamSession = Boolean(
-      options?.closeStreamSession && state.sessionId !== LOCAL_SESSION_ID,
-    );
-    let syncedToServer = false;
-    let syncPath: ProgressSyncPath = "queue_only";
-    let syncOutcome: ProgressSyncOutcome = "queued_offline";
-    let syncErrorMessage: string | undefined;
-
-    try {
-
-      if (online && authenticated) {
-        if (shouldCloseStreamSession) {
-          try {
-            await sessionsApi.closeSession(state.sessionId, {
-              timeListened: timeListenedSeconds,
-              currentTime: promotedProgress.currentTimeSeconds,
-              duration: promotedProgress.durationSeconds || undefined,
-            });
-          } catch (error) {
-            if (!(error instanceof AbsApiError && error.status === 404) && __DEV__) {
-              console.warn("[player-service] progress:close-session-failed", {
-                reason,
-                libraryItemId: state.libraryItemId,
-                sessionId: state.sessionId,
-                error,
-              });
-            }
-          }
-        }
-
-        const shouldUseProgressUpdateApi =
-          Boolean(options?.forceDirectProgressUpdate) ||
-          shouldCloseStreamSession ||
-          state.sessionId === LOCAL_SESSION_ID || hasQueuedProgress;
-
-        if (shouldUseProgressUpdateApi) {
-          syncPath = "direct_progress_update";
-          await meApi.updateProgress(state.libraryItemId, {
-            currentTime: promotedProgress.currentTimeSeconds,
-            isFinished: promotedProgress.isFinished,
-          });
-          syncedToServer = true;
-        } else {
-          syncPath = "session_sync";
-          const syncResult = await sessionsApi.syncSession(state.sessionId, {
-            timeListened: timeListenedSeconds,
-            currentTime: promotedProgress.currentTimeSeconds,
-            duration: durationSeconds || undefined,
-          });
-          if (syncResult.success) {
-            syncedToServer = true;
-          } else {
-            // Session may have closed server-side. Persist progress via direct update.
-            syncPath = "session_sync_then_direct_progress_update";
-            await meApi.updateProgress(state.libraryItemId, {
-              currentTime: promotedProgress.currentTimeSeconds,
-              isFinished: promotedProgress.isFinished,
-            });
-            syncedToServer = true;
-          }
-        }
-      }
-
-      if (syncedToServer) {
-        syncOutcome = "synced_to_server";
-        clearQueuedProgressSync();
-        this.lastSyncAt = Date.now();
-        playbackStore.getState().actions.setLastSyncAt(this.lastSyncAt);
-      } else {
-        queueProgressSync();
-      }
-
-      this.updateUserServerStateCache({
-        libraryItemId: state.libraryItemId,
-        currentTimeSeconds: promotedProgress.currentTimeSeconds,
-        durationSeconds: promotedProgress.durationSeconds,
-        isFinished: promotedProgress.isFinished,
-      });
-    } catch (error) {
-      syncOutcome = "queued_after_error";
-      syncErrorMessage = error instanceof Error ? error.message : "Unknown sync error";
-      queueProgressSync();
-      this.updateUserServerStateCache({
-        libraryItemId: state.libraryItemId,
-        currentTimeSeconds: promotedProgress.currentTimeSeconds,
-        durationSeconds: promotedProgress.durationSeconds,
-        isFinished: promotedProgress.isFinished,
-      });
-      if (__DEV__) {
-        console.warn("[player-service] progress:queued-after-sync-error", {
-          reason,
-          libraryItemId: state.libraryItemId,
-          sessionId: state.sessionId,
-          error,
-        });
-      }
-    }
+    const syncResult = await syncListeningPosition({
+      state,
+      reason,
+      currentTimeSeconds: promotedProgress.currentTimeSeconds,
+      durationSeconds: promotedProgress.durationSeconds,
+      timeListenedSeconds,
+      isFinished: promotedProgress.isFinished,
+      title: this.resolveBookTitle(state),
+      sessionKind: this.resolveSessionKind(state.sessionId),
+      closeStreamSession: options?.closeStreamSession,
+      forceDirectProgressUpdate: options?.forceDirectProgressUpdate,
+      updateLocalProgress: (progress) => this.updateUserServerStateCache(progress),
+      setLastSyncAt: (timestamp) => {
+        this.lastSyncAt = timestamp;
+        playbackStore.getState().actions.setLastSyncAt(timestamp);
+      },
+    });
+    if (!syncResult) return;
 
     progressLogStore.getState().actions.appendEntry({
       eventType: "progress_sync_point",
@@ -2278,19 +2126,24 @@ class PlayerService {
       libraryItemId: state.libraryItemId,
       title: this.resolveBookTitle(state),
       sessionKind: this.resolveSessionKind(state.sessionId),
-      syncPath: syncedToServer ? syncPath : online && authenticated ? syncPath : "queue_only",
-      outcome: syncOutcome,
+      syncPath:
+        syncResult.syncedToServer || (syncResult.online && syncResult.authenticated)
+          ? syncResult.syncPath
+          : "queue_only",
+      outcome: syncResult.syncOutcome,
       currentTimeSeconds: promotedProgress.currentTimeSeconds,
       durationSeconds: promotedProgress.durationSeconds,
       timeListenedSeconds,
       isFinished: promotedProgress.isFinished,
-      online,
-      authenticated,
-      hadQueuedProgress: hasQueuedProgress,
+      online: syncResult.online,
+      authenticated: syncResult.authenticated,
+      hadQueuedProgress: syncResult.hadQueuedProgress,
       forcedDirectProgressUpdate: Boolean(options?.forceDirectProgressUpdate),
-      closedStreamSession: shouldCloseStreamSession,
+      closedStreamSession: Boolean(
+        options?.closeStreamSession && state.sessionId !== LOCAL_SESSION_ID,
+      ),
       preventedRegression: promotedProgress.preventedRegression,
-      errorMessage: syncErrorMessage,
+      errorMessage: syncResult.syncErrorMessage,
     });
   }
 

@@ -336,13 +336,21 @@ export type LocalBookmarkRecord = {
 };
 
 export type PendingProgressSync = {
+  intentId?: string;
   libraryItemId: string;
+  mediaItemId?: string | null;
   currentTime: number;
   isFinished: boolean;
+  intentKind?: "position_sample" | "mark_finished" | "mark_unread";
   updatedAt: number;
+  intentCreatedAt?: number;
   title?: string | null;
   sessionKind?: ProgressLogSessionKind | null;
   trigger?: string | null;
+  userKey?: string | null;
+  serverUrl?: string | null;
+  username?: string | null;
+  status?: "pending" | "unmatched";
 };
 
 export type HomeDerivedShelfId = "continueListening" | "recentlyAdded" | "discover" | "downloaded";
@@ -421,6 +429,7 @@ type DeviceBooksPersistedState = {
   pendingBookmarkCreatesByUser: Record<string, Record<string, PendingBookmarkCreate>>;
   pendingBookmarkDeletesByUser: Record<string, Record<string, PendingBookmarkDelete>>;
   pendingProgressByUser: Record<string, Record<string, PendingProgressSync>>;
+  progressSyncUserKeyByLibraryItemId: Record<string, string>;
   customShelvesByScope: Record<string, HomeCustomShelf[]>;
   playlistShelvesByScope: Record<string, HomePlaylistShelf[]>;
   suppressedPlaylistIdsByScope: Record<string, string[]>;
@@ -471,12 +480,22 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
     ) => void;
     queueProgressSync: (
       libraryItemId: string,
-      payload: { currentTime: number; isFinished: boolean; updatedAt?: number },
+      payload: {
+        currentTime: number;
+        isFinished: boolean;
+        updatedAt?: number;
+        intentKind?: PendingProgressSync["intentKind"];
+        intentId?: string;
+        intentCreatedAt?: number;
+        mediaItemId?: string | null;
+      },
       options?: {
         userKey?: string | null;
         title?: string | null;
         sessionKind?: ProgressLogSessionKind;
         trigger?: string;
+        serverUrl?: string | null;
+        username?: string | null;
       },
     ) => void;
     clearPendingProgressSync: (
@@ -596,6 +615,7 @@ const createDefaultPersistedState = (): DeviceBooksPersistedState => ({
   pendingBookmarkCreatesByUser: {},
   pendingBookmarkDeletesByUser: {},
   pendingProgressByUser: {},
+  progressSyncUserKeyByLibraryItemId: {},
   customShelvesByScope: {},
   playlistShelvesByScope: {},
   suppressedPlaylistIdsByScope: {},
@@ -1037,6 +1057,8 @@ const mergePersistedDeviceBooksState = (
     pendingBookmarkDeletesByUser:
       typedState.pendingBookmarkDeletesByUser ?? base.pendingBookmarkDeletesByUser,
     pendingProgressByUser: typedState.pendingProgressByUser ?? base.pendingProgressByUser,
+    progressSyncUserKeyByLibraryItemId:
+      typedState.progressSyncUserKeyByLibraryItemId ?? base.progressSyncUserKeyByLibraryItemId,
     customShelvesByScope: typedState.customShelvesByScope ?? base.customShelvesByScope,
     playlistShelvesByScope: typedState.playlistShelvesByScope ?? base.playlistShelvesByScope,
     suppressedPlaylistIdsByScope:
@@ -1585,9 +1607,13 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           const currentTime = Math.max(0, Math.floor(payload.currentTime));
           const isFinished = Boolean(payload.isFinished);
           const updatedAt = payload.updatedAt ?? Date.now();
+          const intentCreatedAt = payload.intentCreatedAt ?? updatedAt;
           const title = options?.title?.trim() || null;
           const sessionKind = options?.sessionKind ?? null;
           const trigger = options?.trigger?.trim() || null;
+          const authState = authStore.getState();
+          const serverUrl = options?.serverUrl ?? authState.serverUrl ?? null;
+          const username = options?.username ?? authState.storedUsername ?? null;
           const cachedProgress = getCachedProgressForLibraryItem(userKey, libraryItemId);
           const cachedCurrentTime = Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0));
           const shouldProtectProgressFloor =
@@ -1630,13 +1656,27 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               return state;
             }
             const nextQueuedEntry: PendingProgressSync = {
+              intentId:
+                payload.intentId ??
+                previous?.intentId ??
+                `progress_intent_${updatedAt}_${Math.random().toString(36).slice(2, 10)}`,
               libraryItemId,
+              mediaItemId: payload.mediaItemId ?? previous?.mediaItemId ?? null,
               currentTime: queuedCurrentTime,
               isFinished,
+              intentKind:
+                payload.intentKind ??
+                previous?.intentKind ??
+                (isFinished ? "mark_finished" : queuedCurrentTime <= 0 ? "mark_unread" : "position_sample"),
               updatedAt,
+              intentCreatedAt: previous?.intentCreatedAt ?? intentCreatedAt,
               title: title ?? previous?.title ?? null,
               sessionKind: sessionKind ?? previous?.sessionKind ?? null,
               trigger: trigger ?? previous?.trigger ?? null,
+              userKey,
+              serverUrl: serverUrl ?? previous?.serverUrl ?? null,
+              username: username ?? previous?.username ?? null,
+              status: previous?.status === "unmatched" ? "unmatched" : "pending",
             };
             queueSizeForUser = Object.keys(queueByItemId).length + (previous ? 0 : 1);
             queueNote =
@@ -1654,6 +1694,10 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                   [libraryItemId]: nextQueuedEntry,
                 },
               },
+              progressSyncUserKeyByLibraryItemId: {
+                ...state.progressSyncUserKeyByLibraryItemId,
+                [libraryItemId]: userKey,
+              },
             };
           });
 
@@ -1666,6 +1710,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               libraryItemId,
               title: queuedEntry.title ?? null,
               sessionKind: queuedEntry.sessionKind ?? "unknown",
+              intentId: queuedEntry.intentId ?? null,
+              intentKind: queuedEntry.intentKind ?? null,
+              intentStatus: queuedEntry.status ?? "pending",
               currentTimeSeconds: queuedEntry.currentTime,
               isFinished: queuedEntry.isFinished,
               queuedAt: queuedEntry.updatedAt,
@@ -1710,9 +1757,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           if (!userKey) return;
 
           const queuedProgressByItemId = get().pendingProgressByUser[userKey] ?? {};
-          const queuedEntries = Object.values(queuedProgressByItemId).sort(
-            (a, b) => a.updatedAt - b.updatedAt,
-          );
+          const queuedEntries = Object.values(queuedProgressByItemId)
+            .filter((entry) => entry.status !== "unmatched")
+            .sort((a, b) => a.updatedAt - b.updatedAt);
           if (!queuedEntries.length) return;
 
           const resolvedLibraryItemIds: string[] = [];
@@ -1746,6 +1793,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
 
               const shouldSkipStaleZeroProgress =
                 !queuedProgress.isFinished &&
+                queuedProgress.intentKind !== "mark_unread" &&
                 queuedProgress.currentTime <= 0 &&
                 knownCurrentTimeSeconds > ZERO_PROGRESS_REGRESSION_GUARD_SECONDS;
               const shouldSkipStaleAutomaticProgress =
@@ -1768,6 +1816,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                   libraryItemId: queuedProgress.libraryItemId,
                   title: queuedProgress.title ?? null,
                   sessionKind: queuedProgress.sessionKind ?? "unknown",
+                  intentId: queuedProgress.intentId ?? null,
+                  intentKind: queuedProgress.intentKind ?? null,
+                  intentStatus: queuedProgress.status ?? "pending",
                   currentTimeSeconds: queuedProgress.currentTime,
                   isFinished: queuedProgress.isFinished,
                   queuedAt: queuedProgress.updatedAt,
@@ -1792,6 +1843,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 libraryItemId: queuedProgress.libraryItemId,
                 title: queuedProgress.title ?? null,
                 sessionKind: queuedProgress.sessionKind ?? "unknown",
+                intentId: queuedProgress.intentId ?? null,
+                intentKind: queuedProgress.intentKind ?? null,
+                intentStatus: queuedProgress.status ?? "pending",
                 currentTimeSeconds: queuedProgress.currentTime,
                 isFinished: queuedProgress.isFinished,
                 queuedAt: queuedProgress.updatedAt,
@@ -1801,6 +1855,44 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               });
               resolvedLibraryItemIds.push(queuedProgress.libraryItemId);
             } catch (error) {
+              if (error instanceof AbsApiError && error.status === 404) {
+                progressLogStore.getState().actions.appendEntry({
+                  eventType: "queue_sync",
+                  trigger: "reconnect_flush",
+                  action: "flush_skipped",
+                  libraryItemId: queuedProgress.libraryItemId,
+                  title: queuedProgress.title ?? null,
+                  sessionKind: queuedProgress.sessionKind ?? "unknown",
+                  intentId: queuedProgress.intentId ?? null,
+                  intentKind: queuedProgress.intentKind ?? null,
+                  intentStatus: "unmatched",
+                  currentTimeSeconds: queuedProgress.currentTime,
+                  isFinished: queuedProgress.isFinished,
+                  queuedAt: queuedProgress.updatedAt,
+                  queueSizeForUser: queuedEntries.length,
+                  originTrigger: queuedProgress.trigger ?? null,
+                  note: "Marked unmatched because the audiobook was not found on the server",
+                });
+                set((state) => {
+                  const queueByItemId = state.pendingProgressByUser[userKey] ?? {};
+                  const current = queueByItemId[queuedProgress.libraryItemId];
+                  if (!current) return state;
+                  return {
+                    ...state,
+                    pendingProgressByUser: {
+                      ...state.pendingProgressByUser,
+                      [userKey]: {
+                        ...queueByItemId,
+                        [queuedProgress.libraryItemId]: {
+                          ...current,
+                          status: "unmatched",
+                        },
+                      },
+                    },
+                  };
+                });
+                continue;
+              }
               progressLogStore.getState().actions.appendEntry({
                 eventType: "queue_sync",
                 trigger: "reconnect_flush",
@@ -1808,6 +1900,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 libraryItemId: queuedProgress.libraryItemId,
                 title: queuedProgress.title ?? null,
                 sessionKind: queuedProgress.sessionKind ?? "unknown",
+                intentId: queuedProgress.intentId ?? null,
+                intentKind: queuedProgress.intentKind ?? null,
+                intentStatus: queuedProgress.status ?? "pending",
                 currentTimeSeconds: queuedProgress.currentTime,
                 isFinished: queuedProgress.isFinished,
                 queuedAt: queuedProgress.updatedAt,
@@ -3636,13 +3731,14 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         pendingBookmarkCreatesByUser: state.pendingBookmarkCreatesByUser,
         pendingBookmarkDeletesByUser: state.pendingBookmarkDeletesByUser,
         pendingProgressByUser: state.pendingProgressByUser,
+        progressSyncUserKeyByLibraryItemId: state.progressSyncUserKeyByLibraryItemId,
         customShelvesByScope: state.customShelvesByScope,
         playlistShelvesByScope: state.playlistShelvesByScope,
         suppressedPlaylistIdsByScope: state.suppressedPlaylistIdsByScope,
         pendingPlaylistOpsByUser: state.pendingPlaylistOpsByUser,
         homeShelfVisibilityByScope: state.homeShelfVisibilityByScope,
       }),
-      version: 7,
+      version: 8,
       merge: (persistedState, currentState) =>
         mergePersistedDeviceBooksState(persistedState, currentState),
       migrate: (persistedState, version) => {
@@ -3665,6 +3761,8 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             pendingPlaylistOpsByUser: typedState.pendingPlaylistOpsByUser ?? {},
             homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
             downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
+            progressSyncUserKeyByLibraryItemId:
+              typedState.progressSyncUserKeyByLibraryItemId ?? {},
           };
         }
 
@@ -3679,6 +3777,8 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
             downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
             pendingProgressByUser: typedState.pendingProgressByUser ?? {},
+            progressSyncUserKeyByLibraryItemId:
+              typedState.progressSyncUserKeyByLibraryItemId ?? {},
           };
         }
 
@@ -3693,6 +3793,8 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
             downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
             pendingProgressByUser: typedState.pendingProgressByUser ?? {},
+            progressSyncUserKeyByLibraryItemId:
+              typedState.progressSyncUserKeyByLibraryItemId ?? {},
           };
         }
 
@@ -3707,6 +3809,8 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
             downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
             pendingProgressByUser: typedState.pendingProgressByUser ?? {},
+            progressSyncUserKeyByLibraryItemId:
+              typedState.progressSyncUserKeyByLibraryItemId ?? {},
           };
         }
 
@@ -3720,6 +3824,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           pendingPlaylistOpsByUser: typedState.pendingPlaylistOpsByUser ?? {},
           homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
           downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
+          pendingProgressByUser: typedState.pendingProgressByUser ?? {},
+          progressSyncUserKeyByLibraryItemId:
+            typedState.progressSyncUserKeyByLibraryItemId ?? {},
         };
       },
     },
