@@ -63,6 +63,34 @@ _Avoid_: Duration lock
 The audiobook position where normal listening should continue.
 _Avoid_: Playback cursor
 
+**Resume Resolution**:
+The decision that chooses the Listening Position when opening an audiobook from saved local, queued, or server progress.
+_Avoid_: Truth, resume merge
+
+**Progress Sync Intent**:
+A local audiobook progress change that LAABS Audio still needs to apply to the Audiobookshelf Server.
+_Avoid_: Pending progress, queued progress
+
+**Audiobook Identity**:
+The server-scoped identity used to match local progress and server progress for the same audiobook.
+_Avoid_: Book key, item match
+
+**Unmatched Progress Sync Intent**:
+A Progress Sync Intent whose audiobook is no longer present on the Audiobookshelf Server it belongs to.
+_Avoid_: Orphaned progress, dead progress sync
+
+**Streamed Playback Session**:
+An Audiobookshelf playback session used while streaming an audiobook from the Audiobookshelf Server.
+_Avoid_: Stream session, playback session
+
+**Automatic Progress Sample**:
+A Progress Sync Intent created from playback movement or app lifecycle handling rather than an explicit user command.
+_Avoid_: Background progress, passive progress
+
+**Explicit Progress Change**:
+A Progress Sync Intent created by a user command such as marking an audiobook finished or unread.
+_Avoid_: Manual progress, forced progress
+
 **Preview Position**:
 The temporary audiobook position used while inspecting a clip bookmark.
 _Avoid_: Preview cursor, temporary playback position
@@ -151,6 +179,14 @@ _Avoid_: Five minute window, scrubber window
 - Library-scoped book lists may use User Session scoped Favorites as an overlay.
 - **Downloaded-Only Mode** is not an **Offline User Session**.
 - **Downloaded-Only Mode** shows downloaded audiobooks without **Library Selection** or server-scoped browsing.
+- **Downloaded-Only Mode** allows downloaded audiobooks to play and track local progress without server status, auth status, or internet connectivity.
+- **Progress Sync Intent** records for downloaded audiobooks may survive explicit logout and sync when the same **User Session** is restored.
+- **Progress Sync Intent** records are scoped to the Audiobookshelf Server and user they were created for when that identity is known.
+- **Audiobook Identity** uses Audiobookshelf's library item identity first and may use media item identity to recover the same audiobook on the same Audiobookshelf Server for the same user.
+- **Audiobook Identity** does not use title, author, or duration matching for progress sync.
+- A **Progress Sync Intent** becomes an **Unmatched Progress Sync Intent** when its audiobook no longer exists on the Audiobookshelf Server it belongs to.
+- An **Unmatched Progress Sync Intent** does not prevent downloaded playback or local progress tracking.
+- An **Unmatched Progress Sync Intent** may become a **Progress Sync Intent** again when the same audiobook identity reappears on the same Audiobookshelf Server for the same user.
 - An **Offline User Session** may keep its remembered **Active Library** while offline.
 - A **Bookmark** is either a **Point Bookmark** or a **Clip Bookmark**.
 - A **Point Bookmark** has exactly one **Bookmark Position**.
@@ -190,6 +226,29 @@ _Avoid_: Five minute window, scrubber window
 - A **Bookmark** may change between **Point Bookmark** and **Clip Bookmark** without becoming a different **Bookmark**.
 - Editing a **Bookmark Position** changes the same Bookmark rather than creating a different Bookmark.
 - Choosing a **Bookmark** from the bookmark viewer sets the **Listening Position** to that bookmark's **Bookmark Position**.
+- **Resume Resolution** chooses the **Listening Position** when opening an audiobook.
+- **Resume Resolution** may use server progress to advance the **Listening Position** for either streamed or downloaded audiobooks.
+- **Resume Resolution** treats a **Progress Sync Intent** as a candidate, not as an automatic winner over farther server progress.
+- A **Progress Sync Intent** is either an **Automatic Progress Sample** or an **Explicit Progress Change**.
+- **Resume Resolution** treats an **Explicit Progress Change** to finished as stronger than a lower unfinished server position.
+- A **Progress Sync Intent** for an explicit finished state remains pending until LAABS Audio syncs it to the Audiobookshelf Server.
+- **Resume Resolution** treats an **Explicit Progress Change** to unread as stronger than a farther server position.
+- **Resume Resolution** does not clear a finished state merely by opening an audiobook.
+- Intentionally playing a finished audiobook starts from the beginning and creates an **Explicit Progress Change** to unread after playback starts.
+- An **Automatic Progress Sample** at zero position must not erase meaningful **Listening Position** evidence.
+- Downloaded and streamed audiobooks share **Resume Resolution** and **Progress Sync Intent** rules.
+- Downloaded and streamed audiobooks may use different server sync paths for the same **Progress Sync Intent**.
+- A **Progress Sync Intent** makes direct progress sync take precedence over streamed session sync until the intent is resolved.
+- A **Progress Sync Intent** remains pending until the Audiobookshelf Server confirms the intended progress state.
+- App backgrounding or playback interruption creates a local **Progress Sync Intent** before any server sync attempt.
+- Pausing playback creates a local **Progress Sync Intent** before any server sync attempt.
+- Seeking to a new **Listening Position** creates a local **Progress Sync Intent** before any server sync attempt.
+- Stopping playback or switching audiobooks creates a local **Progress Sync Intent** before closing a **Streamed Playback Session**.
+- Reaching the natural end of an audiobook creates an **Explicit Progress Change** to finished before any server sync attempt.
+- Interval sync while playback continues does not create a **Progress Sync Intent** unless remote sync fails.
+- A successful sync clears only the matching or older **Progress Sync Intent** for that audiobook.
+- Pausing streamed playback preserves the **Streamed Playback Session**.
+- Stopping streamed playback or switching audiobooks closes the **Streamed Playback Session**.
 - Previewing a **Clip Bookmark** must not accidentally change the user's intended **Listening Position**.
 - A **Preview Position** must not replace the user's **Listening Position**.
 - The app stores **Preview Position** in transient preview state, not in the main playback state.
@@ -255,3 +314,6 @@ _Avoid_: Five minute window, scrubber window
 - "export clip transcription" was used for sharing transcribed text; resolved: the canonical term is **Clip Transcript Export**.
 - "trim range" was used ambiguously for both the selected clip span and visible editing span; resolved: the selected span is **Clip Range**.
 - "five minute window" and "scrubber window" were used for the visible editing span; resolved: the canonical term is **Trim Window**.
+- "truth" was used for choosing between local and server audiobook progress; resolved: the canonical term is **Resume Resolution**.
+- "pending progress" and "queued progress" were used for local audiobook progress changes waiting to sync; resolved: the canonical term is **Progress Sync Intent**.
+- "orphaned progress" was used for unsyncable progress whose audiobook is missing from its server; resolved: the canonical term is **Unmatched Progress Sync Intent**.
