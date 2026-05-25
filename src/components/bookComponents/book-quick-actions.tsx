@@ -1,8 +1,10 @@
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
+import { useAuthStore } from "@/auth/auth-store";
 import {
   selectIsAnotherDownloadActive,
   selectIsBookActivelyDownloading,
   selectIsBookFullyDownloaded,
+  selectLocalBookmarksForBook,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -17,6 +19,11 @@ type BookQuickActionsProps = {
 };
 
 const clampPercent = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
+const getUserKey = (username: string | null, serverUrl: string | null) => {
+  if (!username || !serverUrl) return null;
+  return `${username}::${serverUrl}`;
+};
+
 type DownloadIconProps = {
   isDownloaded: boolean;
   isDownloading: boolean;
@@ -112,7 +119,11 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   const themeColors = useThemeColors();
   const segments = useSegments();
   const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const storedUsername = useAuthStore((state) => state.storedUsername);
+  const serverUrl = useAuthStore((state) => state.serverUrl);
   useGetUserServerState();
+  const resolvedUserKey = activeLibraryUserKey ?? getUserKey(storedUsername, serverUrl);
   const isDownloaded = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
     return selectIsBookFullyDownloaded(state, libraryItemId);
@@ -122,13 +133,7 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   );
   const bookmarkCount = useDeviceBooksStore((state) => {
     if (!libraryItemId) return 0;
-    return Object.values(state.localBookmarksByUser).reduce(
-      (count, recordsById) =>
-        count +
-        Object.values(recordsById).filter((bookmark) => bookmark.libraryItemId === libraryItemId)
-          .length,
-      0,
-    );
+    return selectLocalBookmarksForBook(state, libraryItemId, resolvedUserKey).length;
   });
 
   const isDownloading = useDeviceBooksStore((state) =>
