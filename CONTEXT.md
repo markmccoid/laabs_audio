@@ -40,6 +40,10 @@ _Avoid_: Logged out, downloaded-only mode
 A user-specific marker for a Library Item, identified in Audiobookshelf by a tag derived from the user's login name.
 _Avoid_: Global favorite, app-only favorite
 
+**Current Audiobook**:
+The audiobook whose detail context the user is presently viewing.
+_Avoid_: Selected book, current book
+
 **Bookmark**:
 A saved reference to a meaningful place in an audiobook.
 
@@ -181,6 +185,7 @@ _Avoid_: Five minute window, scrubber window
 - A **Favorite** belongs to a **User Session** and a globally unique Library Item.
 - A **Favorite** may be discovered by querying Libraries, but Library-specific discovery does not make the Favorite belong to a Library.
 - Library-scoped book lists may use User Session scoped Favorites as an overlay.
+- A **Current Audiobook** may belong to an Audiobookshelf series with other audiobooks.
 - **Downloaded-Only Mode** is not an **Offline User Session**.
 - **Downloaded-Only Mode** shows downloaded audiobooks without **Library Selection** or server-scoped browsing.
 - **Downloaded-Only Mode** allows downloaded audiobooks to play and track local progress without server status, auth status, or internet connectivity.

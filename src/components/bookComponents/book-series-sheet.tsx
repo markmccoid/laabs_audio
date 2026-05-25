@@ -3,6 +3,7 @@ import { normalizeUserProgressByLibraryItemId, type UserBookProgress } from "@/a
 import { useAuthStore } from "@/auth/auth-store";
 import { BookFlashListRow } from "@/components/books/book-flashlist-row";
 import { useGetSeriesWithProgress, useGetUserServerState } from "@/hooks/abs-data-hooks";
+import { getBookDetailHref } from "@/navigation/book-links";
 import { queryKeys } from "@/query/query-keys";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
@@ -27,14 +28,17 @@ export const BookSeriesSheet = () => {
   const {
     seriesId: seriesIdParam,
     seriesName: seriesNameParam,
+    currentAudiobookId: currentAudiobookIdParam,
     sourceTab: sourceTabParam,
   } = useLocalSearchParams<{
     seriesId?: string | string[];
     seriesName?: string | string[];
+    currentAudiobookId?: string | string[];
     sourceTab?: string | string[];
   }>();
   const seriesId = resolveParam(seriesIdParam);
   const seriesName = resolveParam(seriesNameParam) ?? "Series";
+  const currentAudiobookId = resolveParam(currentAudiobookIdParam);
   const sourceTabParamResolved = resolveParam(sourceTabParam);
   const sourceTab: SourceTab = sourceTabParamResolved === "search" ? "search" : "home";
   const booksQueryKey = queryKeys.libraryBooks(activeLibraryId);
@@ -84,10 +88,12 @@ export const BookSeriesSheet = () => {
   const missingBooksCount = Math.max(0, seriesLibraryItemIds.length - seriesBooks.length);
 
   const handleBookPress = (libraryItemId: string) => {
-    const destination =
-      sourceTab === "search"
-        ? `/(tabs)/search/${libraryItemId}`
-        : `/(tabs)/(home)/${libraryItemId}`;
+    if (currentAudiobookId && libraryItemId === currentAudiobookId) {
+      router.back();
+      return;
+    }
+
+    const destination = getBookDetailHref(libraryItemId, { routeSource: sourceTab });
 
     router.back();
     setTimeout(() => {
@@ -166,6 +172,7 @@ export const BookSeriesSheet = () => {
               book={item}
               isOffline={isOffline}
               isFinished={Boolean(progressByBookId[item.id]?.isFinished)}
+              isCurrentAudiobook={currentAudiobookId === item.id}
               onPress={() => handleBookPress(item.id)}
             />
           )}

@@ -65,14 +65,6 @@ const resolveBookDescription = (
   return metadataDescription ?? summaryDescription ?? metadataDescriptionPlain ?? "";
 };
 
-const formatSeriesChipLabel = (seriesName: string, sequence?: string | null) => {
-  const trimmedSequence = sequence?.trim();
-  if (!trimmedSequence) {
-    return seriesName;
-  }
-  return `${seriesName} #${trimmedSequence}`;
-};
-
 const BookContainer = ({ libraryItemId }: Props) => {
   const themeColors = useThemeColors();
   const { theme } = useUniwind();
@@ -292,6 +284,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
       params: {
         seriesId,
         seriesName,
+        ...(libraryItemId ? { currentAudiobookId: libraryItemId } : null),
         sourceTab,
       },
     });
@@ -619,7 +612,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
                           selectable
                           style={{ fontSize: 12, fontWeight: "600", color: themeColors.accent }}
                         >
-                          {formatSeriesChipLabel(seriesEntry.name, seriesEntry.sequence)}
+                          {seriesEntry.name}
                         </Text>
                       </Pressable>
                     ))}

@@ -19,6 +19,7 @@ type BookFlashListRowProps = {
   isFavorite?: boolean;
   isFinished?: boolean;
   isOffline?: boolean;
+  isCurrentAudiobook?: boolean;
   href?: Href;
   onPress?: () => void;
   showSeries?: boolean;
@@ -29,6 +30,7 @@ export const BookFlashListRow = ({
   isFavorite = false,
   isFinished = false,
   isOffline = false,
+  isCurrentAudiobook = false,
   href,
   onPress,
   showSeries = true,
@@ -47,12 +49,13 @@ export const BookFlashListRow = ({
     <Pressable
       onPress={onPress}
       disabled={!onPress && !href}
+      accessibilityRole={onPress || href ? "button" : undefined}
+      accessibilityState={isCurrentAudiobook ? { selected: true } : undefined}
       style={({ pressed }) => ({
         // borderWidth: StyleSheet.hairlineWidth,
         // borderColor: themeColors.border,
         // backgroundColor: themeColors.surface,
-        // padding: 8,
-        // opacity: pressed ? 0.86 : 1,
+        opacity: pressed ? 0.86 : 1,
       })}
     >
       <View
@@ -63,8 +66,11 @@ export const BookFlashListRow = ({
           paddingVertical: 8,
           paddingHorizontal: 10,
           marginVertical: 4,
+          backgroundColor: isCurrentAudiobook ? themeColors.bg : themeColors.surface,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderColor: themeColors.accent,
         }}
-        className="bg-surface border-hairline border-accent border-l-0 border-r-0"
       >
         <View style={{ width: 100, height: 100 }}>
           <CoverImage
@@ -106,14 +112,39 @@ export const BookFlashListRow = ({
           ) : null}
         </View>
         <View style={{ flex: 1, justifyContent: "space-between", alignItems: "flex-start" }}>
-          <Text
-            selectable
-            numberOfLines={2}
-            lineBreakMode="tail"
-            style={{ color: themeColors.text, fontSize: 16, fontWeight: "600" }}
-          >
-            {book.title}
-          </Text>
+          <View style={{ width: "100%", flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+            <Text
+              selectable
+              numberOfLines={2}
+              lineBreakMode="tail"
+              style={{ flex: 1, color: themeColors.text, fontSize: 16, fontWeight: "600" }}
+            >
+              {book.title}
+            </Text>
+            {isCurrentAudiobook ? (
+              <View
+                style={{
+                  borderRadius: 999,
+                  borderCurve: "continuous",
+                  backgroundColor: themeColors.accent,
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                }}
+              >
+                <Text
+                  selectable
+                  numberOfLines={1}
+                  style={{
+                    color: themeColors.accentForeground,
+                    fontSize: 11,
+                    fontWeight: "700",
+                  }}
+                >
+                  Current
+                </Text>
+              </View>
+            ) : null}
+          </View>
           <Text
             selectable
             numberOfLines={1}
