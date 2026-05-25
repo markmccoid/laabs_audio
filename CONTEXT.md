@@ -67,6 +67,18 @@ _Avoid_: Apply bookmark
 The canonical whole-second audiobook position where a Clip Bookmark's Clip Range ends.
 _Avoid_: Duration lock
 
+**Starting Position Scrubber**:
+The coarse whole-book drag control for choosing a Clip Bookmark's Starting Position.
+_Avoid_: Starting Position lock
+
+**Audiobook Duration**:
+The total length of an audiobook used as the upper reference for whole-book position controls.
+_Avoid_: Book duration
+
+**Starting Position Nudge Controls**:
+The small step controls for adjusting a Clip Bookmark's Starting Position by fixed intervals.
+_Avoid_: Starting Position buttons
+
 **Listening Position**:
 The audiobook position where normal listening should continue.
 _Avoid_: Playback cursor
@@ -265,6 +277,7 @@ _Avoid_: Five minute window, scrubber window
 - Previewing a **Clip Bookmark** must not accidentally change the user's intended **Listening Position**.
 - A **Preview Position** must not replace the user's **Listening Position**.
 - The app stores **Preview Position** in transient preview state, not in the main playback state.
+- **Clip Editor** preview requires the previewed audiobook to already be the loaded audiobook.
 - A **Bookmark Detail** belongs to exactly one **Bookmark**.
 - A **Clip Bookmark** is edited from its **Bookmark Detail**.
 - A **Clip Editor** may be used to create an unsaved Clip Bookmark or to edit an existing Clip Bookmark.

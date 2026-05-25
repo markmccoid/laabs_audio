@@ -11,7 +11,7 @@ import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
 import { router, Stack, useSegments } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
@@ -19,6 +19,10 @@ import {
   DEFAULT_CREATE_CLIP_DURATION_SECONDS,
   useBookAddBookmarkDraft,
 } from "./book-addbookmark-draft-context";
+import {
+  ClipEditorTimingControlGroup,
+  StartingPositionScrubberRevealButton,
+} from "./clip-editor-timing-control-group";
 import { clampSeconds, MAX_CLIP_DURATION_SECONDS, MIN_CLIP_DURATION_SECONDS } from "./clip-timing";
 
 const FALLBACK_BOOK_DURATION_SECONDS = 16 * 60 * 60;
@@ -99,6 +103,8 @@ export const BookAddBookmarkClipEditorSheet = () => {
   const [startSeconds, setStartSeconds] = useState(initialRange.startSeconds);
   const [rawDurationSeconds, setDurationSeconds] = useState(initialRange.durationSeconds);
   const [isEndPositionLocked, setIsEndPositionLocked] = useState(false);
+  const [isStartingPositionScrubberVisible, setIsStartingPositionScrubberVisible] =
+    useState(false);
   const maxDurationForCurrentStart = Math.max(
     MIN_CLIP_DURATION_SECONDS,
     Math.min(MAX_CLIP_DURATION_SECONDS, bookDurationSeconds - startSeconds),
@@ -115,6 +121,9 @@ export const BookAddBookmarkClipEditorSheet = () => {
     activeLibraryItemId,
     activeQueueLength,
   });
+  const previewUnavailableReason = clipPreviewAvailability.available
+    ? null
+    : (clipPreviewAvailability.reason ?? "Clip preview is unavailable.");
   const draftPreviewId = draft.libraryItemId ? `draft:create-clip:${draft.libraryItemId}` : null;
   const isThisDraftPreview =
     Boolean(draftPreviewId) &&
@@ -133,6 +142,9 @@ export const BookAddBookmarkClipEditorSheet = () => {
   );
   const startMinimumSeconds = isEndPositionLocked ? lockedStartMinimumSeconds : 0;
   const startMaximumSeconds = isEndPositionLocked ? lockedStartMaximumSeconds : maxStartSeconds;
+  const startingPositionValue = isStartingPositionScrubberVisible
+    ? `${formatClock(startSeconds)} of ${formatClock(bookDurationSeconds)}`
+    : formatClock(startSeconds);
 
   useEffect(() => {
     return () => {
@@ -243,39 +255,6 @@ export const BookAddBookmarkClipEditorSheet = () => {
     router.back();
   };
 
-  const renderNudgeButton = ({
-    label,
-    icon,
-    onPress,
-  }: {
-    label: string;
-    icon: "chevron.left" | "chevron.right" | "backward.end" | "forward.end";
-    onPress: () => void;
-  }) => (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      disabled={false}
-      style={({ pressed }) => ({
-        flex: 1,
-        minHeight: 52,
-        borderRadius: 16,
-        borderCurve: "continuous",
-        backgroundColor: "#EDF2F4",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 2,
-        opacity: pressed ? 0.76 : 1,
-      })}
-    >
-      <SymbolView name={icon} tintColor={themeColors.accent} size={16} />
-      <Text selectable style={{ color: themeColors.text, fontSize: 10, fontWeight: "800" }}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-
   const cardStyle = {
     borderRadius: 20,
     borderCurve: "continuous" as const,
@@ -286,77 +265,6 @@ export const BookAddBookmarkClipEditorSheet = () => {
     gap: 10,
     boxShadow: "0 10px 22px rgba(15, 23, 42, 0.08)",
   };
-
-  const renderControlGroup = ({
-    title: groupTitle,
-    value,
-    sliderValue,
-    minimumValue,
-    maximumValue,
-    accessory,
-    onValueChange,
-    onSlidingComplete,
-    buttons,
-  }: {
-    title: string;
-    value: string;
-    sliderValue: number;
-    minimumValue: number;
-    maximumValue: number;
-    accessory?: ReactNode;
-    onValueChange: (value: number) => void;
-    onSlidingComplete: (value: number) => void;
-    buttons: {
-      label: string;
-      icon: "chevron.left" | "chevron.right" | "backward.end" | "forward.end";
-      onPress: () => void;
-    }[];
-  }) => (
-    <View style={cardStyle}>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
-        <Text selectable style={{ color: themeColors.text, fontSize: 13, fontWeight: "800" }}>
-          {groupTitle}
-        </Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          {accessory}
-          <Text
-            selectable
-            style={{
-              color: themeColors.text,
-              fontSize: 13,
-              fontWeight: "700",
-              fontVariant: ["tabular-nums"],
-            }}
-          >
-            {value}
-          </Text>
-        </View>
-      </View>
-      <Slider
-        value={sliderValue}
-        minimumValue={minimumValue}
-        maximumValue={Math.max(minimumValue, maximumValue)}
-        step={1}
-        minimumTrackTintColor={themeColors.accent}
-        maximumTrackTintColor="#D8E0E4"
-        thumbTintColor={themeColors.accent}
-        disabled={false}
-        onSlidingStart={() => {
-          void stopPreviewAtClipStart();
-        }}
-        onValueChange={onValueChange}
-        onSlidingComplete={onSlidingComplete}
-        style={{ width: "100%", height: 32 }}
-      />
-      <View style={{ flexDirection: "row", gap: 6 }}>
-        {buttons.map((button) => (
-          <View key={button.label} style={{ flex: 1 }}>
-            {renderNudgeButton(button)}
-          </View>
-        ))}
-      </View>
-    </View>
-  );
 
   const selectedRangeColumns = [
     { label: "Start", value: formatClock(startSeconds), align: "left" as const },
@@ -369,25 +277,19 @@ export const BookAddBookmarkClipEditorSheet = () => {
   ];
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: themeColors.bg }}
-      bounces={false}
-      alwaysBounceVertical={false}
-      contentInsetAdjustmentBehavior="automatic"
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="interactive"
-      contentContainerStyle={{
-        flexGrow: 1,
-        gap: 8,
-        paddingHorizontal: 12,
-        paddingTop: 12,
-        paddingBottom: Math.max(24, insets.bottom + 12),
-        backgroundColor: themeColors.bg,
-      }}
-    >
+    <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       <Stack.Screen options={{ title: screenTitle }} />
 
-      <View style={{ gap: 10 }}>
+      <View
+        style={{
+          gap: 8,
+          paddingHorizontal: 12,
+          paddingTop: Math.max(12, insets.top + 12),
+          paddingBottom: 8,
+          backgroundColor: themeColors.bg,
+          zIndex: 1,
+        }}
+      >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <Pressable
             accessibilityRole="button"
@@ -420,257 +322,310 @@ export const BookAddBookmarkClipEditorSheet = () => {
             {screenTitle}
           </Text>
         </View>
-      </View>
 
-      <View
-        style={{
-          borderRadius: 24,
-          borderCurve: "continuous",
-          backgroundColor: "#FFFFFF",
-          paddingHorizontal: 16,
-          paddingVertical: 18,
-          gap: 14,
-          boxShadow: "0 18px 34px rgba(15, 23, 42, 0.12)",
-        }}
-      >
-        <Text
-          selectable
+        <View
           style={{
-            color: themeColors.text,
-            fontSize: 13,
-            fontWeight: "800",
-            textAlign: "center",
+            borderRadius: 24,
+            borderCurve: "continuous",
+            backgroundColor: "#FFFFFF",
+            paddingHorizontal: 16,
+            paddingVertical: 18,
+            gap: 14,
+            boxShadow: "0 18px 34px rgba(15, 23, 42, 0.12)",
           }}
         >
-          SELECTED RANGE
-        </Text>
-        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-          {selectedRangeColumns.map((item) => (
-            <View
-              key={item.label}
-              style={{
-                flex: 1,
-                gap: 6,
-                alignItems:
-                  item.align === "left"
-                    ? "flex-start"
-                    : item.align === "right"
-                      ? "flex-end"
-                      : "center",
-              }}
-            >
-              <Text
-                selectable
-                style={{
-                  color: themeColors.textMuted,
-                  fontSize: 10,
-                  fontWeight: "800",
-                }}
-              >
-                {item.label}
-              </Text>
-              <Text
-                selectable
-                adjustsFontSizeToFit
-                numberOfLines={1}
-                style={{
-                  color: themeColors.text,
-                  fontSize: 18,
-                  fontWeight: "800",
-                  fontVariant: ["tabular-nums"],
-                  textAlign: item.align,
-                }}
-              >
-                {item.value}
-              </Text>
-            </View>
-          ))}
-        </View>
-      </View>
-
-      {renderControlGroup({
-        title: "Starting Position",
-        value: formatClock(startSeconds),
-        sliderValue: startSeconds,
-        minimumValue: startMinimumSeconds,
-        maximumValue: startMaximumSeconds,
-        onValueChange: setLiveStart,
-        onSlidingComplete: (value) => {
-          void updateStart(value);
-        },
-        buttons: [
-          { label: "< 1m", icon: "backward.end", onPress: () => nudgeStart(-60) },
-          { label: "< 10s", icon: "chevron.left", onPress: () => nudgeStart(-10) },
-          { label: "< 1s", icon: "chevron.left", onPress: () => nudgeStart(-1) },
-          { label: "1s >", icon: "chevron.right", onPress: () => nudgeStart(1) },
-          { label: "10s >", icon: "chevron.right", onPress: () => nudgeStart(10) },
-          { label: "1m >", icon: "forward.end", onPress: () => nudgeStart(60) },
-        ],
-      })}
-
-      {renderControlGroup({
-        title: "Duration",
-        value: formatDuration(durationSeconds),
-        sliderValue: durationSeconds,
-        minimumValue: MIN_CLIP_DURATION_SECONDS,
-        maximumValue: maxDurationForCurrentStart,
-        accessory: (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={isEndPositionLocked ? "Unlock end position" : "Lock end position"}
-            accessibilityState={{ selected: isEndPositionLocked }}
-            onPress={() => setIsEndPositionLocked((current) => !current)}
-            style={({ pressed }) => ({
-              width: 30,
-              height: 30,
-              borderRadius: 15,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: isEndPositionLocked ? themeColors.accent : themeColors.border,
-              backgroundColor: isEndPositionLocked ? themeColors.accent : "#EDF2F4",
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pressed ? 0.78 : 1,
-            })}
-          >
-            <SymbolView
-              name={isEndPositionLocked ? "lock.fill" : "lock.open"}
-              tintColor={isEndPositionLocked ? themeColors.accentForeground : themeColors.textMuted}
-              size={14}
-            />
-          </Pressable>
-        ),
-        onValueChange: setLiveDuration,
-        onSlidingComplete: (value) => {
-          void updateDuration(value);
-        },
-        buttons: [
-          { label: "-1m", icon: "chevron.left", onPress: () => nudgeDuration(-60) },
-          { label: "-10s", icon: "chevron.left", onPress: () => nudgeDuration(-10) },
-          { label: "-1s", icon: "chevron.left", onPress: () => nudgeDuration(-1) },
-          { label: "+1s", icon: "chevron.right", onPress: () => nudgeDuration(1) },
-          { label: "+10s", icon: "chevron.right", onPress: () => nudgeDuration(10) },
-          { label: "+1m", icon: "chevron.right", onPress: () => nudgeDuration(60) },
-        ],
-      })}
-
-      <View style={cardStyle}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={isPreviewing ? "Stop clip preview" : "Preview clip"}
-            onPress={() => {
-              void playPreview();
-            }}
-            accessibilityState={{ disabled: !clipPreviewAvailability.available }}
-            style={({ pressed }) => ({
-              width: 54,
-              height: 54,
-              borderRadius: 27,
-              backgroundColor: themeColors.accent,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: !clipPreviewAvailability.available ? 0.45 : pressed ? 0.8 : 1,
-            })}
-          >
-            <SymbolView
-              name={isPreviewing ? "pause.fill" : "play.fill"}
-              tintColor={themeColors.accentForeground}
-              size={24}
-            />
-          </Pressable>
-          <View style={{ flex: 1 }} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Preview last five seconds"
-            onPress={() => {
-              void playPreview({ lastFiveSeconds: true });
-            }}
-            accessibilityState={{ disabled: !clipPreviewAvailability.available }}
-            style={({ pressed }) => ({
-              width: 54,
-              height: 54,
-              borderRadius: 16,
-              borderCurve: "continuous",
-              backgroundColor: "#EDF2F4",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 2,
-              opacity: !clipPreviewAvailability.available ? 0.45 : pressed ? 0.78 : 1,
-            })}
-          >
-            <SymbolView name="arrow.counterclockwise" tintColor={themeColors.accent} size={18} />
-            <Text selectable style={{ color: themeColors.text, fontSize: 10, fontWeight: "800" }}>
-              Last 5s
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Stop clip preview"
-            onPress={() => {
-              setPreviewScrubSeconds(0);
-              void stopPreview();
-            }}
-            style={({ pressed }) => ({
-              width: 54,
-              height: 54,
-              borderRadius: 16,
-              borderCurve: "continuous",
-              backgroundColor: "#EDF2F4",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 2,
-              opacity: pressed ? 0.78 : 1,
-            })}
-          >
-            <SymbolView name="stop.fill" tintColor={themeColors.accent} size={17} />
-            <Text selectable style={{ color: themeColors.text, fontSize: 10, fontWeight: "800" }}>
-              Stop
-            </Text>
-          </Pressable>
-        </View>
-        <Slider
-          value={previewElapsedSeconds}
-          minimumValue={0}
-          maximumValue={durationSeconds}
-          step={1}
-          minimumTrackTintColor={themeColors.accent}
-          maximumTrackTintColor="#D8E0E4"
-          thumbTintColor={themeColors.accent}
-          disabled={!clipPreviewAvailability.available}
-          onSlidingStart={() => {
-            void stopPreview();
-          }}
-          onValueChange={(value) => {
-            setPreviewScrubSeconds(clampSeconds(Math.round(value), 0, durationSeconds));
-          }}
-          onSlidingComplete={(value) => {
-            const nextOffsetSeconds = clampSeconds(Math.round(value), 0, durationSeconds);
-            setPreviewScrubSeconds(nextOffsetSeconds);
-            void playPreview({ offsetSeconds: nextOffsetSeconds });
-          }}
-          style={{ width: "100%", height: 32 }}
-        />
-        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
           <Text
             selectable
             style={{
-              color: themeColors.textMuted,
-              fontSize: 10,
-              fontWeight: "700",
-              fontVariant: ["tabular-nums"],
+              color: themeColors.text,
+              fontSize: 13,
+              fontWeight: "800",
+              textAlign: "center",
             }}
           >
-            {formatClock(previewElapsedSeconds)}
+            SELECTED RANGE
           </Text>
-          <Text
-            selectable
-            style={{ color: themeColors.textMuted, fontSize: 10, fontWeight: "700" }}
-          >
-            {formatDuration(durationSeconds)}
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+            {selectedRangeColumns.map((item) => (
+              <View
+                key={item.label}
+                style={{
+                  flex: 1,
+                  gap: 6,
+                  alignItems:
+                    item.align === "left"
+                      ? "flex-start"
+                      : item.align === "right"
+                        ? "flex-end"
+                        : "center",
+                }}
+              >
+                <Text
+                  selectable
+                  style={{
+                    color: themeColors.textMuted,
+                    fontSize: 10,
+                    fontWeight: "800",
+                  }}
+                >
+                  {item.label}
+                </Text>
+                <Text
+                  selectable
+                  adjustsFontSizeToFit
+                  numberOfLines={1}
+                  style={{
+                    color: themeColors.text,
+                    fontSize: 18,
+                    fontWeight: "800",
+                    fontVariant: ["tabular-nums"],
+                    textAlign: item.align,
+                  }}
+                >
+                  {item.value}
+                </Text>
+              </View>
+            ))}
+          </View>
         </View>
       </View>
-    </ScrollView>
+
+      <ScrollView
+        style={{ flex: 1, backgroundColor: themeColors.bg }}
+        bounces={false}
+        alwaysBounceVertical={false}
+        contentInsetAdjustmentBehavior="never"
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        contentContainerStyle={{
+          flexGrow: 1,
+          gap: 8,
+          paddingHorizontal: 12,
+          paddingTop: 0,
+          paddingBottom: Math.max(24, insets.bottom + 12),
+          backgroundColor: themeColors.bg,
+        }}
+      >
+        <ClipEditorTimingControlGroup
+          title="Starting Position"
+          value={startingPositionValue}
+          sliderValue={startSeconds}
+          minimumValue={startMinimumSeconds}
+          maximumValue={startMaximumSeconds}
+          accessory={
+            <StartingPositionScrubberRevealButton
+              visible={isStartingPositionScrubberVisible}
+              onPress={() => setIsStartingPositionScrubberVisible((current) => !current)}
+            />
+          }
+          expandHeaderValue={isStartingPositionScrubberVisible}
+          showSlider={isStartingPositionScrubberVisible}
+          onSliderStart={() => {
+            void stopPreviewAtClipStart();
+          }}
+          onValueChange={setLiveStart}
+          onSlidingComplete={(value) => {
+            void updateStart(value);
+          }}
+          buttons={[
+            { label: "< 1m", icon: "backward.end", onPress: () => nudgeStart(-60) },
+            { label: "< 10s", icon: "chevron.left", onPress: () => nudgeStart(-10) },
+            { label: "< 1s", icon: "chevron.left", onPress: () => nudgeStart(-1) },
+            { label: "1s >", icon: "chevron.right", onPress: () => nudgeStart(1) },
+            { label: "10s >", icon: "chevron.right", onPress: () => nudgeStart(10) },
+            { label: "1m >", icon: "forward.end", onPress: () => nudgeStart(60) },
+          ]}
+        />
+
+        <ClipEditorTimingControlGroup
+          title="Duration"
+          value={formatDuration(durationSeconds)}
+          sliderValue={durationSeconds}
+          minimumValue={MIN_CLIP_DURATION_SECONDS}
+          maximumValue={maxDurationForCurrentStart}
+          accessory={
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                isEndPositionLocked ? "Unlock end position" : "Lock end position"
+              }
+              accessibilityState={{ selected: isEndPositionLocked }}
+              onPress={() => setIsEndPositionLocked((current) => !current)}
+              style={({ pressed }) => ({
+                width: 30,
+                height: 30,
+                borderRadius: 15,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: isEndPositionLocked ? themeColors.accent : themeColors.border,
+                backgroundColor: isEndPositionLocked ? themeColors.accent : "#EDF2F4",
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: pressed ? 0.78 : 1,
+              })}
+            >
+              <SymbolView
+                name={isEndPositionLocked ? "lock.fill" : "lock.open"}
+                tintColor={
+                  isEndPositionLocked ? themeColors.accentForeground : themeColors.textMuted
+                }
+                size={14}
+              />
+            </Pressable>
+          }
+          onSliderStart={() => {
+            void stopPreviewAtClipStart();
+          }}
+          onValueChange={setLiveDuration}
+          onSlidingComplete={(value) => {
+            void updateDuration(value);
+          }}
+          buttons={[
+            { label: "-1m", icon: "chevron.left", onPress: () => nudgeDuration(-60) },
+            { label: "-10s", icon: "chevron.left", onPress: () => nudgeDuration(-10) },
+            { label: "-1s", icon: "chevron.left", onPress: () => nudgeDuration(-1) },
+            { label: "+1s", icon: "chevron.right", onPress: () => nudgeDuration(1) },
+            { label: "+10s", icon: "chevron.right", onPress: () => nudgeDuration(10) },
+            { label: "+1m", icon: "chevron.right", onPress: () => nudgeDuration(60) },
+          ]}
+        />
+
+        <View style={cardStyle}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={isPreviewing ? "Stop clip preview" : "Preview clip"}
+              onPress={() => {
+                void playPreview();
+              }}
+              disabled={!clipPreviewAvailability.available}
+              accessibilityState={{ disabled: !clipPreviewAvailability.available }}
+              style={({ pressed }) => ({
+                width: 54,
+                height: 54,
+                borderRadius: 27,
+                backgroundColor: themeColors.accent,
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: !clipPreviewAvailability.available ? 0.45 : pressed ? 0.8 : 1,
+              })}
+            >
+              <SymbolView
+                name={isPreviewing ? "pause.fill" : "play.fill"}
+                tintColor={themeColors.accentForeground}
+                size={24}
+              />
+            </Pressable>
+            <View style={{ flex: 1 }} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Preview last five seconds"
+              onPress={() => {
+                void playPreview({ lastFiveSeconds: true });
+              }}
+              disabled={!clipPreviewAvailability.available}
+              accessibilityState={{ disabled: !clipPreviewAvailability.available }}
+              style={({ pressed }) => ({
+                width: 54,
+                height: 54,
+                borderRadius: 16,
+                borderCurve: "continuous",
+                backgroundColor: "#EDF2F4",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 2,
+                opacity: !clipPreviewAvailability.available ? 0.45 : pressed ? 0.78 : 1,
+              })}
+            >
+              <SymbolView name="arrow.counterclockwise" tintColor={themeColors.accent} size={18} />
+              <Text selectable style={{ color: themeColors.text, fontSize: 10, fontWeight: "800" }}>
+                Last 5s
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Stop clip preview"
+              onPress={() => {
+                setPreviewScrubSeconds(0);
+                void stopPreview();
+              }}
+              disabled={!clipPreviewAvailability.available}
+              accessibilityState={{ disabled: !clipPreviewAvailability.available }}
+              style={({ pressed }) => ({
+                width: 54,
+                height: 54,
+                borderRadius: 16,
+                borderCurve: "continuous",
+                backgroundColor: "#EDF2F4",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 2,
+                opacity: !clipPreviewAvailability.available ? 0.45 : pressed ? 0.78 : 1,
+              })}
+            >
+              <SymbolView name="stop.fill" tintColor={themeColors.accent} size={17} />
+              <Text selectable style={{ color: themeColors.text, fontSize: 10, fontWeight: "800" }}>
+                Stop
+              </Text>
+            </Pressable>
+          </View>
+          {previewUnavailableReason ? (
+            <Text
+              selectable
+              style={{
+                color: themeColors.textMuted,
+                fontSize: 12,
+                lineHeight: 17,
+                fontWeight: "600",
+                textAlign: "center",
+              }}
+            >
+              {previewUnavailableReason}
+            </Text>
+          ) : null}
+          <Slider
+            value={previewElapsedSeconds}
+            minimumValue={0}
+            maximumValue={durationSeconds}
+            step={1}
+            minimumTrackTintColor={themeColors.accent}
+            maximumTrackTintColor="#D8E0E4"
+            thumbTintColor={themeColors.accent}
+            disabled={!clipPreviewAvailability.available}
+            onSlidingStart={() => {
+              void stopPreview();
+            }}
+            onValueChange={(value) => {
+              setPreviewScrubSeconds(clampSeconds(Math.round(value), 0, durationSeconds));
+            }}
+            onSlidingComplete={(value) => {
+              const nextOffsetSeconds = clampSeconds(Math.round(value), 0, durationSeconds);
+              setPreviewScrubSeconds(nextOffsetSeconds);
+              void playPreview({ offsetSeconds: nextOffsetSeconds });
+            }}
+            style={{ width: "100%", height: 32 }}
+          />
+          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+            <Text
+              selectable
+              style={{
+                color: themeColors.textMuted,
+                fontSize: 10,
+                fontWeight: "700",
+                fontVariant: ["tabular-nums"],
+              }}
+            >
+              {formatClock(previewElapsedSeconds)}
+            </Text>
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 10, fontWeight: "700" }}
+            >
+              {formatDuration(durationSeconds)}
+            </Text>
+          </View>
+        </View>
+      </ScrollView>
+    </View>
   );
 };

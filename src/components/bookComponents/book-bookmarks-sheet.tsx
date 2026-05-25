@@ -345,6 +345,12 @@ export const BookBookmarksSheet = () => {
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }} collapsable={false}>
+      <Stack.Screen
+        options={{
+          // headerShown: true,
+          title: "Bookmarks",
+        }}
+      />
       <View
         collapsable={false}
         style={{
@@ -356,7 +362,6 @@ export const BookBookmarksSheet = () => {
           backgroundColor: themeColors.surface,
         }}
       >
-        <Stack.Screen options={{ title: "Bookmarks" }} />
         <View className="flex-row items-center justify-between">
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             <Text className="text-xl font-bold text-text">Bookmarks</Text>
