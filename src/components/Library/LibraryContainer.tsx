@@ -19,6 +19,7 @@ const LibraryContainer = () => {
   } = useGetFilterData();
   const filterActions = useFiltersActions();
   const favoriteFilter = useFiltersStore((state) => state.favoriteFilter);
+  const finishedOnly = useFiltersStore((state) => state.finishedOnly);
   const selectedGenres = useFiltersStore((state) => state.genres);
   const selectedTags = useFiltersStore((state) => state.tags);
   const { data, isLoading, isPending } = useGetBooks();
@@ -40,11 +41,14 @@ const LibraryContainer = () => {
       ListHeaderComponent={
         <LibraryFiltersHeader
           favoriteFilter={favoriteFilter}
+          finishedOnly={finishedOnly}
           selectedGenres={selectedGenres}
           selectedTags={selectedTags}
           isFilterDataError={isFilterDataError}
           onCycleFavoriteFilter={() => filterActions.cycleFavoriteFilter()}
           onClearFavoriteFilter={() => filterActions.clearFavoriteFilter()}
+          onToggleFinishedOnly={() => filterActions.toggleFinishedOnly()}
+          onClearFinishedOnly={() => filterActions.clearFinishedOnly()}
           onOpenSheet={(sheetType) =>
             router.push({
               pathname: "/(tabs)/search/filter-sheet",

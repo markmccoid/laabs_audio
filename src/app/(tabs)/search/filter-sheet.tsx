@@ -75,6 +75,7 @@ export default function SearchFilterSheet() {
         </View>
       ) : (
         <FilterOptionsSheet
+          key={type}
           type={type}
           options={options}
           selectedValues={selectedValues}

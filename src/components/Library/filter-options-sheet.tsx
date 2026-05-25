@@ -1,12 +1,15 @@
-import SegmentedControl from "@/shared/ui/organisms/segmented-control";
 import type { FilterOperator } from "@/store/store-filters";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView } from "expo-symbols";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { FlatList, Pressable, Text, TextInput, View } from "react-native";
-import { useUniwind } from "uniwind";
 
 export type FilterSheetType = "genres" | "tags";
+
+const OPERATOR_OPTIONS: { value: FilterOperator; label: string }[] = [
+  { value: "and", label: "AND" },
+  { value: "or", label: "OR" },
+];
 
 type FilterOptionsSheetProps = {
   type: FilterSheetType;
@@ -30,15 +33,8 @@ export const FilterOptionsSheet = ({
   onClose,
 }: FilterOptionsSheetProps) => {
   const themeColors = useThemeColors();
-  const { theme } = useUniwind();
   const [searchValue, setSearchValue] = useState("");
   const title = type === "genres" ? "Genres" : "Tags";
-  const currentOperatorIndex = operator === "and" ? 0 : 1;
-  const segmentedPreset = theme === "dark" ? "dark" : "light";
-
-  useEffect(() => {
-    setSearchValue("");
-  }, [type]);
 
   const filteredOptions = useMemo(() => {
     const normalizedSearch = searchValue.trim().toLowerCase();
@@ -87,43 +83,57 @@ export const FilterOptionsSheet = ({
             }}
           />
 
-          {/* <Text style={{ color: themeColors.textMuted, fontSize: 13, fontWeight: "600" }}>
-              {operatorDescription}
-            </Text> */}
-          <View className="">
-            <SegmentedControl
-              currentIndex={currentOperatorIndex}
-              onChange={(index) => onOperatorChange(index === 0 ? "and" : "or")}
-              preset={segmentedPreset}
-              paddingVertical={8}
-              activeSegmentBackgroundColor={themeColors.accent}
-              width={125}
-            >
-              <Text
-                style={{
-                  color:
-                    currentOperatorIndex === 0
-                      ? themeColors.accentForeground
-                      : themeColors.textMuted,
-                  fontSize: 12,
-                  fontWeight: "700",
-                }}
-              >
-                AND
-              </Text>
-              <Text
-                style={{
-                  color:
-                    currentOperatorIndex === 1
-                      ? themeColors.accentForeground
-                      : themeColors.textMuted,
-                  fontSize: 12,
-                  fontWeight: "700",
-                }}
-              >
-                OR
-              </Text>
-            </SegmentedControl>
+          <View
+            accessibilityRole="radiogroup"
+            style={{
+              flexDirection: "row",
+              borderWidth: 1,
+              borderColor: themeColors.border,
+              borderRadius: 12,
+              backgroundColor: themeColors.surface,
+              padding: 3,
+              gap: 3,
+            }}
+          >
+            {OPERATOR_OPTIONS.map((option) => {
+              const isSelected = operator === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: isSelected }}
+                  onPress={() => onOperatorChange(option.value)}
+                  style={{
+                    minWidth: 58,
+                    minHeight: 38,
+                    borderRadius: 9,
+                    backgroundColor: isSelected ? themeColors.accent : "transparent",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexDirection: "row",
+                    gap: 4,
+                    paddingHorizontal: 8,
+                  }}
+                >
+                  {isSelected ? (
+                    <SymbolView
+                      name="checkmark"
+                      tintColor={themeColors.accentForeground}
+                      size={11}
+                    />
+                  ) : null}
+                  <Text
+                    style={{
+                      color: isSelected ? themeColors.accentForeground : themeColors.textMuted,
+                      fontSize: 12,
+                      fontWeight: "800",
+                    }}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 

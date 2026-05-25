@@ -20,6 +20,7 @@ interface FiltersState {
   tags: string[];
   tagOperator: FilterOperator;
   favoriteFilter: FavoriteFilter;
+  finishedOnly: boolean;
   author: string;
   sortedBy: SortBy;
   sortDirection: SortDirection;
@@ -47,6 +48,8 @@ interface FiltersActions {
   cycleFavoriteFilter: () => void;
   setFavoriteFilter: (filter: FavoriteFilter) => void;
   clearFavoriteFilter: () => void;
+  toggleFinishedOnly: () => void;
+  clearFinishedOnly: () => void;
   setAuthor: (author: string) => void;
   setSortedBy: (sortBy: SortBy) => void;
   setSortDirection: (sortDir: SortDirection) => void;
@@ -69,6 +72,7 @@ const DEFAULT_GENRES: string[] = [];
 const DEFAULT_TAGS: string[] = [];
 const DEFAULT_FILTER_OPERATOR: FilterOperator = "and";
 const DEFAULT_FAVORITE_FILTER: FavoriteFilter = "all";
+const DEFAULT_FINISHED_ONLY = false;
 const DEFAULT_AUTHOR = "";
 const DEFAULT_SORTED_BY: SortBy = "addedAt";
 
@@ -85,6 +89,7 @@ export const useFiltersStore = create<FiltersStore>()(
       tags: DEFAULT_TAGS,
       tagOperator: DEFAULT_FILTER_OPERATOR,
       favoriteFilter: DEFAULT_FAVORITE_FILTER,
+      finishedOnly: DEFAULT_FINISHED_ONLY,
       author: DEFAULT_AUTHOR,
       sortedBy: DEFAULT_SORTED_BY,
       sortDirection: "desc",
@@ -168,6 +173,10 @@ export const useFiltersStore = create<FiltersStore>()(
 
         clearFavoriteFilter: () => set({ favoriteFilter: DEFAULT_FAVORITE_FILTER }),
 
+        toggleFinishedOnly: () => set((state) => ({ finishedOnly: !state.finishedOnly })),
+
+        clearFinishedOnly: () => set({ finishedOnly: DEFAULT_FINISHED_ONLY }),
+
         setAuthor: (author: string) => set({ author }),
 
         setSortedBy: (sortBy: SortBy) => set({ sortedBy: sortBy }),
@@ -182,6 +191,7 @@ export const useFiltersStore = create<FiltersStore>()(
             tags: DEFAULT_TAGS,
             tagOperator: DEFAULT_FILTER_OPERATOR,
             favoriteFilter: DEFAULT_FAVORITE_FILTER,
+            finishedOnly: DEFAULT_FINISHED_ONLY,
             author: DEFAULT_AUTHOR,
             sortedBy: DEFAULT_SORTED_BY,
           }),
@@ -252,6 +262,11 @@ export const useTagOperator = () => useFiltersStore((state) => state.tagOperator
 export const useFavoriteFilter = () => useFiltersStore((state) => state.favoriteFilter);
 
 /**
+ * Hook to get whether only finished books should be shown.
+ */
+export const useFinishedOnly = () => useFiltersStore((state) => state.finishedOnly);
+
+/**
  * Hook to get the author value
  */
 export const useAuthor = () => useFiltersStore((state) => state.author);
@@ -314,6 +329,7 @@ export const useAllFilters = () =>
     tags: state.tags,
     tagOperator: state.tagOperator,
     favoriteFilter: state.favoriteFilter,
+    finishedOnly: state.finishedOnly,
     author: state.author,
     sortedBy: state.sortedBy,
   }));
@@ -331,6 +347,7 @@ export const useHasActiveFilters = () =>
       state.tags.length > 0 ||
       state.tagOperator !== DEFAULT_FILTER_OPERATOR ||
       state.favoriteFilter !== DEFAULT_FAVORITE_FILTER ||
+      state.finishedOnly !== DEFAULT_FINISHED_ONLY ||
       state.author !== DEFAULT_AUTHOR ||
       state.sortedBy !== DEFAULT_SORTED_BY,
   );
@@ -345,6 +362,7 @@ export const useFilterCounts = () =>
     hasGenreOperatorFilter: state.genreOperator !== DEFAULT_FILTER_OPERATOR,
     hasTagOperatorFilter: state.tagOperator !== DEFAULT_FILTER_OPERATOR,
     hasFavoriteFilter: state.favoriteFilter !== DEFAULT_FAVORITE_FILTER,
+    hasFinishedOnlyFilter: state.finishedOnly !== DEFAULT_FINISHED_ONLY,
     hasSearch: state.searchValue !== DEFAULT_SEARCH_VALUE,
     hasAuthor: state.author !== DEFAULT_AUTHOR,
     hasCustomSort: state.sortedBy !== DEFAULT_SORTED_BY,
@@ -355,6 +373,7 @@ export const useFilterCounts = () =>
       state.tags.length +
       (state.tagOperator !== DEFAULT_FILTER_OPERATOR ? 1 : 0) +
       (state.favoriteFilter !== DEFAULT_FAVORITE_FILTER ? 1 : 0) +
+      (state.finishedOnly !== DEFAULT_FINISHED_ONLY ? 1 : 0) +
       (state.author !== DEFAULT_AUTHOR ? 1 : 0) +
       (state.sortedBy !== DEFAULT_SORTED_BY ? 1 : 0),
   }));

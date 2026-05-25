@@ -23,6 +23,7 @@ import { fetchReconciledUserServerState } from "../query/user-server-state-recon
 import type { Bookmark } from "../types/absTypes";
 import {
   useFavoriteFilter,
+  useFinishedOnly,
   useFiltersStore,
   useGenreOperator,
   useGenres,
@@ -84,6 +85,7 @@ type Filters = {
   tags?: string[];
   tagOperator?: "and" | "or";
   favoriteFilter?: "all" | "only" | "exclude";
+  finishedOnly?: boolean;
 };
 const createFilterConfig = (filters: Filters) => ({
   search: {
@@ -127,6 +129,10 @@ const createFilterConfig = (filters: Filters) => ({
           return true;
       }
     },
+  },
+  finished: {
+    enabled: filters.finishedOnly === true,
+    condition: (book: LibraryItemWithUserState) => book.isFinished === true,
   },
   // rating: {
   //   enabled: additionalFilters.minRating != null,
@@ -180,6 +186,9 @@ const applyFilters = <T extends LibraryItemWithUserState>(
     if (filterConfig.favorites.enabled) {
       if (!filterConfig.favorites.condition(book)) return false;
     }
+    if (filterConfig.finished.enabled) {
+      if (!filterConfig.finished.condition(book)) return false;
+    }
     // Add other filters here as needed
     // Each filter should return false if the book doesn't match
     return true; // Book passes all filters
@@ -215,6 +224,7 @@ export const useGetBooks = () => {
   const tags = useTags();
   const tagOperator = useTagOperator();
   const favoriteFilter = useFavoriteFilter();
+  const finishedOnly = useFinishedOnly();
 
   // Always call useQuery, but disable it when not authenticated
   const {
@@ -274,6 +284,7 @@ export const useGetBooks = () => {
       tags,
       tagOperator,
       favoriteFilter,
+      finishedOnly,
       searchDescription,
       searchTitleAuthor,
     });
@@ -291,6 +302,7 @@ export const useGetBooks = () => {
     tags,
     tagOperator,
     favoriteFilter,
+    finishedOnly,
     searchDescription,
     searchTitleAuthor,
   ]);

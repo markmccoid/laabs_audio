@@ -9,10 +9,13 @@ type LibraryFiltersHeaderProps = {
   selectedGenres: string[];
   selectedTags: string[];
   favoriteFilter: FavoriteFilter;
+  finishedOnly: boolean;
   isFilterDataError: boolean;
   onOpenSheet: (sheetType: FilterSheetType) => void;
   onCycleFavoriteFilter: () => void;
   onClearFavoriteFilter: () => void;
+  onToggleFinishedOnly: () => void;
+  onClearFinishedOnly: () => void;
   onRemoveGenre: (genre: string) => void;
   onRemoveTag: (tag: string) => void;
   onRetryFilterData: () => void;
@@ -94,17 +97,21 @@ export const LibraryFiltersHeader = ({
   selectedGenres,
   selectedTags,
   favoriteFilter,
+  finishedOnly,
   isFilterDataError,
   onOpenSheet,
   onCycleFavoriteFilter,
   onClearFavoriteFilter,
+  onToggleFinishedOnly,
+  onClearFinishedOnly,
   onRemoveGenre,
   onRemoveTag,
   onRetryFilterData,
 }: LibraryFiltersHeaderProps) => {
   const themeColors = useThemeColors();
   const hasFavoriteFilter = favoriteFilter !== "all";
-  const hasAnyFilters = selectedGenres.length > 0 || selectedTags.length > 0 || hasFavoriteFilter;
+  const hasAnyFilters =
+    selectedGenres.length > 0 || selectedTags.length > 0 || hasFavoriteFilter || finishedOnly;
   const favoriteIcon: SFSymbol =
     favoriteFilter === "only"
       ? "heart.fill"
@@ -123,6 +130,7 @@ export const LibraryFiltersHeader = ({
       : favoriteFilter === "exclude"
         ? "Exclude favorites"
         : null;
+  const finishedTintColor = finishedOnly ? themeColors.accent : themeColors.textMuted;
 
   return (
     <View style={{ gap: 10, paddingHorizontal: 8, paddingBottom: 12, paddingTop: 6 }}>
@@ -154,6 +162,25 @@ export const LibraryFiltersHeader = ({
         >
           <SymbolView name={favoriteIcon} tintColor={favoriteTintColor} size={16} />
         </Pressable>
+        <Pressable
+          onPress={onToggleFinishedOnly}
+          style={{
+            borderWidth: 1,
+            borderRadius: 14,
+            borderColor: finishedOnly ? finishedTintColor : themeColors.border,
+            backgroundColor: themeColors.surface,
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <SymbolView
+            name={finishedOnly ? "checkmark.circle.fill" : "checkmark.circle"}
+            tintColor={finishedTintColor}
+            size={16}
+          />
+        </Pressable>
       </View>
 
       {hasAnyFilters ? (
@@ -180,6 +207,13 @@ export const LibraryFiltersHeader = ({
                 icon={favoriteIcon}
                 label={favoriteChipLabel}
                 onPress={onClearFavoriteFilter}
+              />
+            ) : null}
+            {finishedOnly ? (
+              <SelectedFilterChip
+                icon="checkmark.circle.fill"
+                label="Finished only"
+                onPress={onClearFinishedOnly}
               />
             ) : null}
           </View>
