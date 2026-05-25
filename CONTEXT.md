@@ -55,6 +55,10 @@ _Avoid_: Advanced bookmark, audio clip
 The canonical whole-second audiobook position used for bookmark ordering and navigation.
 _Avoid_: Timestamp, location
 
+**Play from Bookmark**:
+A user-initiated action that sets the Listening Position to a Bookmark's Bookmark Position.
+_Avoid_: Apply bookmark
+
 **End Position**:
 The canonical whole-second audiobook position where a Clip Bookmark's Clip Range ends.
 _Avoid_: Duration lock
@@ -225,7 +229,7 @@ _Avoid_: Five minute window, scrubber window
 - A **Clip Bookmark** uses the same **Bookmark Title** concept as a Point Bookmark; it does not have a separate clip title.
 - A **Bookmark** may change between **Point Bookmark** and **Clip Bookmark** without becoming a different **Bookmark**.
 - Editing a **Bookmark Position** changes the same Bookmark rather than creating a different Bookmark.
-- Choosing a **Bookmark** from the bookmark viewer sets the **Listening Position** to that bookmark's **Bookmark Position**.
+- **Play from Bookmark** sets the **Listening Position** to that Bookmark's **Bookmark Position**.
 - **Resume Resolution** chooses the **Listening Position** when opening an audiobook.
 - **Resume Resolution** may use server progress to advance the **Listening Position** for either streamed or downloaded audiobooks.
 - **Resume Resolution** treats a **Progress Sync Intent** as a candidate, not as an automatic winner over farther server progress.
@@ -288,7 +292,7 @@ _Avoid_: Five minute window, scrubber window
 > **Domain expert:** "No, it becomes an **Unmatched Bookmark** and remains visible because the **Local Bookmark Record** owns the clip details."
 
 > **Dev:** "Should tapping a clip in the bookmark viewer preview the clip?"
-> **Domain expert:** "No, choosing the **Bookmark** updates the **Listening Position**. Use **Clip Detail** to preview or trim the clip."
+> **Domain expert:** "No, **Play from Bookmark** updates the **Listening Position**. Use **Clip Detail** to preview or trim the clip."
 
 > **Dev:** "Is text created from a saved passage a separate note?"
 > **Domain expert:** "No, it is a **Clip Transcription** created from the **Clip Bookmark**'s **Clip Range**."

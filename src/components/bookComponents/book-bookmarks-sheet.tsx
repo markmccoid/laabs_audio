@@ -8,6 +8,7 @@ import {
 } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { formatSeconds } from "@/utils/formatUtils";
+import { MenuView, type MenuAction, type NativeActionEvent } from "@expo/ui/community/menu";
 import * as FileSystem from "expo-file-system/legacy";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import * as Sharing from "expo-sharing";
@@ -55,6 +56,8 @@ type BookmarkExportRow = {
   createdAt: number;
   updatedAt: number;
 };
+
+type BookmarkMenuActionId = "play" | "detail" | "delete";
 
 const toBookmarksCsv = (rows: BookmarkExportRow[]) => {
   const header = [
@@ -264,7 +267,7 @@ export const BookBookmarksSheet = () => {
     }
   };
 
-  const openSecondaryAction = (bookmark: LocalBookmarkRecord) => {
+  const openBookmarkDetail = (bookmark: LocalBookmarkRecord) => {
     if (!libraryItemId) return;
     router.push({
       pathname: "/book-bookmarks/edit",
@@ -273,6 +276,48 @@ export const BookBookmarksSheet = () => {
         bookmarkId: bookmark.id,
       },
     });
+  };
+
+  const getBookmarkMenuActions = (
+    bookmark: LocalBookmarkRecord,
+    disabled: boolean,
+  ): MenuAction[] => [
+    {
+      id: "play",
+      title: "Play from Bookmark",
+      image: "play.fill",
+      attributes: { disabled },
+    },
+    {
+      id: "detail",
+      title: bookmark.kind === "clip" ? "Clip Detail" : "Edit Bookmark",
+      image: bookmark.kind === "clip" ? "slider.horizontal.3" : "square.and.pencil",
+      attributes: { disabled },
+    },
+    {
+      id: "delete",
+      title: "Delete Bookmark",
+      image: "trash",
+      attributes: { destructive: true, disabled },
+    },
+  ];
+
+  const handleBookmarkMenuAction = (
+    event: NativeActionEvent,
+    bookmark: LocalBookmarkRecord,
+  ) => {
+    const actionId = event.nativeEvent.event as BookmarkMenuActionId;
+    if (actionId === "play") {
+      void handleBookmarkPress(bookmark);
+      return;
+    }
+    if (actionId === "detail") {
+      openBookmarkDetail(bookmark);
+      return;
+    }
+    if (actionId === "delete") {
+      openDeleteConfirm(bookmark);
+    }
   };
 
   const handleDeleteBookmark = async (bookmark: LocalBookmarkRecord) => {
@@ -401,23 +446,19 @@ export const BookBookmarksSheet = () => {
           const isPending = pendingBookmarkId === bookmark.id;
           const isDeleting = pendingDeleteId === bookmark.id;
           const isActionDisabled = isPending || isDeleting;
-          const primaryActionLabel = `Go to bookmark at ${timeLabel}`;
-          const secondaryActionLabel =
-            bookmark.kind === "clip"
-              ? `Edit clip at ${timeLabel}`
-              : `Edit bookmark at ${timeLabel}`;
+          const primaryActionLabel = `Open bookmark actions for ${title} at ${timeLabel}`;
 
           return (
-            <View style={{ flexDirection: "row", alignItems: "stretch", gap: 8 }}>
-              <Pressable
+            <MenuView
+              title={title}
+              actions={getBookmarkMenuActions(bookmark, isActionDisabled)}
+              onPressAction={(event) => handleBookmarkMenuAction(event, bookmark)}
+              style={{ flex: 1 }}
+            >
+              <View
                 accessibilityRole="button"
                 accessibilityLabel={primaryActionLabel}
-                onPress={() => {
-                  void handleBookmarkPress(bookmark);
-                }}
-                disabled={isActionDisabled}
-                style={({ pressed }) => ({
-                  flex: 1,
+                style={{
                   borderRadius: 14,
                   borderCurve: "continuous",
                   borderWidth: 1,
@@ -428,8 +469,8 @@ export const BookBookmarksSheet = () => {
                   flexDirection: "row",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  opacity: pressed || isActionDisabled ? 0.8 : 1,
-                })}
+                  opacity: isActionDisabled ? 0.8 : 1,
+                }}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
                   <View
@@ -494,58 +535,12 @@ export const BookBookmarksSheet = () => {
                   </View>
                 </View>
                 <SymbolView
-                  name={isPending || isDeleting ? "hourglass" : "arrow.right"}
+                  name={isPending || isDeleting ? "hourglass" : "ellipsis"}
                   tintColor={themeColors.textMuted}
                   size={14}
                 />
-              </Pressable>
-
-              <View style={{ width: 44, gap: 8 }}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={secondaryActionLabel}
-                  onPress={() => openSecondaryAction(bookmark)}
-                  disabled={isActionDisabled}
-                  style={({ pressed }) => ({
-                    flex: 1,
-                    borderRadius: 10,
-                    borderCurve: "continuous",
-                    borderWidth: 1,
-                    borderColor: themeColors.border,
-                    backgroundColor: themeColors.surface,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    opacity: pressed || isActionDisabled ? 0.8 : 1,
-                  })}
-                >
-                  <SymbolView
-                    name={bookmark.kind === "clip" ? "slider.horizontal.3" : "square.and.pencil"}
-                    tintColor={themeColors.textMuted}
-                    size={15}
-                  />
-                </Pressable>
-
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Delete bookmark at ${timeLabel}`}
-                  onPress={() => openDeleteConfirm(bookmark)}
-                  disabled={isActionDisabled}
-                  style={({ pressed }) => ({
-                    flex: 1,
-                    borderRadius: 10,
-                    borderCurve: "continuous",
-                    borderWidth: 1,
-                    borderColor: themeColors.border,
-                    backgroundColor: themeColors.surface,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    opacity: pressed || isActionDisabled ? 0.8 : 1,
-                  })}
-                >
-                  <SymbolView name={isDeleting ? "hourglass" : "trash"} tintColor="#dc2626" size={15} />
-                </Pressable>
               </View>
-            </View>
+            </MenuView>
           );
         }}
         ListEmptyComponent={
