@@ -29,8 +29,10 @@ import type { Bookmark } from "@/types/absTypes";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import * as Sharing from "expo-sharing";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
+  BackHandler,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -80,7 +82,7 @@ const areDraftAndBookmarkEqual = (
   );
 };
 
-export const BookBookmarkEditSheet = () => {
+export const BookBookmarkDetailSheet = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const draft = useBookAddBookmarkDraft();
@@ -186,10 +188,8 @@ export const BookBookmarkEditSheet = () => {
       !isExporting &&
       !isExportingTranscript,
   );
-  const canSave = Boolean(
-    bookmark && draft.title.trim() && hasUnsavedChanges && !isSaving && !isExportingTranscript,
-  );
   const isBusy = isSaving || isExporting || isExportingTranscript;
+  const canSave = Boolean(bookmark && draft.title.trim() && hasUnsavedChanges && !isBusy);
   const fieldBackgroundColor = "#FFFFFF";
 
   useEffect(() => {
@@ -207,14 +207,42 @@ export const BookBookmarkEditSheet = () => {
   const openClipEditor = () => {
     if (!bookmark) return;
     draft.convertToClipDraft();
-    router.push("/book-bookmarks/clip-editor");
+    router.push("/book-bookmark-detail/clip-editor");
   };
 
-  const closeDraft = async () => {
+  const closeDetail = useCallback(async () => {
     await playerService.restoreListeningPositionAfterPreview();
     Keyboard.dismiss();
     router.back();
-  };
+  }, []);
+
+  const requestCloseDetail = useCallback(() => {
+    if (isBusy) return;
+    if (!hasUnsavedChanges) {
+      void closeDetail();
+      return;
+    }
+
+    Alert.alert("Discard changes?", "Your bookmark changes have not been saved.", [
+      { text: "Keep Editing", style: "cancel" },
+      {
+        text: "Discard",
+        style: "destructive",
+        onPress: () => {
+          void closeDetail();
+        },
+      },
+    ]);
+  }, [closeDetail, hasUnsavedChanges, isBusy]);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      requestCloseDetail();
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [requestCloseDetail]);
 
   const handleSave = async () => {
     if (!bookmark || !libraryItemId || !canSave) return;
@@ -239,7 +267,7 @@ export const BookBookmarkEditSheet = () => {
       toast.success(isClipDraft ? "Clip saved" : "Bookmark saved");
       router.back();
     } catch (error) {
-      console.warn("[BookBookmarkEditSheet] Failed to save bookmark draft", error);
+      console.warn("[BookBookmarkDetailSheet] Failed to save bookmark draft", error);
       toast.error("Unable to save bookmark");
     } finally {
       setIsSaving(false);
@@ -276,7 +304,7 @@ export const BookBookmarkEditSheet = () => {
         UTI: result.uti,
       });
     } catch (error) {
-      console.warn("[BookBookmarkEditSheet] Failed to export clip", error);
+      console.warn("[BookBookmarkDetailSheet] Failed to export clip", error);
       toast.error(getClipExportErrorMessage(error));
     } finally {
       setIsExporting(false);
@@ -342,7 +370,7 @@ export const BookBookmarkEditSheet = () => {
         UTI: result.uti,
       });
     } catch (error) {
-      console.warn("[BookBookmarkEditSheet] Failed to export clip transcript", error);
+      console.warn("[BookBookmarkDetailSheet] Failed to export clip transcript", error);
       logClipTranscriptExportFailure({
         trigger: "book_bookmark_edit",
         libraryItemId,
@@ -381,7 +409,7 @@ export const BookBookmarkEditSheet = () => {
           backgroundColor: themeColors.bg,
         }}
       >
-        <Stack.Screen options={{ title: isClipDraft ? "Edit Clip" : "Edit Bookmark" }} />
+        <Stack.Screen options={{ title: isClipDraft ? "Clip Bookmark" : "Bookmark Detail" }} />
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <Text
@@ -394,13 +422,13 @@ export const BookBookmarkEditSheet = () => {
               fontWeight: "700",
             }}
           >
-            {isClipDraft ? "Edit Clip" : "Edit Bookmark"}
+            {isClipDraft ? "Clip Bookmark" : "Bookmark Detail"}
           </Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Cancel bookmark edit"
+            accessibilityLabel="Cancel bookmark detail"
             onPress={() => {
-              void closeDraft();
+              requestCloseDetail();
             }}
             disabled={isBusy}
             style={({ pressed }) => ({

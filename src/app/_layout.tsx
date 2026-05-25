@@ -45,6 +45,7 @@ const BOOK_UTILITY_SHEETS = new Set([
   "book-bookshelves",
   "book-downloads",
   "book-bookmarks",
+  "book-bookmark-detail",
   "book-addbookmark",
   "book-series",
   "book-filter-results",
@@ -275,7 +276,10 @@ export default function RootLayout() {
       initialDeepLinkBookId,
       routeState,
     });
-    setInitialDeepLinkBookId(null);
+    const task = InteractionManager.runAfterInteractions(() => {
+      setInitialDeepLinkBookId(null);
+    });
+    return () => task.cancel();
   }, [initialDeepLinkBookId, routeState]);
 
   const handleAppTreeLayout = useCallback(() => {
@@ -605,6 +609,7 @@ export default function RootLayout() {
                   sheetCornerRadius: 20,
                   contentStyle: {
                     backgroundColor: themeColors.surface,
+                    height: "100%",
                   },
                 }}
               />
@@ -664,6 +669,21 @@ export default function RootLayout() {
               />
               <Stack.Screen
                 name="book-bookmarks"
+                options={{
+                  headerShown: false,
+                  presentation: "formSheet",
+                  animation: "slide_from_bottom",
+                  gestureEnabled: true,
+                  sheetAllowedDetents: [0.45, 0.9],
+                  sheetGrabberVisible: true,
+                  sheetCornerRadius: 20,
+                  contentStyle: {
+                    backgroundColor: themeColors.surface,
+                  },
+                }}
+              />
+              <Stack.Screen
+                name="book-bookmark-detail"
                 options={{
                   headerShown: false,
                   presentation: "fullScreenModal",

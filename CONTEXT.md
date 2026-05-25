@@ -60,7 +60,7 @@ The canonical whole-second audiobook position used for bookmark ordering and nav
 _Avoid_: Timestamp, location
 
 **Play from Bookmark**:
-A user-initiated action that sets the Listening Position to a Bookmark's Bookmark Position.
+A user-initiated action that sets the Listening Position to a Bookmark's Bookmark Position and starts playback.
 _Avoid_: Apply bookmark
 
 **End Position**:
@@ -119,9 +119,13 @@ _Avoid_: Bookmark attachment, bookmark metadata
 A local bookmark record whose linked server bookmark is not present in the latest server state.
 _Avoid_: Orphaned bookmark
 
-**Clip Detail**:
-A clip-only view for previewing, trimming, editing, exporting, or transcribing a clip bookmark.
-_Avoid_: Clip page, clip editor
+**Bookmark List**:
+A user-facing surface for reviewing saved Bookmarks for the Current Audiobook and choosing bookmark actions.
+_Avoid_: Bookmarks view, bookmark manager
+
+**Bookmark Detail**:
+A user-facing surface for reviewing and editing a saved Bookmark's Bookmark Title, Local Note, and bookmark-specific actions.
+_Avoid_: Edit bookmark screen, clip detail
 
 **Clip Editor**:
 A surface for creating or editing a Clip Bookmark's Clip Range.
@@ -234,7 +238,7 @@ _Avoid_: Five minute window, scrubber window
 - A **Clip Bookmark** uses the same **Bookmark Title** concept as a Point Bookmark; it does not have a separate clip title.
 - A **Bookmark** may change between **Point Bookmark** and **Clip Bookmark** without becoming a different **Bookmark**.
 - Editing a **Bookmark Position** changes the same Bookmark rather than creating a different Bookmark.
-- **Play from Bookmark** sets the **Listening Position** to that Bookmark's **Bookmark Position**.
+- **Play from Bookmark** sets the **Listening Position** to that Bookmark's **Bookmark Position** and starts playback.
 - **Resume Resolution** chooses the **Listening Position** when opening an audiobook.
 - **Resume Resolution** may use server progress to advance the **Listening Position** for either streamed or downloaded audiobooks.
 - **Resume Resolution** treats a **Progress Sync Intent** as a candidate, not as an automatic winner over farther server progress.
@@ -261,8 +265,8 @@ _Avoid_: Five minute window, scrubber window
 - Previewing a **Clip Bookmark** must not accidentally change the user's intended **Listening Position**.
 - A **Preview Position** must not replace the user's **Listening Position**.
 - The app stores **Preview Position** in transient preview state, not in the main playback state.
-- A **Clip Detail** belongs to exactly one **Clip Bookmark**.
-- A **Clip Bookmark** is edited from its **Clip Detail**.
+- A **Bookmark Detail** belongs to exactly one **Bookmark**.
+- A **Clip Bookmark** is edited from its **Bookmark Detail**.
 - A **Clip Editor** may be used to create an unsaved Clip Bookmark or to edit an existing Clip Bookmark.
 - Creating an unsaved Clip Bookmark continues from the **Add Bookmark Sheet** into the **Clip Editor** before saving.
 - Returning from the **Clip Editor** to the **Add Bookmark Sheet** preserves the unsaved Clip Bookmark draft.
@@ -276,10 +280,12 @@ _Avoid_: Five minute window, scrubber window
 - Moving a **Trim Window** updates the draft Clip Bookmark positions but does not drive clip preview playback.
 - In the **Clip Editor**, the **Trim Window** may automatically keep the **Clip Range** visible while users adjust Starting Position and duration.
 - Changing a **Clip Range** or **Trim Window** while previewing stops clip preview, restores the **Listening Position**, and returns the **Preview Position** to the start of the Clip Range.
-- Playback inside **Clip Detail** must not accidentally change the user's intended **Listening Position**.
-- When clip preview ends or Clip Detail closes, LAABS Audio restores the **Listening Position**.
+- Playback inside **Bookmark Detail** must not accidentally change the user's intended **Listening Position**.
+- When clip preview ends or Bookmark Detail closes, LAABS Audio restores the **Listening Position**.
 - Starting a **Clip Transcript Export** stops clip preview and restores the **Listening Position** before transcription begins.
 - Choosing a **Bookmark** is an explicit navigation action and takes precedence over clip preview restoration.
+- The **Bookmark List** shows saved Bookmarks for the Current Audiobook.
+- A saved **Bookmark** is reviewed and edited from **Bookmark Detail**.
 - A **Local Bookmark Record** may be linked to a **Server Bookmark**.
 - Every **Bookmark** shown by LAABS Audio is represented as a **Local Bookmark Record**.
 - An **Unmatched Bookmark** remains a **Local Bookmark Record** until the user deletes it or it is linked to a **Server Bookmark** again.
@@ -297,7 +303,7 @@ _Avoid_: Five minute window, scrubber window
 > **Domain expert:** "No, it becomes an **Unmatched Bookmark** and remains visible because the **Local Bookmark Record** owns the clip details."
 
 > **Dev:** "Should tapping a clip in the bookmark viewer preview the clip?"
-> **Domain expert:** "No, **Play from Bookmark** updates the **Listening Position**. Use **Clip Detail** to preview or trim the clip."
+> **Domain expert:** "No, **Play from Bookmark** updates the **Listening Position**. Use **Bookmark Detail** to review the Clip Bookmark, and use **Clip Editor** to trim the clip."
 
 > **Dev:** "Is text created from a saved passage a separate note?"
 > **Domain expert:** "No, it is a **Clip Transcription** created from the **Clip Bookmark**'s **Clip Range**."
@@ -315,7 +321,7 @@ _Avoid_: Five minute window, scrubber window
 - "advanced bookmark" was used to mean a bookmark with a start and end position; resolved: the canonical term is **Clip Bookmark**.
 - "orphaned bookmark" was used to mean a local bookmark whose server counterpart is missing; resolved: the canonical term is **Unmatched Bookmark**.
 - "clip name" and "bookmark name" were used for the user-facing label; resolved: the canonical term is **Bookmark Title**.
-- "clip details page" was used for the clip-only preview/edit surface; resolved: the canonical term is **Clip Detail**.
+- "clip details page" and "edit bookmark screen" were used for the saved bookmark review/edit surface; resolved: the canonical term is **Bookmark Detail**.
 - "shared clip controls" was used for the reusable create/edit surface; resolved: the canonical term is **Clip Editor**.
 - "share clip" and "export clip" were used for creating shareable audio from a Clip Bookmark; resolved: the canonical term is **Clip Export**.
 - "audio clip text" and "speech note" were used for text created from a Clip Bookmark's audio; resolved: the canonical term is **Clip Transcription**.

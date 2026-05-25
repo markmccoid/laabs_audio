@@ -27,7 +27,7 @@ The React Native FFmpeg path is risky as the first implementation dependency. Th
 - Phase 3 Clip Export Files do not need embedded audio tags. The Bookmark Title and book title should be reflected in the generated filename and share metadata where the platform supports it.
 - Local notes are not included in the audio Clip Export share payload. They remain part of bookmark review and Bookmark Backup Export metadata.
 - Clip Export filenames should include both book title and Bookmark Title, for example `{Book Title} - {Bookmark Title}.m4a`, sanitized for the filesystem.
-- Clip Export Files are generated on demand when the user starts Clip Export, not when Clip Detail opens.
+- Clip Export Files are generated on demand when the user starts Clip Export, not when Bookmark Detail opens.
 - After a Clip Export File is generated, the app should open the share sheet immediately rather than showing a second confirmation step.
 - If sharing is unavailable after generation, the app should notify the user and remove the temporary Clip Export File rather than persisting it.
 - Failed Clip Export attempts should show an error, clean up temporary files, and allow the user to try again without keeping export history.

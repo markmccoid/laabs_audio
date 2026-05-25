@@ -14,15 +14,7 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import * as Sharing from "expo-sharing";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useMemo, useState } from "react";
-import {
-  Alert,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  Text,
-  View,
-} from "react-native";
+import { Alert, FlatList, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
 
@@ -86,7 +78,6 @@ const toBookmarksCsv = (rows: BookmarkExportRow[]) => {
 export const BookBookmarksSheet = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
-  const playbackState = usePlaybackStore((state) => state.playbackState);
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
@@ -103,6 +94,7 @@ export const BookBookmarksSheet = () => {
   const [pendingBookmarkId, setPendingBookmarkId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const isBookmarkPlayPending = pendingBookmarkId !== null;
 
   const resolvedUserKey = useMemo(
     () => activeLibraryUserKey ?? getUserKey(storedUsername, serverUrl),
@@ -180,7 +172,9 @@ export const BookBookmarksSheet = () => {
       exportFileUri = `${exportDirectory}${fileName}`;
 
       const fileBody =
-        format === "json" ? JSON.stringify(buildBookmarkBackupExport(), null, 2) : toBookmarksCsv(rows);
+        format === "json"
+          ? JSON.stringify(buildBookmarkBackupExport(), null, 2)
+          : toBookmarksCsv(rows);
 
       await FileSystem.writeAsStringAsync(exportFileUri, fileBody, {
         encoding: FileSystem.EncodingType.UTF8,
@@ -216,7 +210,7 @@ export const BookBookmarksSheet = () => {
   };
 
   const openExportFormatPicker = () => {
-    if (isExporting) return;
+    if (isExporting || isBookmarkPlayPending) return;
     const rows = buildExportRows();
     if (!rows.length) {
       toast.info("No bookmarks to export");
@@ -241,19 +235,16 @@ export const BookBookmarksSheet = () => {
   };
 
   const handleBookmarkPress = async (bookmark: LocalBookmarkRecord) => {
-    if (!libraryItemId) return;
+    if (!libraryItemId || isBookmarkPlayPending) return;
     const targetPositionMs = secondsToMs(bookmark.startTimeSeconds);
     const isViewedBookActive = activeLibraryItemId === libraryItemId && queueLength > 0;
-    const isViewedBookPlaying = isViewedBookActive && playbackState === "playing";
 
     setPendingBookmarkId(bookmark.id);
     try {
       await playerService.cancelPreviewForExplicitNavigation();
-      if (isViewedBookPlaying) {
+      if (isViewedBookActive) {
         await playerService.seekTo(targetPositionMs);
         await playerService.play({ touchProgressCache: false });
-      } else if (isViewedBookActive) {
-        await playerService.seekTo(targetPositionMs);
       } else {
         await playerService.loadBook(libraryItemId, { autoPlay: false });
         await playerService.seekTo(targetPositionMs);
@@ -268,9 +259,9 @@ export const BookBookmarksSheet = () => {
   };
 
   const openBookmarkDetail = (bookmark: LocalBookmarkRecord) => {
-    if (!libraryItemId) return;
+    if (!libraryItemId || isBookmarkPlayPending) return;
     router.push({
-      pathname: "/book-bookmarks/edit",
+      pathname: "/book-bookmark-detail",
       params: {
         libraryItemId,
         bookmarkId: bookmark.id,
@@ -290,8 +281,8 @@ export const BookBookmarksSheet = () => {
     },
     {
       id: "detail",
-      title: bookmark.kind === "clip" ? "Clip Detail" : "Edit Bookmark",
-      image: bookmark.kind === "clip" ? "slider.horizontal.3" : "square.and.pencil",
+      title: "Bookmark Details",
+      image: "square.and.pencil",
       attributes: { disabled },
     },
     {
@@ -302,10 +293,8 @@ export const BookBookmarksSheet = () => {
     },
   ];
 
-  const handleBookmarkMenuAction = (
-    event: NativeActionEvent,
-    bookmark: LocalBookmarkRecord,
-  ) => {
+  const handleBookmarkMenuAction = (event: NativeActionEvent, bookmark: LocalBookmarkRecord) => {
+    if (isBookmarkPlayPending) return;
     const actionId = event.nativeEvent.event as BookmarkMenuActionId;
     if (actionId === "play") {
       void handleBookmarkPress(bookmark);
@@ -321,7 +310,7 @@ export const BookBookmarksSheet = () => {
   };
 
   const handleDeleteBookmark = async (bookmark: LocalBookmarkRecord) => {
-    if (!libraryItemId || pendingDeleteId !== null) return;
+    if (!libraryItemId || pendingDeleteId !== null || isBookmarkPlayPending) return;
 
     setPendingDeleteId(bookmark.id);
     try {
@@ -338,7 +327,7 @@ export const BookBookmarksSheet = () => {
   };
 
   const openDeleteConfirm = (bookmark: LocalBookmarkRecord) => {
-    if (pendingDeleteId !== null) return;
+    if (pendingDeleteId !== null || isBookmarkPlayPending) return;
     const timeLabel = getBookmarkTimeLabel(bookmark.startTimeSeconds);
     const title = getBookmarkDisplayTitle(bookmark);
 
@@ -355,15 +344,16 @@ export const BookBookmarksSheet = () => {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: themeColors.bg }}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
+    <View style={{ flex: 1, backgroundColor: themeColors.bg }} collapsable={false}>
       <View
         collapsable={false}
         style={{
-          paddingHorizontal: 32,
-          paddingTop: Math.max(32, insets.top + 16),
+          paddingHorizontal: 20,
+          paddingTop: 18,
+          paddingBottom: 14,
+          borderBottomWidth: 1,
+          borderBottomColor: themeColors.border,
+          backgroundColor: themeColors.surface,
         }}
       >
         <Stack.Screen options={{ title: "Bookmarks" }} />
@@ -374,7 +364,7 @@ export const BookBookmarksSheet = () => {
               accessibilityRole="button"
               accessibilityLabel="Export bookmarks"
               onPress={openExportFormatPicker}
-              disabled={isExporting}
+              disabled={isExporting || isBookmarkPlayPending}
               style={({ pressed }) => ({
                 width: 34,
                 height: 34,
@@ -382,10 +372,10 @@ export const BookBookmarksSheet = () => {
                 borderCurve: "continuous",
                 borderWidth: 1,
                 borderColor: themeColors.border,
-                backgroundColor: themeColors.surface,
+                backgroundColor: themeColors.bg,
                 alignItems: "center",
                 justifyContent: "center",
-                opacity: pressed || isExporting ? 0.75 : 1,
+                opacity: pressed || isExporting || isBookmarkPlayPending ? 0.75 : 1,
               })}
             >
               <SymbolView
@@ -399,7 +389,7 @@ export const BookBookmarksSheet = () => {
             accessibilityRole="button"
             accessibilityLabel="Close bookmarks"
             onPress={() => router.back()}
-            disabled={isExporting}
+            disabled={isExporting || isBookmarkPlayPending}
             style={({ pressed }) => ({
               minWidth: 72,
               height: 34,
@@ -407,14 +397,17 @@ export const BookBookmarksSheet = () => {
               borderCurve: "continuous",
               borderWidth: 1,
               borderColor: themeColors.border,
-              backgroundColor: themeColors.surface,
+              backgroundColor: themeColors.bg,
               alignItems: "center",
               justifyContent: "center",
               paddingHorizontal: 12,
-              opacity: pressed || isExporting ? 0.75 : 1,
+              opacity: pressed || isExporting || isBookmarkPlayPending ? 0.75 : 1,
             })}
           >
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 13, fontWeight: "700" }}>
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 13, fontWeight: "700" }}
+            >
               Close
             </Text>
           </Pressable>
@@ -445,7 +438,7 @@ export const BookBookmarksSheet = () => {
           const hasLocalNote = Boolean(note.length);
           const isPending = pendingBookmarkId === bookmark.id;
           const isDeleting = pendingDeleteId === bookmark.id;
-          const isActionDisabled = isPending || isDeleting;
+          const isActionDisabled = isBookmarkPlayPending || isDeleting;
           const primaryActionLabel = `Open bookmark actions for ${title} at ${timeLabel}`;
 
           return (
@@ -563,6 +556,6 @@ export const BookBookmarksSheet = () => {
           </View>
         }
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 };

@@ -9,7 +9,7 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { formatSeconds } from "@/utils/formatUtils";
 import Slider from "@react-native-community/slider";
 import * as Haptics from "expo-haptics";
-import { router, Stack } from "expo-router";
+import { router, Stack, useSegments } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
@@ -61,6 +61,7 @@ const getInitialRange = ({
 export const BookAddBookmarkClipEditorSheet = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
+  const segments = useSegments();
   const playbackDurationMs = usePlaybackStore((state) => state.durationMs);
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const activeQueueLength = usePlaybackStore((state) => state.queue.length);
@@ -82,6 +83,10 @@ export const BookAddBookmarkClipEditorSheet = () => {
       ? Math.max(MIN_CLIP_DURATION_SECONDS, draft.clipEndSeconds - draft.positionSeconds)
       : DEFAULT_CREATE_CLIP_DURATION_SECONDS;
   const screenTitle = draft.sourceBookmarkKind === "clip" ? "Edit Clip" : "Create Clip";
+  const isSavedBookmarkEdit = segments[0] === "book-bookmark-detail";
+  const backAccessibilityLabel = isSavedBookmarkEdit
+    ? "Back to bookmark detail"
+    : "Back to add bookmark";
   const initialRange = useMemo(
     () =>
       getInitialRange({
@@ -92,8 +97,17 @@ export const BookAddBookmarkClipEditorSheet = () => {
     [bookDurationSeconds, requestedDurationSeconds, requestedStartSeconds],
   );
   const [startSeconds, setStartSeconds] = useState(initialRange.startSeconds);
-  const [durationSeconds, setDurationSeconds] = useState(initialRange.durationSeconds);
+  const [rawDurationSeconds, setDurationSeconds] = useState(initialRange.durationSeconds);
   const [isEndPositionLocked, setIsEndPositionLocked] = useState(false);
+  const maxDurationForCurrentStart = Math.max(
+    MIN_CLIP_DURATION_SECONDS,
+    Math.min(MAX_CLIP_DURATION_SECONDS, bookDurationSeconds - startSeconds),
+  );
+  const durationSeconds = clampSeconds(
+    rawDurationSeconds,
+    MIN_CLIP_DURATION_SECONDS,
+    maxDurationForCurrentStart,
+  );
   const endSeconds = startSeconds + durationSeconds;
   const [previewScrubSeconds, setPreviewScrubSeconds] = useState(0);
   const clipPreviewAvailability = resolveClipPreviewAvailability({
@@ -119,26 +133,12 @@ export const BookAddBookmarkClipEditorSheet = () => {
   );
   const startMinimumSeconds = isEndPositionLocked ? lockedStartMinimumSeconds : 0;
   const startMaximumSeconds = isEndPositionLocked ? lockedStartMaximumSeconds : maxStartSeconds;
-  const maxDurationForCurrentStart = Math.max(
-    MIN_CLIP_DURATION_SECONDS,
-    Math.min(MAX_CLIP_DURATION_SECONDS, bookDurationSeconds - startSeconds),
-  );
-  useEffect(() => {
-    setDurationSeconds((current) =>
-      clampSeconds(current, MIN_CLIP_DURATION_SECONDS, maxDurationForCurrentStart),
-    );
-  }, [maxDurationForCurrentStart]);
 
   useEffect(() => {
     return () => {
       void playerService.restoreListeningPositionAfterPreview();
     };
   }, []);
-
-  useEffect(() => {
-    if (!isThisDraftPreview) return;
-    setPreviewScrubSeconds(previewElapsedSeconds);
-  }, [isThisDraftPreview, previewElapsedSeconds]);
 
   const stopPreview = async () => {
     await playerService.restoreListeningPositionAfterPreview();
@@ -391,7 +391,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Back to add bookmark"
+            accessibilityLabel={backAccessibilityLabel}
             onPress={() => {
               void handleCancel();
             }}
