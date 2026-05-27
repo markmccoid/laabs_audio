@@ -1,4 +1,4 @@
-import { useAuthActions, useAuthStore } from "@/auth/auth-store";
+import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
 import { usePlaybackStore } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 export const SettingsAuthenticationScreen = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
-  const status = useAuthStore((state) => state.status);
+  const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const serverUrl = useAuthStore((state) => state.serverUrl);
@@ -19,8 +19,28 @@ export const SettingsAuthenticationScreen = () => {
   );
   const { logout } = useAuthActions();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const canLogIn = status !== "authenticated";
-  const canChangeLibrary = status === "authenticated";
+  const canLogIn = accessMode !== "serverBrowsing" && accessMode !== "serverSetup";
+  const canFinishLibrarySetup = accessMode === "serverSetup";
+  const canChangeLibrary = accessMode === "serverBrowsing";
+  const canLogOut = accessMode === "serverBrowsing" || accessMode === "downloadedSessionOnly";
+  const sessionLabel =
+    accessMode === "serverBrowsing"
+      ? "Signed in"
+      : accessMode === "serverSetup"
+        ? "Choose library"
+      : accessMode === "downloadedSessionOnly"
+        ? "Sign in needed"
+        : "Not signed in";
+  const sessionDescription =
+    accessMode === "serverSetup"
+      ? "Select a library to finish signing in."
+      : accessMode === "downloadedSessionOnly"
+      ? "Downloaded books from this session remain available. Sign in to restore streaming, search, and sync."
+      : accessMode === "downloadedOnly"
+        ? "Downloaded books remain available on this device. Sign in to browse and sync with a server."
+        : accessMode === "firstRunSignInRequired"
+          ? "Sign in to connect this app to your Audiobookshelf server."
+          : null;
   const bottomPadding = (hasLoadedBook ? 112 : 0) + Math.max(24, insets.bottom + 16);
 
   const handleLogout = async () => {
@@ -59,8 +79,16 @@ export const SettingsAuthenticationScreen = () => {
           <Text selectable style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}>
             Session
           </Text>
+          <Text selectable style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
+            {sessionLabel}
+          </Text>
+          {sessionDescription ? (
+            <Text selectable style={{ color: themeColors.textMuted, fontSize: 14, lineHeight: 20 }}>
+              {sessionDescription}
+            </Text>
+          ) : null}
           <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
-            Status: {status}
+            Access: {accessMode}
           </Text>
           <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
             Online: {isOnline ? "Yes" : "No"}
@@ -101,9 +129,24 @@ export const SettingsAuthenticationScreen = () => {
           </Pressable>
         ) : null}
 
+        {canFinishLibrarySetup ? (
+          <Pressable
+            onPress={() => router.push({ pathname: "/library-picker", params: { mode: "setup" } })}
+            style={{
+              borderRadius: 14,
+              borderCurve: "continuous",
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              backgroundColor: themeColors.accent,
+            }}
+          >
+            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Choose Library</Text>
+          </Pressable>
+        ) : null}
+
         {canLogIn ? (
           <Pressable
-            onPress={() => router.replace({ pathname: "/login", params: { mode: "required" } })}
+            onPress={() => router.push({ pathname: "/login", params: { mode: "required" } })}
             style={{
               borderRadius: 14,
               borderCurve: "continuous",
@@ -114,7 +157,9 @@ export const SettingsAuthenticationScreen = () => {
           >
             <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Sign In</Text>
           </Pressable>
-        ) : (
+        ) : null}
+
+        {canLogOut ? (
           <Pressable
             onPress={() => {
               void handleLogout();
@@ -138,7 +183,7 @@ export const SettingsAuthenticationScreen = () => {
               {isLoggingOut ? "Logging Out..." : "Log Out"}
             </Text>
           </Pressable>
-        )}
+        ) : null}
       </ScrollView>
     </View>
   );

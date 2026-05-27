@@ -11,9 +11,10 @@ import { Toaster } from "react-native-sonner";
 import { Uniwind } from "uniwind";
 import { AmbientCoordinator } from "../ambient/ambient-coordinator";
 import { libraryItemsApi } from "../api/library-items-api";
-import { useAuthStore } from "../auth/auth-store";
+import { selectAccessMode, useAuthStore } from "../auth/auth-store";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
 import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
+import { LibraryActivationOverlay } from "../components/library-activation-overlay";
 import { LibrarySelectionGate } from "../components/library-selection-gate";
 import { OfflineConnectionBanner } from "../components/offline-connection-banner";
 import "../global.css";
@@ -115,12 +116,16 @@ const getReturnToLibraryItemId = (
     ? resolveParam(globalParams.libraryItemId)
     : undefined;
 
+const isDownloadedAccessMode = (accessMode: string) =>
+  accessMode === "downloadedOnly" || accessMode === "downloadedSessionOnly";
+
 export default function RootLayout() {
   useApplyAccentThemeOverrides();
   const { status } = useAuthBootstrap();
   const navigationTheme = useNavigationTheme();
   const themeColors = useThemeColors();
   const loginRequired = useAuthStore((state) => state.loginRequired);
+  const accessMode = useAuthStore(selectAccessMode);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const segments = useSegments();
@@ -338,6 +343,7 @@ export default function RootLayout() {
 
     logStartupDebug("routeGate:evaluate", {
       status,
+      accessMode,
       loginRequired,
       routeState,
       startupBookLinkId,
@@ -345,7 +351,7 @@ export default function RootLayout() {
     });
 
     // Keep all auth and startup routing decisions in one place to avoid competing redirects.
-    if (status === "anonymous" && !routeState.inLogin) {
+    if (accessMode === "firstRunSignInRequired" && !routeState.inLogin) {
       logStartupDebug("routeGate:redirect-login-required", {
         startupBookLinkId,
       });
@@ -359,9 +365,20 @@ export default function RootLayout() {
       return;
     }
 
-    if (loginRequired && status !== "anonymous" && !routeState.inLogin) {
+    if (
+      loginRequired &&
+      accessMode !== "firstRunSignInRequired" &&
+      accessMode !== "downloadedSessionOnly" &&
+      !routeState.inLogin
+    ) {
       logStartupDebug("routeGate:push-login-sheet");
       router.push({ pathname: "/login", params: { mode: "sheet" } });
+      return;
+    }
+
+    if (isDownloadedAccessMode(accessMode) && routeState.inLibraryPicker) {
+      logStartupDebug("routeGate:redirect-downloaded-access-home");
+      router.replace("/(tabs)/(home)");
       return;
     }
 
@@ -374,7 +391,7 @@ export default function RootLayout() {
       routeState.inPlayerUtilitySheet ||
       routeState.inBookUtilitySheet;
 
-    if (status !== "anonymous" && !loginRequired && !isKnownAuthenticatedRoute) {
+    if (accessMode !== "firstRunSignInRequired" && !isKnownAuthenticatedRoute) {
       if (startupBookLinkId) {
         logStartupDebug("routeGate:holding-for-deeplink", {
           startupBookLinkId,
@@ -384,7 +401,7 @@ export default function RootLayout() {
       logStartupDebug("routeGate:redirect-home");
       router.replace("/(tabs)/(home)");
     }
-  }, [initialDeepLinkBookId, loginRequired, routeState, startupBookLinkId, status]);
+  }, [accessMode, initialDeepLinkBookId, loginRequired, routeState, startupBookLinkId, status]);
 
   useEffect(() => {
     if (status === "hydrating") return;
@@ -524,6 +541,7 @@ export default function RootLayout() {
           <OfflineConnectionBanner />
           <SleepTimerCoordinator />
           <AmbientCoordinator />
+          <LibraryActivationOverlay />
           <View style={{ flex: 1 }}>
             <Stack
               screenOptions={{
@@ -535,13 +553,10 @@ export default function RootLayout() {
               <Stack.Screen
                 name="login"
                 options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  // sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
+                  presentation: "card",
+                  animation: "slide_from_right",
                   contentStyle: {
-                    backgroundColor: themeColors.surface,
+                    backgroundColor: themeColors.bg,
                   },
                 }}
               />

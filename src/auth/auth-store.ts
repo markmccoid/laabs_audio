@@ -14,6 +14,14 @@ const log = (...args: unknown[]) => {
 
 export type AuthStatus = "hydrating" | "anonymous" | "authenticated" | "offlineOnly";
 
+export type AccessMode =
+  | "hydrating"
+  | "firstRunSignInRequired"
+  | "downloadedOnly"
+  | "downloadedSessionOnly"
+  | "serverSetup"
+  | "serverBrowsing";
+
 export type AuthState = {
   status: AuthStatus;
   hasStoredCredentials: boolean;
@@ -404,3 +412,19 @@ export const useAuthStore = <T>(selector: (state: AuthState) => T) => useStore(a
 export const useAuthActions = () => useAuthStore((state) => state.actions);
 
 export const getAuthState = () => authStore.getState();
+
+export const selectAccessMode = (state: AuthState): AccessMode => {
+  if (state.status === "hydrating") return "hydrating";
+
+  if (state.status === "authenticated") {
+    return state.activeLibraryId ? "serverBrowsing" : "serverSetup";
+  }
+
+  if (state.status === "offlineOnly") {
+    return state.loginRequired && Boolean(state.storedUsername && state.serverUrl)
+      ? "downloadedSessionOnly"
+      : "downloadedOnly";
+  }
+
+  return state.hasOfflineContent ? "downloadedOnly" : "firstRunSignInRequired";
+};

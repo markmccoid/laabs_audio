@@ -24,6 +24,10 @@ _Avoid_: Current library, selected library
 The user-facing choice of which Library becomes the Active Library for a User Session.
 _Avoid_: Library picker, library prompt
 
+**Library Activation**:
+The transition that makes a chosen Library ready for browsing after Library Selection.
+_Avoid_: Library load, library warmup
+
 **Library Resolution**:
 The post-authentication determination of whether a User Session has zero, one, or multiple Libraries.
 _Avoid_: Library fetch, picker decision
@@ -32,9 +36,33 @@ _Avoid_: Library fetch, picker decision
 The app state after an explicit logout where locally downloaded audiobooks remain available but no User Session is browsable.
 _Avoid_: Offline mode
 
+**Downloaded Audio Asset**:
+The local audio and cover files for an audiobook from a known Audiobookshelf Server stored on the device.
+_Avoid_: Downloaded book
+
+**Legacy Downloaded Audio Asset**:
+A Downloaded Audio Asset created before LAABS Audio knew which Audiobookshelf Server owned it.
+_Avoid_: Orphaned download
+
+**Download Entitlement**:
+The association that makes a Downloaded Audio Asset visible to a User Session while that User Session is signed in.
+_Avoid_: Download owner, downloaded book
+
 **Offline User Session**:
 A remembered User Session used while the device is offline.
 _Avoid_: Logged out, downloaded-only mode
+
+**Session Needs Sign-In**:
+A remembered User Session whose server access is blocked until the user signs in again.
+_Avoid_: Logged out, anonymous, downloaded-only mode
+
+**Session State**:
+The user's relationship to a User Session, independent of which app surfaces are available.
+_Avoid_: Status
+
+**Access Mode**:
+The set of app surfaces currently available to the user.
+_Avoid_: Status
 
 **Favorite**:
 A user-specific marker for a Library Item, identified in Audiobookshelf by a tag derived from the user's login name.
@@ -43,6 +71,14 @@ _Avoid_: Global favorite, app-only favorite
 **Current Audiobook**:
 The audiobook whose detail context the user is presently viewing.
 _Avoid_: Selected book, current book
+
+**Active Playback**:
+The audiobook currently owned by the player for listening.
+_Avoid_: Current audiobook, selected playback, global player book
+
+**Playback Start Attempt**:
+A user-requested attempt to make an audiobook become Active Playback.
+_Avoid_: Pending load, playback request, loading state
 
 **Bookmark**:
 A saved reference to a meaningful place in an audiobook.
@@ -102,6 +138,10 @@ _Avoid_: Orphaned progress, dead progress sync
 **Streamed Playback Session**:
 An Audiobookshelf playback session used while streaming an audiobook from the Audiobookshelf Server.
 _Avoid_: Stream session, playback session
+
+**Streamed Playback Start Failure**:
+A failed attempt to begin streamed listening after a Streamed Playback Session has been created but before LAABS Audio confirms playable audio.
+_Avoid_: Streaming timeout, bad connection, stuck loading
 
 **Automatic Progress Sample**:
 A Progress Sync Intent created from playback movement or app lifecycle handling rather than an explicit user command.
@@ -198,13 +238,45 @@ _Avoid_: Five minute window, scrubber window
 - A remembered **Active Library** may be used when it belongs to the same **User Session**, but it stops being valid if Audiobookshelf no longer returns that Library.
 - User-requested **Library Selection** may still show the available Libraries even when only one Library can become the **Active Library**.
 - **Library Selection** chooses the Active Library; Library-scoped audiobook, shelf, progress, and playlist data belong to the Active Library after it is chosen.
+- **Library Activation** happens after **Library Selection** and before the chosen Library is treated as browsable.
+- **Library Activation** requires enough Library-scoped catalog data and User Session listening state to make browsing coherent.
+- Remembered Library data may satisfy **Library Activation**.
+- **Library Activation** blocks other app interactions while it is in progress.
+- After user-requested **Library Activation**, Home is the safe browsing surface for the newly Active Library.
+- A return to a specific audiobook after **Library Activation** is valid only when that audiobook belongs to the newly Active Library.
+- Failed **Library Activation** leaves the previous Active Library browsable when one exists.
+- Failed **Library Activation** returns to **Library Selection** when no previous Active Library exists.
+- Library-scoped enhancements may finish loading after **Library Activation**.
 - A **Favorite** belongs to a **User Session** and a globally unique Library Item.
 - A **Favorite** may be discovered by querying Libraries, but Library-specific discovery does not make the Favorite belong to a Library.
 - Library-scoped book lists may use User Session scoped Favorites as an overlay.
 - A **Current Audiobook** may belong to an Audiobookshelf series with other audiobooks.
+- A **Current Audiobook** may differ from **Active Playback**.
+- A **Playback Start Attempt** may become **Active Playback** only after playable audio is confirmed.
+- A **Playback Start Attempt** for one audiobook may replace existing **Active Playback** for another audiobook before playable audio is confirmed.
+- A failed **Playback Start Attempt** may leave no **Active Playback**.
 - **Downloaded-Only Mode** is not an **Offline User Session**.
-- **Downloaded-Only Mode** shows downloaded audiobooks without **Library Selection** or server-scoped browsing.
-- **Downloaded-Only Mode** allows downloaded audiobooks to play and track local progress without server status, auth status, or internet connectivity.
+- A user in **Downloaded-Only Mode** is not signed in.
+- **Downloaded-Only Mode** shows all **Downloaded Audio Assets** without **Library Selection** or server-scoped browsing.
+- **Downloaded-Only Mode** allows **Downloaded Audio Assets** to play and track local progress without server status, auth status, or internet connectivity.
+- **Session Needs Sign-In** is not **Downloaded-Only Mode** because it retains the remembered **User Session** identity.
+- **Session Needs Sign-In** allows **Downloaded Audio Assets** with a **Download Entitlement** for the remembered **User Session** to remain available.
+- **Session Needs Sign-In** blocks streaming, search, server-scoped browsing, and sync until the **User Session** is restored.
+- A user in **Session Needs Sign-In** may explicitly log out and enter **Downloaded-Only Mode**.
+- A **Downloaded Audio Asset** may be shared by multiple **Download Entitlements**.
+- A **Downloaded Audio Asset** identity includes its **Audiobookshelf Server** and **Audiobook Identity**.
+- A **Legacy Downloaded Audio Asset** may be shown in **Downloaded-Only Mode** until it can be associated with a **User Session**.
+- A signed-in **User Session** sees **Downloaded Audio Assets** through its own **Download Entitlements**.
+- **Session State** is distinct from **Access Mode**.
+- **Session State** determines whether there is a signed-in, remembered, or absent **User Session**.
+- **Access Mode** determines whether the user can browse server Libraries, use remembered downloaded content, or only use device downloads.
+- **Downloaded-Only Mode** is an **Access Mode** where only device downloads and account recovery surfaces are available.
+- **Session Needs Sign-In** uses an **Access Mode** where only downloads for the remembered **User Session** and account recovery surfaces are available.
+- A first run with no **User Session** and no **Downloaded Audio Assets** uses an **Access Mode** where sign-in is required before app entry.
+- A signed-in **User Session** with an **Active Library** uses an **Access Mode** where server browsing, streaming, search, and sync are available.
+- App entry is guarded by **Access Mode**, not by **Session State** alone.
+- Manual sign-in from a downloaded-capable **Access Mode** is dismissible.
+- Forced sign-in is only used when no **User Session** and no **Downloaded Audio Assets** are available.
 - **Progress Sync Intent** records for downloaded audiobooks may survive explicit logout and sync when the same **User Session** is restored.
 - **Progress Sync Intent** records are scoped to the Audiobookshelf Server and user they were created for when that identity is known.
 - **Audiobook Identity** uses Audiobookshelf's library item identity first and may use media item identity to recover the same audiobook on the same Audiobookshelf Server for the same user.
@@ -252,6 +324,9 @@ _Avoid_: Five minute window, scrubber window
 - Editing a **Bookmark Position** changes the same Bookmark rather than creating a different Bookmark.
 - **Play from Bookmark** sets the **Listening Position** to that Bookmark's **Bookmark Position** and starts playback.
 - **Resume Resolution** chooses the **Listening Position** when opening an audiobook.
+- A **Streamed Playback Start Failure** belongs to one **Streamed Playback Session**.
+- A **Streamed Playback Start Failure** does not change the **Listening Position**.
+- A **Streamed Playback Start Failure** may close its **Streamed Playback Session** after user-facing playback has already reset.
 - **Resume Resolution** may use server progress to advance the **Listening Position** for either streamed or downloaded audiobooks.
 - **Resume Resolution** treats a **Progress Sync Intent** as a candidate, not as an automatic winner over farther server progress.
 - A **Progress Sync Intent** is either an **Automatic Progress Sample** or an **Explicit Progress Change**.

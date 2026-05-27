@@ -1,0 +1,3 @@
+# Provisional Streamed Playback Start Attempts
+
+Bad connectivity can let Audiobookshelf create a Streamed Playback Session while the first streamed track never becomes playable, leaving LAABS Audio in a misleading loading or ready state. Streamed autoplay now treats the session as provisional until the target track reaches playing within a single startup budget after `getPlayInfo`; only then does the attempt become Active Playback. If the attempt fails, LAABS Audio resets to no Active Playback, shows a poor-connection message, leaves the Listening Position unchanged, and closes the provisional Streamed Playback Session best-effort after the user-facing reset.

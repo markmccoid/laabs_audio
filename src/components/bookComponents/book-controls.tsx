@@ -1,4 +1,4 @@
-import { playerService, usePlaybackStore } from "@/player";
+import { isStreamedPlaybackStartFailure, playerService, usePlaybackStore } from "@/player";
 import { useAuthStore } from "@/auth/auth-store";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
@@ -6,6 +6,7 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
+import { toast } from "react-native-sonner";
 import PlayPauseAnimation, { type PlaybackControlVisualState } from "./play-pause-animation";
 
 type Props = {
@@ -88,6 +89,13 @@ const resolveSeekForwardIcon = (seconds: number): SFSymbol => {
   }
 };
 
+const showStreamedPlaybackStartFailureToast = () => {
+  toast.error("Unable to start streaming", {
+    description:
+      "Your connection is not good enough for streaming right now. Try again when it improves, or download the audiobook.",
+  });
+};
+
 const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
   const themeColors = useThemeColors();
   const isOnline = useAuthStore((state) => state.isOnline);
@@ -116,9 +124,15 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
     const canResolvePending =
       isLoadedForViewedBook || playbackState === "error" || playbackState === "ended";
 
-    if (canResolvePending) {
+    if (!canResolvePending) return;
+
+    const timeoutId = setTimeout(() => {
       setPendingLoadBookId(null);
-    }
+    }, 0);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
   }, [libraryItemId, pendingLoadBookId, playbackState, isBookActive, isBookLoaded]);
 
   const viewedBookState: PlaybackControlVisualState = (() => {
@@ -155,7 +169,10 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
       setPendingLoadBookId(libraryItemId);
       try {
         await playerService.loadBook(libraryItemId, { autoPlay: true });
-      } catch {
+      } catch (error) {
+        if (isStreamedPlaybackStartFailure(error)) {
+          showStreamedPlaybackStartFailureToast();
+        }
         setPendingLoadBookId(null);
       }
       return;
@@ -165,7 +182,10 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
     }
     try {
       await playerService.togglePlayPause();
-    } catch {
+    } catch (error) {
+      if (isStreamedPlaybackStartFailure(error)) {
+        showStreamedPlaybackStartFailureToast();
+      }
       setPendingLoadBookId(null);
     }
   };

@@ -189,10 +189,12 @@ Transition behavior:
 2. The pending marker drives `loading` immediately so the user sees an in-progress spinner while metadata and queue initialize.
 3. `audio-engine.load()` waits for a ready native state (`PAUSED`/`STOPPED`/`PLAYING`) for the target track before returning control to `playerService`.
 4. `playerService.play()` waits for confirmed native `PLAYING` state on the same target track before setting store playback state to `playing`.
-5. Once `PLAYING` is confirmed, the control transitions to `playing`; if confirmation fails, the service sets an error and returns to `ready`.
+5. Once `PLAYING` is confirmed, the control transitions to `playing`; if non-streamed confirmation fails, the service sets an error and returns to `ready`.
 6. Pressing the control while active uses `playerService.togglePlayPause()`.
-7. If `loadBook` fails at any point, `playerService` exits `loading` and sets an actionable playback state (`ready` when queue data exists, otherwise `error`) so the control is never stuck disabled.
+7. If `loadBook` fails at any point, `playerService` exits `loading` and sets an actionable playback state so the control is never stuck disabled.
 8. Chapter navigation resolves from `positionMs` (not cached chapter id), and `seekTo` immediately updates `currentChapterId` so next/previous chapter actions stay accurate while paused or between progress ticks.
+
+Streamed autoplay has one additional guardrail: after `getPlayInfo` returns, the Streamed Playback Session stays provisional until the target track reaches `PLAYING` within the streamed startup budget. If that does not happen, `playerService` unloads the engine, resets to no active playback, closes the provisional session best-effort, and the play control shows a poor-connection toast before returning to `not-loaded`.
 
 ## Per-Book Rate Setter
 

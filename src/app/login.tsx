@@ -12,12 +12,12 @@ import {
 } from "react-native";
 import { SymbolView } from "expo-symbols";
 import Dropdown from "../shared/ui/organisms/dropdown";
-import { useAuthActions, useAuthStore } from "../auth/auth-store";
+import { selectAccessMode, useAuthActions, useAuthStore } from "../auth/auth-store";
 import {
   fetchLibrariesForResolution,
   resolveLibrarySelection,
 } from "../auth/library-resolution";
-import { getBookDetailHref } from "../navigation/book-links";
+import { useActivateLibrarySelection } from "../hooks/use-activate-library-selection";
 import { useThemeColors } from "../theme/use-app-theme";
 
 const SERVER_PROTOCOLS = ["https://", "http://"] as const;
@@ -58,9 +58,11 @@ const buildServerUrl = (protocol: ServerProtocol, host: string) => {
 export default function LoginScreen() {
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const storedServerUrl = useAuthStore((state) => state.serverUrl);
+  const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
   const lastAuthError = useAuthStore((state) => state.lastAuthError);
-  const { loginWithPassword, setActiveLibrary, setLoginRequired } = useAuthActions();
+  const { loginWithPassword, setLoginRequired } = useAuthActions();
+  const activateLibrarySelection = useActivateLibrarySelection();
   const themeColors = useThemeColors();
   const params = useLocalSearchParams<{ mode?: string; returnToLibraryItemId?: string | string[] }>();
 
@@ -87,6 +89,11 @@ export default function LoginScreen() {
   const [localError, setLocalError] = useState<string | null>(null);
 
   const handleClose = () => {
+    setLoginRequired(false);
+    router.back();
+  };
+
+  const handleCancel = () => {
     setLoginRequired(false);
     router.back();
   };
@@ -128,16 +135,14 @@ export default function LoginScreen() {
         return;
       }
 
-      setActiveLibrary(resolution.library);
-
-      if (returnToLibraryItemId) {
-        router.replace(getBookDetailHref(returnToLibraryItemId));
-      } else if (isSheet) {
+      if (isSheet) {
         setLoginRequired(false);
-        router.back();
-      } else {
-        router.replace("/(tabs)/(home)");
       }
+
+      await activateLibrarySelection(resolution.library, {
+        mode: "setup",
+        returnToLibraryItemId,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Login failed";
       setLocalError(message);
@@ -290,6 +295,16 @@ export default function LoginScreen() {
           <Text className="text-center text-base font-semibold text-accent-foreground">Sign in</Text>
         )}
       </Pressable>
+
+      {!isSheet && accessMode !== "firstRunSignInRequired" ? (
+        <Pressable
+          onPress={handleCancel}
+          className="mt-3 rounded-xl border border-border bg-surface px-4 py-3"
+          disabled={isSubmitting}
+        >
+          <Text className="text-center text-base font-semibold text-text">Cancel</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 

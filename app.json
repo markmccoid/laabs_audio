@@ -2,7 +2,7 @@
   "expo": {
     "name": "LAABS Audiobookshelf",
     "slug": "laabs_audio",
-    "version": "1.3.5",
+    "version": "1.3.6",
     "orientation": "portrait",
     "scheme": "laabsaudio",
     "userInterfaceStyle": "automatic",

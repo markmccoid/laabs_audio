@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import { router, useSegments } from "expo-router";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
+import { useLibraryActivationStore } from "../auth/library-activation-store";
+import { useActivateLibrarySelection } from "../hooks/use-activate-library-selection";
 import { useLibrarySelection } from "../hooks/use-library-selection";
 
 // A stable key to scope library prompts/selections per user + server.
@@ -19,6 +21,8 @@ export const LibrarySelectionGate = () => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryName = useAuthStore((state) => state.activeLibraryName);
   const { clearActiveLibrary, logout } = useAuthActions();
+  const activationStatus = useLibraryActivationStore((state) => state.status);
+  const activateLibrarySelection = useActivateLibrarySelection();
   const segments = useSegments();
 
   // Query + actions for fetching and storing library selection.
@@ -66,6 +70,7 @@ export const LibrarySelectionGate = () => {
     if (loginRequired) return;
     if (!isFetched) return;
     if (isFetching) return;
+    if (activationStatus !== "idle") return;
     if (!libraries.length) {
       if (activeLibraryId) {
         clearActiveLibrary();
@@ -89,7 +94,7 @@ export const LibrarySelectionGate = () => {
     }
 
     if (libraries.length === 1) {
-      selectLibrary(libraries[0]);
+      void activateLibrarySelection(libraries[0], { mode: "setup" });
       return;
     }
 
@@ -102,6 +107,8 @@ export const LibrarySelectionGate = () => {
   }, [
     activeLibraryId,
     activeLibraryName,
+    activateLibrarySelection,
+    activationStatus,
     clearActiveLibrary,
     isFetched,
     isFetching,

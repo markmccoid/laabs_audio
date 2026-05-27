@@ -56,13 +56,12 @@ First login performs a fresh Libraries query before normal browsing begins:
 
 - `queryKeys.libraries` via `librariesApi.getAll()`
 
-If exactly one Library is returned, it becomes the Active Library automatically. If multiple Libraries are returned, the app routes to Library Selection without setting a temporary Active Library. After setup Library Selection, the picker displays a loading state while prefetching:
+If exactly one Library is returned, Library Activation runs before it becomes the Active Library. If multiple Libraries are returned, the app routes to Library Selection without setting a temporary Active Library. Library Activation can use remembered data immediately, and fetches only missing required activation data before committing the Active Library:
 
 - `queryKeys.libraryBooks(activeLibraryId)`
 - `queryKeys.userServerState(activeLibraryUserKey)`
-- `queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId)`
 
-This prevents the Home screen from appearing blank or stale during the initial 2-5 second data load after choosing a Library.
+`queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId)` may prefetch in the background, but it does not block Library Activation. This prevents the Home screen from appearing blank during the initial data load after choosing a Library without making cached library switches wait for a server refresh.
 
 ## Home Manual Refresh
 

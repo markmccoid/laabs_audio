@@ -51,6 +51,20 @@ export type PlaybackStoreState = {
       durationMs: number;
       chapterIndex: ResolvedChapter[];
     }) => void;
+    commitStartedSession: (payload: {
+      libraryItemId: string;
+      bookTitle: string | null;
+      sessionId: string;
+      queue: PlaybackQueueItem[];
+      durationMs: number;
+      chapterIndex: ResolvedChapter[];
+      currentTrackIndex: number;
+      positionMs: number;
+      trackPositionMs: number;
+      rate: number;
+      currentChapterId: number | null;
+      trackDurationMs: number;
+    }) => void;
     setCurrentTrack: (index: number, trackDurationMs: number) => void;
     setTrackDuration: (trackDurationMs: number) => void;
     setPosition: (payload: { positionMs: number; trackPositionMs: number }) => void;
@@ -140,6 +154,37 @@ export const playbackStore = createStore<PlaybackStoreState>()(
             trackPositionMs: 0,
             currentChapterId: chapterIndex[0]?.id ?? null,
             error: null,
+          }),
+        commitStartedSession: ({
+          libraryItemId,
+          bookTitle,
+          sessionId,
+          queue,
+          durationMs,
+          chapterIndex,
+          currentTrackIndex,
+          positionMs,
+          trackPositionMs,
+          rate,
+          currentChapterId,
+          trackDurationMs,
+        }) =>
+          set({
+            playbackState: "playing",
+            libraryItemId,
+            bookTitle,
+            sessionId,
+            queue,
+            durationMs,
+            chapterIndex,
+            currentTrackIndex,
+            positionMs,
+            trackPositionMs,
+            rate,
+            currentChapterId,
+            trackDurationMs,
+            error: null,
+            debugStatus: null,
           }),
         setCurrentTrack: (currentTrackIndex, trackDurationMs) =>
           set({ currentTrackIndex, trackDurationMs, trackPositionMs: 0 }),

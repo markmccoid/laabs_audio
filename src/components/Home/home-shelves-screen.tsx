@@ -2,6 +2,7 @@ import { libraryItemsApi } from "@/api/library-items-api";
 import { playlistsApi } from "@/api/playlists-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { type HomeShelf, useHomeShelves } from "@/hooks/use-home-shelves";
+import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
 import { useLibrarySelection } from "@/hooks/use-library-selection";
 import { queryKeys } from "@/query/query-keys";
 import { fetchReconciledUserServerState } from "@/query/user-server-state-reconcile";
@@ -35,12 +36,12 @@ const HomeShelvesScreen = () => {
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const { visibleShelves, favoriteByBookId, progressByBookId, refreshDiscover } =
     useHomeShelves();
+  const activateLibrarySelection = useActivateLibrarySelection();
   const {
     libraries,
     isLoading: isLibrariesLoading,
     isError: isLibrariesError,
     refetch: refetchLibraries,
-    selectLibrary,
   } = useLibrarySelection();
   const canChangeLibrary = authStatus === "authenticated";
   const scrollY = useSharedValue(0);
@@ -109,9 +110,9 @@ const HomeShelvesScreen = () => {
     (library: Library) => {
       if (library.id === activeLibraryId) return;
       setRefreshMessage(null);
-      selectLibrary(library);
+      void activateLibrarySelection(library);
     },
-    [activeLibraryId, selectLibrary],
+    [activateLibrarySelection, activeLibraryId],
   );
 
   return (
@@ -209,7 +210,7 @@ const HomeShelvesScreen = () => {
 
         {visibleShelves.map((shelf: HomeShelf) => (
           <HomeShelfSection
-            key={shelf.id}
+            key={`${activeLibraryId ?? "no-library"}:${shelf.id}`}
             title={shelf.title}
             books={shelf.books}
             favoriteByBookId={favoriteByBookId}

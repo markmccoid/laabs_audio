@@ -4,6 +4,7 @@ import {
   type UserServerState,
 } from "../api/me-api";
 import { playbackApi } from "../api/playback-api";
+import { sessionsApi } from "../api/sessions-api";
 import { buildCoverUrls } from "../api/cover-urls";
 import { authStore } from "../auth/auth-store";
 import { queryClient } from "../query/query-client";
@@ -34,6 +35,11 @@ import { createAudioEngine } from "./audio-engine";
 import { buildChapterIndex, findChapterForPosition, findTrackForPosition } from "./chapters";
 import { clipPreviewStore } from "./clip-preview-store";
 import { resolveClipPreviewAvailability } from "./clip-preview-availability";
+import {
+  isStreamedPlaybackStartFailure,
+  StreamedPlaybackStartFailureError,
+  withPlaybackStartTimeout,
+} from "./playback-start-attempt";
 import type { PlaybackStoreState } from "./playback-store";
 import { playbackStore } from "./playback-store";
 import { buildPlaybackQueue } from "./queue";
@@ -140,6 +146,7 @@ class PlayerService {
   private lastPauseSyncAt = 0;
   private initialized = false;
   private localStreamFallbackInFlight = false;
+  private playbackStartAttemptId = 0;
   private clipPreviewSession: ClipPreviewSession | null = null;
   private postPreviewStatusGuard:
     | {
@@ -290,6 +297,20 @@ class PlayerService {
       this.lastSyncAt = 0;
       this.lastTrackedPositionMs = 0;
 
+      if (!shouldUseDownloadedAudio && options?.autoPlay) {
+        await this.startProvisionalStreamedPlayback({
+          libraryItemId: resolvedLibraryItemId,
+          bookTitle: resolvedBookTitle,
+          sessionId: resolvedSessionId,
+          queue,
+          durationMs,
+          chapterIndex,
+          resumePositionMs,
+          rate: storedBookRate,
+        });
+        return;
+      }
+
       playbackStore.getState().actions.setSession({
         libraryItemId: resolvedLibraryItemId,
         bookTitle: resolvedBookTitle,
@@ -333,9 +354,18 @@ class PlayerService {
         try {
           await this.loadBook(libraryItemId, options, { preferDownloaded: false });
           return;
-        } catch {
+        } catch (fallbackError) {
+          if (isStreamedPlaybackStartFailure(fallbackError)) {
+            throw fallbackError;
+          }
           // Fall through to existing error handling.
         }
+      }
+      if (isStreamedPlaybackStartFailure(error)) {
+        if (__DEV__) {
+          console.log("[player-service] streamed-start-failure", { libraryItemId, error });
+        }
+        throw error;
       }
       if (__DEV__) {
         console.log("[player-service] loadBook:error", { libraryItemId, error });
@@ -346,6 +376,128 @@ class PlayerService {
       playbackStore.getState().actions.setError(message);
       throw error;
     }
+  }
+
+  private async startProvisionalStreamedPlayback(payload: {
+    libraryItemId: string;
+    bookTitle: string | null;
+    sessionId: string;
+    queue: PlaybackQueueItem[];
+    durationMs: number;
+    chapterIndex: ReturnType<typeof buildChapterIndex>;
+    resumePositionMs: number;
+    rate: number;
+  }) {
+    const targetTrack = findTrackForPosition(payload.queue, payload.resumePositionMs) ?? payload.queue[0];
+    if (!targetTrack) {
+      throw new Error("Track not found");
+    }
+
+    const attemptId = ++this.playbackStartAttemptId;
+    const targetIndex = payload.queue.indexOf(targetTrack);
+    const trackPositionMs = Math.max(0, payload.resumePositionMs - targetTrack.startOffsetMs);
+    const bookPositionMs = targetTrack.startOffsetMs + trackPositionMs;
+    const chapterAtPosition = findChapterForPosition(payload.chapterIndex, bookPositionMs);
+
+    try {
+      await withPlaybackStartTimeout(
+        (async () => {
+          await this.engine.load(targetTrack, {
+            initialPositionMs: trackPositionMs,
+            rate: payload.rate,
+            pitchCorrectionQuality: settingsStore.getState().pitchCorrectionQuality,
+          });
+
+          await this.engine.play();
+          try {
+            await this.engine.waitForPlaying();
+          } catch {
+            await this.engine.play();
+            await this.engine.waitForPlaying();
+          }
+
+          await this.engine.setRate(
+            payload.rate,
+            settingsStore.getState().pitchCorrectionQuality,
+          );
+        })(),
+      );
+
+      if (attemptId !== this.playbackStartAttemptId) {
+        throw new StreamedPlaybackStartFailureError("Streamed playback start attempt was superseded");
+      }
+
+      playbackStore.getState().actions.commitStartedSession({
+        libraryItemId: payload.libraryItemId,
+        bookTitle: payload.bookTitle,
+        sessionId: payload.sessionId,
+        queue: payload.queue,
+        durationMs: payload.durationMs,
+        chapterIndex: payload.chapterIndex,
+        currentTrackIndex: targetIndex,
+        positionMs: bookPositionMs,
+        trackPositionMs,
+        rate: payload.rate,
+        currentChapterId: chapterAtPosition?.id ?? null,
+        trackDurationMs: targetTrack.durationMs,
+      });
+
+      this.lastTrackedPositionMs = bookPositionMs;
+      this.lastSyncAttemptAt = Date.now();
+      this.touchUserServerStateCacheForPlayStart();
+      this.logPlaybackResult("started");
+    } catch (error) {
+      this.playbackStartAttemptId += 1;
+      await this.resetAfterStreamedPlaybackStartFailure({
+        sessionId: payload.sessionId,
+        currentTimeMs: payload.resumePositionMs,
+        durationMs: payload.durationMs,
+      });
+      this.logPlaybackResult("failed", {
+        reason: error instanceof Error ? error.message : "Unable to start streamed playback",
+        mode: "streaming",
+        snapshot: this.engine.getDebugSnapshot(),
+      });
+      if (isStreamedPlaybackStartFailure(error)) {
+        throw error;
+      }
+      throw new StreamedPlaybackStartFailureError();
+    }
+  }
+
+  private async resetAfterStreamedPlaybackStartFailure(payload: {
+    sessionId: string;
+    currentTimeMs: number;
+    durationMs: number;
+  }) {
+    try {
+      await this.engine.unload();
+    } catch (error) {
+      if (__DEV__) {
+        console.warn("[player-service] streamed-start-failure:unload-failed", { error });
+      }
+    }
+
+    playbackStore.getState().actions.reset();
+    this.listenedMs = 0;
+    this.lastSyncAttemptAt = 0;
+    this.lastSyncAt = 0;
+    this.lastTrackedPositionMs = 0;
+
+    void sessionsApi
+      .closeSession(payload.sessionId, {
+        timeListened: 0,
+        currentTime: msToSeconds(payload.currentTimeMs),
+        duration: msToSeconds(payload.durationMs),
+      })
+      .catch((error) => {
+        if (__DEV__) {
+          console.warn("[player-service] streamed-start-failure:close-session-failed", {
+            sessionId: payload.sessionId,
+            error,
+          });
+        }
+      });
   }
 
   async loadLocalFile(payload: {
@@ -1180,7 +1332,9 @@ class PlayerService {
           });
           return;
         } catch (fallbackError) {
-          void fallbackError;
+          if (isStreamedPlaybackStartFailure(fallbackError)) {
+            throw fallbackError;
+          }
         } finally {
           this.localStreamFallbackInFlight = false;
         }
