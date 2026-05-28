@@ -50,6 +50,7 @@ const MAX_LISTEN_DELTA_MS = 5000;
 const PAUSE_SYNC_DEDUPE_WINDOW_MS = 2000;
 const DEBUG_PLAYBACK_EVENTS = false;
 const CHAPTER_RESTART_THRESHOLD_MS = 3000;
+const PLAYBACK_CONTROL_SETTLE_MS = 350;
 const MIN_PLAYBACK_RATE = 0.25;
 const MAX_PLAYBACK_RATE = 2.0;
 const LOCAL_SESSION_ID = "local";
@@ -105,6 +106,15 @@ type ClipPreviewSession = {
   stoppedAtEnd: boolean;
 };
 
+export type PlaybackControlResult =
+  | { status: "accepted"; intentId: string }
+  | {
+      status: "ignored";
+      reason: "intent_active";
+      activeIntentKind: "start" | "play" | "pause";
+    }
+  | { status: "already_satisfied"; state: "playing" | "paused" };
+
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
 const clampPlaybackRate = (rate: number) =>
@@ -148,6 +158,7 @@ class PlayerService {
   private initialized = false;
   private localStreamFallbackInFlight = false;
   private playbackStartAttemptId = 0;
+  private playbackControlIntentClearTimeout: ReturnType<typeof setTimeout> | null = null;
   private clipPreviewSession: ClipPreviewSession | null = null;
   private postPreviewStatusGuard:
     | {
@@ -155,6 +166,73 @@ class PlayerService {
         restoredPositionMs: number;
       }
     | null = null;
+
+  private createPlaybackControlIntentId(kind: "start" | "play" | "pause") {
+    return `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private beginPlaybackControlIntent(payload: {
+    kind: "start" | "play" | "pause";
+    libraryItemId: string | null;
+    requestedAudibleState: "playing" | "paused";
+  }): PlaybackControlResult {
+    const activeIntent = playbackStore.getState().playbackControlIntent;
+    if (activeIntent) {
+      return {
+        status: "ignored",
+        reason: "intent_active",
+        activeIntentKind: activeIntent.kind,
+      };
+    }
+
+    if (this.playbackControlIntentClearTimeout) {
+      clearTimeout(this.playbackControlIntentClearTimeout);
+      this.playbackControlIntentClearTimeout = null;
+    }
+
+    const intentId = this.createPlaybackControlIntentId(payload.kind);
+    playbackStore.getState().actions.setPlaybackControlIntent({
+      id: intentId,
+      kind: payload.kind,
+      libraryItemId: payload.libraryItemId,
+      requestedAudibleState: payload.requestedAudibleState,
+      startedAt: Date.now(),
+    });
+    return { status: "accepted", intentId };
+  }
+
+  private finishPlaybackControlIntent(intentId: string) {
+    if (this.playbackControlIntentClearTimeout) {
+      clearTimeout(this.playbackControlIntentClearTimeout);
+      this.playbackControlIntentClearTimeout = null;
+    }
+
+    this.playbackControlIntentClearTimeout = setTimeout(() => {
+      this.playbackControlIntentClearTimeout = null;
+      this.clearPlaybackControlIntent(intentId);
+    }, PLAYBACK_CONTROL_SETTLE_MS);
+  }
+
+  private clearPlaybackControlIntent(intentId: string) {
+    const activeIntent = playbackStore.getState().playbackControlIntent;
+    if (activeIntent?.id === intentId) {
+      playbackStore.getState().actions.setPlaybackControlIntent(null);
+    }
+  }
+
+  private runPlaybackFollowUp(label: string, task: () => Promise<unknown> | unknown) {
+    try {
+      void Promise.resolve(task()).catch((error) => {
+        if (__DEV__) {
+          console.warn(`[player-service] follow-up failed: ${label}`, { error });
+        }
+      });
+    } catch (error) {
+      if (__DEV__) {
+        console.warn(`[player-service] follow-up failed: ${label}`, { error });
+      }
+    }
+  }
 
   private async waitForDownloadedPlaybackProgress() {
     const startedAt = Date.now();
@@ -179,6 +257,11 @@ class PlayerService {
   init() {
     if (this.initialized) return;
     this.initialized = true;
+    if (this.playbackControlIntentClearTimeout) {
+      clearTimeout(this.playbackControlIntentClearTimeout);
+      this.playbackControlIntentClearTimeout = null;
+    }
+    playbackStore.getState().actions.setPlaybackControlIntent(null);
     this.engine.setEvents({
       onEnded: () => {
         void this.handleTrackEnded();
@@ -339,7 +422,7 @@ class PlayerService {
       this.logSnapshot("after loadBook");
 
       if (options?.autoPlay) {
-        await this.play();
+        await this.performPlay();
         if (shouldUseDownloadedAudio) {
           const postPlayState = playbackStore.getState();
           if (postPlayState.playbackState !== "playing") {
@@ -450,9 +533,13 @@ class PlayerService {
     } catch (error) {
       this.playbackStartAttemptId += 1;
       await this.resetAfterStreamedPlaybackStartFailure({
+        libraryItemId: payload.libraryItemId,
+        bookTitle: payload.bookTitle,
         sessionId: payload.sessionId,
         currentTimeMs: payload.resumePositionMs,
         durationMs: payload.durationMs,
+        rate: payload.rate,
+        errorMessage: error instanceof Error ? error.message : "Unable to start streamed playback",
       });
       this.logPlaybackResult("failed", {
         reason: error instanceof Error ? error.message : "Unable to start streamed playback",
@@ -467,9 +554,13 @@ class PlayerService {
   }
 
   private async resetAfterStreamedPlaybackStartFailure(payload: {
+    libraryItemId: string;
+    bookTitle: string | null;
     sessionId: string;
     currentTimeMs: number;
     durationMs: number;
+    rate: number;
+    errorMessage: string;
   }) {
     try {
       await this.engine.unload();
@@ -479,22 +570,45 @@ class PlayerService {
       }
     }
 
-    playbackStore.getState().actions.reset();
+    const preservedPositionMs = this.resolveProgressFloorMsForFailedStart(
+      payload.libraryItemId,
+      payload.currentTimeMs,
+    );
+    playbackStore.getState().actions.resetAfterFailedStart({
+      libraryItemId: payload.libraryItemId,
+      bookTitle: payload.bookTitle,
+      positionMs: preservedPositionMs,
+      rate: payload.rate,
+      error: payload.errorMessage,
+    });
     this.listenedMs = 0;
     this.lastSyncAttemptAt = 0;
     this.lastSyncAt = 0;
-    this.lastTrackedPositionMs = 0;
+    this.lastTrackedPositionMs = preservedPositionMs;
+
+    const closeCurrentTimeSeconds = msToSeconds(preservedPositionMs);
+    if (closeCurrentTimeSeconds <= 0) {
+      if (__DEV__) {
+        console.warn("[player-service] streamed-start-failure:skip-zero-close-session", {
+          sessionId: payload.sessionId,
+          libraryItemId: payload.libraryItemId,
+        });
+      }
+      return;
+    }
 
     void sessionsApi
       .closeSession(payload.sessionId, {
         timeListened: 0,
-        currentTime: msToSeconds(payload.currentTimeMs),
+        currentTime: closeCurrentTimeSeconds,
         duration: msToSeconds(payload.durationMs),
       })
       .catch((error) => {
         if (__DEV__) {
           console.warn("[player-service] streamed-start-failure:close-session-failed", {
             sessionId: payload.sessionId,
+            libraryItemId: payload.libraryItemId,
+            currentTimeSeconds: closeCurrentTimeSeconds,
             error,
           });
         }
@@ -566,7 +680,7 @@ class PlayerService {
     this.logSnapshot("after loadLocalFile");
 
     if (payload.autoPlay) {
-      await this.play();
+      await this.performPlay();
     } else {
       playbackStore.getState().actions.setPlaybackState("ready");
     }
@@ -586,7 +700,10 @@ class PlayerService {
     );
   }
 
-  private async unloadAndResetPlayback() {
+  private async unloadAndResetPlayback(options?: { preservePlaybackControlIntent?: boolean }) {
+    const preservedPlaybackControlIntent = options?.preservePlaybackControlIntent
+      ? playbackStore.getState().playbackControlIntent
+      : null;
     try {
       await this.engine.unload();
     } catch (error) {
@@ -596,6 +713,9 @@ class PlayerService {
     }
 
     playbackStore.getState().actions.reset();
+    if (preservedPlaybackControlIntent) {
+      playbackStore.getState().actions.setPlaybackControlIntent(preservedPlaybackControlIntent);
+    }
     this.listenedMs = 0;
     this.lastSyncAttemptAt = 0;
     this.lastSyncAt = 0;
@@ -630,14 +750,17 @@ class PlayerService {
     }
 
     if (shouldPersistProgress) {
-      await this.syncProgress("close", {
-        state: playbackStore.getState(),
-        closeStreamSession: shouldCloseStreamSession,
-        forceDirectProgressUpdate: true,
-      });
+      const closingState = playbackStore.getState();
+      this.runPlaybackFollowUp("close-progress-sync", () =>
+        this.syncProgress("close", {
+          state: closingState,
+          closeStreamSession: shouldCloseStreamSession,
+          forceDirectProgressUpdate: true,
+        }),
+      );
     }
 
-    await this.unloadAndResetPlayback();
+    await this.unloadAndResetPlayback({ preservePlaybackControlIntent: true });
   }
 
   async endActivePlaybackForLogout() {
@@ -1014,6 +1137,29 @@ class PlayerService {
     );
   }
 
+  private resolveProgressFloorMsForFailedStart(libraryItemId: string, requestedPositionMs: number) {
+    const candidateIds = this.buildCandidateIds(libraryItemId);
+    const cachedProgress = this.getCachedProgressForLibraryItem(libraryItemId);
+    const queuedProgress = this.getQueuedProgressForCandidateIds(candidateIds);
+    const persisted = playbackStore.getState();
+    const persistedPositionMs =
+      persisted.libraryItemId === libraryItemId ? Math.max(0, persisted.positionMs) : 0;
+    const cachedPositionMs = secondsToMs(
+      Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0)),
+    );
+    const queuedPositionMs = secondsToMs(
+      Math.max(0, Math.floor(queuedProgress?.currentTime ?? 0)),
+    );
+
+    return Math.max(
+      0,
+      requestedPositionMs,
+      persistedPositionMs,
+      cachedPositionMs,
+      queuedPositionMs,
+    );
+  }
+
   private resolveResumePositionMs(payload: {
     candidateIds: string[];
     cachedUserServerState?: UserServerState;
@@ -1343,7 +1489,7 @@ class PlayerService {
     };
   }
 
-  async play(options?: {
+  private async performPlay(options?: {
     touchProgressCache?: boolean;
     updatePlaybackStore?: boolean;
     disableLocalStreamFallback?: boolean;
@@ -1367,13 +1513,6 @@ class PlayerService {
         await this.engine.waitForPlaying({ timeoutMs: 15000 });
       }
 
-      if (shouldVerifyDownloadedPlayback) {
-        await this.waitForDownloadedPlaybackProgress();
-      }
-
-      // Ensure preferred per-book speed is applied after native playback starts.
-      await this.reconcilePlaybackRate("play");
-
       this.logSnapshot("after play");
       if (options?.updatePlaybackStore !== false) {
         playbackStore.getState().actions.setPlaybackState("playing");
@@ -1382,7 +1521,19 @@ class PlayerService {
       // Arm interval sync from play start so we do not flush transient 0s immediately.
       this.lastSyncAttemptAt = Date.now();
       if (options?.updatePlaybackStore !== false && options?.touchProgressCache !== false) {
-        this.touchUserServerStateCacheForPlayStart();
+        this.runPlaybackFollowUp("touch-play-start-cache", () =>
+          this.touchUserServerStateCacheForPlayStart(),
+        );
+      }
+      if (shouldVerifyDownloadedPlayback) {
+        this.runPlaybackFollowUp("downloaded-playback-progress-watchdog", () =>
+          this.waitForDownloadedPlaybackProgress(),
+        );
+      }
+      if (options?.updatePlaybackStore !== false) {
+        this.runPlaybackFollowUp("playback-rate-reconcile", () =>
+          this.reconcilePlaybackRate("play"),
+        );
       }
       this.logPlaybackResult("started");
     } catch (error) {
@@ -1468,7 +1619,7 @@ class PlayerService {
     return { syncAttempted: true, dedupeSkipped: false };
   }
 
-  async pause(options?: { syncProgress?: boolean; updatePlaybackStore?: boolean }) {
+  private async performPause(options?: { syncProgress?: boolean; updatePlaybackStore?: boolean }) {
     this.logDebug("pause");
     await this.engine.pause();
     this.logSnapshot("after pause");
@@ -1476,8 +1627,100 @@ class PlayerService {
       playbackStore.getState().actions.setPlaybackState("paused");
     }
     if (options?.updatePlaybackStore !== false && options?.syncProgress !== false) {
-      await this.syncPauseLikeProgress("pause", { state: playbackStore.getState() });
+      this.runPlaybackFollowUp("pause-progress-sync", () =>
+        this.syncPauseLikeProgress("pause", { state: playbackStore.getState() }),
+      );
     }
+  }
+
+  async requestStart(libraryItemId: string): Promise<PlaybackControlResult> {
+    const state = playbackStore.getState();
+    const accepted = this.beginPlaybackControlIntent({
+      kind: "start",
+      libraryItemId,
+      requestedAudibleState: "playing",
+    });
+    if (accepted.status !== "accepted") return accepted;
+
+    if (state.libraryItemId === libraryItemId && state.queue.length > 0) {
+      if (state.playbackState === "playing") {
+        this.finishPlaybackControlIntent(accepted.intentId);
+        return { status: "already_satisfied", state: "playing" };
+      }
+      try {
+        await this.performPlay();
+        return accepted;
+      } finally {
+        this.finishPlaybackControlIntent(accepted.intentId);
+      }
+    }
+
+    try {
+      await this.loadBook(libraryItemId, { autoPlay: true });
+      return accepted;
+    } finally {
+      this.finishPlaybackControlIntent(accepted.intentId);
+    }
+  }
+
+  async requestPlay(): Promise<PlaybackControlResult> {
+    const state = playbackStore.getState();
+    const accepted = this.beginPlaybackControlIntent({
+      kind: "play",
+      libraryItemId: state.libraryItemId,
+      requestedAudibleState: "playing",
+    });
+    if (accepted.status !== "accepted") return accepted;
+    if (state.playbackState === "playing") {
+      this.finishPlaybackControlIntent(accepted.intentId);
+      return { status: "already_satisfied", state: "playing" };
+    }
+
+    try {
+      if (!state.queue.length) {
+        if (state.libraryItemId) {
+          await this.loadBook(state.libraryItemId, { autoPlay: true });
+        }
+      } else {
+        await this.performPlay();
+      }
+      return accepted;
+    } finally {
+      this.finishPlaybackControlIntent(accepted.intentId);
+    }
+  }
+
+  async requestPause(): Promise<PlaybackControlResult> {
+    const state = playbackStore.getState();
+    const accepted = this.beginPlaybackControlIntent({
+      kind: "pause",
+      libraryItemId: state.libraryItemId,
+      requestedAudibleState: "paused",
+    });
+    if (accepted.status !== "accepted") return accepted;
+    if (state.playbackState === "paused") {
+      this.finishPlaybackControlIntent(accepted.intentId);
+      return { status: "already_satisfied", state: "paused" };
+    }
+
+    try {
+      await this.performPause();
+      return accepted;
+    } finally {
+      this.finishPlaybackControlIntent(accepted.intentId);
+    }
+  }
+
+  async play(options?: {
+    touchProgressCache?: boolean;
+    updatePlaybackStore?: boolean;
+    disableLocalStreamFallback?: boolean;
+  }) {
+    await this.performPlay(options);
+  }
+
+  async pause(options?: { syncProgress?: boolean; updatePlaybackStore?: boolean }) {
+    await this.performPause(options);
   }
 
   async stop() {
@@ -1566,24 +1809,9 @@ class PlayerService {
     }
   }
 
-  async togglePlayPause() {
-    const state = playbackStore.getState();
-    if (state.playbackState === "playing") {
-      await this.pause();
-      return;
-    }
-    if (state.playbackState === "loading") return;
-    if (!state.queue.length) {
-      if (state.libraryItemId) {
-        await this.loadBook(state.libraryItemId, { autoPlay: true });
-      }
-      return;
-    }
-    await this.play();
-  }
-
   async seekTo(positionMs: number, options?: { syncProgress?: boolean }) {
     const state = playbackStore.getState();
+    if (state.playbackControlIntent) return;
     if (!state.queue.length) return;
     this.logDebug(`seekTo: ${positionMs}`);
 
@@ -1619,6 +1847,7 @@ class PlayerService {
 
   async skipBy(seconds: number, goBackwards: boolean = false) {
     const state = playbackStore.getState();
+    if (state.playbackControlIntent) return;
     if (!state.queue.length) return;
     let skipMs = secondsToMs(seconds);
     if (goBackwards) {
@@ -1680,7 +1909,7 @@ class PlayerService {
 
     try {
       await this.seekPreviewEngineTo(startMs);
-      await this.play({
+      await this.performPlay({
         touchProgressCache: false,
         updatePlaybackStore: false,
         disableLocalStreamFallback: true,
@@ -1906,6 +2135,7 @@ class PlayerService {
 
   async jumpToChapter(chapterId: number) {
     const state = playbackStore.getState();
+    if (state.playbackControlIntent) return;
     const chapter = state.chapterIndex.find((item) => item.id === chapterId);
     if (!chapter) return;
     await this.seekTo(chapter.startMs);
@@ -1913,6 +2143,7 @@ class PlayerService {
 
   async nextChapter() {
     const state = playbackStore.getState();
+    if (state.playbackControlIntent) return;
     if (!state.queue.length) return;
 
     if (!state.chapterIndex.length) {
@@ -1934,6 +2165,7 @@ class PlayerService {
 
   async previousChapter() {
     const state = playbackStore.getState();
+    if (state.playbackControlIntent) return;
     if (!state.queue.length) return;
 
     if (!state.chapterIndex.length) {
@@ -1994,7 +2226,7 @@ class PlayerService {
     this.lastTrackedPositionMs = bookPositionMs;
 
     if (options?.autoPlay) {
-      await this.play();
+      await this.performPlay();
     }
   }
 

@@ -102,6 +102,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
   const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
   const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
   const playbackState = usePlaybackStore((state) => state.playbackState);
+  const playbackControlIntent = usePlaybackStore((state) => state.playbackControlIntent);
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const isDownloaded = useDeviceBooksStore((state) => {
@@ -114,6 +115,9 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
   const isBookActive = hasBookId && currentLibraryItemId === libraryItemId;
   const isBookLoaded = isBookActive && queueLength > 0;
   const isPendingForViewedBook = Boolean(libraryItemId && pendingLoadBookId === libraryItemId);
+  const hasActivePlaybackControlIntent = playbackControlIntent !== null;
+  const isStartIntentForViewedBook =
+    playbackControlIntent?.kind === "start" && playbackControlIntent.libraryItemId === libraryItemId;
 
   // Clear pending-load marker once the viewed book has either loaded or playback left loading.
   useEffect(() => {
@@ -137,6 +141,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
 
   const viewedBookState: PlaybackControlVisualState = (() => {
     if (!libraryItemId) return "not-loaded";
+    if (isStartIntentForViewedBook) return "loading";
     if (isPendingForViewedBook && (!isBookActive || playbackState === "loading")) return "loading";
     if (isBookActive && playbackState === "loading") return "loading";
     if (!isBookActive || !isBookLoaded) return "not-loaded";
@@ -149,10 +154,12 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
   const isPlaying = viewedBookState === "playing";
   const isPlayOnly = variant === "play-only";
   const canControl =
-    viewedBookState === "playing" ||
-    viewedBookState === "paused" ||
-    viewedBookState === "loaded-active";
-  const canToggle = hasBookId && !isLoading && (isOnline !== false || isDownloaded);
+    !hasActivePlaybackControlIntent &&
+    (viewedBookState === "playing" ||
+      viewedBookState === "paused" ||
+      viewedBookState === "loaded-active");
+  const canToggle =
+    hasBookId && !isLoading && !hasActivePlaybackControlIntent && (isOnline !== false || isDownloaded);
 
   const seekBackwardIcon = resolveSeekBackwardIcon(seekBackwardSeconds);
   const seekForwardIcon = resolveSeekForwardIcon(seekForwardSeconds);
@@ -162,13 +169,13 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
   const baseTintColor = canControl || canToggle ? themeColors.text : themeColors.textMuted;
 
   const handleToggle = async () => {
-    if (!libraryItemId || isLoading) return;
+    if (!libraryItemId || isLoading || hasActivePlaybackControlIntent) return;
     if (!isBookActive) {
       // Mark this viewed book as pending immediately so the loading animation starts
       // before playback store session metadata is fully populated.
       setPendingLoadBookId(libraryItemId);
       try {
-        await playerService.loadBook(libraryItemId, { autoPlay: true });
+        await playerService.requestStart(libraryItemId);
       } catch (error) {
         if (isStreamedPlaybackStartFailure(error)) {
           showStreamedPlaybackStartFailureToast();
@@ -181,7 +188,11 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
       setPendingLoadBookId(libraryItemId);
     }
     try {
-      await playerService.togglePlayPause();
+      if (isPlaying) {
+        await playerService.requestPause();
+      } else {
+        await playerService.requestPlay();
+      }
     } catch (error) {
       if (isStreamedPlaybackStartFailure(error)) {
         showStreamedPlaybackStartFailureToast();
@@ -226,7 +237,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
             alignItems: "center",
             justifyContent: "center",
             backgroundColor: canToggle ? themeColors.accent : themeColors.textMuted,
-            opacity: pressed ? 0.85 : 1,
+            opacity: !canToggle ? 0.55 : pressed ? 0.85 : 1,
             transform: [{ scale: pressed ? 0.98 : 1 }],
             boxShadow: "0 14px 24px rgba(15, 23, 42, 0.25)",
           })}
@@ -295,7 +306,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
               alignItems: "center",
               justifyContent: "center",
               backgroundColor: canToggle ? themeColors.accent : themeColors.textMuted,
-              opacity: pressed ? 0.85 : 1,
+              opacity: !canToggle ? 0.55 : pressed ? 0.85 : 1,
               transform: [{ scale: pressed ? 0.98 : 1 }],
               boxShadow: "0 14px 24px rgba(15, 23, 42, 0.25)",
             })}

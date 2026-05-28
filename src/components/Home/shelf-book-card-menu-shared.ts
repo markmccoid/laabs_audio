@@ -343,16 +343,16 @@ export const useShelfBookCardMenuActions = ({
     setBusyAction("primary");
     try {
       if (isBookPlaying) {
-        await playerService.pause();
+        await playerService.requestPause();
         return;
       }
 
       if (isBookLoaded) {
-        await playerService.play();
+        await playerService.requestPlay();
         return;
       }
 
-      await playerService.loadBook(book.id, { autoPlay: true });
+      await playerService.requestStart(book.id);
     } catch {
       toast.error(`Unable to ${primaryLabel.toLowerCase()}`);
     } finally {

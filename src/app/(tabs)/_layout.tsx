@@ -10,24 +10,30 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 export default function TabLayout() {
   const playbackRate = usePlaybackStore((state) => state.rate);
   const libraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const { setBookPlaybackRate } = useDeviceBooksActions();
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const playbackState = usePlaybackStore((state) => state.playbackState);
+  const playbackControlIntent = usePlaybackStore((state) => state.playbackControlIntent);
+  const intentLibraryItemId =
+    playbackControlIntent?.kind === "start" ? playbackControlIntent.libraryItemId : null;
+  const miniPlayerLibraryItemId = intentLibraryItemId ?? currentLibraryItemId;
+  const isMiniPlayerLoading = Boolean(intentLibraryItemId && !currentLibraryItemId);
   const localCoverUri = useDeviceBooksStore((state) =>
-    currentLibraryItemId
-      ? resolveStoredDownloadCoverUri(state.downloadedBookData[currentLibraryItemId])
+    miniPlayerLibraryItemId
+      ? resolveStoredDownloadCoverUri(state.downloadedBookData[miniPlayerLibraryItemId])
       : null,
   );
   // const currentBook1 = useCachedBookSummary(currentLibraryItemId ?? undefined);
-  const { data: currentBook } = useGetItemDetails(currentLibraryItemId || undefined);
+  const { data: currentBook } = useGetItemDetails(miniPlayerLibraryItemId || undefined);
   const themeColors = useThemeColors();
-  const playbackState = usePlaybackStore((state) => state.playbackState);
   const isPlaying = playbackState === "playing";
   const hasLoadedBook = usePlaybackStore((s) => Boolean(s.libraryItemId) && s.queue.length > 0);
+  const shouldShowMiniPlayer = hasLoadedBook || Boolean(intentLibraryItemId);
   const handleSetRate = async (rate: number) => {
     await playerService.setRate(rate);
     if (libraryItemId) {
@@ -36,12 +42,12 @@ export default function TabLayout() {
   };
 
   const handleToggle = async () => {
-    // if (isLoading) return;
-    // if (!isBookActive) {
-    //   await playerService.loadBook(libraryItemId, { autoPlay: true });
-    //   return;
-    // }
-    await playerService.togglePlayPause();
+    if (playbackControlIntent) return;
+    if (isPlaying) {
+      await playerService.requestPause();
+    } else {
+      await playerService.requestPlay();
+    }
   };
 
   return (
@@ -72,14 +78,14 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
-      {hasLoadedBook && (
+      {shouldShowMiniPlayer && (
         <NativeTabs.BottomAccessory>
           <View className="gap-1 flex-row items-center justify-between h-full px-4 border-hairline border-gray-400 rounded-full bg-transparent">
             <Link href="/main-player" className="flex-1 items-center flex-row  mt-[4]">
               <Link.Trigger>
                 <View className="flex-row items-center h-full flex-1 ">
                   <CoverImage
-                    libraryItemId={currentLibraryItemId ?? undefined}
+                    libraryItemId={miniPlayerLibraryItemId ?? undefined}
                     coverUri={currentBook?.coverFull}
                     localCoverUri={localCoverUri}
                     variant="thumb"
@@ -96,48 +102,54 @@ export default function TabLayout() {
 
                   <View className="flex-col justify-center flex-1 items-start h-full">
                     <Text style={{ fontSize: 12, color: themeColors.text }} numberOfLines={1}>
-                      {currentBook?.title}
+                      {currentBook?.title ?? "Starting audiobook"}
                     </Text>
                     <Text style={{ fontSize: 10, color: themeColors.textMuted }} numberOfLines={1}>
-                      by {currentBook?.author}
+                      {isMiniPlayerLoading ? "Starting playback..." : `by ${currentBook?.author ?? ""}`}
                     </Text>
                   </View>
                 </View>
               </Link.Trigger>
-              <Link.Menu>
-                <Link.MenuAction icon="book.closed.fill" onPress={() => playerService.stop()}>
-                  Close Book
-                </Link.MenuAction>
+              {hasLoadedBook && !playbackControlIntent ? (
+                <Link.Menu>
+                  <Link.MenuAction icon="book.closed.fill" onPress={() => playerService.stop()}>
+                    Close Book
+                  </Link.MenuAction>
 
-                <Link.Menu title="Speed" icon="hare.fill">
-                  <Link.MenuAction onPress={() => handleSetRate(0.75)} isOn={playbackRate === 0.75}>
-                    .75x
-                  </Link.MenuAction>
-                  <Link.MenuAction onPress={() => handleSetRate(1)} isOn={playbackRate === 1}>
-                    1x
-                  </Link.MenuAction>
-                  <Link.MenuAction onPress={() => handleSetRate(1.25)} isOn={playbackRate === 1.25}>
-                    1.25x
-                  </Link.MenuAction>
-                  <Link.MenuAction onPress={() => handleSetRate(1.5)} isOn={playbackRate === 1.5}>
-                    1.5x
-                  </Link.MenuAction>
-                  <Link.MenuAction onPress={() => handleSetRate(1.75)} isOn={playbackRate === 1.75}>
-                    1.75x
-                  </Link.MenuAction>
-                  <Link.MenuAction onPress={() => handleSetRate(2)} isOn={playbackRate === 2}>
-                    2x
-                  </Link.MenuAction>
+                  <Link.Menu title="Speed" icon="hare.fill">
+                    <Link.MenuAction onPress={() => handleSetRate(0.75)} isOn={playbackRate === 0.75}>
+                      .75x
+                    </Link.MenuAction>
+                    <Link.MenuAction onPress={() => handleSetRate(1)} isOn={playbackRate === 1}>
+                      1x
+                    </Link.MenuAction>
+                    <Link.MenuAction onPress={() => handleSetRate(1.25)} isOn={playbackRate === 1.25}>
+                      1.25x
+                    </Link.MenuAction>
+                    <Link.MenuAction onPress={() => handleSetRate(1.5)} isOn={playbackRate === 1.5}>
+                      1.5x
+                    </Link.MenuAction>
+                    <Link.MenuAction onPress={() => handleSetRate(1.75)} isOn={playbackRate === 1.75}>
+                      1.75x
+                    </Link.MenuAction>
+                    <Link.MenuAction onPress={() => handleSetRate(2)} isOn={playbackRate === 2}>
+                      2x
+                    </Link.MenuAction>
+                  </Link.Menu>
                 </Link.Menu>
-              </Link.Menu>
+              ) : null}
             </Link>
             {/* Play / Pause Icon */}
             <Pressable
               onPress={handleToggle}
+              disabled={Boolean(playbackControlIntent)}
               className="h-full items-center flex-row w-8 justify-center"
               hitSlop={10}
+              style={{ opacity: playbackControlIntent ? 0.45 : 1 }}
             >
-              {!isPlaying ? (
+              {isMiniPlayerLoading ? (
+                <ActivityIndicator size="small" color={themeColors.accent} />
+              ) : !isPlaying ? (
                 <SymbolView name="play.fill" tintColor={themeColors.accent} />
               ) : (
                 <SymbolView name="pause.fill" tintColor={themeColors.accent} />

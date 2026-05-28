@@ -4,8 +4,17 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { mmkvStorage } from "../store/mmkv-storage";
 import type { PlaybackQueueItem, PlaybackState, ResolvedChapter } from "./types";
 
+export type PlaybackControlIntent = {
+  id: string;
+  kind: "start" | "play" | "pause";
+  libraryItemId: string | null;
+  requestedAudibleState: "playing" | "paused";
+  startedAt: number;
+};
+
 export type PlaybackStoreState = {
   playbackState: PlaybackState;
+  playbackControlIntent: PlaybackControlIntent | null;
   libraryItemId: string | null;
   bookTitle: string | null;
   sessionId: string | null;
@@ -32,6 +41,7 @@ export type PlaybackStoreState = {
   actions: {
     reset: () => void;
     setPlaybackState: (state: PlaybackState) => void;
+    setPlaybackControlIntent: (intent: PlaybackControlIntent | null) => void;
     setError: (message: string | null) => void;
     endSession: (payload: {
       libraryItemId: string;
@@ -74,6 +84,13 @@ export type PlaybackStoreState = {
     setDebugStatus: (status: PlaybackStoreState["debugStatus"]) => void;
     setDebugSnapshot: (snapshot: PlaybackStoreState["debugSnapshot"]) => void;
     setDebugMessage: (message: string | null) => void;
+    resetAfterFailedStart: (payload: {
+      libraryItemId: string;
+      bookTitle: string | null;
+      positionMs: number;
+      rate: number;
+      error: string | null;
+    }) => void;
     applyStatusUpdate: (payload: {
       playbackState?: PlaybackState;
       positionMs?: number;
@@ -87,6 +104,7 @@ export type PlaybackStoreState = {
 
 const getBaseState = () => ({
   playbackState: "idle" as PlaybackState,
+  playbackControlIntent: null as PlaybackControlIntent | null,
   libraryItemId: null,
   bookTitle: null,
   sessionId: null,
@@ -113,6 +131,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
       actions: {
         reset: () => set((state) => ({ ...getBaseState(), actions: state.actions })),
         setPlaybackState: (playbackState) => set({ playbackState }),
+        setPlaybackControlIntent: (playbackControlIntent) => set({ playbackControlIntent }),
         setError: (error) => set({ error }),
         endSession: ({
           libraryItemId,
@@ -126,6 +145,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
         }) =>
           set({
             playbackState: "ended",
+            playbackControlIntent: null,
             libraryItemId,
             bookTitle,
             sessionId: null,
@@ -197,6 +217,17 @@ export const playbackStore = createStore<PlaybackStoreState>()(
         setDebugStatus: (debugStatus) => set({ debugStatus }),
         setDebugSnapshot: (debugSnapshot) => set({ debugSnapshot }),
         setDebugMessage: (debugMessage) => set({ debugMessage }),
+        resetAfterFailedStart: ({ libraryItemId, bookTitle, positionMs, rate, error }) =>
+          set({
+            ...getBaseState(),
+            actions: get().actions,
+            playbackState: "error",
+            libraryItemId,
+            bookTitle,
+            positionMs,
+            rate,
+            error,
+          }),
         applyStatusUpdate: (payload) => set(payload),
       },
     }),
