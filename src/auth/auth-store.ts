@@ -17,6 +17,7 @@ export type AuthStatus = "hydrating" | "anonymous" | "authenticated" | "offlineO
 export type AccessMode =
   | "hydrating"
   | "firstRunSignInRequired"
+  /** @deprecated Explicit signed-out state requires sign-in before downloaded playback. */
   | "downloadedOnly"
   | "downloadedSessionOnly"
   | "serverSetup"
@@ -423,8 +424,8 @@ export const selectAccessMode = (state: AuthState): AccessMode => {
   if (state.status === "offlineOnly") {
     return state.loginRequired && Boolean(state.storedUsername && state.serverUrl)
       ? "downloadedSessionOnly"
-      : "downloadedOnly";
+      : "firstRunSignInRequired";
   }
 
-  return state.hasOfflineContent ? "downloadedOnly" : "firstRunSignInRequired";
+  return "firstRunSignInRequired";
 };

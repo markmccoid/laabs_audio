@@ -3,6 +3,7 @@ import { libraryActivationStore } from "@/auth/library-activation-store";
 import { authStore, useAuthStore } from "@/auth/auth-store";
 import { queryClient } from "@/query/query-client";
 import { getBookDetailHref } from "@/navigation/book-links";
+import { playerService } from "@/player/player-service";
 import type { Library } from "@/types/absTypes";
 import { router } from "expo-router";
 import { useCallback } from "react";
@@ -48,6 +49,7 @@ export const runLibraryActivationSelection = async (
       queryClient,
     });
 
+    await playerService.endActivePlaybackForLibrarySwitch();
     authState.actions.setActiveLibrary({ id: library.id, name: library.name });
 
     const returnToLibraryItemId = options.returnToLibraryItemId;

@@ -121,7 +121,7 @@ The write path only needs:
 After mutation, update:
 - `queryKeys.userServerState(activeLibraryUserKey)`
 - `queryKeys.libraryBooks(activeLibraryId)` when an Active Library exists
-- `queryKeys.itemDetails(libraryItemId)`
+- `queryKeys.itemDetails(activeLibraryUserKey, libraryItemId)`
 
 ### 5. Device Books Store
 Audit `resolveScopeContext()` usage.

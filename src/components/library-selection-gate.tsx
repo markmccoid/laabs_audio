@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import { router, useSegments } from "expo-router";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
+import { useExplicitLogout } from "../auth/use-explicit-logout";
 import { useLibraryActivationStore } from "../auth/library-activation-store";
 import { useActivateLibrarySelection } from "../hooks/use-activate-library-selection";
 import { useLibrarySelection } from "../hooks/use-library-selection";
@@ -20,7 +21,8 @@ export const LibrarySelectionGate = () => {
   const serverUrl = useAuthStore((state) => state.serverUrl);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryName = useAuthStore((state) => state.activeLibraryName);
-  const { clearActiveLibrary, logout } = useAuthActions();
+  const { clearActiveLibrary } = useAuthActions();
+  const logout = useExplicitLogout();
   const activationStatus = useLibraryActivationStore((state) => state.status);
   const activateLibrarySelection = useActivateLibrarySelection();
   const segments = useSegments();

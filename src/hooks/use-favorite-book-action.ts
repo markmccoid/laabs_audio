@@ -76,7 +76,7 @@ export const useFavoriteBookAction = () => {
           exact: true,
         }),
         queryClient.cancelQueries({
-          queryKey: queryKeys.itemDetails(libraryItemId),
+          queryKey: queryKeys.itemDetails(activeLibraryUserKey, libraryItemId),
           exact: true,
         }),
       ]);
@@ -88,7 +88,7 @@ export const useFavoriteBookAction = () => {
         queryKeys.libraryBooks(activeLibraryId),
       );
       const previousItemDetails = queryClient.getQueryData<ItemDetails>(
-        queryKeys.itemDetails(libraryItemId),
+        queryKeys.itemDetails(activeLibraryUserKey, libraryItemId),
       );
       const nextIsFavorite = !isFavorite;
 
@@ -118,7 +118,7 @@ export const useFavoriteBookAction = () => {
       );
 
       queryClient.setQueryData<ItemDetails>(
-        queryKeys.itemDetails(libraryItemId),
+        queryKeys.itemDetails(activeLibraryUserKey, libraryItemId),
         (previousDetails) =>
           previousDetails
             ? {
@@ -140,7 +140,7 @@ export const useFavoriteBookAction = () => {
     onSuccess: (_data, variables) => {
       toast.success(variables.isFavorite ? "Removed from favorites" : "Marked as favorite");
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.itemDetails(variables.libraryItemId),
+        queryKey: queryKeys.itemDetails(activeLibraryUserKey, variables.libraryItemId),
         exact: true,
       });
     },
@@ -158,7 +158,7 @@ export const useFavoriteBookAction = () => {
         );
       }
       queryClient.setQueryData(
-        queryKeys.itemDetails(variables.libraryItemId),
+        queryKeys.itemDetails(activeLibraryUserKey, variables.libraryItemId),
         context?.previousItemDetails,
       );
       toast.error(variables.isFavorite ? "Unable to remove favorite" : "Unable to mark favorite");

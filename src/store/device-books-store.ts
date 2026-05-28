@@ -43,6 +43,7 @@ const PROGRESS_FLOOR_QUEUE_TRIGGERS = new Set([
   "sync:pause",
   "sync:external_pause",
   "sync:close",
+  "logout",
 ]);
 const GLOBAL_PLAYBACK_RATE_KEY = "__global__";
 
@@ -774,23 +775,6 @@ const arePendingBookmarkCreatesEqual = (
   });
 };
 
-const findPlaybackRateKeyByLibraryItemId = (
-  playbackRatesByUserBook: Record<string, number>,
-  libraryItemId: string,
-) => {
-  const suffix = `::${libraryItemId}`;
-  const matchingKeys = Object.keys(playbackRatesByUserBook).filter((key) => key.endsWith(suffix));
-  if (!matchingKeys.length) return null;
-  if (matchingKeys.length === 1) return matchingKeys[0];
-
-  const matchingRates = matchingKeys.map((key) => playbackRatesByUserBook[key]);
-  const uniqueRates = new Set(matchingRates.map((rate) => Number(rate.toFixed(2))));
-  if (uniqueRates.size === 1) {
-    return matchingKeys[matchingKeys.length - 1];
-  }
-  return null;
-};
-
 const findStoredPlaybackRateForLibraryItem = (
   playbackRatesByUserBook: Record<string, number>,
   libraryItemId: string,
@@ -801,13 +785,12 @@ const findStoredPlaybackRateForLibraryItem = (
     const exactKey = toUserBookKey(resolvedUserKey, libraryItemId);
     const exactRate = playbackRatesByUserBook[exactKey];
     if (typeof exactRate === "number") return clampBookPlaybackRate(exactRate);
+    return null;
   }
 
-  const fallbackKey = findPlaybackRateKeyByLibraryItemId(playbackRatesByUserBook, libraryItemId);
-  if (fallbackKey) {
-    const fallbackRate = playbackRatesByUserBook[fallbackKey];
-    if (typeof fallbackRate === "number") return clampBookPlaybackRate(fallbackRate);
-  }
+  const globalKey = toUserBookKey(GLOBAL_PLAYBACK_RATE_KEY, libraryItemId);
+  const globalRate = playbackRatesByUserBook[globalKey];
+  if (typeof globalRate === "number") return clampBookPlaybackRate(globalRate);
 
   return null;
 };
@@ -1087,11 +1070,6 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           const normalizedRate = clampBookPlaybackRate(playbackRate);
           const key = (() => {
             if (userKey) return toUserBookKey(userKey, libraryItemId);
-            const existingKey = findPlaybackRateKeyByLibraryItemId(
-              get().playbackRatesByUserBook,
-              libraryItemId,
-            );
-            if (existingKey) return existingKey;
             return toUserBookKey(GLOBAL_PLAYBACK_RATE_KEY, libraryItemId);
           })();
           set((state) => ({

@@ -1,4 +1,5 @@
-import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
+import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
+import { useExplicitLogout } from "@/auth/use-explicit-logout";
 import { usePlaybackStore } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
@@ -17,7 +18,7 @@ export const SettingsAuthenticationScreen = () => {
   const hasLoadedBook = usePlaybackStore(
     (state) => Boolean(state.libraryItemId) && state.queue.length > 0,
   );
-  const { logout } = useAuthActions();
+  const logout = useExplicitLogout();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const canLogIn = accessMode !== "serverBrowsing" && accessMode !== "serverSetup";
   const canFinishLibrarySetup = accessMode === "serverSetup";
@@ -37,7 +38,7 @@ export const SettingsAuthenticationScreen = () => {
       : accessMode === "downloadedSessionOnly"
       ? "Downloaded books from this session remain available. Sign in to restore streaming, search, and sync."
       : accessMode === "downloadedOnly"
-        ? "Downloaded books remain available on this device. Sign in to browse and sync with a server."
+        ? "Sign in to use downloaded books on this device."
         : accessMode === "firstRunSignInRequired"
           ? "Sign in to connect this app to your Audiobookshelf server."
           : null;

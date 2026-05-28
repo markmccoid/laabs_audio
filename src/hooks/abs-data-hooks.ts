@@ -17,7 +17,7 @@ import {
   type UserBookProgress,
   type UserServerState,
 } from "../api/me-api";
-import { useAuthActions, useAuthStore } from "../auth/auth-store";
+import { selectAccessMode, useAuthActions, useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import type { Bookmark } from "../types/absTypes";
@@ -600,6 +600,8 @@ export const useCachedBookSummary = (itemId?: string) => {
 
 export const useGetItemDetails = (itemId?: string) => {
   const status = useAuthStore((state) => state.status);
+  const accessMode = useAuthStore(selectAccessMode);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const cachedSummary = useCachedBookSummary(itemId);
   const downloadedDetails = useDeviceBooksStore((state) =>
     itemId ? state.downloadedDetailsById[itemId] : undefined,
@@ -618,12 +620,13 @@ export const useGetItemDetails = (itemId?: string) => {
     error,
     ...rest
   } = useQuery<ItemDetails, Error>({
-    queryKey: queryKeys.itemDetails(itemId),
+    queryKey: queryKeys.itemDetails(activeLibraryUserKey, itemId),
     queryFn: async () => {
       if (!itemId) throw new Error("No item ID provided");
+      if (!activeLibraryUserKey) throw new Error("No user session provided");
       return itemsApi.getItemDetails(itemId);
     },
-    enabled: status === "authenticated" && !!itemId,
+    enabled: status === "authenticated" && !!activeLibraryUserKey && !!itemId,
     staleTime: 10000,
   });
 
@@ -709,7 +712,7 @@ export const useGetItemDetails = (itemId?: string) => {
   // Return appropriate data based on authentication state
   if (status !== "authenticated") {
     return {
-      data: downloadedFallback,
+      data: accessMode === "downloadedSessionOnly" ? downloadedFallback : undefined,
       isPending: false,
       isError: false,
       isLoading: false,

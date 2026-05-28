@@ -13,7 +13,8 @@ export type ProgressSyncIntentTrigger =
   | "sync_failure"
   | "interval"
   | "mark_read"
-  | "mark_unread";
+  | "mark_unread"
+  | "logout";
 
 export const resolveProgressIntentKind = (payload: {
   currentTimeSeconds: number;

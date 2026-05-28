@@ -53,7 +53,7 @@ Expected benefit:
 
 Current friction:
 
-- `downloadedOnly`, `downloadedSessionOnly`, `serverSetup`, and `serverBrowsing` are correct domain states, but the UI can feel like generic settings.
+- `downloadedSessionOnly`, `serverSetup`, and `serverBrowsing` are correct domain states, but the UI can feel like generic settings. `downloadedOnly` is deprecated for explicit signed-out access.
 
 Future direction:
 

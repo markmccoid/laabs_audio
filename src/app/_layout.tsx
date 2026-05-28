@@ -117,7 +117,7 @@ const getReturnToLibraryItemId = (
     : undefined;
 
 const isDownloadedAccessMode = (accessMode: string) =>
-  accessMode === "downloadedOnly" || accessMode === "downloadedSessionOnly";
+  accessMode === "downloadedSessionOnly";
 
 export default function RootLayout() {
   useApplyAccentThemeOverrides();

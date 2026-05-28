@@ -65,8 +65,11 @@ Library Resolution is part of first User Session entry. Normal server-scoped bro
 3. `useAuthBootstrap` derives `hasOfflineContent` from `device-books-store`.
 4. `status` becomes:
    - `authenticated` if a session exists
-   - `offlineOnly` if there’s offline content but no session
+   - `offlineOnly` if there is offline content but no active server session
    - `anonymous` otherwise
+5. `selectAccessMode` determines entry:
+   - no usable or remembered User Session becomes required sign-in, even when downloaded files exist
+   - remembered identity plus `loginRequired` becomes downloaded-session access for that remembered User Session
 
 ## Bootstrap Side Effects
 
@@ -108,14 +111,15 @@ All API calls should go through `absClient`, which uses `authFetch`.
    - SecureStore tokens cleared
    - `loginRequired` set to `true`
    - state transitions to `anonymous` or `offlineOnly` (if offline content exists)
+   - downloaded-session access is available only when the remembered username and server URL are still present
 
 ## Logout Flow
 
-1. UI calls `authStore.actions.logout()`.
-2. Best-effort `authService.logout()` via `POST /logout` with `x-refresh-token`.
-3. SecureStore tokens and password are cleared.
-4. State is reset and `activeLibraryId` cleared.
-5. If downloaded content remains, the app may enter downloaded-only mode. This is not the same as an offline User Session: Library Selection and server-scoped browsing remain hidden until the user signs in again.
+1. UI calls the explicit logout orchestrator.
+2. Active Playback is stopped/unloaded after snapshotting meaningful progress for the known User Session.
+3. Session-scoped React Query data is cleared from memory and the persisted query snapshot.
+4. The low-level logout action performs best-effort `POST /logout`, clears SecureStore tokens/password, clears the Active Library, and clears remembered username.
+5. The app routes to required Login. Downloaded files, device-only bookmark metadata, and queued progress/bookmark data remain on disk but are not exposed until a User Session is available again.
 
 ## Error Handling
 

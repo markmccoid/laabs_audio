@@ -20,15 +20,15 @@ This document describes the current Authentication, Access Mode, Library Resolut
 | `hydrating` | Auth state is being restored from storage. |
 | `anonymous` | No usable User Session is present. |
 | `authenticated` | A remembered or signed-in User Session exists. |
-| `offlineOnly` | No server browsing session is available, but downloaded content can be used. |
+| `offlineOnly` | Server browsing is unavailable. Downloaded access is allowed only when a remembered User Session identity is still present and sign-in is required. |
 
 `AccessMode` is derived by `selectAccessMode`.
 
 | AccessMode | Condition | Available surfaces |
 | --- | --- | --- |
 | `hydrating` | `status === "hydrating"` | Startup/loading only. |
-| `firstRunSignInRequired` | `anonymous` and no downloaded content | Forced sign-in. |
-| `downloadedOnly` | No User Session, downloaded content exists | Downloaded content and sign-in/recovery surfaces. |
+| `firstRunSignInRequired` | No usable or remembered User Session | Forced sign-in. Downloaded Audio Assets are not exposed. |
+| `downloadedOnly` | Deprecated legacy mode | Must not be returned for explicit signed-out state. |
 | `downloadedSessionOnly` | Server access is blocked, remembered session identity exists, downloaded content exists | Session-scoped downloads and sign-in/recovery surfaces. |
 | `serverSetup` | `authenticated` with no Active Library | Library Resolution or Library Selection required. |
 | `serverBrowsing` | `authenticated` with an Active Library | Home, Search, streaming, sync, shelves, and server browsing. |
@@ -38,11 +38,11 @@ This document describes the current Authentication, Access Mode, Library Resolut
 | Stored session | Downloaded content | Active Library | Login required | AuthStatus | AccessMode | Expected route behavior |
 | --- | --- | --- | --- | --- | --- | --- |
 | No | No | No | No | `anonymous` | `firstRunSignInRequired` | Route to required Login. |
-| No | Yes | No | No | `offlineOnly` | `downloadedOnly` | Allow downloaded content; sign-in is optional. |
+| No | Yes | No | No | `offlineOnly` | `firstRunSignInRequired` | Route to required Login; downloaded assets remain on disk but are not exposed. |
 | Yes | No | No | No | `authenticated` | `serverSetup` | Resolve Libraries, then choose/activate a Library. |
 | Yes | Yes | No | No | `authenticated` | `serverSetup` | Resolve Libraries, then choose/activate a Library. Downloads remain available. |
 | Yes | Any | Yes | No | `authenticated` | `serverBrowsing` | Route to Home unless already on a known app route. |
-| Remembered identity | Yes | Maybe | Yes | `offlineOnly` | `downloadedSessionOnly` | Allow session downloads; prompt for sign-in when needed. |
+| Remembered identity | Yes | Maybe | Yes | `offlineOnly` | `downloadedSessionOnly` | Allow remembered-session downloads; prompt for sign-in when needed. |
 | Any | Any | Stale or invalid | No | `authenticated` | `serverSetup` after clearing invalid Active Library | Validate Libraries and require Library Selection if needed. |
 
 ## Startup Flow
@@ -52,7 +52,7 @@ This document describes the current Authentication, Access Mode, Library Resolut
 3. Download availability is provided by device state.
 4. `AuthStatus` is computed.
 5. `selectAccessMode` determines which app surfaces are available.
-6. Root routing sends first-run users to Login, downloaded-capable users to the app, and authenticated users to known authenticated routes or Home.
+6. Root routing sends users with no usable or remembered User Session to Login, downloaded-session users to remembered downloaded surfaces, and authenticated users to known authenticated routes or Home.
 7. `LibrarySelectionGate` validates the remembered Active Library against the Libraries returned by the Audiobookshelf Server.
 
 ## Library Resolution
@@ -92,9 +92,10 @@ Current flow:
 2. `runLibraryActivationSelection` starts Library Activation state.
 3. The app routes to Home under the loading overlay.
 4. Required activation data is loaded or read from cache.
-5. `setActiveLibrary` commits the new Active Library.
-6. Activation state clears.
-7. Home shelves render using the new Active Library.
+5. Active Playback is ended and unloaded while the previous Active Library is still current.
+6. `setActiveLibrary` commits the new Active Library.
+7. Activation state clears.
+8. Home shelves render using the new Active Library.
 
 This flow should not be changed unless there is a true bug.
 
@@ -123,6 +124,14 @@ If activation fails:
 - Retry attempts the same chosen Library again.
 - Cancel clears activation state.
 - If no previous Active Library exists, Cancel returns to Library Selection.
+
+## Explicit Logout Boundary
+
+Explicit logout is coordinated above the auth store. The logout command must snapshot Active
+Playback's Listening Position for the current User Session, end Active Playback, clear the Current
+Audiobook surface, clear server-derived query snapshots, clear auth credentials/session state, and
+route to required Login. Durable device state such as Downloaded Audio Assets,
+local bookmark records, and identity-scoped Progress Sync Intents survives logout.
 
 ## Important Modules
 

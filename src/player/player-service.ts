@@ -67,6 +67,7 @@ type ProgressSyncReason =
   | "external_pause"
   | "seek"
   | "close"
+  | "logout"
   | "finish"
   | "natural_completion";
 type CachedUserServerStateSource =
@@ -637,6 +638,77 @@ class PlayerService {
     }
 
     await this.unloadAndResetPlayback();
+  }
+
+  async endActivePlaybackForLogout() {
+    const state = playbackStore.getState();
+    if (!state.queue.length) {
+      await this.unloadAndResetPlayback();
+      return;
+    }
+
+    const authState = authStore.getState();
+    const userKey =
+      authState.activeLibraryUserKey ??
+      (authState.storedUsername && authState.serverUrl
+        ? `${authState.storedUsername}::${authState.serverUrl}`
+        : null);
+    if (!userKey || !state.libraryItemId) {
+      await this.unloadAndResetPlayback();
+      return;
+    }
+
+    const shouldCloseStreamSession =
+      state.sessionId !== null &&
+      state.sessionId !== LOCAL_SESSION_ID &&
+      (state.playbackState === "playing" || state.playbackState === "paused");
+    const currentTimeSeconds = msToSeconds(state.positionMs);
+    const cachedProgress = this.getCachedProgressForLibraryItem(state.libraryItemId);
+    const queuedProgress =
+      deviceBooksStore.getState().pendingProgressByUser[userKey]?.[state.libraryItemId];
+    const isFinished =
+      state.durationMs > 0 && state.positionMs >= state.durationMs - secondsToMs(3);
+    const hasMeaningfulProgress =
+      currentTimeSeconds > 0 ||
+      isFinished ||
+      Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0)) > 0 ||
+      Math.max(0, Math.floor(queuedProgress?.currentTime ?? 0)) > 0;
+
+    if (state.playbackState === "playing") {
+      try {
+        await this.engine.pause();
+      } catch (error) {
+        if (__DEV__) {
+          console.warn("[player-service] logout:pause-before-reset-failed", {
+            libraryItemId: state.libraryItemId,
+            error,
+          });
+        }
+      }
+      playbackStore.getState().actions.setPlaybackState("paused");
+    }
+
+    if (hasMeaningfulProgress) {
+      await this.syncProgress("logout", {
+        state: playbackStore.getState(),
+        closeStreamSession: shouldCloseStreamSession,
+        forceDirectProgressUpdate: true,
+      });
+    } else if (shouldCloseStreamSession && state.sessionId) {
+      await sessionsApi
+        .closeSession(state.sessionId, {
+          timeListened: msToSeconds(this.listenedMs),
+          currentTime: currentTimeSeconds,
+          duration: msToSeconds(state.durationMs) || undefined,
+        })
+        .catch(() => undefined);
+    }
+
+    await this.unloadAndResetPlayback();
+  }
+
+  async endActivePlaybackForLibrarySwitch() {
+    await this.closeActiveBookForTransition();
   }
 
   private resolveStoredBookRate(rateCandidateIds: string[]) {

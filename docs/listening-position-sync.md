@@ -18,7 +18,8 @@ LAABS Audio keeps audiobook progress durable locally before it asks Audiobookshe
 - A newer Progress Sync Intent created while a remote sync is in flight remains pending.
 - Explicit finished and unread changes are authoritative user intent.
 - Automatic zero-position samples must not erase meaningful Listening Position evidence.
-- Downloaded-Only Mode may continue recording local Progress Sync Intent records under the last known user scope for that downloaded audiobook. They flush only when the same User Session is restored.
+- Session Needs Sign-In may continue recording local Progress Sync Intent records under the remembered user scope for that downloaded audiobook. They flush only when the same User Session is restored.
+- Signed-Out Required Sign-In does not permit playback and therefore does not create new Progress Sync Intents.
 - A missing audiobook during flush becomes an Unmatched Progress Sync Intent rather than retrying forever.
 
 ## Current Storage Shape

@@ -33,8 +33,12 @@ The post-authentication determination of whether a User Session has zero, one, o
 _Avoid_: Library fetch, picker decision
 
 **Downloaded-Only Mode**:
-The app state after an explicit logout where locally downloaded audiobooks remain available but no User Session is browsable.
+Deprecated term for the old post-logout access state where locally downloaded audiobooks remained available without a User Session. Explicit logout now uses **Signed-Out Required Sign-In** instead.
 _Avoid_: Offline mode
+
+**Signed-Out Required Sign-In**:
+The app state with no usable User Session where sign-in is required before any audiobook browsing or playback.
+_Avoid_: Downloaded-only mode, offline mode
 
 **Downloaded Audio Asset**:
 The local audio and cover files for an audiobook from a known Audiobookshelf Server stored on the device.
@@ -44,9 +48,9 @@ _Avoid_: Downloaded book
 A Downloaded Audio Asset created before LAABS Audio knew which Audiobookshelf Server owned it.
 _Avoid_: Orphaned download
 
-**Download Entitlement**:
-The association that makes a Downloaded Audio Asset visible to a User Session while that User Session is signed in.
-_Avoid_: Download owner, downloaded book
+**Download Availability**:
+The condition where a signed-in User Session may use a Downloaded Audio Asset because the User Session can access the same Audiobook Identity on the Audiobookshelf Server.
+_Avoid_: Download owner, download entitlement
 
 **Offline User Session**:
 A remembered User Session used while the device is offline.
@@ -75,6 +79,10 @@ _Avoid_: Selected book, current book
 **Active Playback**:
 The audiobook currently owned by the player for listening.
 _Avoid_: Current audiobook, selected playback, global player book
+
+**Playback Rate**:
+The listening speed preference for an audiobook, scoped to a User Session when the user is signed in.
+_Avoid_: Global speed, book speed
 
 **Playback Start Attempt**:
 A user-requested attempt to make an audiobook become Active Playback.
@@ -255,28 +263,37 @@ _Avoid_: Five minute window, scrubber window
 - A **Playback Start Attempt** may become **Active Playback** only after playable audio is confirmed.
 - A **Playback Start Attempt** for one audiobook may replace existing **Active Playback** for another audiobook before playable audio is confirmed.
 - A failed **Playback Start Attempt** may leave no **Active Playback**.
-- **Downloaded-Only Mode** is not an **Offline User Session**.
-- A user in **Downloaded-Only Mode** is not signed in.
-- **Downloaded-Only Mode** shows all **Downloaded Audio Assets** without **Library Selection** or server-scoped browsing.
-- **Downloaded-Only Mode** allows **Downloaded Audio Assets** to play and track local progress without server status, auth status, or internet connectivity.
+- **Downloaded-Only Mode** is deprecated and must not be used as a post-logout access state.
+- **Signed-Out Required Sign-In** is not an **Offline User Session**.
+- A user in **Signed-Out Required Sign-In** is not signed in.
+- **Signed-Out Required Sign-In** does not expose **Downloaded Audio Assets**, **Library Selection**, server browsing, playback, bookmarks, or search.
+- Explicit logout enters **Signed-Out Required Sign-In** even when **Downloaded Audio Assets** remain on the device.
+- Explicit logout does not delete **Downloaded Audio Assets**; it only removes access until a **User Session** is available again.
+- Explicit logout ends **Active Playback** and clears the **Current Audiobook** surface.
+- Explicit logout records a **Progress Sync Intent** for **Active Playback** before ending playback when a known **User Session** exists.
+- **Signed-Out Required Sign-In** must not read server-derived User Session snapshots or durable device audiobook state for display.
+- **Playback Rate** belongs to a **User Session** when that session is known and must not be inherited by another User Session.
+- Explicit logout records the **Listening Position** for **Active Playback** even when playback is paused or local, provided a known **User Session** exists.
 - **Session Needs Sign-In** is not **Downloaded-Only Mode** because it retains the remembered **User Session** identity.
-- **Session Needs Sign-In** allows **Downloaded Audio Assets** with a **Download Entitlement** for the remembered **User Session** to remain available.
+- **Session Needs Sign-In** allows remembered downloaded content only when the app can still associate it with the remembered **User Session**.
 - **Session Needs Sign-In** blocks streaming, search, server-scoped browsing, and sync until the **User Session** is restored.
-- A user in **Session Needs Sign-In** may explicitly log out and enter **Downloaded-Only Mode**.
-- A **Downloaded Audio Asset** may be shared by multiple **Download Entitlements**.
+- A user in **Session Needs Sign-In** may explicitly log out and enter **Signed-Out Required Sign-In**.
+- **Session Needs Sign-In** may use remembered downloaded content because progress and bookmarks still have a known **User Session** owner.
+- A **Downloaded Audio Asset** may be available to multiple **User Sessions** through **Download Availability**.
 - A **Downloaded Audio Asset** identity includes its **Audiobookshelf Server** and **Audiobook Identity**.
-- A **Legacy Downloaded Audio Asset** may be shown in **Downloaded-Only Mode** until it can be associated with a **User Session**.
-- A signed-in **User Session** sees **Downloaded Audio Assets** through its own **Download Entitlements**.
+- A **Legacy Downloaded Audio Asset** remains on disk but is not visible or playable until a **User Session** can associate it with an accessible **Audiobook Identity**.
+- A signed-in **User Session** sees **Downloaded Audio Assets** through **Download Availability**.
+- A **Downloaded Audio Asset** may be shared as local media, but listening state such as **Listening Position**, **Bookmark**, and **Playback Rate** belongs to the current **User Session**.
 - **Session State** is distinct from **Access Mode**.
 - **Session State** determines whether there is a signed-in, remembered, or absent **User Session**.
-- **Access Mode** determines whether the user can browse server Libraries, use remembered downloaded content, or only use device downloads.
-- **Downloaded-Only Mode** is an **Access Mode** where only device downloads and account recovery surfaces are available.
+- **Access Mode** determines whether the user can browse server Libraries, use remembered downloaded content, or must sign in before app entry.
+- **Signed-Out Required Sign-In** is an **Access Mode** where sign-in is required before app entry.
 - **Session Needs Sign-In** uses an **Access Mode** where only downloads for the remembered **User Session** and account recovery surfaces are available.
-- A first run with no **User Session** and no **Downloaded Audio Assets** uses an **Access Mode** where sign-in is required before app entry.
+- A first run with no **User Session** uses **Signed-Out Required Sign-In**.
 - A signed-in **User Session** with an **Active Library** uses an **Access Mode** where server browsing, streaming, search, and sync are available.
 - App entry is guarded by **Access Mode**, not by **Session State** alone.
-- Manual sign-in from a downloaded-capable **Access Mode** is dismissible.
-- Forced sign-in is only used when no **User Session** and no **Downloaded Audio Assets** are available.
+- Manual sign-in from **Session Needs Sign-In** is dismissible only when remembered downloaded content is available.
+- Forced sign-in is used when no **User Session** is available after explicit logout or first install.
 - **Progress Sync Intent** records for downloaded audiobooks may survive explicit logout and sync when the same **User Session** is restored.
 - **Progress Sync Intent** records are scoped to the Audiobookshelf Server and user they were created for when that identity is known.
 - **Audiobook Identity** uses Audiobookshelf's library item identity first and may use media item identity to recover the same audiobook on the same Audiobookshelf Server for the same user.

@@ -7,7 +7,7 @@ import {
   type UserServerState,
 } from "../api/me-api";
 import { playlistsApi } from "../api/playlists-api";
-import { useAuthStore } from "../auth/auth-store";
+import { selectAccessMode, useAuthStore } from "../auth/auth-store";
 import { usePlaybackStore } from "../player/playback-store";
 import { queryKeys } from "../query/query-keys";
 import {
@@ -193,11 +193,13 @@ export const useHomeShelves = () => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const authStatus = useAuthStore((state) => state.status);
+  const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
   const homeScopeKey = toHomeShelfScopeKey(activeLibraryUserKey, activeLibraryId);
   const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const playbackPositionMs = usePlaybackStore((state) => state.positionMs);
   const playbackDurationMs = usePlaybackStore((state) => state.durationMs);
+  const playbackStatusUpdatedAt = usePlaybackStore((state) => state.debugStatus?.updatedAt ?? 0);
 
   const libraryBooksQueryKey = queryKeys.libraryBooks(activeLibraryId);
   const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
@@ -335,7 +337,7 @@ export const useHomeShelves = () => {
           duration: playbackDuration,
           isFinished:
             playbackDuration > 0 && playbackCurrentTime >= Math.max(0, playbackDuration - 3),
-          updatedAt: Date.now(),
+          updatedAt: Math.max(playbackStatusUpdatedAt, previous?.lastUpdate ?? 0),
           previous,
         });
 
@@ -350,6 +352,7 @@ export const useHomeShelves = () => {
     playbackDurationMs,
     playbackLibraryItemId,
     playbackPositionMs,
+    playbackStatusUpdatedAt,
     userServerState,
   ]);
 
@@ -598,6 +601,10 @@ export const useHomeShelves = () => {
 
   const visibleShelves = useMemo<HomeShelf[]>(() => {
     if (authStatus !== "authenticated") {
+      if (accessMode !== "downloadedSessionOnly") {
+        return [];
+      }
+
       return [
         {
           kind: "derived",
@@ -626,7 +633,7 @@ export const useHomeShelves = () => {
         ...shelf,
         books: shelf.books.slice(0, shelf.homeItemCount),
       }));
-  }, [authStatus, offlineDownloaded, orderedShelves, shelfSettingsById.downloaded]);
+  }, [accessMode, authStatus, offlineDownloaded, orderedShelves, shelfSettingsById.downloaded]);
 
   const customShelves = useMemo<HomeCustomShelf[]>(
     () => [
@@ -658,6 +665,8 @@ export const useHomeShelves = () => {
     shelves:
       authStatus === "authenticated"
         ? orderedShelves
+        : accessMode !== "downloadedSessionOnly"
+          ? []
         : [
             {
               kind: "derived" as const,

@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
+import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -10,14 +11,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SymbolView } from "expo-symbols";
-import Dropdown from "../shared/ui/organisms/dropdown";
 import { selectAccessMode, useAuthActions, useAuthStore } from "../auth/auth-store";
-import {
-  fetchLibrariesForResolution,
-  resolveLibrarySelection,
-} from "../auth/library-resolution";
+import { fetchLibrariesForResolution, resolveLibrarySelection } from "../auth/library-resolution";
 import { useActivateLibrarySelection } from "../hooks/use-activate-library-selection";
+import Dropdown from "../shared/ui/organisms/dropdown";
 import { useThemeColors } from "../theme/use-app-theme";
 
 const SERVER_PROTOCOLS = ["https://", "http://"] as const;
@@ -64,7 +61,10 @@ export default function LoginScreen() {
   const { loginWithPassword, setLoginRequired } = useAuthActions();
   const activateLibrarySelection = useActivateLibrarySelection();
   const themeColors = useThemeColors();
-  const params = useLocalSearchParams<{ mode?: string; returnToLibraryItemId?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    mode?: string;
+    returnToLibraryItemId?: string | string[];
+  }>();
 
   const mode = useMemo(() => {
     return typeof params.mode === "string" ? params.mode : "required";
@@ -125,7 +125,7 @@ export default function LoginScreen() {
       }
 
       if (resolution.status === "needsLibrarySelection") {
-        router.replace({
+        router.push({
           pathname: "/library-picker",
           params: {
             mode: "setup",
@@ -160,7 +160,10 @@ export default function LoginScreen() {
       <View className="flex-row items-center justify-between">
         <Text className="text-3xl font-semibold text-text">Sign in</Text>
         {isSheet ? (
-          <Pressable onPress={handleClose} className="rounded-full border border-border bg-bg px-3 py-1">
+          <Pressable
+            onPress={handleClose}
+            className="rounded-full border border-border bg-bg px-3 py-1"
+          >
             <Text className="text-sm text-text-muted">Close</Text>
           </Pressable>
         ) : null}
@@ -292,7 +295,9 @@ export default function LoginScreen() {
         {isSubmitting ? (
           <ActivityIndicator color={themeColors.accentForeground} />
         ) : (
-          <Text className="text-center text-base font-semibold text-accent-foreground">Sign in</Text>
+          <Text className="text-center text-base font-semibold text-accent-foreground">
+            Sign in
+          </Text>
         )}
       </Pressable>
 
