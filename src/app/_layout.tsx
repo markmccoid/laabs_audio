@@ -23,6 +23,7 @@ import { playerService } from "../player/player-service";
 import { SleepTimerCoordinator } from "../player/sleep-timer-coordinator";
 import { FIVE_MINUTES_MS, queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
+import { clearSessionQueryCache } from "../query/session-query-cache";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import { mmkvQueryPersister } from "../store/mmkv-query-persister";
 import {
@@ -204,8 +205,10 @@ export default function RootLayout() {
       persister: mmkvQueryPersister,
       maxAge: Infinity,
       dehydrateOptions: {
-        shouldDehydrateQuery: (query: { meta?: Record<string, unknown> }) =>
-          query.meta?.persist === true,
+        shouldDehydrateQuery: (query: {
+          meta?: Record<string, unknown>;
+          state?: { status?: string };
+        }) => query.meta?.persist === true && query.state?.status === "success",
       },
     }),
     [],
@@ -411,18 +414,7 @@ export default function RootLayout() {
     // Clear persisted query data on logout transitions.
     const didLogout = prevStatus !== null && prevStatus !== "anonymous" && status === "anonymous";
     if (didLogout) {
-      queryClient.removeQueries({
-        predicate: (query) => {
-          const rootKey = query.queryKey[0];
-          return (
-            rootKey === "library" ||
-            rootKey === "libraries" ||
-            // Clean up legacy pre-refactor keys on fresh transitions.
-            rootKey === "books" ||
-            rootKey === "absfilterdata"
-          );
-        },
-      });
+      void clearSessionQueryCache(queryClient);
     }
 
     // Track current values for the next transition check.

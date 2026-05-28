@@ -12,7 +12,10 @@ const SESSION_QUERY_ROOTS = new Set<unknown>([
   "absfilterdata",
 ]);
 
-export const clearSessionQueryCache = (queryClient: QueryClient) => {
+export const clearSessionQueryCache = async (queryClient: QueryClient) => {
+  await queryClient.cancelQueries({
+    predicate: (query) => SESSION_QUERY_ROOTS.has(query.queryKey[0]),
+  });
   queryClient.removeQueries({
     predicate: (query) => SESSION_QUERY_ROOTS.has(query.queryKey[0]),
   });

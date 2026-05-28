@@ -21,7 +21,7 @@ export const useExplicitLogout = () => {
         }
       });
       libraryActivationStore.getState().actions.clear();
-      clearSessionQueryCache(queryClient);
+      await clearSessionQueryCache(queryClient);
       await logout();
       router.replace({ pathname: "/login", params: { mode: "required" } });
     } finally {
