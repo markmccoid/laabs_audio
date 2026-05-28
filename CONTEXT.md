@@ -88,6 +88,14 @@ _Avoid_: Global speed, book speed
 A user-requested attempt to make an audiobook become Active Playback.
 _Avoid_: Pending load, playback request, loading state
 
+**Playback Control Intent**:
+A user-requested play, pause, or start action whose requested Audible Playback State has not yet been reached. A Playback Start Attempt is the start-audiobook form of Playback Control Intent.
+_Avoid_: Transition, touch guard, pending command
+
+**Audible Playback State**:
+The player condition where the user-facing audio engine has reached the requested listening state, such as playing or paused, even if follow-up progress or cache work is still running.
+_Avoid_: Fully synced state, settled playback
+
 **Bookmark**:
 A saved reference to a meaningful place in an audiobook.
 
@@ -263,6 +271,8 @@ _Avoid_: Five minute window, scrubber window
 - A **Playback Start Attempt** may become **Active Playback** only after playable audio is confirmed.
 - A **Playback Start Attempt** for one audiobook may replace existing **Active Playback** for another audiobook before playable audio is confirmed.
 - A failed **Playback Start Attempt** may leave no **Active Playback**.
+- Only one **Playback Control Intent** may be active at a time.
+- Play and pause controls should follow **Audible Playback State**, not completion of follow-up progress or cache work.
 - **Downloaded-Only Mode** is deprecated and must not be used as a post-logout access state.
 - **Signed-Out Required Sign-In** is not an **Offline User Session**.
 - A user in **Signed-Out Required Sign-In** is not signed in.
