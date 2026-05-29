@@ -1,9 +1,8 @@
 import { useCoverImageSource } from "@/components/images/cover-image";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
-import { usePlaybackStore, useSleepTimerActions, useSleepTimerStatus } from "@/player";
+import { usePlayerDisplayAudiobook, useSleepTimerActions, useSleepTimerStatus } from "@/player";
 import { resolveStoredDownloadCoverUri, useDeviceBooksStore } from "@/store/device-books-store";
-import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
@@ -26,12 +25,12 @@ const MainPlayerScreen = () => {
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId ?? undefined);
-  const hasLoadedBook = usePlaybackStore(
-    (state) => Boolean(state.libraryItemId) && state.queue.length > 0,
-  );
-  const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
-  const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
+  const playerDisplayAudiobook = usePlayerDisplayAudiobook();
+  const currentLibraryItemId = playerDisplayAudiobook.displayLibraryItemId;
+  const loadedActionLibraryItemId = playerDisplayAudiobook.canUseLoadedPlayerActions
+    ? playerDisplayAudiobook.activeLibraryItemId
+    : undefined;
+  const hasLoadedBook = playerDisplayAudiobook.hasLoadedBook;
   const localCoverUri = useDeviceBooksStore((state) =>
     currentLibraryItemId
       ? resolveStoredDownloadCoverUri(state.downloadedBookData[currentLibraryItemId])
@@ -56,7 +55,7 @@ const MainPlayerScreen = () => {
     localCoverUri,
     variant: "full",
   });
-  const backgroundSource = coverURL || localCoverUri ? backgroundImage.source : DEFAULT_BOOK_COVER;
+  const backgroundSource = currentLibraryItemId ? backgroundImage.source : DEFAULT_BOOK_COVER;
   const chapters = bookData?.media?.chapters ?? [];
   const fallbackDurationMs = Math.max(
     0,
@@ -77,12 +76,18 @@ const MainPlayerScreen = () => {
   const gradientColors = useMemo(
     () =>
       isDarkTheme
-        ? ["rgba(6, 10, 11, 0.18)", "rgba(6, 10, 11, 0.52)", "rgba(6, 10, 11, 0.82)"]
-        : ["rgba(248, 250, 252, 0.14)", "rgba(248, 250, 252, 0.62)", "rgba(248, 250, 252, 0.86)"],
+        ? ([
+            "rgba(6, 10, 11, 0.18)",
+            "rgba(6, 10, 11, 0.52)",
+            "rgba(6, 10, 11, 0.82)",
+          ] as const)
+        : ([
+            "rgba(248, 250, 252, 0.14)",
+            "rgba(248, 250, 252, 0.62)",
+            "rgba(248, 250, 252, 0.86)",
+          ] as const),
     [isDarkTheme],
   );
-  const skipSummaryLabel = `Back ${seekBackwardSeconds}s / Forward ${seekForwardSeconds}s`;
-
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
@@ -144,9 +149,9 @@ const MainPlayerScreen = () => {
             >
               by {authorName}
             </Text>
-            <MainPlayerAmbientControl />
+            <MainPlayerAmbientControl libraryItemId={loadedActionLibraryItemId} />
             {sleepTimerStatus.isActive ? (
-              <Link href="">
+              <Link href="/player-sleep-timer">
                 <Link.Trigger>
                   <View className="py-[10] self-start border-hairline border-accent mt-[6] px-[10] rounded-full bg-surface flex-row items-center gap-[6]">
                     <SymbolView name="powersleep" size={15} tintColor={themeColors.accent} />
@@ -194,22 +199,15 @@ const MainPlayerScreen = () => {
                 Loading details...
               </Text>
             ) : null}
-            {!hasLoadedBook ? (
+            {playerDisplayAudiobook.isPlaybackStartAttempt ? (
+              <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
+                Starting playback...
+              </Text>
+            ) : !hasLoadedBook ? (
               <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
                 Start playback from Home to load a book.
               </Text>
             ) : null}
-            {/* <Text
-              selectable
-              style={{
-                fontSize: 12,
-                color: themeColors.textMuted,
-                textAlign: "center",
-                fontVariant: ["tabular-nums"],
-              }}
-            >
-              {skipSummaryLabel}
-            </Text> */}
           </View>
         </View>
 
@@ -222,7 +220,7 @@ const MainPlayerScreen = () => {
           <BookControls libraryItemId={currentLibraryItemId} />
         </View>
 
-        <MainPlayerActionsBar libraryItemId={currentLibraryItemId} />
+        <MainPlayerActionsBar libraryItemId={loadedActionLibraryItemId} />
       </View>
     </View>
   );

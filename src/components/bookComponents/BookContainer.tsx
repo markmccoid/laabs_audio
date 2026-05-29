@@ -1,6 +1,6 @@
 import { AbsApiError } from "@/api/abs-client";
 import type { LibraryItemSummary } from "@/api/library-items-api";
-import { normalizeUserProgressByLibraryItemId } from "@/api/me-api";
+import { normalizeUserProgressByLibraryItemId, type UserBookProgress } from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { useCoverImageSource } from "@/components/images/cover-image";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
@@ -75,7 +75,6 @@ const BookContainer = ({ libraryItemId }: Props) => {
   const { data: userServerState } = useGetUserServerState();
   const isOffline = useAuthStore((state) => state.isOnline === false);
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
-  const playbackState = usePlaybackStore((state) => state.playbackState);
   const currentTrackIndex = usePlaybackStore((state) => state.currentTrackIndex);
   const queue = usePlaybackStore((state) => state.queue);
   const hasPlayableLocalDownload = useDeviceBooksStore((state) => {
@@ -133,20 +132,10 @@ const BookContainer = ({ libraryItemId }: Props) => {
   const durationSeconds = bookData?.media?.duration ?? bookData?.duration ?? 0;
   const progressByBookId = useMemo(
     () =>
-      normalizeUserProgressByLibraryItemId(
+      normalizeUserProgressByLibraryItemId<UserBookProgress>(
         userServerState as
           | (typeof userServerState & {
-              progressByBookId?: Record<
-                string,
-                {
-                  libraryItemId?: string;
-                  mediaItemId?: string;
-                  currentTime?: number;
-                  duration?: number;
-                  isFinished?: boolean;
-                  lastUpdate?: number;
-                }
-              >;
+              progressByBookId?: Record<string, UserBookProgress>;
             })
           | undefined,
       ),
@@ -168,7 +157,6 @@ const BookContainer = ({ libraryItemId }: Props) => {
     fallbackProgress,
     durationSeconds,
     isViewedBookActive,
-    playbackState,
   });
   const coverURL = bookData?.coverUri;
   const backgroundImage = useCoverImageSource({

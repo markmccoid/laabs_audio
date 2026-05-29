@@ -141,6 +141,18 @@ Rate ownership:
 
 Note: the store only persists `libraryItemId`, `currentTrackIndex`, `positionMs`, and `rate`. After a reload, the UI must call `loadBook` or `loadLocalFile` to rebuild the queue.
 
+## Player Display Audiobook
+
+Player surfaces should use `usePlayerDisplayAudiobook()` from `src/player/player-display-audiobook.ts` when choosing which audiobook title, author, and cover to show.
+
+The projection resolves display identity in this order:
+
+1. Active Playback Start Attempt
+2. Active Playback
+3. No player display audiobook
+
+This matters during audiobook switches. If Book A is Active Playback and Book B starts loading, Book B becomes the Player Display Audiobook immediately, but loaded-only actions stay disabled until Book B becomes Active Playback with a queue. Main Player and mini player should not duplicate this ordering rule.
+
 ## Component API (Common Tasks)
 
 All UI actions should go through `playerService`, and all state should come from `usePlaybackStore`.
@@ -221,20 +233,24 @@ Behavior:
 1. The slider is chapter-scoped: minimum is `0`, maximum is current chapter duration.
 2. Left label shows live chapter elapsed time; right label shows total chapter duration.
 3. The center label shows absolute book progress (`current position of total duration`).
-4. Before the viewed book is active, chapter + position are derived from user server state (`useGetUserServerState`) and the loaded item chapters.
-5. During initial `loading`, the slider keeps using cached user progress to avoid a temporary jump to zero while queue/session state initializes.
-6. On first transition into `playing/paused`, the slider waits until live position is plausibly aligned with cached resume position (with a short timeout fallback) before switching from cached to live progress.
-7. Once that handoff is ready, chapter + position are sourced from live playback state (`playbackStore.chapterIndex`, `positionMs`).
-8. The slider remains disabled until the user has played that viewed book at least once during the current screen session.
-9. Seeking occurs only on `onSlidingComplete`; the chapter-relative slider value is translated back to absolute book position before calling `playerService.seekTo(positionMs)`.
+4. Before the viewed book has a Displayed Listening Position, chapter + position fall back to user server state (`useGetUserServerState`) and the loaded item chapters.
+5. During a Playback Start Attempt, the player surface may show the attempted audiobook before it becomes Active Playback. `playerService` seeds Displayed Listening Position from cached server progress, queued Progress Sync Intent, or persisted playback before native audio setup can emit status ticks.
+6. Once Resume Resolution finishes, the slider reads the shared Displayed Listening Position instead of independently switching between cache and raw playback state.
+7. Native AudioPro setup can briefly emit `0` or stale positions after the streamed session commits. `playerService.handleStatus()` and the Displayed Listening Position store ignore raw playback progress below the chosen Resume Resolution until the engine reaches that position.
+8. User-initiated position changes, including slider scrubbing, skip buttons, chapter navigation, and Play from Bookmark, update Displayed Listening Position optimistically and reset the trusted floor so intentional backward movement is allowed.
+9. The slider remains disabled until the viewed book is loaded in Active Playback.
+10. Seeking occurs only on `onSlidingComplete`; the chapter-relative slider value is translated back to absolute book position before calling `playerService.seekTo(positionMs)`.
 
 ## Resume Position Source
 
-When loading a book with `playerService.loadBook(libraryItemId)`, initial seek is resolved in this order:
+When loading a book with `playerService.loadBook(libraryItemId)`, Resume Resolution chooses the Listening Position from these candidates:
 
-1. `userServerState` query cache (`progressByLibraryItemId[libraryItemId]`).
-2. For streamed playback only, fallback network read `meApi.getProgress(libraryItemId)` if query cache is missing the book.
-3. Fallback to persisted playback-store position if no server progress is available.
+1. Fresh server progress fetched during load.
+2. `userServerState` query cache (`progressByLibraryItemId[libraryItemId]`), including older persisted `progressByBookId` shape.
+3. Pending Progress Sync Intent for the audiobook.
+4. Persisted playback-store position if no stronger progress evidence is available.
+
+The same resolution logic is also used to seed Displayed Listening Position early, before streamed metadata and native audio setup complete. Fresh server progress may advance the displayed position, but it must not move it backward or override newer local listening evidence.
 
 ### Play / Pause / Toggle
 

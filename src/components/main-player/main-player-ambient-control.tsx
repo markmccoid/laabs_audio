@@ -11,22 +11,32 @@ import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { Pressable, Text, View } from "react-native";
 
-const MainPlayerAmbientControl = () => {
+type MainPlayerAmbientControlProps = {
+  libraryItemId?: string;
+};
+
+const MainPlayerAmbientControl = ({ libraryItemId }: MainPlayerAmbientControlProps) => {
   const themeColors = useThemeColors();
-  const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
-  const hasLoadedBook = usePlaybackStore(
-    (state) => Boolean(state.libraryItemId) && state.queue.length > 0,
+  const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const hasLoadedBook = usePlaybackStore((state) =>
+    Boolean(libraryItemId && state.libraryItemId === libraryItemId && state.queue.length > 0),
   );
   const isEnabled = useAmbientStore((state) => state.isEnabled);
   const availableTrackCount = useAmbientStore((state) => selectAvailableAmbientTracks(state).length);
   const attachedTrack = useAmbientStore((state) =>
-    selectAttachedAmbientTrackForBook(state, currentLibraryItemId),
+    selectAttachedAmbientTrackForBook(state, libraryItemId),
   );
   const activeTrack = useAmbientStore(selectActiveAmbientTrack);
-  const activeLibraryItemId = useAmbientStore((state) => state.activeLibraryItemId);
+  const ambientActiveLibraryItemId = useAmbientStore((state) => state.activeLibraryItemId);
   const ambientPlaybackState = useAmbientStore((state) => state.playbackState);
 
-  if (!hasLoadedBook || !isEnabled || availableTrackCount === 0) {
+  if (
+    !libraryItemId ||
+    activeLibraryItemId !== libraryItemId ||
+    !hasLoadedBook ||
+    !isEnabled ||
+    availableTrackCount === 0
+  ) {
     return null;
   }
 
@@ -62,7 +72,7 @@ const MainPlayerAmbientControl = () => {
   }
 
   const isActiveForCurrentBook =
-    activeTrack?.id === attachedTrack.id && activeLibraryItemId === currentLibraryItemId;
+    activeTrack?.id === attachedTrack.id && ambientActiveLibraryItemId === libraryItemId;
   const isPlaying = isActiveForCurrentBook && ambientPlaybackState === "playing";
   const isPaused = isActiveForCurrentBook && ambientPlaybackState === "paused";
 
@@ -97,7 +107,7 @@ const MainPlayerAmbientControl = () => {
             return;
           }
 
-          ambientService.loadAttachedTrackForBook(currentLibraryItemId);
+          ambientService.loadAttachedTrackForBook(libraryItemId);
         }}
         style={({ pressed }) => ({
           width: 34,
@@ -143,7 +153,7 @@ const MainPlayerAmbientControl = () => {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Remove ambient track ${attachedTrack.fileName}`}
-        onPress={() => ambientService.detachTrackFromBook(currentLibraryItemId)}
+        onPress={() => ambientService.detachTrackFromBook(libraryItemId)}
         style={({ pressed }) => ({
           width: 34,
           height: 34,

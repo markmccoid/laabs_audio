@@ -8,6 +8,7 @@ import {
 } from "../api/me-api";
 import { playlistsApi } from "../api/playlists-api";
 import { selectAccessMode, useAuthStore } from "../auth/auth-store";
+import { useDisplayedListeningPositionRecord } from "../progress/displayed-listening-position";
 import { usePlaybackStore } from "../player/playback-store";
 import { queryKeys } from "../query/query-keys";
 import {
@@ -197,9 +198,10 @@ export const useHomeShelves = () => {
   const isOnline = useAuthStore((state) => state.isOnline);
   const homeScopeKey = toHomeShelfScopeKey(activeLibraryUserKey, activeLibraryId);
   const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
-  const playbackPositionMs = usePlaybackStore((state) => state.positionMs);
-  const playbackDurationMs = usePlaybackStore((state) => state.durationMs);
-  const playbackStatusUpdatedAt = usePlaybackStore((state) => state.debugStatus?.updatedAt ?? 0);
+  const displayedListeningPosition = useDisplayedListeningPositionRecord(
+    playbackLibraryItemId,
+    "browsing",
+  );
 
   const libraryBooksQueryKey = queryKeys.libraryBooks(activeLibraryId);
   const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
@@ -321,23 +323,23 @@ export const useHomeShelves = () => {
       );
     });
 
-    if (playbackLibraryItemId) {
-      const playbackCurrentTime = msToSeconds(playbackPositionMs);
-      if (playbackCurrentTime > 0) {
+    if (playbackLibraryItemId && displayedListeningPosition) {
+      const displayedCurrentTime = msToSeconds(displayedListeningPosition.positionMs);
+      if (displayedCurrentTime > 0) {
         const previous = normalizedProgress[playbackLibraryItemId];
         const book = catalogById.get(playbackLibraryItemId);
-        const playbackDuration = Math.max(
-          msToSeconds(playbackDurationMs),
+        const displayedDuration = Math.max(
+          msToSeconds(displayedListeningPosition.durationMs),
           previous?.duration ?? 0,
           book?.duration ?? 0,
         );
         const candidate = buildLocalProgress({
           libraryItemId: playbackLibraryItemId,
-          currentTime: playbackCurrentTime,
-          duration: playbackDuration,
+          currentTime: displayedCurrentTime,
+          duration: displayedDuration,
           isFinished:
-            playbackDuration > 0 && playbackCurrentTime >= Math.max(0, playbackDuration - 3),
-          updatedAt: Math.max(playbackStatusUpdatedAt, previous?.lastUpdate ?? 0),
+            displayedDuration > 0 && displayedCurrentTime >= Math.max(0, displayedDuration - 3),
+          updatedAt: Math.max(displayedListeningPosition.updatedAt, previous?.lastUpdate ?? 0),
           previous,
         });
 
@@ -348,11 +350,9 @@ export const useHomeShelves = () => {
     return normalizedProgress;
   }, [
     catalogById,
+    displayedListeningPosition,
     pendingProgressByItemId,
-    playbackDurationMs,
     playbackLibraryItemId,
-    playbackPositionMs,
-    playbackStatusUpdatedAt,
     userServerState,
   ]);
 

@@ -2,12 +2,13 @@ import { normalizeUserProgressByLibraryItemId } from "@/api/me-api";
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import SliderWithBubble from "@/components/sliders/slider-with-bubble";
 import { playerService, usePlaybackStore } from "@/player";
+import { useDisplayedListeningPositionRecord } from "@/progress/displayed-listening-position";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Chapter } from "@/types/absTypes";
 import { formatSeconds } from "@/utils/formatUtils";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 
 type Props = {
@@ -18,10 +19,6 @@ type Props = {
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
-const RESUME_POSITION_TOLERANCE_MS = 5000;
-const PLAYBACK_PROGRESS_HANDOFF_DELAY_MS = 1500;
-const PENDING_SEEK_SETTLE_TOLERANCE_MS = 1000;
-const PENDING_SEEK_TIMEOUT_MS = 3000;
 
 type ChapterWindow = {
   id?: number;
@@ -43,12 +40,11 @@ const findChapterForPosition = (chapterWindows: ChapterWindow[], positionMs: num
 const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }: Props) => {
   const { data: userServerState } = useGetUserServerState();
   const themeColors = useThemeColors();
-  const playbackState = usePlaybackStore((state) => state.playbackState);
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
-  const positionMs = usePlaybackStore((state) => state.positionMs);
   const durationMs = usePlaybackStore((state) => state.durationMs);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const chapterIndex = usePlaybackStore((state) => state.chapterIndex);
+  const displayedListeningPosition = useDisplayedListeningPositionRecord(libraryItemId, "player");
 
   const localProgressMs = useMemo(() => {
     if (!libraryItemId) return 0;
@@ -65,10 +61,8 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
     const currentTimeSeconds = progressByBookId[libraryItemId]?.currentTime ?? 0;
     return secondsToMs(currentTimeSeconds);
   }, [libraryItemId, userServerState]);
-  const [isLiveProgressReady, setIsLiveProgressReady] = useState(false);
   const [isSliding, setIsSliding] = useState(false);
   const [draftChapterPositionMs, setDraftChapterPositionMs] = useState(0);
-  const [pendingSeekBookPositionMs, setPendingSeekBookPositionMs] = useState<number | null>(null);
 
   const fallbackChapterWindows = useMemo<ChapterWindow[]>(
     () =>
@@ -85,17 +79,16 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
 
   const isViewedBookActive = Boolean(libraryItemId) && currentLibraryItemId === libraryItemId;
   const isViewedBookLoaded = isViewedBookActive && queueLength > 0;
-  const shouldUsePlaybackProgress = isViewedBookActive && isViewedBookLoaded && isLiveProgressReady;
   const resolvedBookDurationMs = isViewedBookActive
-    ? Math.max(durationMs, fallbackDurationMs, 0)
-    : Math.max(fallbackDurationMs, 0);
-  const sourceBookPositionMs = shouldUsePlaybackProgress ? positionMs : localProgressMs;
+    ? Math.max(durationMs, fallbackDurationMs, displayedListeningPosition?.durationMs ?? 0, 0)
+    : Math.max(fallbackDurationMs, displayedListeningPosition?.durationMs ?? 0, 0);
+  const sourceBookPositionMs = displayedListeningPosition?.positionMs ?? localProgressMs;
   const resolvedBookPositionMs =
     resolvedBookDurationMs > 0
       ? clamp(sourceBookPositionMs, 0, resolvedBookDurationMs)
       : Math.max(sourceBookPositionMs, 0);
 
-  const displayedBookPositionMs = pendingSeekBookPositionMs ?? resolvedBookPositionMs;
+  const displayedBookPositionMs = resolvedBookPositionMs;
 
   const activeChapterWindow = useMemo(() => {
     if (isViewedBookActive && isViewedBookLoaded && chapterIndex.length) {
@@ -120,86 +113,6 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
     chapterDurationMs > 0
       ? clamp(displayedBookPositionMs - chapterStartMs, 0, chapterDurationMs)
       : Math.max(0, displayedBookPositionMs - chapterStartMs);
-
-  useEffect(() => {
-    setIsLiveProgressReady(false);
-    setIsSliding(false);
-    setDraftChapterPositionMs(0);
-    setPendingSeekBookPositionMs(null);
-  }, [libraryItemId]);
-
-  useEffect(() => {
-    if (!isViewedBookActive || !isViewedBookLoaded) {
-      setIsLiveProgressReady(false);
-      return;
-    }
-
-    const isPlayableState =
-      playbackState === "ready" || playbackState === "playing" || playbackState === "paused";
-    if (!isPlayableState) {
-      return;
-    }
-
-    const expectedMinPosition =
-      localProgressMs > RESUME_POSITION_TOLERANCE_MS
-        ? localProgressMs - RESUME_POSITION_TOLERANCE_MS
-        : 0;
-    const hasValidLivePosition =
-      localProgressMs <= RESUME_POSITION_TOLERANCE_MS || positionMs >= expectedMinPosition;
-
-    if (hasValidLivePosition) {
-      if (!isLiveProgressReady) {
-        setIsLiveProgressReady(true);
-      }
-      return;
-    }
-
-    const timeoutId = setTimeout(() => {
-      setIsLiveProgressReady(true);
-    }, PLAYBACK_PROGRESS_HANDOFF_DELAY_MS);
-
-    return () => {
-      clearTimeout(timeoutId);
-    };
-  }, [
-    isViewedBookActive,
-    isViewedBookLoaded,
-    playbackState,
-    localProgressMs,
-    positionMs,
-    isLiveProgressReady,
-  ]);
-
-  useEffect(() => {
-    if (!isSliding) {
-      setDraftChapterPositionMs(resolvedChapterPositionMs);
-    }
-  }, [resolvedChapterPositionMs, isSliding]);
-
-  useEffect(() => {
-    if (
-      pendingSeekBookPositionMs === null ||
-      Math.abs(resolvedBookPositionMs - pendingSeekBookPositionMs) > PENDING_SEEK_SETTLE_TOLERANCE_MS
-    ) {
-      return;
-    }
-
-    setPendingSeekBookPositionMs(null);
-  }, [pendingSeekBookPositionMs, resolvedBookPositionMs]);
-
-  useEffect(() => {
-    if (pendingSeekBookPositionMs === null) {
-      return;
-    }
-
-    const timeoutId = setTimeout(() => {
-      setPendingSeekBookPositionMs(null);
-    }, PENDING_SEEK_TIMEOUT_MS);
-
-    return () => {
-      clearTimeout(timeoutId);
-    };
-  }, [pendingSeekBookPositionMs]);
 
   const sliderValue = isSliding ? draftChapterPositionMs : resolvedChapterPositionMs;
   const canSeek = isViewedBookLoaded && resolvedBookDurationMs > 0;
@@ -264,7 +177,7 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
         maximumTrackTintColor={themeColors.border}
         thumbTintColor={canSeek ? themeColors.accent : themeColors.textMuted}
         onSlidingStart={() => {
-          setPendingSeekBookPositionMs(null);
+          setDraftChapterPositionMs(resolvedChapterPositionMs);
           setIsSliding(true);
         }}
         onValueChange={(value: number) => setDraftChapterPositionMs(value)}
@@ -275,7 +188,6 @@ const BookTimeSlider = ({ libraryItemId, fallbackDurationMs = 0, chapters = [] }
             resolvedBookDurationMs > 0
               ? clamp(nextBookPositionMs, 0, resolvedBookDurationMs)
               : Math.max(0, nextBookPositionMs);
-          setPendingSeekBookPositionMs(boundedBookPositionMs);
           setDraftChapterPositionMs(value);
           setIsSliding(false);
           void playerService.seekTo(boundedBookPositionMs);

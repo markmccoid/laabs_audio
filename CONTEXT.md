@@ -80,6 +80,10 @@ _Avoid_: Selected book, current book
 The audiobook currently owned by the player for listening.
 _Avoid_: Current audiobook, selected playback, global player book
 
+**Player Display Audiobook**:
+The audiobook whose title, author, and cover should be shown by player surfaces while playback is idle, loading, playing, paused, or failed. During a Playback Start Attempt, this is the attempted audiobook; otherwise it is Active Playback when one exists.
+_Avoid_: Now playing, current player book, selected playback book
+
 **Playback Rate**:
 The listening speed preference for an audiobook, scoped to a User Session when the user is signed in.
 _Avoid_: Global speed, book speed
@@ -134,6 +138,10 @@ _Avoid_: Starting Position buttons
 **Listening Position**:
 The audiobook position where normal listening should continue.
 _Avoid_: Playback cursor
+
+**Displayed Listening Position**:
+The audiobook position shown by player and browsing surfaces while LAABS Audio is resolving, starting, or playing an audiobook.
+_Avoid_: Slider position, UI progress, playback cursor
 
 **Resume Resolution**:
 The decision that chooses the Listening Position when opening an audiobook from saved local, queued, or server progress.
@@ -268,6 +276,8 @@ _Avoid_: Five minute window, scrubber window
 - Library-scoped book lists may use User Session scoped Favorites as an overlay.
 - A **Current Audiobook** may belong to an Audiobookshelf series with other audiobooks.
 - A **Current Audiobook** may differ from **Active Playback**.
+- A **Player Display Audiobook** may differ from **Active Playback** during a **Playback Start Attempt**.
+- Player surfaces may show the **Player Display Audiobook** before it becomes **Active Playback**, but loaded-only player actions still belong to **Active Playback**.
 - A **Playback Start Attempt** may become **Active Playback** only after playable audio is confirmed.
 - A **Playback Start Attempt** for one audiobook may replace existing **Active Playback** for another audiobook before playable audio is confirmed.
 - A failed **Playback Start Attempt** may leave no **Active Playback**.
@@ -351,6 +361,18 @@ _Avoid_: Five minute window, scrubber window
 - Editing a **Bookmark Position** changes the same Bookmark rather than creating a different Bookmark.
 - **Play from Bookmark** sets the **Listening Position** to that Bookmark's **Bookmark Position** and starts playback.
 - **Resume Resolution** chooses the **Listening Position** when opening an audiobook.
+- After **Resume Resolution**, the **Displayed Listening Position** should show the chosen **Listening Position** before raw playback engine progress is trusted.
+- Fresh server progress may advance the **Displayed Listening Position** during startup handoff, but it must not move it backward or override newer local listening evidence.
+- Newer local listening evidence includes a user-initiated **Listening Position** change, playback progress that reaches the chosen **Listening Position**, a pause/stop/background sync point, or a new **Progress Sync Intent** for the audiobook.
+- A user-initiated **Listening Position** change includes slider scrubbing, skip controls, chapter navigation, and **Play from Bookmark**.
+- A user-initiated **Listening Position** change should update the **Displayed Listening Position** immediately while the playback engine catches up.
+- If a user-initiated **Listening Position** change fails, the **Displayed Listening Position** should return to the last trusted position.
+- **Displayed Listening Position** is derived from saved and live progress evidence, not a separate durable listening state.
+- Player and browsing surfaces should use the same **Displayed Listening Position** for **Active Playback**.
+- During a **Playback Start Attempt**, player surfaces may show the attempted audiobook's **Displayed Listening Position** before it becomes **Active Playback**.
+- During a **Playback Start Attempt**, browsing surfaces should keep using **Active Playback** for live **Displayed Listening Position** until the attempted audiobook becomes **Active Playback**.
+- For inactive audiobooks, an **Automatic Progress Sample** is display evidence but not an automatic winner over farther server progress.
+- For inactive audiobooks, an **Explicit Progress Change** should be displayed even when server progress has not yet caught up.
 - A **Streamed Playback Start Failure** belongs to one **Streamed Playback Session**.
 - A **Streamed Playback Start Failure** does not change the **Listening Position**.
 - A **Streamed Playback Start Failure** may close its **Streamed Playback Session** after user-facing playback has already reset.

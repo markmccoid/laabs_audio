@@ -1,5 +1,5 @@
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
-import { playerService, usePlaybackStore } from "@/player";
+import { playerService, usePlaybackStore, usePlayerDisplayAudiobook } from "@/player";
 import { CoverImage } from "@/components/images/cover-image";
 import {
   resolveStoredDownloadCoverUri,
@@ -16,24 +16,21 @@ export default function TabLayout() {
   const playbackRate = usePlaybackStore((state) => state.rate);
   const libraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const { setBookPlaybackRate } = useDeviceBooksActions();
-  const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const playbackControlIntent = usePlaybackStore((state) => state.playbackControlIntent);
-  const intentLibraryItemId =
-    playbackControlIntent?.kind === "start" ? playbackControlIntent.libraryItemId : null;
-  const miniPlayerLibraryItemId = intentLibraryItemId ?? currentLibraryItemId;
-  const isMiniPlayerLoading = Boolean(intentLibraryItemId && !currentLibraryItemId);
+  const playerDisplayAudiobook = usePlayerDisplayAudiobook();
+  const miniPlayerLibraryItemId = playerDisplayAudiobook.displayLibraryItemId;
+  const isMiniPlayerLoading = playerDisplayAudiobook.isPlaybackStartAttempt;
   const localCoverUri = useDeviceBooksStore((state) =>
     miniPlayerLibraryItemId
       ? resolveStoredDownloadCoverUri(state.downloadedBookData[miniPlayerLibraryItemId])
       : null,
   );
-  // const currentBook1 = useCachedBookSummary(currentLibraryItemId ?? undefined);
   const { data: currentBook } = useGetItemDetails(miniPlayerLibraryItemId || undefined);
   const themeColors = useThemeColors();
   const isPlaying = playbackState === "playing";
-  const hasLoadedBook = usePlaybackStore((s) => Boolean(s.libraryItemId) && s.queue.length > 0);
-  const shouldShowMiniPlayer = hasLoadedBook || Boolean(intentLibraryItemId);
+  const hasLoadedBook = playerDisplayAudiobook.hasLoadedBook;
+  const shouldShowMiniPlayer = hasLoadedBook || playerDisplayAudiobook.isPlaybackStartAttempt;
   const handleSetRate = async (rate: number) => {
     await playerService.setRate(rate);
     if (libraryItemId) {

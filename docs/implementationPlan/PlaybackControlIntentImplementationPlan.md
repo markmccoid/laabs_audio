@@ -15,7 +15,7 @@ Make play, pause, and start commands globally safe while keeping playback start 
 - Follow-up work such as remote progress sync, cache touches, downloaded-progress watchdogs, Streamed Playback Session close, and playback-rate reconciliation must not keep the controls locked unless required before audio can start or pause.
 - A Playback Start Attempt is global: disable all play/start controls while one is active.
 - Seek and chapter-skip controls should also disable while a Playback Control Intent is active.
-- The mini player remains tied to Active Playback, not Playback Control Intent.
+- Player display surfaces may read a Playback Start Attempt to choose the Player Display Audiobook, while loaded-only actions remain tied to Active Playback.
 - Playback Control Intent is volatile and must not be persisted.
 
 ## Proposed Store Shape

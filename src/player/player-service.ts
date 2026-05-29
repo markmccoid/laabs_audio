@@ -10,6 +10,7 @@ import { authStore } from "../auth/auth-store";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
+import { displayedListeningPositionStore } from "../progress/displayed-listening-position";
 import { syncListeningPosition } from "../progress/listening-position-sync";
 import { chooseResumeResolutionCandidate } from "../progress/resume-resolution";
 import {
@@ -308,6 +309,13 @@ class PlayerService {
       await this.closeActiveBookForTransition();
     }
 
+    this.seedDisplayedResumePositionForLoad({
+      candidateIds: this.buildCandidateIds(libraryItemId),
+      cachedUserServerState: this.getCachedUserServerStateSnapshot().state,
+      libraryItemId,
+      durationMs: 0,
+    });
+
     playbackStore.getState().actions.setPlaybackState("loading");
     playbackStore.getState().actions.setError(null);
     const preferDownloaded = internalOptions?.preferDownloaded ?? true;
@@ -350,21 +358,27 @@ class PlayerService {
       }
 
       const sessionKind = shouldUseDownloadedAudio ? "downloaded" : "streamed";
+      const rateCandidateIds = this.buildCandidateIds(resolvedLibraryItemId, libraryItemId);
+      const cachedUserServerState = await this.getCachedUserServerState({
+        fetchIfMissing: false,
+      });
+      this.seedDisplayedResumePositionForLoad({
+        candidateIds: rateCandidateIds,
+        cachedUserServerState: cachedUserServerState.state,
+        libraryItemId: resolvedLibraryItemId,
+        durationMs,
+      });
       const freshServerProgressRequest = this.startFreshServerProgressFetch({
         libraryItemId: resolvedLibraryItemId,
         bookTitle: resolvedBookTitle,
         sessionKind,
       });
-      const rateCandidateIds = this.buildCandidateIds(resolvedLibraryItemId, libraryItemId);
       const storedBookRate = this.resolveStoredBookRate(rateCandidateIds);
       const freshServerProgress = await this.awaitFreshServerProgressForLoad({
         request: freshServerProgressRequest,
         libraryItemId: resolvedLibraryItemId,
         bookTitle: resolvedBookTitle,
         sessionKind,
-      });
-      const cachedUserServerState = await this.getCachedUserServerState({
-        fetchIfMissing: false,
       });
       const resumePositionMs = this.resolveResumePositionMs({
         candidateIds: rateCandidateIds,
@@ -374,6 +388,11 @@ class PlayerService {
         bookTitle: resolvedBookTitle,
         sessionKind,
         serverStateSource: cachedUserServerState.source,
+      });
+      displayedListeningPositionStore.getState().actions.setResumeResolution({
+        libraryItemId: resolvedLibraryItemId,
+        positionMs: resumePositionMs,
+        durationMs,
       });
 
       this.listenedMs = 0;
@@ -524,6 +543,12 @@ class PlayerService {
         rate: payload.rate,
         currentChapterId: chapterAtPosition?.id ?? null,
         trackDurationMs: targetTrack.durationMs,
+      });
+      displayedListeningPositionStore.getState().actions.markPlaybackProgress({
+        libraryItemId: payload.libraryItemId,
+        positionMs: bookPositionMs,
+        durationMs: payload.durationMs,
+        isFinished: payload.durationMs > 0 && bookPositionMs >= payload.durationMs - secondsToMs(3),
       });
 
       this.lastTrackedPositionMs = bookPositionMs;
@@ -713,6 +738,7 @@ class PlayerService {
     }
 
     playbackStore.getState().actions.reset();
+    displayedListeningPositionStore.getState().actions.clearAll();
     if (preservedPlaybackControlIntent) {
       playbackStore.getState().actions.setPlaybackControlIntent(preservedPlaybackControlIntent);
     }
@@ -977,6 +1003,17 @@ class PlayerService {
           payload.libraryItemId,
           serverProgress,
         );
+        if (result.status === "applied" && typeof serverProgress.currentTime === "number") {
+          displayedListeningPositionStore.getState().actions.acceptFreshServerProgress({
+            libraryItemId: serverProgress.libraryItemId || payload.libraryItemId,
+            positionMs: secondsToMs(Math.max(0, Math.floor(serverProgress.currentTime))),
+            durationMs:
+              typeof serverProgress.duration === "number"
+                ? secondsToMs(Math.max(0, Math.floor(serverProgress.duration)))
+                : undefined,
+            isFinished: Boolean(serverProgress.isFinished),
+          });
+        }
         this.logFreshServerProgressFetch({
           libraryItemId: payload.libraryItemId,
           bookTitle: payload.bookTitle,
@@ -1088,31 +1125,48 @@ class PlayerService {
     source: CachedUserServerStateSource;
   }> {
     const { fetchIfMissing = false } = options ?? {};
-    const activeLibraryUserKey = authStore.getState().activeLibraryUserKey;
-    if (!activeLibraryUserKey) {
-      return { state: undefined, source: "unavailable" as CachedUserServerStateSource };
-    }
-
-    const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
-    let cachedUserServerState = queryClient.getQueryData<UserServerState>(userServerStateQueryKey);
-    if (cachedUserServerState || !fetchIfMissing) {
+    const cachedSnapshot = this.getCachedUserServerStateSnapshot();
+    if (cachedSnapshot.state || !fetchIfMissing || cachedSnapshot.source === "unavailable") {
       return {
-        state: cachedUserServerState,
-        source: cachedUserServerState ? "cache_hit" : "skipped_fetch",
+        state: cachedSnapshot.state,
+        source: cachedSnapshot.source,
       };
     }
 
     try {
-      cachedUserServerState = await queryClient.fetchQuery({
-        queryKey: userServerStateQueryKey,
-        queryFn: () => fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
+      const cachedUserServerState = await queryClient.fetchQuery({
+        queryKey: cachedSnapshot.queryKey,
+        queryFn: () =>
+          fetchReconciledUserServerState(queryClient, cachedSnapshot.activeLibraryUserKey),
         meta: { persist: true },
       });
+      return { state: cachedUserServerState, source: "fetch_success" };
     } catch {
       return { state: undefined, source: "fetch_failed" as CachedUserServerStateSource };
     }
+  }
 
-    return { state: cachedUserServerState, source: "fetch_success" as CachedUserServerStateSource };
+  private getCachedUserServerStateSnapshot() {
+    const activeLibraryUserKey = authStore.getState().activeLibraryUserKey;
+    const queryKey = queryKeys.userServerState(activeLibraryUserKey ?? "");
+    if (!activeLibraryUserKey) {
+      return {
+        state: undefined,
+        source: "unavailable" as CachedUserServerStateSource,
+        activeLibraryUserKey: "",
+        queryKey,
+      };
+    }
+
+    const cachedUserServerState = queryClient.getQueryData<UserServerState>(queryKey);
+    return {
+      state: cachedUserServerState,
+      source: cachedUserServerState
+        ? ("cache_hit" as CachedUserServerStateSource)
+        : ("skipped_fetch" as CachedUserServerStateSource),
+      activeLibraryUserKey,
+      queryKey,
+    };
   }
 
   private getQueuedProgressForCandidateIds(candidateIds: string[]) {
@@ -1135,6 +1189,127 @@ class PlayerService {
     return pickNewestQueuedProgress(
       Object.values(queueByItemId).filter((progress) => candidateIds.includes(progress.libraryItemId)),
     );
+  }
+
+  private getCachedProgressForCandidateIds(
+    candidateIds: string[],
+    cachedUserServerState?: UserServerState,
+  ) {
+    const progressByLibraryItemId =
+      cachedUserServerState?.progressByLibraryItemId ??
+      // Compatibility for older persisted query shape.
+      (
+        cachedUserServerState as UserServerState & {
+          progressByBookId?: UserServerState["progressByLibraryItemId"];
+        }
+      )?.progressByBookId ??
+      {};
+
+    const directCachedUserProgress = candidateIds
+      .map((candidateId) => progressByLibraryItemId[candidateId])
+      .find((progress) => typeof progress?.currentTime === "number");
+    const fallbackCachedUserProgress = pickNewestProgress(
+      Object.values(progressByLibraryItemId).filter((progress) => {
+        if (!progress || typeof progress.currentTime !== "number") return false;
+        const libraryItemId = progress.libraryItemId;
+        const mediaItemId = progress.mediaItemId;
+        return (
+          (typeof libraryItemId === "string" && candidateIds.includes(libraryItemId)) ||
+          (typeof mediaItemId === "string" && candidateIds.includes(mediaItemId))
+        );
+      }),
+    );
+
+    return directCachedUserProgress ?? fallbackCachedUserProgress;
+  }
+
+  private seedDisplayedResumePositionForLoad(payload: {
+    candidateIds: string[];
+    cachedUserServerState?: UserServerState;
+    libraryItemId: string;
+    durationMs: number;
+  }) {
+    const cachedUserProgress = this.getCachedProgressForCandidateIds(
+      payload.candidateIds,
+      payload.cachedUserServerState,
+    );
+    const queuedProgress = this.getQueuedProgressForCandidateIds(payload.candidateIds);
+    const persisted = playbackStore.getState();
+    const persistedPositionMs = payload.candidateIds.some(
+      (candidateId) => persisted.libraryItemId === candidateId,
+    )
+      ? persisted.positionMs
+      : 0;
+    const cachedCurrentTimeSeconds =
+      typeof cachedUserProgress?.currentTime === "number"
+        ? Math.max(0, Math.floor(cachedUserProgress.currentTime))
+        : null;
+    const queuedCurrentTimeSeconds =
+      typeof queuedProgress?.currentTime === "number"
+        ? Math.max(0, Math.floor(queuedProgress.currentTime))
+        : null;
+    const persistedCurrentTimeSeconds =
+      persistedPositionMs > 0 ? msToSeconds(persistedPositionMs) : null;
+    const bestServerCurrentTimeSeconds = cachedCurrentTimeSeconds ?? 0;
+    const serverWouldBeatQueuedZero =
+      !queuedProgress?.isFinished &&
+      (queuedCurrentTimeSeconds ?? 0) <= 0 &&
+      bestServerCurrentTimeSeconds > STALE_ZERO_PROGRESS_GUARD_SECONDS;
+    const candidates: ProgressResolutionCandidate[] = [
+      {
+        source: "persisted_query_cache",
+        available: cachedCurrentTimeSeconds !== null,
+        currentTimeSeconds: cachedCurrentTimeSeconds,
+        durationSeconds:
+          typeof cachedUserProgress?.duration === "number"
+            ? Math.max(0, Math.floor(cachedUserProgress.duration))
+            : null,
+        isFinished:
+          typeof cachedUserProgress?.isFinished === "boolean" ? cachedUserProgress.isFinished : null,
+        lastUpdate:
+          typeof cachedUserProgress?.lastUpdate === "number"
+            ? Math.max(0, Math.floor(cachedUserProgress.lastUpdate))
+            : null,
+        note: "Seeded from cached user server state before fresh server progress returned",
+      },
+      {
+        source: "queue",
+        available: queuedCurrentTimeSeconds !== null,
+        currentTimeSeconds: queuedCurrentTimeSeconds,
+        durationSeconds: null,
+        isFinished: typeof queuedProgress?.isFinished === "boolean" ? queuedProgress.isFinished : null,
+        lastUpdate:
+          typeof queuedProgress?.updatedAt === "number"
+            ? Math.max(0, Math.floor(queuedProgress.updatedAt))
+            : null,
+        note: serverWouldBeatQueuedZero
+          ? "Ignored as a stale queued zero-progress entry"
+          : "Seeded from pending local queued progress",
+      },
+      {
+        source: "persisted_playback",
+        available: persistedCurrentTimeSeconds !== null,
+        currentTimeSeconds: persistedCurrentTimeSeconds,
+        durationSeconds: persistedCurrentTimeSeconds,
+        isFinished: null,
+        lastUpdate: null,
+        note: "Seeded from persisted playback-store position",
+      },
+    ];
+    const chosenCandidate = chooseResumeResolutionCandidate(candidates, {
+      ignoreQueue: serverWouldBeatQueuedZero,
+    });
+    const chosenCurrentTimeSeconds = Math.max(0, chosenCandidate?.currentTimeSeconds ?? 0);
+
+    displayedListeningPositionStore.getState().actions.setResumeResolution({
+      libraryItemId: payload.libraryItemId,
+      positionMs: secondsToMs(chosenCurrentTimeSeconds),
+      durationMs: Math.max(
+        payload.durationMs,
+        secondsToMs(Math.max(0, chosenCandidate?.durationSeconds ?? 0)),
+      ),
+      isFinished: Boolean(chosenCandidate?.isFinished),
+    });
   }
 
   private resolveProgressFloorMsForFailedStart(libraryItemId: string, requestedPositionMs: number) {
@@ -1178,31 +1353,10 @@ class PlayerService {
       sessionKind,
       serverStateSource,
     } = payload;
-    const progressByLibraryItemId =
-      cachedUserServerState?.progressByLibraryItemId ??
-      // Compatibility for older persisted query shape.
-      (
-        cachedUserServerState as UserServerState & {
-          progressByBookId?: UserServerState["progressByLibraryItemId"];
-        }
-      )?.progressByBookId ??
-      {};
-
-    const directCachedUserProgress = candidateIds
-      .map((candidateId) => progressByLibraryItemId[candidateId])
-      .find((progress) => typeof progress?.currentTime === "number");
-    const fallbackCachedUserProgress = pickNewestProgress(
-      Object.values(progressByLibraryItemId).filter((progress) => {
-        if (!progress || typeof progress.currentTime !== "number") return false;
-        const libraryItemId = progress.libraryItemId;
-        const mediaItemId = progress.mediaItemId;
-        return (
-          (typeof libraryItemId === "string" && candidateIds.includes(libraryItemId)) ||
-          (typeof mediaItemId === "string" && candidateIds.includes(mediaItemId))
-        );
-      }),
+    const cachedUserProgress = this.getCachedProgressForCandidateIds(
+      candidateIds,
+      cachedUserServerState,
     );
-    const cachedUserProgress = directCachedUserProgress ?? fallbackCachedUserProgress;
     const queuedProgress = this.getQueuedProgressForCandidateIds(candidateIds);
 
     const persisted = playbackStore.getState();
@@ -1655,6 +1809,13 @@ class PlayerService {
       }
     }
 
+    this.seedDisplayedResumePositionForLoad({
+      candidateIds: this.buildCandidateIds(libraryItemId),
+      cachedUserServerState: this.getCachedUserServerStateSnapshot().state,
+      libraryItemId,
+      durationMs: 0,
+    });
+
     try {
       await this.loadBook(libraryItemId, { autoPlay: true });
       return accepted;
@@ -1823,19 +1984,40 @@ class PlayerService {
     const targetIndex = state.queue.indexOf(targetTrack);
     const trackPositionMs = Math.max(0, boundedPosition - targetTrack.startOffsetMs);
     const isPlaying = state.playbackState === "playing";
+    const isFinished = state.durationMs > 0 && boundedPosition >= state.durationMs - secondsToMs(3);
 
-    if (targetIndex !== state.currentTrackIndex) {
-      await this.loadTrack(targetIndex, {
-        initialPositionMs: trackPositionMs,
-        autoPlay: isPlaying,
-      });
-    } else {
-      await this.engine.seek(trackPositionMs);
+    displayedListeningPositionStore.getState().actions.startUserPositionChange({
+      libraryItemId: state.libraryItemId as string,
+      positionMs: boundedPosition,
+      durationMs: state.durationMs,
+      isFinished,
+    });
+
+    try {
+      if (targetIndex !== state.currentTrackIndex) {
+        await this.loadTrack(targetIndex, {
+          initialPositionMs: trackPositionMs,
+          autoPlay: isPlaying,
+        });
+      } else {
+        await this.engine.seek(trackPositionMs);
+      }
+    } catch (error) {
+      displayedListeningPositionStore
+        .getState()
+        .actions.rollbackUserPositionChange(state.libraryItemId as string);
+      throw error;
     }
 
     playbackStore.getState().actions.setPosition({
       positionMs: boundedPosition,
       trackPositionMs,
+    });
+    displayedListeningPositionStore.getState().actions.confirmUserPositionChange({
+      libraryItemId: state.libraryItemId as string,
+      positionMs: boundedPosition,
+      durationMs: state.durationMs,
+      isFinished,
     });
     const chapterAtPosition = findChapterForPosition(state.chapterIndex, boundedPosition);
     playbackStore.getState().actions.setCurrentChapter(chapterAtPosition?.id ?? null);
@@ -2220,6 +2402,14 @@ class PlayerService {
       positionMs: bookPositionMs,
       trackPositionMs: options?.initialPositionMs ?? 0,
     });
+    if (state.libraryItemId) {
+      displayedListeningPositionStore.getState().actions.markPlaybackProgress({
+        libraryItemId: state.libraryItemId,
+        positionMs: bookPositionMs,
+        durationMs: state.durationMs,
+        isFinished: state.durationMs > 0 && bookPositionMs >= state.durationMs - secondsToMs(3),
+      });
+    }
     const chapterAtPosition = findChapterForPosition(state.chapterIndex, bookPositionMs);
     playbackStore.getState().actions.setCurrentChapter(chapterAtPosition?.id ?? null);
 
@@ -2260,6 +2450,13 @@ class PlayerService {
 
     const trackPositionMs = Math.max(0, status.positionMs);
     const positionMs = currentTrack.startOffsetMs + trackPositionMs;
+    const displayedPositionRecord = state.libraryItemId
+      ? displayedListeningPositionStore.getState().byLibraryItemId[state.libraryItemId]
+      : undefined;
+    const resumeFloorMs = displayedPositionRecord?.chosenResumePositionMs;
+    if (resumeFloorMs !== null && resumeFloorMs !== undefined && positionMs < resumeFloorMs) {
+      return;
+    }
     if (await this.shouldIgnorePostPreviewStatus(status, positionMs)) {
       return;
     }
@@ -2296,6 +2493,14 @@ class PlayerService {
     }
 
     playbackStore.getState().actions.applyStatusUpdate(updates);
+    if (state.libraryItemId) {
+      displayedListeningPositionStore.getState().actions.markPlaybackProgress({
+        libraryItemId: state.libraryItemId,
+        positionMs,
+        durationMs: state.durationMs,
+        isFinished: state.durationMs > 0 && positionMs >= state.durationMs - secondsToMs(3),
+      });
+    }
 
     // Accumulate listening time for sync (ignore large jumps).
     if (status.isPlaying || didTransitionToNonPlaying) {
