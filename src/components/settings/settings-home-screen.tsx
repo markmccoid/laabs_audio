@@ -7,6 +7,7 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 
 type SettingsRowProps = {
   href:
+    | "/login"
     | "/(tabs)/settings/ambient-audio"
     | "/(tabs)/settings/authentication"
     | "/(tabs)/settings/bookshelves"
@@ -124,9 +125,9 @@ export const SettingsHomeScreen = () => {
 
         <SettingsGroup title="Account">
           <SettingsRow
-            href="/(tabs)/settings/authentication"
-            title="Authentication"
-            subtitle="Manage server, account, and session state"
+            href="/login"
+            title="Sign-Ins"
+            subtitle="Add, switch, edit, or remove Audiobookshelf sign-ins"
             icon="person.crop.circle"
             isLast
           />

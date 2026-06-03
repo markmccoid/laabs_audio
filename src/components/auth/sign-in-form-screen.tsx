@@ -11,11 +11,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { selectAccessMode, useAuthActions, useAuthStore } from "../auth/auth-store";
-import { fetchLibrariesForResolution, resolveLibrarySelection } from "../auth/library-resolution";
-import { useActivateLibrarySelection } from "../hooks/use-activate-library-selection";
-import Dropdown from "../shared/ui/organisms/dropdown";
-import { useThemeColors } from "../theme/use-app-theme";
+import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
+import { getDefaultSessionLabel } from "@/auth/auth-storage";
+import { useCompleteSessionEntry } from "@/auth/use-complete-session-entry";
+import Dropdown from "@/shared/ui/organisms/dropdown";
+import { useThemeColors } from "@/theme/use-app-theme";
 
 const SERVER_PROTOCOLS = ["https://", "http://"] as const;
 type ServerProtocol = (typeof SERVER_PROTOCOLS)[number];
@@ -52,14 +52,14 @@ const buildServerUrl = (protocol: ServerProtocol, host: string) => {
   return `${protocol}${trimmedHost}`;
 };
 
-export default function LoginScreen() {
+export function SignInFormScreen() {
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const storedServerUrl = useAuthStore((state) => state.serverUrl);
   const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
   const lastAuthError = useAuthStore((state) => state.lastAuthError);
   const { loginWithPassword, setLoginRequired } = useAuthActions();
-  const activateLibrarySelection = useActivateLibrarySelection();
+  const completeSessionEntry = useCompleteSessionEntry();
   const themeColors = useThemeColors();
   const params = useLocalSearchParams<{
     mode?: string;
@@ -79,6 +79,7 @@ export default function LoginScreen() {
   }, [params.returnToLibraryItemId]);
 
   const [username, setUsername] = useState(() => storedUsername ?? "");
+  const [sessionLabel, setSessionLabel] = useState("");
   const [password, setPassword] = useState("");
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [serverProtocol, setServerProtocol] = useState<ServerProtocol>(
@@ -114,35 +115,14 @@ export default function LoginScreen() {
     const finalServerUrl = buildServerUrl(serverProtocol, serverHost);
     setIsSubmitting(true);
     try {
-      await loginWithPassword(username.trim(), password, finalServerUrl);
-
-      const response = await fetchLibrariesForResolution();
-      const resolution = resolveLibrarySelection(response.libraries);
-
-      if (resolution.status === "noLibraries") {
-        setLocalError("This Audiobookshelf user does not have any libraries available.");
-        return;
-      }
-
-      if (resolution.status === "needsLibrarySelection") {
-        router.push({
-          pathname: "/library-picker",
-          params: {
-            mode: "setup",
-            ...(returnToLibraryItemId ? { returnToLibraryItemId } : null),
-          },
-        });
-        return;
-      }
-
-      if (isSheet) {
-        setLoginRequired(false);
-      }
-
-      await activateLibrarySelection(resolution.library, {
-        mode: "setup",
-        returnToLibraryItemId,
+      const trimmedUsername = username.trim();
+      const finalLabel =
+        sessionLabel.trim() || getDefaultSessionLabel(trimmedUsername, finalServerUrl);
+      await loginWithPassword(trimmedUsername, password, finalServerUrl, {
+        label: finalLabel,
       });
+
+      await completeSessionEntry({ mode, returnToLibraryItemId });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Login failed";
       setLocalError(message);
@@ -158,7 +138,7 @@ export default function LoginScreen() {
       }
     >
       <View className="flex-row items-center justify-between">
-        <Text className="text-3xl font-semibold text-text">Sign in</Text>
+        <Text className="text-3xl font-semibold text-text">Add Sign-In</Text>
         {isSheet ? (
           <Pressable
             onPress={handleClose}
@@ -171,10 +151,32 @@ export default function LoginScreen() {
       <Text className="mt-2 text-text-muted">
         {isSheet
           ? "Login required to stream. Offline downloads remain available."
-          : "Enter your Audiobookshelf server details."}
+          : "Enter your Audiobookshelf sign-in details."}
       </Text>
 
       <View className="mt-6 gap-4">
+        <View>
+          <Text className="mb-2 text-sm font-medium text-text-muted">Session Label</Text>
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            value={sessionLabel}
+            onChangeText={setSessionLabel}
+            placeholder={
+              username.trim() && serverHost.trim()
+                ? getDefaultSessionLabel(
+                    username.trim(),
+                    buildServerUrl(serverProtocol, serverHost),
+                  )
+                : "user @ server"
+            }
+            placeholderTextColor={themeColors.textMuted}
+            selectionColor={themeColors.accent}
+            className="rounded-xl border border-border bg-surface px-4 py-3 text-base text-text"
+            style={{ color: themeColors.text }}
+          />
+        </View>
+
         <View>
           <Text className="mb-2 text-sm font-medium text-text-muted">Server URL</Text>
           <Dropdown>

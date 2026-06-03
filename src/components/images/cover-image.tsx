@@ -36,12 +36,14 @@ export const resolveCoverImageCandidates = ({
   coverUri,
   libraryItemId,
   localCoverUri,
+  serverUrl,
   variant = "full",
 }: {
   accessToken?: string | null;
   libraryItemId?: string;
   coverUri?: string | null;
   localCoverUri?: string | null;
+  serverUrl?: string | null;
   variant?: CoverImageVariant;
 }) => {
   const localUri = localCoverUri?.trim() || (isLocalUri(coverUri) ? coverUri?.trim() : null) || null;
@@ -54,8 +56,8 @@ export const resolveCoverImageCandidates = ({
     };
   }
 
-  if (libraryItemId) {
-    const urls = buildCoverUrls(libraryItemId, { token: accessToken });
+  if (libraryItemId && serverUrl) {
+    const urls = buildCoverUrls(libraryItemId, { token: accessToken, serverUrl });
     return {
       localUri: null,
       tokenlessRemoteUri: variant === "thumb" ? urls.thumb : urls.full,
@@ -83,6 +85,7 @@ export const useCoverImageSource = ({
 }) => {
   const useTokenWithCoverImages = useSettingsStore((state) => state.useTokenWithCoverImages);
   const accessToken = useAuthStore((state) => state.accessToken);
+  const serverUrl = useAuthStore((state) => state.serverUrl);
 
   const candidates = useMemo(() => {
     return resolveCoverImageCandidates({
@@ -90,9 +93,10 @@ export const useCoverImageSource = ({
       coverUri,
       libraryItemId,
       localCoverUri,
+      serverUrl,
       variant,
     });
-  }, [accessToken, coverUri, libraryItemId, localCoverUri, variant]);
+  }, [accessToken, coverUri, libraryItemId, localCoverUri, serverUrl, variant]);
 
   const hasTokenedRemote = Boolean(candidates.tokenedRemoteUri);
   const [mode, setMode] = useState<CoverSourceMode>(() => {
@@ -102,15 +106,21 @@ export const useCoverImageSource = ({
   });
 
   useEffect(() => {
+    const nextMode = (() => {
     if (candidates.localUri) {
-      setMode("local");
-      return;
+        return "local";
     }
     if (!candidates.tokenlessRemoteUri) {
-      setMode("default");
-      return;
+        return "default";
     }
-    setMode(getPreferredMode(useTokenWithCoverImages, hasTokenedRemote));
+      return getPreferredMode(useTokenWithCoverImages, hasTokenedRemote);
+    })();
+
+    const frameId = requestAnimationFrame(() => {
+      setMode(nextMode);
+    });
+
+    return () => cancelAnimationFrame(frameId);
   }, [
     candidates.localUri,
     candidates.tokenlessRemoteUri,

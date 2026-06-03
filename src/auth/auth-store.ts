@@ -4,7 +4,11 @@ import { createStore } from "zustand/vanilla";
 import { mmkvStorage } from "../store/mmkv-storage";
 import { logStartupDuration, logStartupEvent, markStartup } from "../utils/dev-startup-tracing";
 import { AuthError, authService } from "./auth-service";
-import { authStorage } from "./auth-storage";
+import {
+  authStorage,
+  getDefaultSessionLabel,
+  type RememberedSessionRecord,
+} from "./auth-storage";
 import { getJwtExpiry, isTokenExpired } from "./auth-token";
 
 const log = (...args: unknown[]) => {
@@ -35,6 +39,8 @@ export type AuthState = {
   accessTokenExpiresAt: number | null;
   lastAuthError: string | null;
   loginRequired: boolean;
+  rememberedSessions: RememberedSessionRecord[];
+  activeSessionKey: string | null;
   activeLibraryId: string | null;
   activeLibraryName: string | null;
   activeLibraryUserKey: string | null;
@@ -45,7 +51,18 @@ export type AuthState = {
     setLoginRequired: (required: boolean, message?: string | null) => void;
     setActiveLibrary: (library: { id: string; name: string }) => void;
     clearActiveLibrary: () => void;
-    loginWithPassword: (username: string, password: string, serverUrl: string) => Promise<void>;
+    loginWithPassword: (
+      username: string,
+      password: string,
+      serverUrl: string,
+      options?: { label?: string | null },
+    ) => Promise<void>;
+    restoreRememberedSession: (sessionKey: string) => Promise<void>;
+    updateRememberedSession: (
+      sessionKey: string,
+      values: { label?: string | null; password?: string | null },
+    ) => Promise<void>;
+    removeRememberedSession: (sessionKey: string) => Promise<void>;
     refreshSession: (options?: { force?: boolean }) => Promise<string | null>;
     logout: () => Promise<void>;
   };
@@ -56,12 +73,6 @@ const computeEntryStatus = (hasSession: boolean, hasOfflineContent: boolean): Au
   if (hasOfflineContent) return "offlineOnly";
   return "anonymous";
 };
-
-const getHasStoredCredentials = (values: {
-  username: string | null;
-  password: string | null;
-  serverUrl: string | null;
-}) => Boolean(values.username && values.password && values.serverUrl);
 
 const getHasStoredSession = (state: {
   hasStoredCredentials: boolean;
@@ -90,6 +101,8 @@ export const authStore = createStore<AuthState>()(
       accessTokenExpiresAt: null,
       lastAuthError: null,
       loginRequired: false,
+      rememberedSessions: [],
+      activeSessionKey: null,
       activeLibraryId: null,
       activeLibraryName: null,
       activeLibraryUserKey: null,
@@ -104,48 +117,80 @@ export const authStore = createStore<AuthState>()(
           }
 
           log("hydrate:start");
-          const [credentials, tokens] = await Promise.all([
-            authStorage.getCredentials(),
-            authStorage.getTokens(),
-          ]);
+          try {
+          const snapshot = await authStorage.migrateLegacySessionIfNeeded();
+          const activeSession = snapshot.sessions.find(
+            (session) => session.key === snapshot.activeSessionKey,
+          );
+          const secrets = activeSession
+            ? await authStorage.getSessionSecrets(activeSession.key)
+            : { password: null, accessToken: null, refreshToken: null };
 
-          const hasStoredCredentials = getHasStoredCredentials(credentials);
-          const accessTokenExpiresAt = getJwtExpiry(tokens.accessToken);
+          const hasStoredCredentials = Boolean(activeSession && secrets.password);
+          const accessTokenExpiresAt = getJwtExpiry(secrets.accessToken);
           const offlineContent =
             typeof initialOfflineContent === "boolean"
               ? initialOfflineContent
               : get().hasOfflineContent;
           const hasStoredSession = getHasStoredSession({
             hasStoredCredentials,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
+            accessToken: secrets.accessToken,
+            refreshToken: secrets.refreshToken,
           });
-          const userKey = getUserKey(credentials.username, credentials.serverUrl);
-          const hasMatchingLibrary = Boolean(userKey) && get().activeLibraryUserKey === userKey;
+          const userKey = activeSession
+            ? getUserKey(activeSession.username, activeSession.serverUrl)
+            : null;
+          const persistedActiveLibraryId =
+            userKey && get().activeLibraryUserKey === userKey ? get().activeLibraryId : null;
+          const persistedActiveLibraryName =
+            userKey && get().activeLibraryUserKey === userKey ? get().activeLibraryName : null;
+          if (
+            activeSession &&
+            persistedActiveLibraryId &&
+            persistedActiveLibraryName &&
+            !activeSession.activeLibraryId
+          ) {
+            authStorage.updateSession(activeSession.key, {
+              activeLibraryId: persistedActiveLibraryId,
+              activeLibraryName: persistedActiveLibraryName,
+            });
+            activeSession.activeLibraryId = persistedActiveLibraryId;
+            activeSession.activeLibraryName = persistedActiveLibraryName;
+          }
+          const hasMatchingLibrary =
+            Boolean(userKey) &&
+            (get().activeLibraryUserKey === userKey ||
+              Boolean(activeSession?.activeLibraryId && activeSession?.activeLibraryName));
 
           log("hydrate:computed", {
             hasStoredCredentials,
-            hasAccessToken: Boolean(tokens.accessToken),
-            hasRefreshToken: Boolean(tokens.refreshToken),
+            hasAccessToken: Boolean(secrets.accessToken),
+            hasRefreshToken: Boolean(secrets.refreshToken),
             hasStoredSession,
             hasOfflineContent: offlineContent,
             hasMatchingLibrary,
           });
 
           set((state) => ({
-            storedUsername: credentials.username,
-            serverUrl: credentials.serverUrl,
+            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+            activeSessionKey: activeSession?.key ?? null,
+            storedUsername: activeSession?.username ?? null,
+            serverUrl: activeSession?.serverUrl ?? null,
             hasStoredCredentials,
             hasOfflineContent: offlineContent,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
+            accessToken: secrets.accessToken,
+            refreshToken: secrets.refreshToken,
             accessTokenExpiresAt,
             status: computeEntryStatus(hasStoredSession, offlineContent),
             loginRequired: hasStoredSession ? false : state.loginRequired,
             lastAuthError: hasStoredSession ? null : state.lastAuthError,
-            activeLibraryId: hasMatchingLibrary ? state.activeLibraryId : null,
-            activeLibraryName: hasMatchingLibrary ? state.activeLibraryName : null,
-            activeLibraryUserKey: hasMatchingLibrary ? state.activeLibraryUserKey : userKey,
+            activeLibraryId: hasMatchingLibrary
+              ? (activeSession?.activeLibraryId ?? state.activeLibraryId)
+              : null,
+            activeLibraryName: hasMatchingLibrary
+              ? (activeSession?.activeLibraryName ?? state.activeLibraryName)
+              : null,
+            activeLibraryUserKey: hasMatchingLibrary ? userKey : null,
           }));
 
           log("hydrate:done", {
@@ -159,6 +204,38 @@ export const authStore = createStore<AuthState>()(
               hasMatchingLibrary,
               hasOfflineContent: offlineContent,
             });
+          }
+          } catch (error) {
+            const offlineContent =
+              typeof initialOfflineContent === "boolean"
+                ? initialOfflineContent
+                : get().hasOfflineContent;
+            if (__DEV__) {
+              console.warn("[auth-store] hydrate failed", { error });
+            }
+            set({
+              rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+              activeSessionKey: null,
+              storedUsername: null,
+              serverUrl: null,
+              hasStoredCredentials: false,
+              hasOfflineContent: offlineContent,
+              accessToken: null,
+              refreshToken: null,
+              accessTokenExpiresAt: null,
+              status: computeEntryStatus(false, offlineContent),
+              loginRequired: false,
+              lastAuthError: "Sign in needed",
+              activeLibraryId: null,
+              activeLibraryName: null,
+              activeLibraryUserKey: null,
+            });
+            if (isInitialHydrate) {
+              logStartupDuration("auth hydrate failed", hydrateStartedAtMs, {
+                error: error instanceof Error ? error.message : String(error),
+                hasOfflineContent: offlineContent,
+              });
+            }
           }
         },
 
@@ -201,6 +278,7 @@ export const authStore = createStore<AuthState>()(
           const trimmedId = library.id.trim();
           const trimmedName = library.name.trim();
           const userKey = getUserKey(get().storedUsername, get().serverUrl);
+          const activeSessionKey = get().activeSessionKey;
           log("setActiveLibrary", {
             id: trimmedId,
             name: trimmedName,
@@ -208,7 +286,14 @@ export const authStore = createStore<AuthState>()(
             previousId: get().activeLibraryId,
             previousName: get().activeLibraryName,
           });
+          if (activeSessionKey) {
+            authStorage.updateSession(activeSessionKey, {
+              activeLibraryId: trimmedId,
+              activeLibraryName: trimmedName,
+            });
+          }
           set({
+            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
             activeLibraryId: trimmedId,
             activeLibraryName: trimmedName,
             activeLibraryUserKey: userKey,
@@ -223,7 +308,7 @@ export const authStore = createStore<AuthState>()(
           });
         },
 
-        loginWithPassword: async (username, password, serverUrl) => {
+        loginWithPassword: async (username, password, serverUrl, options) => {
           log("login:start", { username, serverUrl });
           const normalizedServerUrl = authService.normalizeServerUrl(serverUrl);
           const nextUserKey = getUserKey(username, normalizedServerUrl);
@@ -232,15 +317,24 @@ export const authStore = createStore<AuthState>()(
             password,
             serverUrl: normalizedServerUrl,
           });
-
-          await Promise.all([
-            authStorage.setCredentials({
+          const session = authStorage.upsertSession(
+            {
               username,
-              password,
               serverUrl: normalizedServerUrl,
-            }),
-            authStorage.setTokens(tokens),
-          ]);
+              label: options?.label || getDefaultSessionLabel(username, normalizedServerUrl),
+              activeLibraryId: null,
+              activeLibraryName: null,
+              needsAttention: false,
+              lastError: null,
+            },
+            { makeActive: true },
+          );
+
+          await authStorage.setSessionSecrets(session.key, {
+            password,
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+          });
 
           log("login:stored", {
             hasAccessToken: Boolean(tokens.accessToken),
@@ -248,6 +342,8 @@ export const authStore = createStore<AuthState>()(
           });
 
           set((state) => ({
+            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+            activeSessionKey: session.key,
             storedUsername: username,
             serverUrl: normalizedServerUrl,
             accessToken: tokens.accessToken,
@@ -263,6 +359,136 @@ export const authStore = createStore<AuthState>()(
           }));
 
           log("login:done", { status: "authenticated" });
+        },
+
+        restoreRememberedSession: async (sessionKey) => {
+          const snapshot = authStorage.getSessionsSnapshot();
+          const session = snapshot.sessions.find((item) => item.key === sessionKey);
+          if (!session) {
+            throw new AuthError("Sign-in entry not found", "INVALID_RESPONSE");
+          }
+
+          if (get().isOnline === false) {
+            throw new AuthError("Offline", "NETWORK_ERROR");
+          }
+
+          const secrets = await authStorage.getSessionSecrets(session.key);
+          let tokens: { accessToken: string; refreshToken: string } | null = null;
+
+          if (secrets.refreshToken) {
+            try {
+              tokens = await authService.refresh(session.serverUrl, secrets.refreshToken);
+            } catch (error) {
+              if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
+                throw error;
+              }
+              tokens = null;
+            }
+          }
+
+          if (!tokens && secrets.password) {
+            try {
+              tokens = await authService.login({
+                username: session.username,
+                password: secrets.password,
+                serverUrl: session.serverUrl,
+              });
+            } catch (error) {
+              if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
+                throw error;
+              }
+              tokens = null;
+            }
+          }
+
+          if (!tokens) {
+            authStorage.updateSession(session.key, {
+              needsAttention: true,
+              lastError: "Sign in needed",
+            });
+            set({
+              rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+              lastAuthError: "Sign in needed",
+            });
+            throw new AuthError("Sign in needed", "UNAUTHORIZED");
+          }
+
+          await authStorage.setSessionSecrets(session.key, {
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+          });
+          authStorage.updateSession(session.key, {
+            needsAttention: false,
+            lastError: null,
+          });
+          authStorage.setActiveSessionKey(session.key);
+
+          const userKey = getUserKey(session.username, session.serverUrl);
+          set((state) => ({
+            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+            activeSessionKey: session.key,
+            storedUsername: session.username,
+            serverUrl: session.serverUrl,
+            accessToken: tokens.accessToken,
+            refreshToken: tokens.refreshToken,
+            accessTokenExpiresAt: getJwtExpiry(tokens.accessToken),
+            hasStoredCredentials: Boolean(secrets.password),
+            status: computeEntryStatus(true, state.hasOfflineContent),
+            lastAuthError: null,
+            loginRequired: false,
+            activeLibraryId: null,
+            activeLibraryName: null,
+            activeLibraryUserKey: userKey,
+          }));
+        },
+
+        updateRememberedSession: async (sessionKey, values) => {
+          const snapshot = authStorage.getSessionsSnapshot();
+          const session = snapshot.sessions.find((item) => item.key === sessionKey);
+          if (!session) {
+            throw new AuthError("Sign-in entry not found", "INVALID_RESPONSE");
+          }
+
+          if (values.password !== undefined && values.password !== null) {
+            await authStorage.setSessionSecrets(sessionKey, {
+              password: values.password,
+            });
+          }
+
+          authStorage.updateSession(sessionKey, {
+            label: values.label?.trim() || getDefaultSessionLabel(session.username, session.serverUrl),
+            needsAttention: false,
+            lastError: null,
+          });
+
+          set({
+            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+          });
+        },
+
+        removeRememberedSession: async (sessionKey) => {
+          await authStorage.removeSession(sessionKey);
+          set((state) => ({
+            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+            activeSessionKey: state.activeSessionKey === sessionKey ? null : state.activeSessionKey,
+            storedUsername: state.activeSessionKey === sessionKey ? null : state.storedUsername,
+            serverUrl: state.activeSessionKey === sessionKey ? null : state.serverUrl,
+            accessToken: state.activeSessionKey === sessionKey ? null : state.accessToken,
+            refreshToken: state.activeSessionKey === sessionKey ? null : state.refreshToken,
+            accessTokenExpiresAt:
+              state.activeSessionKey === sessionKey ? null : state.accessTokenExpiresAt,
+            hasStoredCredentials:
+              state.activeSessionKey === sessionKey ? false : state.hasStoredCredentials,
+            activeLibraryId: state.activeSessionKey === sessionKey ? null : state.activeLibraryId,
+            activeLibraryName:
+              state.activeSessionKey === sessionKey ? null : state.activeLibraryName,
+            activeLibraryUserKey:
+              state.activeSessionKey === sessionKey ? null : state.activeLibraryUserKey,
+            status:
+              state.activeSessionKey === sessionKey
+                ? computeEntryStatus(false, state.hasOfflineContent)
+                : state.status,
+          }));
         },
 
         refreshSession: async (options) => {
@@ -292,6 +518,7 @@ export const authStore = createStore<AuthState>()(
           refreshPromise = (async () => {
             const currentState = get();
             const serverUrl = currentState.serverUrl;
+            const activeSessionKey = currentState.activeSessionKey;
             if (!serverUrl) {
               throw new AuthError("Missing server URL", "INVALID_RESPONSE");
             }
@@ -316,14 +543,16 @@ export const authStore = createStore<AuthState>()(
             }
 
             if (!tokens) {
-              const credentials = await authStorage.getCredentials();
-              if (getHasStoredCredentials(credentials)) {
+              const secrets = activeSessionKey
+                ? await authStorage.getSessionSecrets(activeSessionKey)
+                : { password: null };
+              if (currentState.storedUsername && secrets.password) {
                 try {
                   log("refresh:fallback-login");
                   tokens = await authService.login({
-                    username: credentials.username as string,
-                    password: credentials.password as string,
-                    serverUrl: credentials.serverUrl as string,
+                    username: currentState.storedUsername,
+                    password: secrets.password,
+                    serverUrl,
                   });
                   log("refresh:fallback-success");
                 } catch (error) {
@@ -337,9 +566,16 @@ export const authStore = createStore<AuthState>()(
             }
 
             if (!tokens) {
-              await authStorage.clearTokens();
+              if (activeSessionKey) {
+                await authStorage.clearSessionTokens(activeSessionKey);
+                authStorage.updateSession(activeSessionKey, {
+                  needsAttention: true,
+                  lastError: "Login required to stream",
+                });
+              }
               log("refresh:failed-no-tokens");
               set((state) => ({
+                rememberedSessions: authStorage.getSessionsSnapshot().sessions,
                 accessToken: null,
                 refreshToken: null,
                 accessTokenExpiresAt: null,
@@ -350,9 +586,19 @@ export const authStore = createStore<AuthState>()(
               return null;
             }
 
-            await authStorage.setTokens(tokens);
+            if (activeSessionKey) {
+              await authStorage.setSessionSecrets(activeSessionKey, {
+                accessToken: tokens.accessToken,
+                refreshToken: tokens.refreshToken,
+              });
+              authStorage.updateSession(activeSessionKey, {
+                needsAttention: false,
+                lastError: null,
+              });
+            }
 
             set((state) => ({
+              rememberedSessions: authStorage.getSessionsSnapshot().sessions,
               accessToken: tokens.accessToken,
               refreshToken: tokens.refreshToken,
               accessTokenExpiresAt: getJwtExpiry(tokens.accessToken),
@@ -377,10 +623,16 @@ export const authStore = createStore<AuthState>()(
             await authService.logout(state.serverUrl, state.refreshToken);
           }
 
-          await Promise.all([authStorage.clearTokens(), authStorage.clearUsernameAndPassword()]);
+          if (state.activeSessionKey) {
+            await authStorage.clearSessionTokens(state.activeSessionKey);
+            authStorage.setActiveSessionKey(null);
+          }
 
           set((current) => ({
+            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+            activeSessionKey: null,
             storedUsername: null,
+            serverUrl: null,
             accessToken: null,
             refreshToken: null,
             accessTokenExpiresAt: null,

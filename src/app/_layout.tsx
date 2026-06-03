@@ -132,6 +132,7 @@ export default function RootLayout() {
   const accessMode = useAuthStore(selectAccessMode);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const rememberedSessionCount = useAuthStore((state) => state.rememberedSessions.length);
   const segments = useSegments();
   const globalParams = useGlobalSearchParams<{ libraryItemId?: string | string[] }>();
   const previousStatus = useRef<typeof status | null>(null);
@@ -372,12 +373,12 @@ export default function RootLayout() {
         startupBookLinkId,
       });
       router.replace({
-        pathname: "/login",
+        pathname: rememberedSessionCount > 0 ? "/login" : "/login/add",
         params: {
           mode: "required",
           returnToLibraryItemId: startupBookLinkId,
         },
-      });
+      } as never);
       return;
     }
 
@@ -417,7 +418,15 @@ export default function RootLayout() {
       logStartupDebug("routeGate:redirect-home");
       router.replace("/(tabs)/(home)");
     }
-  }, [accessMode, initialDeepLinkBookId, loginRequired, routeState, startupBookLinkId, status]);
+  }, [
+    accessMode,
+    initialDeepLinkBookId,
+    loginRequired,
+    rememberedSessionCount,
+    routeState,
+    startupBookLinkId,
+    status,
+  ]);
 
   useEffect(() => {
     if (status === "hydrating") return;

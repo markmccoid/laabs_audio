@@ -12,6 +12,18 @@ _Avoid_: Server URL, backend
 The app's authenticated relationship between one user and one Audiobookshelf Server.
 _Avoid_: Login, auth state
 
+**Remembered User Session**:
+A User Session whose Audiobookshelf Server and username are saved on the device so the user can restore that User Session without re-entering its server address or username.
+_Avoid_: Saved server, account
+
+**Session Restoration**:
+The attempt to make a Remembered User Session become the signed-in User Session again.
+_Avoid_: Auto-login, switch login
+
+**Session Label**:
+The user-facing name for a Remembered User Session.
+_Avoid_: Server name, account name
+
 **Library**:
 An Audiobookshelf collection of media that the user may browse and play.
 _Avoid_: Bookshelf, catalog
@@ -266,6 +278,12 @@ _Avoid_: Five minute window, scrubber window
 ## Relationships
 
 - A **User Session** belongs to exactly one **Audiobookshelf Server**.
+- A **Remembered User Session** is identified by the combination of Audiobookshelf Server and username.
+- Multiple **Remembered User Sessions** may belong to the same Audiobookshelf Server when they use different usernames.
+- Switching from one signed-in User Session to another crosses a User Session boundary.
+- **Session Restoration** may use remembered tokens or remembered credentials for the same Remembered User Session.
+- A **Remembered User Session** may remember its previous Active Library, but that Active Library is valid only if Audiobookshelf still returns it during Library Resolution.
+- Removing a **Remembered User Session** prevents Session Restoration for it, but does not delete Downloaded Audio Assets, Progress Sync Intents, Local Bookmark Records, or other durable listening data scoped to that User Session.
 - A **User Session** may have access to zero, one, or many **Libraries**.
 - A **User Session** has at most one **Active Library**.
 - A **Library** is a separate scope under a **User Session**, not part of the User Session identity.
