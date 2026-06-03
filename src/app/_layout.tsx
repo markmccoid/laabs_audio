@@ -25,7 +25,10 @@ import { FIVE_MINUTES_MS, queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { clearSessionQueryCache } from "../query/session-query-cache";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
-import { mmkvQueryPersister } from "../store/mmkv-query-persister";
+import {
+  getPersistedQueryCacheSizeBytes,
+  mmkvQueryPersister,
+} from "../store/mmkv-query-persister";
 import {
   useApplyAccentThemeOverrides,
   useNavigationTheme,
@@ -132,7 +135,8 @@ export default function RootLayout() {
   const segments = useSegments();
   const globalParams = useGlobalSearchParams<{ libraryItemId?: string | string[] }>();
   const previousStatus = useRef<typeof status | null>(null);
-  const queryRestoreStartedAtMsRef = useRef<number | null>(null);
+  const [queryRestoreStartedAtMs] = useState(() => markStartup("query-restore-start"));
+  const initialUrlStartedAtMsRef = useRef<number | null>(null);
   const splashHiddenRef = useRef(false);
   const [initialDeepLinkBookId, setInitialDeepLinkBookId] = useState<string | null | undefined>(
     undefined,
@@ -184,20 +188,22 @@ export default function RootLayout() {
       queryCount: queryClient.getQueryCache().getAll().length,
     });
     setQueryRestoreReady(true);
-    logStartupDuration("query restore complete", queryRestoreStartedAtMsRef.current, {
+    logStartupDuration("query restore complete", queryRestoreStartedAtMs, {
       restoredQueryCount: queryClient.getQueryCache().getAll().length,
+      persistedCacheBytes: getPersistedQueryCacheSizeBytes(),
     });
-  }, []);
+  }, [queryRestoreStartedAtMs]);
 
   const handleQueryRestoreError = useCallback(() => {
     logStartupDebug("queryRestore:error", {
       queryCount: queryClient.getQueryCache().getAll().length,
     });
     setQueryRestoreReady(true);
-    logStartupDuration("query restore failed", queryRestoreStartedAtMsRef.current, {
+    logStartupDuration("query restore failed", queryRestoreStartedAtMs, {
       restoredQueryCount: queryClient.getQueryCache().getAll().length,
+      persistedCacheBytes: getPersistedQueryCacheSizeBytes(),
     });
-  }, []);
+  }, [queryRestoreStartedAtMs]);
 
   // Persist only queries that opt-in via `meta.persist`
   const persistOptions = useMemo(
@@ -219,7 +225,6 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    queryRestoreStartedAtMsRef.current = markStartup("query-restore-start");
     logStartupEvent("query restore start");
     logStartupDebug("queryRestore:start");
   }, []);
@@ -247,6 +252,7 @@ export default function RootLayout() {
     }, 3000);
 
     logStartupDebug("initialUrl:request");
+    initialUrlStartedAtMsRef.current = markStartup("initial-url-start");
 
     Linking.getInitialURL()
       .then((initialUrl) => {
@@ -257,6 +263,10 @@ export default function RootLayout() {
           initialUrl,
           extractedLibraryItemId: extractBookDetailIdFromUrl(initialUrl) ?? null,
         });
+        logStartupDuration("initial URL resolved", initialUrlStartedAtMsRef.current, {
+          hasInitialUrl: Boolean(initialUrl),
+          extractedLibraryItemId: extractBookDetailIdFromUrl(initialUrl) ?? null,
+        });
         setInitialDeepLinkBookId(extractBookDetailIdFromUrl(initialUrl) ?? null);
       })
       .catch((error) => {
@@ -264,6 +274,9 @@ export default function RootLayout() {
         clearTimeout(unresolvedUrlTimer);
         if (!isMounted) return;
         logStartupDebug("initialUrl:error", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        logStartupDuration("initial URL failed", initialUrlStartedAtMsRef.current, {
           error: error instanceof Error ? error.message : String(error),
         });
         setInitialDeepLinkBookId(null);

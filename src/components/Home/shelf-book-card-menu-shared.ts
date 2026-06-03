@@ -15,10 +15,9 @@ import {
 } from "@/store/device-books-store";
 import { shareBook } from "@/sharing/book-share";
 import {
-  useHomeShelves,
-  type HomeCustomShelf,
-  type HomePlaylistShelf,
-} from "@/hooks/use-home-shelves";
+  useHomeCardShelfMembershipOptions,
+  type ShelfMembershipOption,
+} from "@/hooks/use-shelf-membership-options";
 import { playerService, usePlaybackStore } from "@/player";
 import {
   clearSyncedProgressSyncIntent,
@@ -26,7 +25,7 @@ import {
 } from "@/progress/progress-sync-intent-store";
 import { queryKeys } from "@/query/query-keys";
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Alert } from "react-native";
 import { toast } from "react-native-sonner";
 
@@ -34,12 +33,7 @@ export type ShelfBookCardMenuProps = {
   book: LibraryItemSummary;
   progress?: UserBookProgress;
   isFavorite?: boolean;
-};
-
-export type SelectableShelf = HomeCustomShelf | HomePlaylistShelf;
-export type ShelfMembershipOption = {
-  shelf: SelectableShelf;
-  isMember: boolean;
+  includeShelfMembershipOptions?: boolean;
 };
 
 const updateUserServerStateProgress = (
@@ -105,13 +99,16 @@ export const useShelfBookCardMenuActions = ({
   book,
   progress,
   isFavorite = false,
+  includeShelfMembershipOptions = true,
 }: ShelfBookCardMenuProps) => {
   const queryClient = useQueryClient();
   const authStatus = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const isOnline = useAuthStore((state) => state.isOnline);
-  const { customShelves, playlistShelves } = useHomeShelves();
+  const shelfMembershipOptions = useHomeCardShelfMembershipOptions(
+    includeShelfMembershipOptions ? book.id : null,
+  );
   const {
     addBookToCustomShelf,
     addBooksToPlaylistShelfOptimistic,
@@ -173,15 +170,6 @@ export const useShelfBookCardMenuActions = ({
     : "Hide from Continue Listening";
   const continueListeningVisibilityIcon: "eye" | "eye.slash" =
     progress?.hideFromContinueListening ? "eye" : "eye.slash";
-  const shelfMembershipOptions = useMemo<ShelfMembershipOption[]>(
-    () =>
-      [...customShelves, ...playlistShelves].map((shelf) => ({
-        shelf,
-        isMember: shelf.bookIds.includes(book.id),
-      })),
-    [book.id, customShelves, playlistShelves],
-  );
-
   const syncFinishedProgress = async () => {
     const durationSeconds = Math.max(
       0,
@@ -442,8 +430,8 @@ export const useShelfBookCardMenuActions = ({
     }
   };
 
-  const handleToggleShelfMembership = async (shelf: SelectableShelf, isMember: boolean) => {
-    if (busyAction || !canMutateShelves) return;
+  const handleToggleShelfMembership = async (option: ShelfMembershipOption) => {
+    if (busyAction || !canMutateShelves || !option.canMutate) return;
 
     setBusyAction("shelf");
     const scopeOptions = {
@@ -452,23 +440,23 @@ export const useShelfBookCardMenuActions = ({
     };
 
     try {
-      if (shelf.kind === "custom") {
-        if (isMember) {
-          removeBookFromCustomShelf(shelf.id, book.id, scopeOptions);
+      if (option.kind === "custom") {
+        if (option.isMember) {
+          removeBookFromCustomShelf(option.shelfId, book.id, scopeOptions);
         } else {
-          addBookToCustomShelf(shelf.id, book.id, scopeOptions);
+          addBookToCustomShelf(option.shelfId, book.id, scopeOptions);
         }
       } else {
-        if (isMember) {
-          await removeBooksFromPlaylistShelfOptimistic(shelf.id, [book.id], scopeOptions);
+        if (option.isMember) {
+          await removeBooksFromPlaylistShelfOptimistic(option.shelfId, [book.id], scopeOptions);
         } else {
-          await addBooksToPlaylistShelfOptimistic(shelf.id, [book.id], scopeOptions);
+          await addBooksToPlaylistShelfOptimistic(option.shelfId, [book.id], scopeOptions);
         }
       }
 
-      toast.success(isMember ? `Removed from ${shelf.title}` : `Added to ${shelf.title}`);
+      toast.success(option.isMember ? `Removed from ${option.title}` : `Added to ${option.title}`);
     } catch {
-      toast.error(`Unable to ${isMember ? "remove from" : "add to"} bookshelf`);
+      toast.error(`Unable to ${option.isMember ? "remove from" : "add to"} shelf`);
     } finally {
       setBusyAction(null);
     }

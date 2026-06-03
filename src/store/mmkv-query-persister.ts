@@ -5,6 +5,13 @@ import type { PersistedClient, Persister } from "@tanstack/query-persist-client-
 const storage = createMMKV({ id: "laabs-mmkv-query" });
 const STORAGE_KEY = "react-query-cache";
 
+const getPersistedClientRaw = () => storage.getString(STORAGE_KEY);
+
+export const getPersistedQueryCacheSizeBytes = () => {
+  const raw = getPersistedClientRaw();
+  return raw ? raw.length : 0;
+};
+
 export const mmkvQueryPersister: Persister = {
   // Save the entire persisted client snapshot
   persistClient: (client) => {
@@ -12,7 +19,7 @@ export const mmkvQueryPersister: Persister = {
   },
   // Restore the client snapshot on app start
   restoreClient: () => {
-    const raw = storage.getString(STORAGE_KEY);
+    const raw = getPersistedClientRaw();
     if (!raw) return undefined;
     try {
       return JSON.parse(raw) as PersistedClient;

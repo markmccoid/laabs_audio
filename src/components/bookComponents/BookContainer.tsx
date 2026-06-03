@@ -252,6 +252,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
     book: menuBook,
     progress: menuProgress,
     isFavorite,
+    includeShelfMembershipOptions: false,
   });
   const isMissingFromCurrentLibrary =
     Boolean(libraryItemId) &&

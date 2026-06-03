@@ -28,6 +28,22 @@ _Avoid_: Library picker, library prompt
 The transition that makes a chosen Library ready for browsing after Library Selection.
 _Avoid_: Library load, library warmup
 
+**Home Shelf Display**:
+The first visible Home surface that shows the Active Library's small shelf projections, such as Continue Listening, Recently Added, Discover, Downloaded, custom shelves, or playlist shelves.
+_Avoid_: Home bookshelf display, catalog display, Library display
+
+**Shelf Membership**:
+The relationship between an audiobook and an app-managed Home shelf or playlist shelf for the Active Library.
+_Avoid_: Bookshelf selection, book assignment
+
+**Playlist Shelf**:
+An app-managed shelf backed by an Audiobookshelf playlist on the Audiobookshelf Server.
+_Avoid_: Local playlist, app playlist
+
+**Missing Playlist Shelf**:
+A previously known Playlist Shelf whose backing Audiobookshelf playlist is no longer returned by the Audiobookshelf Server. The server is the source of truth, so Missing Playlist Shelves must not be offered in Home, Shelf Membership, or Settings surfaces.
+_Avoid_: Deleted shelf option, orphaned playlist
+
 **Library Resolution**:
 The post-authentication determination of whether a User Session has zero, one, or multiple Libraries.
 _Avoid_: Library fetch, picker decision

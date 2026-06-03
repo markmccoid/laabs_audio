@@ -5,7 +5,7 @@ import { useSettingsActions } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
 import Animated, { useAnimatedRef } from "react-native-reanimated";
 import Sortable, { type SortableFlexDragEndParams } from "react-native-sortables";
@@ -29,16 +29,22 @@ export const BookshelvesScreen = () => {
   const { homeScopeKey, shelves } = useHomeShelves();
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
-  const [orderedShelfIds, setOrderedShelfIds] = useState<string[]>([]);
+  const shelfIds = useMemo(
+    () =>
+      shelves
+        .filter((shelf) => !(shelf.kind === "playlist" && shelf.isSuppressed))
+        .map((shelf) => shelf.id),
+    [shelves],
+  );
+  const [orderedShelfState, setOrderedShelfState] = useState<{
+    sourceIds: string[];
+    orderedIds: string[];
+  }>({ sourceIds: [], orderedIds: [] });
+  const orderedShelfIds = areIdsEqual(orderedShelfState.sourceIds, shelfIds)
+    ? orderedShelfState.orderedIds
+    : shelfIds;
   const [listWidth, setListWidth] = useState(0);
   const [showVisibleOnly, setShowVisibleOnly] = useState(false);
-
-  useEffect(() => {
-    const nextIds = shelves
-      .filter((shelf) => !(shelf.kind === "playlist" && shelf.isSuppressed))
-      .map((shelf) => shelf.id);
-    setOrderedShelfIds((currentIds) => (areIdsEqual(currentIds, nextIds) ? currentIds : nextIds));
-  }, [shelves]);
 
   const shelfById = useMemo(() => new Map(shelves.map((shelf) => [shelf.id, shelf])), [shelves]);
 
@@ -108,7 +114,10 @@ export const BookshelvesScreen = () => {
   };
 
   const handleSortDragEnd = ({ order }: SortableFlexDragEndParams) => {
-    setOrderedShelfIds((current) => {
+    setOrderedShelfState((currentState) => {
+      const current = areIdsEqual(currentState.sourceIds, shelfIds)
+        ? currentState.orderedIds
+        : shelfIds;
       let next = current;
       if (showVisibleOnly) {
         const currentVisibleIds = current.filter((id) => {
@@ -132,7 +141,7 @@ export const BookshelvesScreen = () => {
         .filter((shelf) => shelf.kind === "playlist" && shelf.isSuppressed)
         .map((shelf) => shelf.id);
       setHomeShelfOrder(homeScopeKey, [...next, ...suppressedIds]);
-      return next;
+      return { sourceIds: shelfIds, orderedIds: next };
     });
   };
 

@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { logStartupDuration, markStartup } from "../utils/dev-startup-tracing";
 
 export type StoredCredentials = {
   username: string | null;
@@ -41,6 +42,7 @@ const deleteItem = (key: string) => SecureStore.deleteItemAsync(key);
 
 export const authStorage = {
   async getCredentials(): Promise<StoredCredentials> {
+    const startedAtMs = markStartup("secure-store-credentials-start");
     await logAvailability();
     const [username, password, serverUrl] = await Promise.all([
       getItem(KEYS.username),
@@ -49,6 +51,11 @@ export const authStorage = {
     ]);
 
     log("getCredentials", {
+      hasUsername: Boolean(username),
+      hasPassword: Boolean(password),
+      hasServerUrl: Boolean(serverUrl),
+    });
+    logStartupDuration("secure-store credentials read", startedAtMs, {
       hasUsername: Boolean(username),
       hasPassword: Boolean(password),
       hasServerUrl: Boolean(serverUrl),
@@ -106,6 +113,7 @@ export const authStorage = {
   },
 
   async getTokens(): Promise<StoredTokens> {
+    const startedAtMs = markStartup("secure-store-tokens-start");
     await logAvailability();
     const [accessToken, refreshToken] = await Promise.all([
       getItem(KEYS.accessToken),
@@ -113,6 +121,10 @@ export const authStorage = {
     ]);
 
     log("getTokens", {
+      hasAccessToken: Boolean(accessToken),
+      hasRefreshToken: Boolean(refreshToken),
+    });
+    logStartupDuration("secure-store tokens read", startedAtMs, {
       hasAccessToken: Boolean(accessToken),
       hasRefreshToken: Boolean(refreshToken),
     });

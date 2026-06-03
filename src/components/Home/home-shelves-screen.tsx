@@ -1,6 +1,6 @@
 import { libraryItemsApi } from "@/api/library-items-api";
 import { playlistsApi } from "@/api/playlists-api";
-import { useAuthStore } from "@/auth/auth-store";
+import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
 import { type HomeShelf, useHomeShelves } from "@/hooks/use-home-shelves";
 import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
 import { useLibrarySelection } from "@/hooks/use-library-selection";
@@ -14,11 +14,17 @@ import {
 } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Library } from "@/types/absTypes";
+import {
+  logStartupDuration,
+  markStartup,
+  recordHomeShelfDisplay,
+} from "@/utils/dev-startup-tracing";
+import { markStartupPresentation } from "@/utils/startup-presentation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
-import { useCallback, useState } from "react";
-import { RefreshControl, Text, View } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { InteractionManager, RefreshControl, Text, View } from "react-native";
 import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
 import { HomeShelfSection } from "./home-shelf-section";
 
@@ -29,13 +35,22 @@ const HomeShelvesScreen = () => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const authStatus = useAuthStore((state) => state.status);
+  const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
   const homePreviewSize = useSettingsStore((state) => state.homePreviewSize);
   const setHomePreviewSize = useSettingsStore((state) => state.actions.setHomePreviewSize);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
-  const { visibleShelves, favoriteByBookId, progressByBookId, refreshDiscover } =
-    useHomeShelves();
+  const [shouldRenderCardMenus, setShouldRenderCardMenus] = useState(false);
+  const {
+    catalogCount,
+    progressCount,
+    visibleShelves,
+    visibleBookCount,
+    favoriteByBookId,
+    progressByBookId,
+    refreshDiscover,
+  } = useHomeShelves();
   const activateLibrarySelection = useActivateLibrarySelection();
   const {
     libraries,
@@ -45,6 +60,11 @@ const HomeShelvesScreen = () => {
   } = useLibrarySelection();
   const canChangeLibrary = authStatus === "authenticated";
   const scrollY = useSharedValue(0);
+  const didMarkHomeShelfDisplayRef = useRef(false);
+  const renderStartedAtMs = useMemo(
+    () => markStartup("home-shelves-screen-render-start"),
+    [],
+  );
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -115,8 +135,57 @@ const HomeShelvesScreen = () => {
     [activateLibrarySelection, activeLibraryId],
   );
 
+  const handleHomeLayout = useCallback(() => {
+    if (didMarkHomeShelfDisplayRef.current) return;
+    const hasHomeScope = Boolean(activeLibraryId) || accessMode === "downloadedSessionOnly";
+    if (!hasHomeScope) return;
+
+    didMarkHomeShelfDisplayRef.current = true;
+    logStartupDuration("home shelves render to layout", renderStartedAtMs, {
+      accessMode,
+      activeLibraryId,
+      catalogCount,
+      progressCount,
+      shelfCount: visibleShelves.length,
+      visibleBookCount,
+    });
+    const shelfCount = visibleShelves.length;
+    markStartupPresentation("home-layout", {
+      activeLibraryId,
+      accessMode,
+      catalogCount,
+      progressCount,
+      shelfCount,
+      visibleBookCount,
+    });
+    recordHomeShelfDisplay({
+      accessMode,
+      activeLibraryId,
+      catalogCount,
+      progressCount,
+      hasActiveLibraryUserKey: Boolean(activeLibraryUserKey),
+      shelfCount,
+      visibleBookCount,
+      isOffline: isOnline === false,
+    });
+
+    InteractionManager.runAfterInteractions(() => {
+      setShouldRenderCardMenus(true);
+    });
+  }, [
+    accessMode,
+    activeLibraryId,
+    activeLibraryUserKey,
+    catalogCount,
+    isOnline,
+    progressCount,
+    renderStartedAtMs,
+    visibleBookCount,
+    visibleShelves.length,
+  ]);
+
   return (
-    <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
+    <View style={{ flex: 1, backgroundColor: themeColors.bg }} onLayout={handleHomeLayout}>
       <Stack.Toolbar placement="right">
         {/* <Stack.Toolbar.Button icon="ellipsis" /> */}
         <Stack.Toolbar.Menu icon="ellipsis">
@@ -225,6 +294,7 @@ const HomeShelvesScreen = () => {
             onRefresh={
               shelf.kind === "derived" && shelf.id === "discover" ? refreshDiscover : undefined
             }
+            renderCardMenus={shouldRenderCardMenus}
             scrollY={scrollY}
           />
         ))}

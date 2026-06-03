@@ -19,6 +19,7 @@ type HomeShelfSectionProps = {
   headerHeight: number;
   shelfHref: Href;
   onRefresh?: () => void;
+  renderCardMenus?: boolean;
   scrollY: SharedValue<number>;
 };
 
@@ -32,6 +33,7 @@ export const HomeShelfSection = ({
   headerHeight,
   shelfHref,
   onRefresh,
+  renderCardMenus = true,
   scrollY,
 }: HomeShelfSectionProps) => {
   const themeColors = useThemeColors();
@@ -130,6 +132,7 @@ export const HomeShelfSection = ({
                 isOffline={isOffline}
                 menuContentTop={menuContentTop}
                 progress={progressByBookId[item.id]}
+                renderMenu={renderCardMenus}
                 scrollY={scrollY}
               />
             )}

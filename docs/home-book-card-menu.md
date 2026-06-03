@@ -9,6 +9,7 @@ The home shelf book cover has a lower-right quick-action button.
 - On iOS it uses `@expo/ui/swift-ui` `Menu`.
 - On non-iOS platforms it falls back to a React Native alert menu.
 - The menu fades out and stops accepting touches as the card approaches the header, to avoid the native menu trigger getting visually stuck in the header area.
+- Menu overlays are deferred until after initial Home interactions. This keeps native menu setup and shelf membership option derivation out of the first Home Shelf Display path.
 
 ## Menu actions
 
@@ -21,12 +22,22 @@ Current actions on the home card:
 
 ### Bookshelves submenu
 
-The submenu lists all available shelves and acts as a membership toggle.
+The submenu lists Home-context Shelf Membership options and acts as a membership toggle.
 
 - Shelves the book is already in show a check icon and remove the book when selected.
 - Shelves the book is not in show an empty circle icon and add the book when selected.
 - Custom shelves use `addBookToCustomShelf(...)` and `removeBookFromCustomShelf(...)`
 - Playlist shelves use `addBooksToPlaylistShelfOptimistic(...)` and `removeBooksFromPlaylistShelfOptimistic(...)`
+
+Source:
+- `src/hooks/use-shelf-membership-options.ts`
+- `useHomeCardShelfMembershipOptions(libraryItemId)`
+
+Home card menu rules:
+- Include Home-visible custom shelves.
+- Include Home-visible playlist shelves only when they are not suppressed and not missing on the server.
+- Do not call `useHomeShelves()` from the card menu path; card menus are per-book and should not derive the full Home shelf model.
+- Book detail management uses `useBookShelfManagementOptions(...)` instead, because it needs all manageable shelves and hidden/suppressed indicators.
 
 ## Progress behavior
 

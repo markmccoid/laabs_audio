@@ -216,7 +216,9 @@ export const BookshelfEditorSheet = () => {
       };
     }
 
-    const playlistShelf = playlistShelves.find((candidate) => candidate.id === shelfId);
+    const playlistShelf = playlistShelves.find(
+      (candidate) => candidate.id === shelfId && candidate.syncState !== "missing",
+    );
     if (playlistShelf) {
       return {
         kind: "playlist",
@@ -232,23 +234,23 @@ export const BookshelfEditorSheet = () => {
     return null;
   }, [customShelves, playlistShelves, shelfId, shelfSettings, suppressedPlaylistIds]);
 
-  const [nameDraft, setNameDraft] = useState("");
-  const [draftIsVisible, setDraftIsVisible] = useState(false);
-  const [draftHomeItemCount, setDraftHomeItemCount] = useState(DEFAULT_HOME_SHELF_ITEM_COUNT);
-  const committedRef = useRef(false);
   const shelfTitle = shelf && (isCustomShelf(shelf) || isPlaylistShelf(shelf)) ? shelf.title : null;
   const customShelfId = shelf && isCustomShelf(shelf) ? shelf.id : null;
   const isPlaylistCreateDraft = isCreateMode && createShelfType === "playlist" && !shelf;
   const isCustomCreateRoute = isCreateMode && createShelfType === "custom" && Boolean(shelfId);
-
-  useEffect(() => {
-    if (isPlaylistCreateDraft) {
-      setNameDraft((current) => current || "New Shelf");
-      return;
-    }
-    if (!shelfTitle) return;
-    setNameDraft((current) => (current === shelfTitle ? current : shelfTitle));
-  }, [isPlaylistCreateDraft, shelfTitle]);
+  const nameDraftSource = isPlaylistCreateDraft ? "New Shelf" : shelfTitle;
+  const [nameDraftState, setNameDraftState] = useState<{
+    source: string | null;
+    draft: string;
+  }>({ source: null, draft: "" });
+  const nameDraft =
+    nameDraftState.source === nameDraftSource ? nameDraftState.draft : (nameDraftSource ?? "");
+  const setNameDraft = (nextDraft: string) => {
+    setNameDraftState({ source: nameDraftSource, draft: nextDraft });
+  };
+  const [draftIsVisible, setDraftIsVisible] = useState(false);
+  const [draftHomeItemCount, setDraftHomeItemCount] = useState(DEFAULT_HOME_SHELF_ITEM_COUNT);
+  const committedRef = useRef(false);
 
   useEffect(() => {
     const nextName = nameDraft.trim();

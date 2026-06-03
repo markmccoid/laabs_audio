@@ -1,10 +1,13 @@
 import { useAuthStore } from "@/auth/auth-store";
-import { useHomeShelves } from "@/hooks/use-home-shelves";
+import {
+  useBookShelfManagementOptions,
+  type ShelfMembershipOption,
+} from "@/hooks/use-shelf-membership-options";
 import { useDeviceBooksActions } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -14,80 +17,83 @@ const resolveParam = (value: string | string[] | undefined) =>
 export const BookBookshelvesSheet = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
-  const [optimisticSelectionByShelfId, setOptimisticSelectionByShelfId] = useState<
-    Record<string, boolean>
-  >({});
+  const [optimisticSelectionState, setOptimisticSelectionState] = useState<{
+    libraryItemId?: string;
+    byShelfId: Record<string, boolean>;
+  }>({ byShelfId: {} });
   const { libraryItemId: libraryItemIdParam } = useLocalSearchParams<{
     libraryItemId?: string | string[];
   }>();
   const libraryItemId = resolveParam(libraryItemIdParam);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const { customShelves, playlistShelves } = useHomeShelves();
+  const shelfMembershipOptions = useBookShelfManagementOptions(libraryItemId);
   const {
     addBookToCustomShelf,
     removeBookFromCustomShelf,
     addBooksToPlaylistShelfOptimistic,
     removeBooksFromPlaylistShelfOptimistic,
   } = useDeviceBooksActions();
-  type SelectableShelf = (typeof customShelves)[number] | (typeof playlistShelves)[number];
-
   const canMutate = Boolean(libraryItemId && activeLibraryId && activeLibraryUserKey);
-  const shelves = useMemo(
-    () => (libraryItemId ? [...customShelves, ...playlistShelves] : []),
-    [customShelves, libraryItemId, playlistShelves],
-  );
-
-  useEffect(() => {
-    setOptimisticSelectionByShelfId({});
-  }, [libraryItemId]);
+  const shelves = useMemo(() => (libraryItemId ? shelfMembershipOptions : []), [
+    libraryItemId,
+    shelfMembershipOptions,
+  ]);
+  const optimisticSelectionByShelfId =
+    optimisticSelectionState.libraryItemId === libraryItemId
+      ? optimisticSelectionState.byShelfId
+      : {};
 
   const openBookshelfSettings = () => {
     router.push("/(tabs)/settings/bookshelves");
   };
 
   const clearOptimisticSelection = (shelfId: string, expectedSelected: boolean) => {
-    setOptimisticSelectionByShelfId((current) => {
-      if (current[shelfId] !== expectedSelected) return current;
-      const { [shelfId]: _cleared, ...remaining } = current;
-      return remaining;
+    setOptimisticSelectionState((current) => {
+      if (current.libraryItemId !== libraryItemId) return current;
+      if (current.byShelfId[shelfId] !== expectedSelected) return current;
+      const { [shelfId]: _cleared, ...remaining } = current.byShelfId;
+      return { libraryItemId, byShelfId: remaining };
     });
   };
 
-  const toggleMembership = (shelf: SelectableShelf, currentlySelected: boolean) => {
+  const toggleMembership = (option: ShelfMembershipOption) => {
     if (!libraryItemId || !canMutate) return;
+    if (!option.canMutate) return;
     const scopeOptions = { userKey: activeLibraryUserKey, libraryId: activeLibraryId };
-    const nextSelected = !currentlySelected;
+    const nextSelected = !option.isMember;
 
-    setOptimisticSelectionByShelfId((current) => ({
-      ...current,
-      [shelf.id]: nextSelected,
+    setOptimisticSelectionState((current) => ({
+      libraryItemId,
+      byShelfId: {
+        ...(current.libraryItemId === libraryItemId ? current.byShelfId : {}),
+        [option.shelfId]: nextSelected,
+      },
     }));
 
-    if (shelf.kind === "custom") {
-      if (currentlySelected) {
-        removeBookFromCustomShelf(shelf.id, libraryItemId, scopeOptions);
+    if (option.kind === "custom") {
+      if (option.isMember) {
+        removeBookFromCustomShelf(option.shelfId, libraryItemId, scopeOptions);
       } else {
-        addBookToCustomShelf(shelf.id, libraryItemId, scopeOptions);
+        addBookToCustomShelf(option.shelfId, libraryItemId, scopeOptions);
       }
-      setTimeout(() => clearOptimisticSelection(shelf.id, nextSelected), 150);
+      setTimeout(() => clearOptimisticSelection(option.shelfId, nextSelected), 150);
       return;
     }
 
-    const operation = currentlySelected
-      ? removeBooksFromPlaylistShelfOptimistic(shelf.id, [libraryItemId], scopeOptions)
-      : addBooksToPlaylistShelfOptimistic(shelf.id, [libraryItemId], scopeOptions);
+    const operation = option.isMember
+      ? removeBooksFromPlaylistShelfOptimistic(option.shelfId, [libraryItemId], scopeOptions)
+      : addBooksToPlaylistShelfOptimistic(option.shelfId, [libraryItemId], scopeOptions);
 
     void operation.finally(() => {
-      clearOptimisticSelection(shelf.id, nextSelected);
+      clearOptimisticSelection(option.shelfId, nextSelected);
     });
   };
 
-  const renderShelf = (shelf: SelectableShelf) => {
-    const storedSelected = Boolean(libraryItemId && shelf.bookIds.includes(libraryItemId));
-    const isSelected = optimisticSelectionByShelfId[shelf.id] ?? storedSelected;
+  const renderShelf = (option: ShelfMembershipOption) => {
+    const isSelected = optimisticSelectionByShelfId[option.shelfId] ?? option.isMember;
     const typePill =
-      shelf.kind === "custom"
+      option.kind === "custom"
         ? {
             label: "Custom",
             background: themeColors.accent,
@@ -98,12 +104,18 @@ export const BookBookshelvesSheet = () => {
             background: themeColors.absGold,
             textColor: "#201607",
           };
+    const statusLabels = [
+      option.isHiddenFromHome ? "Hidden from Home" : null,
+      option.isSuppressed ? "Suppressed" : null,
+      option.syncState === "pending" ? "Pending sync" : null,
+      option.syncState === "unsynced" ? "Unsynced" : null,
+    ].filter((label): label is string => Boolean(label));
 
     return (
       <Pressable
-        key={shelf.id}
-        onPress={() => toggleMembership(shelf, isSelected)}
-        disabled={!canMutate}
+        key={option.shelfId}
+        onPress={() => toggleMembership(option)}
+        disabled={!canMutate || !option.canMutate}
         style={({ pressed }) => ({
           borderRadius: 14,
           borderCurve: "continuous",
@@ -116,7 +128,7 @@ export const BookBookshelvesSheet = () => {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 10,
-          opacity: !canMutate ? 0.5 : pressed ? 0.85 : 1,
+          opacity: !canMutate || !option.canMutate ? 0.5 : pressed ? 0.85 : 1,
         })}
       >
         <View style={{ flex: 1, gap: 3 }}>
@@ -126,7 +138,7 @@ export const BookBookshelvesSheet = () => {
               numberOfLines={1}
               style={{ color: themeColors.text, fontSize: 16, fontWeight: "600", flexShrink: 1 }}
             >
-              {shelf.title}
+              {option.title}
             </Text>
             <View
               style={{
@@ -143,8 +155,13 @@ export const BookBookshelvesSheet = () => {
             </View>
           </View>
           <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
-            {shelf.bookIds.length} books
+            {option.bookCount} books
           </Text>
+          {statusLabels.length > 0 ? (
+            <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
+              {statusLabels.join(" • ")}
+            </Text>
+          ) : null}
         </View>
         <SymbolView
           name={isSelected ? "checkmark.circle.fill" : "circle"}

@@ -14,7 +14,7 @@ import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
   Extrapolation,
@@ -43,6 +43,12 @@ const formatDurationBadge = (durationSeconds?: number | null) => {
   return `${minutes}m`;
 };
 
+type ProgressDisplayState = {
+  bookId: string;
+  defaultDisplay: BookProgressTimeDisplay;
+  value: BookProgressTimeDisplay;
+};
+
 type ShelfBookCardProps = {
   book: LibraryItemSummary;
   headerHeight: number;
@@ -50,58 +56,28 @@ type ShelfBookCardProps = {
   progress?: UserBookProgress;
   isOffline: boolean;
   menuContentTop: number;
+  renderMenu?: boolean;
   scrollY: SharedValue<number>;
 };
 
-export const ShelfBookCard = ({
+type CardMenuOverlayProps = {
+  book: LibraryItemSummary;
+  headerHeight: number;
+  isFavorite: boolean;
+  progress?: UserBookProgress;
+  menuContentTop: number;
+  scrollY: SharedValue<number>;
+};
+
+const CardMenuOverlay = ({
   book,
   headerHeight,
-  isFavorite = false,
+  isFavorite,
   progress,
-  isOffline,
   menuContentTop,
   scrollY,
-}: ShelfBookCardProps) => {
-  const themeColors = useThemeColors();
-  const defaultProgressTimeDisplay = useSettingsStore(
-    (state) => state.defaultBookProgressTimeDisplay,
-  );
-  const homePreviewSize = useSettingsStore((state) => state.homePreviewSize);
-  const [progressDisplay, setProgressDisplay] = useState<BookProgressTimeDisplay>(
-    defaultProgressTimeDisplay,
-  );
-  const isDownloaded = useDeviceBooksStore((state) =>
-    selectHasPlayableBookDownload(state, book.id),
-  );
-  const coverLocalUri = useDeviceBooksStore(
-    (state) => resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
-  );
-  const showOfflineUnavailable = isOffline && !isDownloaded;
-  const persistedProgressSeconds = Math.max(0, Math.floor(progress?.currentTime ?? 0));
-  const durationSeconds = Math.max(
-    0,
-    Math.floor(progress?.duration ?? book.duration ?? 0),
-  );
-  const rawProgressSeconds = Math.max(0, persistedProgressSeconds);
-  const progressSeconds =
-    durationSeconds > 0 ? clamp(rawProgressSeconds, 0, durationSeconds) : rawProgressSeconds;
-  const progressPercent = durationSeconds > 0 ? progressSeconds / durationSeconds : 0;
-  const visualProgressPercent = progress?.isFinished ? 1 : progressPercent;
-  const showProgressLabel = progressSeconds > 0 || Boolean(progress?.isFinished);
-  const elapsedLabel = formatDurationBadge(
-    progress?.isFinished ? durationSeconds : progressSeconds,
-  );
-  const remainingLabel =
-    durationSeconds > 0
-      ? `${formatDurationBadge(Math.max(durationSeconds - progressSeconds, 0))} left`
-      : elapsedLabel;
-  const progressLabel =
-    progressDisplay === "elapsed" || durationSeconds <= 0 ? elapsedLabel : remainingLabel;
-  const isElapsedView = progressDisplay === "elapsed";
+}: CardMenuOverlayProps) => {
   const [isMenuHiddenNearHeader, setIsMenuHiddenNearHeader] = useState(false);
-  const coverSize = getHomePreviewCoverSize(homePreviewSize);
-  const showFinishedIndicator = Boolean(progress?.isFinished);
-
   const menuAnimatedStyle = useAnimatedStyle(() => {
     const menuScreenTop = menuContentTop - scrollY.value;
     const opacity = interpolate(
@@ -132,9 +108,78 @@ export const ShelfBookCard = ({
     [headerHeight, menuContentTop, scrollY],
   );
 
-  useEffect(() => {
-    setProgressDisplay(defaultProgressTimeDisplay);
-  }, [defaultProgressTimeDisplay, book.id]);
+  return (
+    <Animated.View
+      pointerEvents={isMenuHiddenNearHeader ? "none" : "auto"}
+      style={[
+        {
+          position: "absolute",
+          right: 8,
+          bottom: 8,
+        },
+        menuAnimatedStyle,
+      ]}
+    >
+      <ShelfBookCardMenu book={book} isFavorite={isFavorite} progress={progress} />
+    </Animated.View>
+  );
+};
+
+export const ShelfBookCard = ({
+  book,
+  headerHeight,
+  isFavorite = false,
+  progress,
+  isOffline,
+  menuContentTop,
+  renderMenu = true,
+  scrollY,
+}: ShelfBookCardProps) => {
+  const themeColors = useThemeColors();
+  const defaultProgressTimeDisplay = useSettingsStore(
+    (state) => state.defaultBookProgressTimeDisplay,
+  );
+  const homePreviewSize = useSettingsStore((state) => state.homePreviewSize);
+  const [progressDisplayState, setProgressDisplayState] = useState<ProgressDisplayState>(() => ({
+    bookId: book.id,
+    defaultDisplay: defaultProgressTimeDisplay,
+    value: defaultProgressTimeDisplay,
+  }));
+  const isDownloaded = useDeviceBooksStore((state) =>
+    selectHasPlayableBookDownload(state, book.id),
+  );
+  const coverLocalUri = useDeviceBooksStore(
+    (state) => resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
+  );
+  const showOfflineUnavailable = isOffline && !isDownloaded;
+  const persistedProgressSeconds = Math.max(0, Math.floor(progress?.currentTime ?? 0));
+  const durationSeconds = Math.max(
+    0,
+    Math.floor(progress?.duration ?? book.duration ?? 0),
+  );
+  const rawProgressSeconds = Math.max(0, persistedProgressSeconds);
+  const progressSeconds =
+    durationSeconds > 0 ? clamp(rawProgressSeconds, 0, durationSeconds) : rawProgressSeconds;
+  const progressPercent = durationSeconds > 0 ? progressSeconds / durationSeconds : 0;
+  const visualProgressPercent = progress?.isFinished ? 1 : progressPercent;
+  const showProgressLabel = progressSeconds > 0 || Boolean(progress?.isFinished);
+  const progressDisplay =
+    progressDisplayState.bookId === book.id &&
+    progressDisplayState.defaultDisplay === defaultProgressTimeDisplay
+      ? progressDisplayState.value
+      : defaultProgressTimeDisplay;
+  const elapsedLabel = formatDurationBadge(
+    progress?.isFinished ? durationSeconds : progressSeconds,
+  );
+  const remainingLabel =
+    durationSeconds > 0
+      ? `${formatDurationBadge(Math.max(durationSeconds - progressSeconds, 0))} left`
+      : elapsedLabel;
+  const progressLabel =
+    progressDisplay === "elapsed" || durationSeconds <= 0 ? elapsedLabel : remainingLabel;
+  const isElapsedView = progressDisplay === "elapsed";
+  const coverSize = getHomePreviewCoverSize(homePreviewSize);
+  const showFinishedIndicator = Boolean(progress?.isFinished);
 
   return (
     <View
@@ -196,19 +241,16 @@ export const ShelfBookCard = ({
             ) : null}
           </Pressable>
         </Link>
-        <Animated.View
-          pointerEvents={isMenuHiddenNearHeader ? "none" : "auto"}
-          style={[
-            {
-              position: "absolute",
-              right: 8,
-              bottom: 8,
-            },
-            menuAnimatedStyle,
-          ]}
-        >
-          <ShelfBookCardMenu book={book} isFavorite={isFavorite} progress={progress} />
-        </Animated.View>
+        {renderMenu ? (
+          <CardMenuOverlay
+            book={book}
+            headerHeight={headerHeight}
+            isFavorite={isFavorite}
+            menuContentTop={menuContentTop}
+            progress={progress}
+            scrollY={scrollY}
+          />
+        ) : null}
       </View>
       <View
         style={{
@@ -241,7 +283,11 @@ export const ShelfBookCard = ({
             accessibilityRole="button"
             accessibilityLabel="Toggle progress display"
             onPress={() =>
-              setProgressDisplay((current) => (current === "elapsed" ? "remaining" : "elapsed"))
+              setProgressDisplayState({
+                bookId: book.id,
+                defaultDisplay: defaultProgressTimeDisplay,
+                value: progressDisplay === "elapsed" ? "remaining" : "elapsed",
+              })
             }
             style={({ pressed }) => ({
               borderRadius: 999,

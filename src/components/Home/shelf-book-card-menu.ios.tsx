@@ -50,15 +50,15 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
         />
         <Menu label="Bookshelves" systemImage="books.vertical">
           {shelfMembershipOptions.length > 0 ? (
-            shelfMembershipOptions.map(({ shelf, isMember }) => (
+            shelfMembershipOptions.map((option) => (
               <Button
-                key={shelf.id}
-                modifiers={[disabled(shelfDisabled)]}
-                systemImage={isMember ? "checkmark.circle.fill" : "circle"}
+                key={option.shelfId}
+                modifiers={[disabled(shelfDisabled || !option.canMutate)]}
+                systemImage={option.isMember ? "checkmark.circle.fill" : "circle"}
                 onPress={() => {
-                  void handleToggleShelfMembership(shelf, isMember);
+                  void handleToggleShelfMembership(option);
                 }}
-                label={shelf.title}
+                label={option.title}
               />
             ))
           ) : (

@@ -4,6 +4,7 @@
 Bookshelves power the Home experience using local state with offline-first behavior:
 - Built-in derived shelves: `Continue Listening`, `Recently Added`, `Discover`
 - User-defined custom shelves
+- Audiobookshelf-backed playlist shelves
 - Shelf settings (visibility, item count, ordering)
 - Daily persisted Discover selection
 
@@ -22,7 +23,7 @@ Primary references:
 - `src/store/device-books-store.ts`
 - `src/store/settings-store.ts`
 
-### 2. Two bookshelf classes
+### 2. Three bookshelf classes
 
 #### Derived shelves (computed)
 - `continueListening`
@@ -33,6 +34,18 @@ Computed from React Query cache (`library books` + `user server state`) and sett
 
 #### Custom shelves (curated)
 Stored in device Zustand store as arrays of `libraryItemId` and mapped to catalog books at render time.
+
+#### Playlist shelves (server-backed)
+Playlist shelves are app shelf projections backed by Audiobookshelf playlists. They live in the device store so the app can render and optimistically update them, but the Audiobookshelf Server is the source of truth for whether the playlist still exists.
+
+Playlist shelves have sync state:
+
+- `synced`: backed by a playlist currently known on the server.
+- `pending`: optimistic local create/update is waiting for server confirmation.
+- `unsynced`: local playlist operation still needs to sync.
+- `missing`: the server no longer returns the backing playlist.
+
+Missing playlist shelves must not be offered in Home, book Shelf Membership, or Settings/Bookshelves. Current UI filters them out instead of showing a repair state.
 
 ## Data Ownership
 
@@ -58,6 +71,25 @@ Custom shelf CRUD lives in:
 Reference:
 - `src/store/device-books-store.ts`
 
+### Device store (`device-books-store`) for playlist shelves
+Playlist shelf projection and optimistic mutation also live in `device-books-store`.
+
+Primary actions:
+- `createPlaylistShelf`
+- `renamePlaylistShelfOptimistic`
+- `addBooksToPlaylistShelfOptimistic`
+- `removeBooksFromPlaylistShelfOptimistic`
+- `suppressPlaylistShelf`
+- `restoreSuppressedPlaylist`
+- `deletePlaylistShelfFromServer`
+
+Missing playlist shelf policy:
+- Reconciliation may mark a playlist shelf `syncState: "missing"` when the server no longer returns it.
+- `useHomeShelves()` filters missing playlist shelves out of the general shelf model.
+- `useShelfMembershipOptions()` filters missing playlist shelves out of card menus and book detail membership management.
+- The Settings editor refuses direct editing of missing playlist shelves and shows the generic missing shelf state if opened through a stale route.
+- Future cleanup should remove missing playlist shelf records during playlist reconciliation once the server absence is confirmed.
+
 ### Settings store (`settings-store`) for Home presentation + Discover snapshot
 - Per-shelf visibility and home item counts
 - Shelf order
@@ -79,10 +111,14 @@ Flow:
    - Recently Added: catalog sorted by `addedAt` desc.
    - Discover: unread books shuffled by deterministic daily seed.
 5. Merge custom shelves by mapping stored `bookIds` to catalog books.
-6. Apply shelf ordering.
-7. Expose:
+6. Merge playlist shelves, excluding `syncState: "missing"` shelves.
+7. Apply shelf ordering.
+8. Expose:
    - `shelves` (full shelf arrays)
    - `visibleShelves` (Home-trimmed arrays)
+   - `customShelves`
+   - `playlistShelves`
+   - `suppressedPlaylistShelves`
    - `refreshDiscover()`
 
 ## Sequence Diagram
@@ -100,6 +136,7 @@ sequenceDiagram
   UHS->>RQ: read catalog + user state
   UHS->>SS: read shelf settings + discover snapshot
   UHS->>DBS: read custom shelves
+  UHS->>DBS: read playlist shelves + suppressed playlist IDs
   UHS-->>HS: visibleShelves
 
   HS->>RT: push /bookshelf/[shelfId]
@@ -145,6 +182,29 @@ Behavior:
 - Chevron hidden for empty shelves.
 - Discover row shows refresh icon.
 - Clicking chevron routes to shelf detail: `/(tabs)/(home)/bookshelf/[shelfId]`
+- Card menu overlays are deferred until after first interactions so the first Home Shelf Display does not pay menu setup cost.
+
+## Shelf Membership Options
+
+Shelf Membership options are intentionally separate from `useHomeShelves()`.
+
+Module:
+- `src/hooks/use-shelf-membership-options.ts`
+
+This module exposes two scopes:
+
+- `useHomeCardShelfMembershipOptions(libraryItemId)`
+  - Used by Home card menus.
+  - Includes only Home-visible custom shelves.
+  - Includes only Home-visible, non-suppressed, non-missing playlist shelves.
+  - Keeps first Home card menu behavior aligned with what users can see on Home.
+- `useBookShelfManagementOptions(libraryItemId)`
+  - Used by the book detail “Add To Bookshelves” sheet.
+  - Includes all custom shelves.
+  - Includes all non-missing playlist shelves.
+  - Marks shelves hidden from Home or suppressed from app view so the sheet can show a visual indication.
+
+Important implementation rule: do not call `useHomeShelves()` from card menu hooks. Home card menus appear per visible book, so pulling full Home shelf derivation into every menu can multiply startup work.
 
 ## Shelf Detail Rendering
 
@@ -181,12 +241,21 @@ Additional behavior:
   - `src/components/settings/bookshelves/bookshelf-list-item.tsx`
   - `src/components/settings/bookshelves/count-stepper.tsx`
 
+Behavior:
+- Settings lists all derived shelves, custom shelves, and non-missing playlist shelves for the Active Library.
+- Suppressed playlist shelves appear under “Hidden from app” and can be restored.
+- Missing playlist shelves do not appear in the main list or the hidden list.
+- Reordering persists visible/non-suppressed order, while preserving suppressed playlist IDs at the end of stored order.
+- Creating a Playlist Shelf creates an Audiobookshelf playlist when Done is pressed.
+
 ## Key Design Decisions
 1. Offline-first local bookshelf derivation from cache/state (no personalized endpoint dependency).
 2. Hard scope isolation by `userKey + libraryId`.
 3. Discover is deterministic per day + refreshable, now capped to user-configured size.
 4. Built-in detail uses virtualized list for large libraries; custom detail keeps sortable drag UX.
 5. Home routes stay thin; logic in reusable components/hooks.
+6. The server is authoritative for playlist shelf existence; missing playlist shelves are hidden from all management surfaces.
+7. Shelf Membership option derivation stays separate from Home shelf derivation to keep startup display fast.
 
 ## Where to Change Things
 - Change shelf composition rules: `src/hooks/use-home-shelves.ts`
@@ -195,14 +264,17 @@ Additional behavior:
 - Change Home row UX: `src/components/Home/home-shelf-section.tsx`
 - Change detail list layout/perf: `src/components/Home/bookshelf/*`
 - Change settings UX for shelf editing: `src/components/settings/bookshelves/*`
+- Change book-level Shelf Membership rules: `src/hooks/use-shelf-membership-options.ts`
 
 ## Known Constraints
 - Built-in shelf details currently show full derived arrays except Discover (which is now capped at source).
 - Custom shelf size is assumed manageable for sortable grid in current version.
 - Discover snapshot is day-based, not time-window-based.
+- Missing playlist shelf records may still exist in local state until reconciliation cleanup removes them, but user-facing surfaces should not expose them.
 
 ## Suggested Next Enhancements
 1. Add explicit per-shelf “detail max items” policy if needed for Continue/Recently Added.
 2. Add telemetry around shelf open time and list render time.
 3. Add tests around Discover day rollover + count changes.
 4. Add user-facing “last refreshed” timestamp for Discover.
+5. Delete confirmed missing playlist shelf records during playlist reconciliation.
