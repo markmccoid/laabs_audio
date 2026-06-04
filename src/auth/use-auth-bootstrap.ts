@@ -17,11 +17,8 @@ export const useAuthBootstrap = () => {
   const isOnline = useAuthStore((state) => state.isOnline);
   const refreshToken = useAuthStore((state) => state.refreshToken);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const storedUsername = useAuthStore((state) => state.storedUsername);
-  const serverUrl = useAuthStore((state) => state.serverUrl);
-  const resolvedUserKey =
-    activeLibraryUserKey ??
-    (storedUsername && serverUrl ? `${storedUsername}::${serverUrl}` : null);
+  const storedUserId = useAuthStore((state) => state.storedUserId);
+  const resolvedUserKey = activeLibraryUserKey ?? storedUserId;
   const hasOfflineContent = useDeviceBooksStore((state) =>
     selectHasOfflineContent(state, resolvedUserKey),
   );

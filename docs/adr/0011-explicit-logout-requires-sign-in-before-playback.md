@@ -1,5 +1,7 @@
 # Explicit Logout Requires Sign-In Before Playback
 
+Status: Superseded by ADR 0015 for explicit post-logout downloaded access.
+
 Explicit logout requires sign-in before any audiobook browsing or playback, even when Downloaded Audio Assets remain on the device. Downloaded Audio Assets are durable local media, but they become usable only through Download Availability for a signed-in or remembered User Session that can access the same Audiobook Identity; listening state such as Listening Position, Bookmarks, and Playback Rate remains scoped to that User Session.
 
 ## Consequences

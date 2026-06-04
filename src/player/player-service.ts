@@ -799,8 +799,9 @@ class PlayerService {
     const authState = authStore.getState();
     const userKey =
       authState.activeLibraryUserKey ??
-      (authState.storedUsername && authState.serverUrl
-        ? `${authState.storedUsername}::${authState.serverUrl}`
+      authState.storedUserId ??
+      (state.libraryItemId
+        ? deviceBooksStore.getState().downloadedOwnerUserIdsById[state.libraryItemId]?.[0] ?? null
         : null);
     if (!userKey || !state.libraryItemId) {
       await this.unloadAndResetPlayback();
@@ -869,14 +870,26 @@ class PlayerService {
       return null;
     }
     const deviceBooksState = deviceBooksStore.getState();
+    const userKey = this.resolveUserKeyForLibraryItem(rateCandidateIds[0]);
     const storedRate = rateCandidateIds
-      .map((candidateId) => selectBookPlaybackRateIfStored(deviceBooksState, candidateId))
+      .map((candidateId) => selectBookPlaybackRateIfStored(deviceBooksState, candidateId, userKey))
       .find((rate): rate is number => rate !== null);
     if (typeof storedRate === "number") {
       return clampPlaybackRate(storedRate);
     }
-    const fallbackRate = selectBookPlaybackRate(deviceBooksState, rateCandidateIds[0]);
+    const fallbackRate = selectBookPlaybackRate(deviceBooksState, rateCandidateIds[0], userKey);
     return typeof fallbackRate === "number" ? clampPlaybackRate(fallbackRate) : null;
+  }
+
+  private resolveUserKeyForLibraryItem(libraryItemId: string | null | undefined) {
+    const authState = authStore.getState();
+    return (
+      authState.activeLibraryUserKey ??
+      authState.storedUserId ??
+      (libraryItemId
+        ? deviceBooksStore.getState().downloadedOwnerUserIdsById[libraryItemId]?.[0] ?? null
+        : null)
+    );
   }
 
   private resolvePreferredRateForState(state: PlaybackStoreState) {
@@ -1100,7 +1113,9 @@ class PlayerService {
     if (Math.abs(state.rate - preferredRate) > 0.0001) {
       playbackStore.getState().actions.setRate(preferredRate);
       if (state.libraryItemId) {
-        deviceBooksStore.getState().actions.setBookPlaybackRate(state.libraryItemId, preferredRate);
+        deviceBooksStore.getState().actions.setBookPlaybackRate(state.libraryItemId, preferredRate, {
+          userKey: this.resolveUserKeyForLibraryItem(state.libraryItemId),
+        });
       }
     }
 
@@ -1170,10 +1185,16 @@ class PlayerService {
   }
 
   private getQueuedProgressForCandidateIds(candidateIds: string[]) {
-    const { activeLibraryUserKey, storedUsername, serverUrl } = authStore.getState();
+    const { activeLibraryUserKey, storedUserId } = authStore.getState();
     const resolvedUserKey =
       activeLibraryUserKey ??
-      (storedUsername && serverUrl ? `${storedUsername}::${serverUrl}` : null);
+      storedUserId ??
+      candidateIds
+        .map(
+          (candidateId) =>
+            deviceBooksStore.getState().downloadedOwnerUserIdsById[candidateId]?.[0] ?? null,
+        )
+        .find((ownerUserId): ownerUserId is string => Boolean(ownerUserId));
     if (!resolvedUserKey) {
       return null;
     }
@@ -2260,7 +2281,9 @@ class PlayerService {
     const previousPlaybackState = state.playbackState;
     playbackStore.getState().actions.setRate(normalizedRate);
     if (state.libraryItemId) {
-      deviceBooksStore.getState().actions.setBookPlaybackRate(state.libraryItemId, normalizedRate);
+      deviceBooksStore.getState().actions.setBookPlaybackRate(state.libraryItemId, normalizedRate, {
+        userKey: this.resolveUserKeyForLibraryItem(state.libraryItemId),
+      });
     }
     await this.engine.setRate(normalizedRate, settingsStore.getState().pitchCorrectionQuality);
 

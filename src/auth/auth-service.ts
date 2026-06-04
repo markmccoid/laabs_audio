@@ -3,6 +3,10 @@ export type AuthTokens = {
   refreshToken: string;
 };
 
+export type AuthLoginResult = AuthTokens & {
+  userId: string;
+};
+
 export type LoginParams = {
   username: string;
   password: string;
@@ -110,6 +114,20 @@ const parseTokens = (
   return { accessToken, refreshToken };
 };
 
+const parseLoginResult = (data: unknown): AuthLoginResult => {
+  const tokens = parseTokens(data);
+  const record = data as {
+    user?: { id?: unknown };
+  };
+  const userId = typeof record.user?.id === "string" ? record.user.id.trim() : "";
+
+  if (!userId) {
+    throw new AuthError("Unable to identify Audiobookshelf user", "INVALID_RESPONSE");
+  }
+
+  return { ...tokens, userId };
+};
+
 const fetchJson = async (
   url: string,
   options: RequestInit,
@@ -168,7 +186,7 @@ export const authService = {
       body: JSON.stringify({ username, password }),
     });
     log("login:response");
-    return parseTokens(data);
+    return parseLoginResult(data);
   },
 
   async refresh(serverUrl: string, refreshToken: string) {

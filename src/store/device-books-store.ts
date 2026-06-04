@@ -422,6 +422,7 @@ type HomeShelfScopeOptions = {
 type DeviceBooksPersistedState = {
   downloadedDetailsById: Record<string, ItemDetails>;
   downloadedBookData: Record<string, DownloadInfo>;
+  downloadedOwnerUserIdsById: Record<string, string[]>;
   downloadedShelfOrderByScope: Record<string, string[]>;
   customCoversById: Record<string, string | null>;
   playbackRatesByUserBook: Record<string, number>;
@@ -608,6 +609,7 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
 const createDefaultPersistedState = (): DeviceBooksPersistedState => ({
   downloadedDetailsById: {},
   downloadedBookData: {},
+  downloadedOwnerUserIdsById: {},
   downloadedShelfOrderByScope: {},
   customCoversById: {},
   playbackRatesByUserBook: {},
@@ -625,9 +627,9 @@ const createDefaultPersistedState = (): DeviceBooksPersistedState => ({
 });
 
 const resolveAuthUserKey = () => {
-  const { activeLibraryUserKey, storedUsername, serverUrl } = authStore.getState();
+  const { activeLibraryUserKey, storedUserId } = authStore.getState();
   if (activeLibraryUserKey) return activeLibraryUserKey;
-  if (storedUsername && serverUrl) return `${storedUsername}::${serverUrl}`;
+  if (storedUserId) return storedUserId;
   return null;
 };
 
@@ -1028,6 +1030,8 @@ const mergePersistedDeviceBooksState = (
     downloadedBookData: normalizePersistedDownloadedBookData(
       typedState.downloadedBookData ?? base.downloadedBookData,
     ),
+    downloadedOwnerUserIdsById:
+      typedState.downloadedOwnerUserIdsById ?? base.downloadedOwnerUserIdsById,
     downloadedShelfOrderByScope:
       typedState.downloadedShelfOrderByScope ?? base.downloadedShelfOrderByScope,
     customCoversById: typedState.customCoversById ?? base.customCoversById,
@@ -3143,12 +3147,24 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         },
 
         setDownloadedBookData: (libraryItemId, info) => {
+          const ownerUserId = resolveAuthUserKey();
           set((state) => ({
             ...state,
             downloadedBookData: {
               ...state.downloadedBookData,
               [libraryItemId]: info,
             },
+            downloadedOwnerUserIdsById: ownerUserId
+              ? {
+                  ...state.downloadedOwnerUserIdsById,
+                  [libraryItemId]: Array.from(
+                    new Set([
+                      ...(state.downloadedOwnerUserIdsById[libraryItemId] ?? []),
+                      ownerUserId,
+                    ]),
+                  ),
+                }
+              : state.downloadedOwnerUserIdsById,
           }));
         },
 
@@ -3157,10 +3173,13 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             const { [libraryItemId]: _detailRemoved, ...remainingDetails } =
               state.downloadedDetailsById;
             const { [libraryItemId]: _dataRemoved, ...remainingData } = state.downloadedBookData;
+            const { [libraryItemId]: _ownersRemoved, ...remainingOwners } =
+              state.downloadedOwnerUserIdsById;
             return {
               ...state,
               downloadedDetailsById: remainingDetails,
               downloadedBookData: remainingData,
+              downloadedOwnerUserIdsById: remainingOwners,
             };
           });
         },
@@ -3335,7 +3354,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 filename: currentFileName,
               });
 
-              const { url, authHeader } = await downloadsApi.getDownloadSpec(
+              const { urlWithToken, authHeader } = await downloadsApi.getDownloadSpec(
                 libraryItemId,
                 audioFile.ino,
               );
@@ -3365,7 +3384,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               let cancelDownloadForFile: (() => Promise<void>) | null = null;
               try {
                 const { task, cancelDownload, cleanFileName, fileUri } = downloadFileBlob(
-                  url,
+                  urlWithToken,
                   currentFileName,
                   (received, total) => {
                     if (!isTokenActive()) return;
@@ -3701,6 +3720,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
       partialize: (state) => ({
         downloadedDetailsById: state.downloadedDetailsById,
         downloadedBookData: state.downloadedBookData,
+        downloadedOwnerUserIdsById: state.downloadedOwnerUserIdsById,
         downloadedShelfOrderByScope: state.downloadedShelfOrderByScope,
         customCoversById: state.customCoversById,
         playbackRatesByUserBook: state.playbackRatesByUserBook,
@@ -3716,7 +3736,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         pendingPlaylistOpsByUser: state.pendingPlaylistOpsByUser,
         homeShelfVisibilityByScope: state.homeShelfVisibilityByScope,
       }),
-      version: 8,
+      version: 9,
       merge: (persistedState, currentState) =>
         mergePersistedDeviceBooksState(persistedState, currentState),
       migrate: (persistedState, version) => {
@@ -3725,6 +3745,10 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           (persistedState as Partial<DeviceBooksPersistedState> | undefined) ?? undefined;
 
         if (!typedState) {
+          return base;
+        }
+
+        if (version < 9) {
           return base;
         }
 
@@ -3880,8 +3904,9 @@ export const selectLocalBookmarksForBook = (
 };
 
 export const selectHasOfflineContent = (state: DeviceBooksState, _userKey?: string | null) => {
-  return Object.values(state.downloadedBookData).some((downloadInfo) =>
-    hasPlayableDownloadAudio(downloadInfo),
+  return Object.entries(state.downloadedBookData).some(([libraryItemId, downloadInfo]) =>
+    hasPlayableDownloadAudio(downloadInfo) &&
+    (state.downloadedOwnerUserIdsById[libraryItemId]?.length ?? 0) > 0,
   );
 };
 
@@ -3926,6 +3951,14 @@ export const selectIsBookFullyDownloaded = (state: DeviceBooksState, libraryItem
 
 export const selectHasPlayableBookDownload = (state: DeviceBooksState, libraryItemId: string) => {
   return hasPlayableDownloadAudio(state.downloadedBookData[libraryItemId]);
+};
+
+export const selectDownloadOwnerUserId = (
+  state: DeviceBooksState,
+  libraryItemId: string | null | undefined,
+) => {
+  if (!libraryItemId) return null;
+  return state.downloadedOwnerUserIdsById[libraryItemId]?.[0] ?? null;
 };
 
 export const toHomeShelfScopeKey = (userKey: string | null, libraryId: string | null) =>

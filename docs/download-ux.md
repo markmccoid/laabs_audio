@@ -24,6 +24,14 @@ The visible progress bar should move from `0` to `100` once for the whole book.
 
 The cover image is part of the offline payload, but it is not shown as a user-facing file in download progress.
 
+## Server Download Request
+
+Book audio files download from `src/api/downloads-api.ts` using the active session's `serverUrl`.
+
+- Use `/api/items/{itemId}/file/{ino}/download?token={token}` for native file download tasks.
+- Keep the `Authorization` header for authenticated clients that honor request headers.
+- Send `Accept-Encoding: identity` so reverse proxies do not gzip large media file responses.
+
 ## Sheet And Toast Re-Entry
 
 The download sheet is the primary detailed status surface. Users may dismiss it while the download continues.
@@ -40,4 +48,3 @@ Both book detail routes handle the sheet trigger:
 - `src/app/(tabs)/search/[libraryItemId].tsx`
 
 Use `getBookDetailHref()` from `src/navigation/book-links.ts` when navigating to a book from download UI. It preserves the Home/Search route source and attaches the one-time sheet-open token.
-

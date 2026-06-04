@@ -8,21 +8,37 @@ LAABS Audio is an audiobook listening app that works with Audiobookshelf librari
 The remote Audiobookshelf instance that owns libraries, users, audiobook catalog data, and server-side listening state.
 _Avoid_: Server URL, backend
 
+**Audiobookshelf User Identity**:
+The durable globally unique user UUID returned by Audiobookshelf for a person using LAABS Audio.
+_Avoid_: user key, username, login
+
 **User Session**:
-The app's authenticated relationship between one user and one Audiobookshelf Server.
+The app's authenticated relationship between one Audiobookshelf User Identity and one Audiobookshelf Server connection.
 _Avoid_: Login, auth state
 
 **Remembered User Session**:
-A User Session whose Audiobookshelf Server and username are saved on the device so the user can restore that User Session without re-entering its server address or username.
+A User Session whose Audiobookshelf User Identity, Audiobookshelf Server, and username are saved on the device so the user can restore that User Session without re-entering its server address or username.
 _Avoid_: Saved server, account
+
+**Server Connection Endpoint**:
+The server URL currently used to make API calls for a User Session.
+_Avoid_: User Session identity, user key
 
 **Session Restoration**:
 The attempt to make a Remembered User Session become the signed-in User Session again.
 _Avoid_: Auto-login, switch login
 
+**Session Entry Switch**:
+A user-requested move from the current User Session to another Session Entry Option.
+_Avoid_: logout, account deletion
+
 **Session Label**:
 The user-facing name for a Remembered User Session.
 _Avoid_: Server name, account name
+
+**Session Entry Option**:
+A saved user-facing way to start Session Restoration through a particular Server Connection Endpoint and username.
+_Avoid_: User Session identity, account
 
 **Library**:
 An Audiobookshelf collection of media that the user may browse and play.
@@ -61,7 +77,7 @@ The post-authentication determination of whether a User Session has zero, one, o
 _Avoid_: Library fetch, picker decision
 
 **Downloaded-Only Mode**:
-Deprecated term for the old post-logout access state where locally downloaded audiobooks remained available without a User Session. Explicit logout now uses **Signed-Out Required Sign-In** instead.
+The access state where locally downloaded audiobooks remain available without a signed-in User Session.
 _Avoid_: Offline mode
 
 **Signed-Out Required Sign-In**:
@@ -72,9 +88,17 @@ _Avoid_: Downloaded-only mode, offline mode
 The local audio and cover files for an audiobook from a known Audiobookshelf Server stored on the device.
 _Avoid_: Downloaded book
 
+**Downloaded Audio Asset Owner**:
+The Audiobookshelf User Identity whose local listening state should change when a Downloaded Audio Asset is used while no User Session is signed in.
+_Avoid_: download entitlement, sync server
+
 **Legacy Downloaded Audio Asset**:
 A Downloaded Audio Asset created before LAABS Audio knew which Audiobookshelf Server owned it.
 _Avoid_: Orphaned download
+
+**Local Data Reset Notice**:
+A user-facing explanation that LAABS Audio must discard old local user-scoped data because it cannot be trusted under the current identity model.
+_Avoid_: migration prompt, repair flow
 
 **Download Availability**:
 The condition where a signed-in User Session may use a Downloaded Audio Asset because the User Session can access the same Audiobook Identity on the Audiobookshelf Server.
@@ -277,9 +301,22 @@ _Avoid_: Five minute window, scrubber window
 
 ## Relationships
 
-- A **User Session** belongs to exactly one **Audiobookshelf Server**.
-- A **Remembered User Session** is identified by the combination of Audiobookshelf Server and username.
-- Multiple **Remembered User Sessions** may belong to the same Audiobookshelf Server when they use different usernames.
+- A **User Session** belongs to exactly one **Audiobookshelf User Identity** and one **Audiobookshelf Server** connection.
+- A **User Session** cannot be established unless the **Audiobookshelf User Identity** is known.
+- A **Remembered User Session** is identified by its **Audiobookshelf User Identity**.
+- LAABS Audio treats **Audiobookshelf User Identity** collisions as outside the domain model.
+- A **Server Connection Endpoint** may change without creating a new **Remembered User Session** when it reaches the same **Audiobookshelf User Identity**.
+- Multiple **Session Entry Options** may restore the same **Remembered User Session** when they return the same **Audiobookshelf User Identity**.
+- A **Session Entry Option** becomes remembered only after Session Restoration identifies an **Audiobookshelf User Identity**.
+- The successful **Session Entry Option** determines the current **Server Connection Endpoint** for API calls.
+- Removing a **Session Entry Option** does not remove the **Remembered User Session** when other Session Entry Options still restore the same **Audiobookshelf User Identity**.
+- Removing the last **Session Entry Option** for an **Audiobookshelf User Identity** requires a separate decision about whether to forget that user's local state.
+- A **Session Entry Switch** crosses a User Session boundary without clearing restoration material for the previous **Audiobookshelf User Identity**.
+- A **Session Entry Switch** must durably capture local listening changes for the previous **Audiobookshelf User Identity** before crossing the User Session boundary.
+- A **Session Entry Switch** must not block on remote sync for the previous **Audiobookshelf User Identity**.
+- Durable user-owned app state, including **Bookmark** state, **Shelf Membership**, **Listening Position**, and **Progress Sync Intent** state, belongs to the **Audiobookshelf User Identity**.
+- The **Server Connection Endpoint** is used for API calls, not for durable user-owned app state identity.
+- Multiple **Remembered User Sessions** may belong to the same Audiobookshelf Server when they use different **Audiobookshelf User Identities**.
 - Switching from one signed-in User Session to another crosses a User Session boundary.
 - **Session Restoration** may use remembered tokens or remembered credentials for the same Remembered User Session.
 - A **Remembered User Session** may remember its previous Active Library, but that Active Library is valid only if Audiobookshelf still returns it during Library Resolution.
@@ -306,6 +343,7 @@ _Avoid_: Five minute window, scrubber window
 - Failed **Library Activation** returns to **Library Selection** when no previous Active Library exists.
 - Library-scoped enhancements may finish loading after **Library Activation**.
 - A **Favorite** belongs to a **User Session** and a globally unique Library Item.
+- A **Favorite** is identified in Audiobookshelf by the username from the current successful **Session Entry Option**.
 - A **Favorite** may be discovered by querying Libraries, but Library-specific discovery does not make the Favorite belong to a Library.
 - Library-scoped book lists may use User Session scoped Favorites as an overlay.
 - A **Current Audiobook** may belong to an Audiobookshelf series with other audiobooks.
@@ -317,12 +355,15 @@ _Avoid_: Five minute window, scrubber window
 - A failed **Playback Start Attempt** may leave no **Active Playback**.
 - Only one **Playback Control Intent** may be active at a time.
 - Play and pause controls should follow **Audible Playback State**, not completion of follow-up progress or cache work.
-- **Downloaded-Only Mode** is deprecated and must not be used as a post-logout access state.
+- **Downloaded-Only Mode** allows local playback of Downloaded Audio Assets without a signed-in User Session.
 - **Signed-Out Required Sign-In** is not an **Offline User Session**.
 - A user in **Signed-Out Required Sign-In** is not signed in.
-- **Signed-Out Required Sign-In** does not expose **Downloaded Audio Assets**, **Library Selection**, server browsing, playback, bookmarks, or search.
-- Explicit logout enters **Signed-Out Required Sign-In** even when **Downloaded Audio Assets** remain on the device.
-- Explicit logout does not delete **Downloaded Audio Assets**; it only removes access until a **User Session** is available again.
+- **Signed-Out Required Sign-In** does not expose **Library Selection**, server browsing, bookmarks, or search.
+- Explicit logout may enter **Downloaded-Only Mode** when **Downloaded Audio Assets** remain on the device.
+- Explicit logout enters **Downloaded-Only Mode** immediately when owned playable **Downloaded Audio Assets** exist.
+- Explicit logout does not delete **Downloaded Audio Assets**.
+- Explicit logout clears restoration tokens for all **Session Entry Options** belonging to the signed-out **Audiobookshelf User Identity**.
+- Explicit logout clears saved credentials for all **Session Entry Options** belonging to the signed-out **Audiobookshelf User Identity**.
 - Explicit logout ends **Active Playback** and clears the **Current Audiobook** surface.
 - Explicit logout records a **Progress Sync Intent** for **Active Playback** before ending playback when a known **User Session** exists.
 - **Signed-Out Required Sign-In** must not read server-derived User Session snapshots or durable device audiobook state for display.
@@ -335,9 +376,20 @@ _Avoid_: Five minute window, scrubber window
 - **Session Needs Sign-In** may use remembered downloaded content because progress and bookmarks still have a known **User Session** owner.
 - A **Downloaded Audio Asset** may be available to multiple **User Sessions** through **Download Availability**.
 - A **Downloaded Audio Asset** identity includes its **Audiobookshelf Server** and **Audiobook Identity**.
-- A **Legacy Downloaded Audio Asset** remains on disk but is not visible or playable until a **User Session** can associate it with an accessible **Audiobook Identity**.
+- A **Downloaded Audio Asset** has a **Downloaded Audio Asset Owner** when LAABS Audio knows which **Audiobookshelf User Identity** should receive its logged-out listening state.
+- A **Downloaded Audio Asset** may have multiple **Downloaded Audio Asset Owners** when multiple **Audiobookshelf User Identities** can use the same local media.
+- A signed-in **User Session** may become a **Downloaded Audio Asset Owner** only after Audiobookshelf shows that it can access the same **Audiobook Identity**.
+- A **Legacy Downloaded Audio Asset** is discarded after a **Local Data Reset Notice** rather than migrated or reassigned.
 - A signed-in **User Session** sees **Downloaded Audio Assets** through **Download Availability**.
 - A **Downloaded Audio Asset** may be shared as local media, but listening state such as **Listening Position**, **Bookmark**, and **Playback Rate** belongs to the current **User Session**.
+- When no User Session is signed in, local **Listening Position** changes for a Downloaded Audio Asset belong to its **Downloaded Audio Asset Owner**.
+- When no User Session is signed in, local **Bookmark** and **Clip Bookmark** records for a Downloaded Audio Asset may be shown when its **Downloaded Audio Asset Owner** is known.
+- When no User Session is signed in, local **Bookmark** and **Clip Bookmark** records for a Downloaded Audio Asset may be changed when its **Downloaded Audio Asset Owner** is known.
+- When no User Session is signed in, **Playback Rate** changes for a Downloaded Audio Asset belong to its **Downloaded Audio Asset Owner**.
+- When no User Session is signed in and a Downloaded Audio Asset has multiple **Downloaded Audio Asset Owners**, each owner's downloaded audiobook experience is separate.
+- **Downloaded-Only Mode** does not create a global signed-out user context.
+- In **Downloaded-Only Mode**, each downloaded audiobook experience carries its **Downloaded Audio Asset Owner**.
+- In **Downloaded-Only Mode**, **Active Playback** carries the **Downloaded Audio Asset Owner** for local listening state changes.
 - **Session State** is distinct from **Access Mode**.
 - **Session State** determines whether there is a signed-in, remembered, or absent **User Session**.
 - **Access Mode** determines whether the user can browse server Libraries, use remembered downloaded content, or must sign in before app entry.
@@ -347,9 +399,13 @@ _Avoid_: Five minute window, scrubber window
 - A signed-in **User Session** with an **Active Library** uses an **Access Mode** where server browsing, streaming, search, and sync are available.
 - App entry is guarded by **Access Mode**, not by **Session State** alone.
 - Manual sign-in from **Session Needs Sign-In** is dismissible only when remembered downloaded content is available.
-- Forced sign-in is used when no **User Session** is available after explicit logout or first install.
+- Forced sign-in is used when no **User Session** and no playable **Downloaded Audio Assets** are available after explicit logout or first install.
 - **Progress Sync Intent** records for downloaded audiobooks may survive explicit logout and sync when the same **User Session** is restored.
-- **Progress Sync Intent** records are scoped to the Audiobookshelf Server and user they were created for when that identity is known.
+- **Progress Sync Intent** records are scoped to the **Audiobookshelf User Identity** they were created for when that identity is known.
+- **Progress Sync Intent** records sync through the current **Server Connection Endpoint** when the signed-in **Audiobookshelf User Identity** matches their owner.
+- Old local user-scoped data that cannot be associated with an **Audiobookshelf User Identity** is discarded after a **Local Data Reset Notice**.
+- A **Local Data Reset Notice** may precede discarding all old user-scoped local app state for the previous identity model.
+- A **Local Data Reset Notice** does not imply discarding unrelated app preferences.
 - **Audiobook Identity** uses Audiobookshelf's library item identity first and may use media item identity to recover the same audiobook on the same Audiobookshelf Server for the same user.
 - **Audiobook Identity** does not use title, author, or duration matching for progress sync.
 - A **Progress Sync Intent** becomes an **Unmatched Progress Sync Intent** when its audiobook no longer exists on the Audiobookshelf Server it belongs to.
@@ -437,6 +493,7 @@ _Avoid_: Five minute window, scrubber window
 - The app stores **Preview Position** in transient preview state, not in the main playback state.
 - **Clip Editor** preview requires the previewed audiobook to already be the loaded audiobook.
 - A **Bookmark Detail** belongs to exactly one **Bookmark**.
+- A **Local Bookmark Record** belongs to an **Audiobookshelf User Identity**.
 - A **Clip Bookmark** is edited from its **Bookmark Detail**.
 - A **Clip Editor** may be used to create an unsaved Clip Bookmark or to edit an existing Clip Bookmark.
 - Creating an unsaved Clip Bookmark continues from the **Add Bookmark Sheet** into the **Clip Editor** before saving.

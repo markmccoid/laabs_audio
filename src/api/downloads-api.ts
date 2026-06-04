@@ -7,7 +7,7 @@ import { authStore } from "../auth/auth-store";
 export type DownloadSpec = {
   url: string;
   urlWithToken: string;
-  authHeader: { Authorization: string };
+  authHeader: Record<string, string>;
   libraryItemId: string;
 };
 
@@ -34,16 +34,19 @@ export const downloadsApi = {
   async getDownloadSpec(itemId: string, fileIno: string): Promise<DownloadSpec> {
     const { token, serverUrl } = await ensureAuthContext();
 
-    const authHeader = { Authorization: `Bearer ${token}` };
-    const url = `${serverUrl}/api/items/${itemId}/file/${fileIno}/download`;
-    const urlWithToken = `${url}?token=${token}`;
+    const authHeader = {
+      Authorization: `Bearer ${token}`,
+      "Accept-Encoding": "identity",
+    };
+    const url = `${serverUrl}/api/items/${encodeURIComponent(itemId)}/file/${encodeURIComponent(fileIno)}/download`;
+    const urlWithToken = `${url}?token=${encodeURIComponent(token)}`;
 
     return { url, urlWithToken, authHeader, libraryItemId: itemId };
   },
 
   async downloadEbook(itemId: string, fileIno: string, filenameWithExt: string) {
     let tempFile: File | null = null;
-    const { url, authHeader } = await downloadsApi.getDownloadSpec(itemId, fileIno);
+    const { urlWithToken, authHeader } = await downloadsApi.getDownloadSpec(itemId, fileIno);
 
     try {
       // 1. Check for cache directory using the new Paths API
@@ -60,7 +63,7 @@ export const downloadsApi = {
       tempFile = new File(tempDir, filenameWithExt);
 
       // 4. Download the file using the modern downloadFileAsync method
-      const output = await File.downloadFileAsync(url, tempFile, {
+      const output = await File.downloadFileAsync(urlWithToken, tempFile, {
         headers: authHeader as Record<string, string>,
       });
 

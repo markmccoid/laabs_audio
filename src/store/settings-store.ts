@@ -396,7 +396,7 @@ export const settingsStore = createStore<SettingsState>()(
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 10,
+      version: 11,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -466,11 +466,11 @@ export const settingsStore = createStore<SettingsState>()(
               ? state.useTokenWithCoverImages ?? false
               : false,
           homeShelvesByScope:
-            version >= 3
+            version >= 11
               ? state.homeShelvesByScope ?? EMPTY_HOME_SHELVES_BY_SCOPE
               : EMPTY_HOME_SHELVES_BY_SCOPE,
           discoverShelfByScope:
-            version >= 4
+            version >= 11
               ? state.discoverShelfByScope ?? {}
               : {},
         };

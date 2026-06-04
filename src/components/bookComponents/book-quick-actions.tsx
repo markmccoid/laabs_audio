@@ -4,6 +4,7 @@ import {
   selectIsAnotherDownloadActive,
   selectIsBookActivelyDownloading,
   selectIsBookFullyDownloaded,
+  selectDownloadOwnerUserId,
   selectLocalBookmarksForBook,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
@@ -19,11 +20,6 @@ type BookQuickActionsProps = {
 };
 
 const clampPercent = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
-const getUserKey = (username: string | null, serverUrl: string | null) => {
-  if (!username || !serverUrl) return null;
-  return `${username}::${serverUrl}`;
-};
-
 type DownloadIconProps = {
   isDownloaded: boolean;
   isDownloading: boolean;
@@ -120,10 +116,12 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   const segments = useSegments();
   const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const storedUsername = useAuthStore((state) => state.storedUsername);
-  const serverUrl = useAuthStore((state) => state.serverUrl);
+  const storedUserId = useAuthStore((state) => state.storedUserId);
   useGetUserServerState();
-  const resolvedUserKey = activeLibraryUserKey ?? getUserKey(storedUsername, serverUrl);
+  const downloadOwnerUserId = useDeviceBooksStore((state) =>
+    selectDownloadOwnerUserId(state, libraryItemId),
+  );
+  const resolvedUserKey = activeLibraryUserKey ?? storedUserId ?? downloadOwnerUserId;
   const isDownloaded = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
     return selectIsBookFullyDownloaded(state, libraryItemId);

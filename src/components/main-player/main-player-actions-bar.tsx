@@ -2,7 +2,11 @@ import { usePlaybackRateGesture } from "@/hooks/use-playback-rate-gesture";
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { useAuthStore } from "@/auth/auth-store";
 import { useSleepTimerStatus } from "@/player";
-import { selectLocalBookmarksForBook, useDeviceBooksStore } from "@/store/device-books-store";
+import {
+  selectDownloadOwnerUserId,
+  selectLocalBookmarksForBook,
+  useDeviceBooksStore,
+} from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -14,11 +18,6 @@ import Animated, { interpolate, useAnimatedStyle } from "react-native-reanimated
 
 type MainPlayerActionsBarProps = {
   libraryItemId?: string;
-};
-
-const getUserKey = (username: string | null, serverUrl: string | null) => {
-  if (!username || !serverUrl) return null;
-  return `${username}::${serverUrl}`;
 };
 
 type ActionIconButtonProps = {
@@ -249,9 +248,11 @@ const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
   const themeColors = useThemeColors();
   useGetUserServerState();
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const storedUsername = useAuthStore((state) => state.storedUsername);
-  const serverUrl = useAuthStore((state) => state.serverUrl);
-  const resolvedUserKey = activeLibraryUserKey ?? getUserKey(storedUsername, serverUrl);
+  const storedUserId = useAuthStore((state) => state.storedUserId);
+  const downloadOwnerUserId = useDeviceBooksStore((state) =>
+    selectDownloadOwnerUserId(state, libraryItemId),
+  );
+  const resolvedUserKey = activeLibraryUserKey ?? storedUserId ?? downloadOwnerUserId;
   const sleepTimerStatus = useSleepTimerStatus();
   const bookmarkCount = useDeviceBooksStore((state) => {
     if (!libraryItemId) return 0;

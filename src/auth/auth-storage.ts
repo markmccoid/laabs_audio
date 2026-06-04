@@ -15,6 +15,7 @@ export type StoredTokens = {
 
 export type RememberedSessionRecord = {
   key: string;
+  userId: string;
   username: string;
   serverUrl: string;
   label: string;
@@ -77,7 +78,7 @@ const encodeSessionKeyPart = (value: string) =>
   encodeURIComponent(value).replace(/%/g, "_").replace(/~/g, "_7E");
 
 export const getSessionKey = (username: string, serverUrl: string) =>
-  `v1.${encodeSessionKeyPart(serverUrl)}.${encodeSessionKeyPart(username)}`;
+  `v2.${encodeSessionKeyPart(serverUrl)}.${encodeSessionKeyPart(username)}`;
 
 export const getDefaultSessionLabel = (username: string, serverUrl: string) =>
   `${username} @ ${serverUrl}`;
@@ -97,6 +98,7 @@ const normalizeSnapshot = (value: unknown): AuthSessionsSnapshot => {
         const candidate = session as Partial<RememberedSessionRecord>;
         return (
           typeof candidate.key === "string" &&
+          typeof candidate.userId === "string" &&
           typeof candidate.username === "string" &&
           typeof candidate.serverUrl === "string" &&
           typeof candidate.label === "string"
@@ -113,6 +115,7 @@ const normalizeSnapshot = (value: unknown): AuthSessionsSnapshot => {
     const safeKey = getSessionKey(session.username, session.serverUrl);
     const normalizedSession: RememberedSessionRecord = {
       key: safeKey,
+      userId: session.userId,
       username: session.username,
       serverUrl: session.serverUrl,
       label: session.label || getDefaultSessionLabel(session.username, session.serverUrl),
@@ -194,6 +197,7 @@ export const authStorage = {
     values: {
       username: string;
       serverUrl: string;
+      userId: string;
       label?: string | null;
       activeLibraryId?: string | null;
       activeLibraryName?: string | null;
@@ -208,6 +212,7 @@ export const authStorage = {
     const existing = snapshot.sessions.find((session) => session.key === key);
     const session: RememberedSessionRecord = {
       key,
+      userId: values.userId,
       username: values.username,
       serverUrl: values.serverUrl,
       label:
@@ -239,6 +244,7 @@ export const authStorage = {
             ...session,
             ...patch,
             key: session.key,
+            userId: session.userId,
             username: session.username,
             serverUrl: session.serverUrl,
             label: patch.label?.trim() || session.label,
@@ -319,43 +325,22 @@ export const authStorage = {
 
   async migrateLegacySessionIfNeeded() {
     const snapshot = readSessionSnapshot();
-    if (snapshot.migrationVersion >= 1) return snapshot;
+    if (snapshot.migrationVersion >= 2) return snapshot;
 
-    const [credentials, tokens] = await Promise.all([
-      this.getCredentials(),
-      this.getTokens(),
-    ]);
-    const hasLegacyCredentials = Boolean(
-      credentials.username && credentials.password && credentials.serverUrl,
+    const oldSessions = snapshot.sessions;
+    await Promise.all(
+      oldSessions.map((session) =>
+        this.setSessionSecrets(session.key, {
+          password: null,
+          accessToken: null,
+          refreshToken: null,
+        }),
+      ),
     );
-
-    if (!hasLegacyCredentials) {
-      const nextSnapshot = { ...snapshot, migrationVersion: 1 };
-      writeSessionSnapshot(nextSnapshot);
-      return nextSnapshot;
-    }
-
-    const username = credentials.username as string;
-    const password = credentials.password as string;
-    const serverUrl = credentials.serverUrl as string;
-    const session = this.upsertSession(
-      {
-        username,
-        serverUrl,
-        label: getDefaultSessionLabel(username, serverUrl),
-      },
-      { makeActive: Boolean(tokens.accessToken || tokens.refreshToken || password) },
-    );
-
-    await this.setSessionSecrets(session.key, {
-      password,
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-    });
-
-    const migratedSnapshot = {
-      ...readSessionSnapshot(),
-      migrationVersion: 1,
+    const migratedSnapshot: AuthSessionsSnapshot = {
+      sessions: [],
+      activeSessionKey: null,
+      migrationVersion: 2,
     };
     writeSessionSnapshot(migratedSnapshot);
     await this.clearLegacySession();

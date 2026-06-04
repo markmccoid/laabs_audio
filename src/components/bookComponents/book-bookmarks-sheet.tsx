@@ -2,6 +2,7 @@ import { useAuthStore } from "@/auth/auth-store";
 import { useGetItemDetails, useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore } from "@/player";
 import {
+  selectDownloadOwnerUserId,
   useDeviceBooksActions,
   useDeviceBooksStore,
   type LocalBookmarkRecord,
@@ -24,10 +25,6 @@ const resolveParam = (value: string | string[] | undefined) =>
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const getBookmarkTimeLabel = (timeSeconds: number) =>
   formatSeconds(timeSeconds, "compact", true, true) ?? "00:00";
-const getUserKey = (username: string | null, serverUrl: string | null) => {
-  if (!username || !serverUrl) return null;
-  return `${username}::${serverUrl}`;
-};
 const sanitizeFileSegment = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "_");
 const toCsvField = (value: string | number) => {
   const normalized = String(value ?? "");
@@ -81,8 +78,7 @@ export const BookBookmarksSheet = () => {
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const storedUsername = useAuthStore((state) => state.storedUsername);
-  const serverUrl = useAuthStore((state) => state.serverUrl);
+  const storedUserId = useAuthStore((state) => state.storedUserId);
   const { deleteBookmark } = useDeviceBooksActions();
   useGetUserServerState();
   const { libraryItemId: libraryItemIdParam } = useLocalSearchParams<{
@@ -90,6 +86,9 @@ export const BookBookmarksSheet = () => {
   }>();
   const libraryItemId = resolveParam(libraryItemIdParam);
   const { data: itemDetails } = useGetItemDetails(libraryItemId);
+  const downloadOwnerUserId = useDeviceBooksStore((state) =>
+    selectDownloadOwnerUserId(state, libraryItemId),
+  );
   const bookName = itemDetails?.title ?? itemDetails?.media?.metadata?.title ?? "";
   const [pendingBookmarkId, setPendingBookmarkId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -97,8 +96,8 @@ export const BookBookmarksSheet = () => {
   const isBookmarkPlayPending = pendingBookmarkId !== null;
 
   const resolvedUserKey = useMemo(
-    () => activeLibraryUserKey ?? getUserKey(storedUsername, serverUrl),
-    [activeLibraryUserKey, serverUrl, storedUsername],
+    () => activeLibraryUserKey ?? storedUserId ?? downloadOwnerUserId,
+    [activeLibraryUserKey, downloadOwnerUserId, storedUserId],
   );
 
   const localBookmarksForUser = useDeviceBooksStore((state) =>
@@ -315,6 +314,7 @@ export const BookBookmarksSheet = () => {
     setPendingDeleteId(bookmark.id);
     try {
       await deleteBookmark(libraryItemId, bookmark.startTimeSeconds, {
+        userKey: resolvedUserKey,
         localBookmarkId: bookmark.id,
       });
       toast.success("Bookmark deleted");

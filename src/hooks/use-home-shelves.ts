@@ -278,6 +278,9 @@ export const useHomeShelves = () => {
   const markMissingPlaylists = useDeviceBooksStore((state) => state.actions.markMissingPlaylists);
   const downloadedDetailsById = useDeviceBooksStore((state) => state.downloadedDetailsById);
   const downloadedBookData = useDeviceBooksStore((state) => state.downloadedBookData);
+  const downloadedOwnerUserIdsById = useDeviceBooksStore(
+    (state) => state.downloadedOwnerUserIdsById,
+  );
   const downloadedShelfOrder = useDeviceBooksStore((state) =>
     homeScopeKey ? state.downloadedShelfOrderByScope[homeScopeKey] ?? EMPTY_ORDER : EMPTY_ORDER,
   );
@@ -450,12 +453,14 @@ export const useHomeShelves = () => {
     return measureStartupSync(
       "home offline downloaded projection",
       () => {
-        const downloadedBooks = Object.values(downloadedDetailsById).map((details) =>
-          toDownloadedBookSummary(
-            details,
-            resolveStoredDownloadCoverUri(downloadedBookData[details.id]),
-          ),
-        );
+        const downloadedBooks = Object.values(downloadedDetailsById)
+          .filter((details) => (downloadedOwnerUserIdsById[details.id]?.length ?? 0) > 0)
+          .map((details) =>
+            toDownloadedBookSummary(
+              details,
+              resolveStoredDownloadCoverUri(downloadedBookData[details.id]),
+            ),
+          );
         const orderedBooks = reorderByIds(downloadedBooks, downloadedShelfOrder);
 
         if (orderedBooks.length > 0) {
@@ -469,7 +474,7 @@ export const useHomeShelves = () => {
         bookCount: books.length,
       }),
     );
-  }, [downloadedBookData, downloadedDetailsById, downloadedShelfOrder]);
+  }, [downloadedBookData, downloadedDetailsById, downloadedOwnerUserIdsById, downloadedShelfOrder]);
 
   const discoverDateKey = toDailySeedKey();
   const hasDiscoverSnapshotForToday = storedDiscoverShelf?.dateKey === discoverDateKey;
@@ -717,7 +722,7 @@ export const useHomeShelves = () => {
       "home visible shelves projection",
       () => {
         if (authStatus !== "authenticated") {
-          if (accessMode !== "downloadedSessionOnly") {
+          if (accessMode !== "downloadedOnly" && accessMode !== "downloadedSessionOnly") {
             return [];
           }
 
@@ -856,7 +861,7 @@ export const useHomeShelves = () => {
     shelves:
       authStatus === "authenticated"
         ? orderedShelves
-        : accessMode !== "downloadedSessionOnly"
+        : accessMode !== "downloadedOnly" && accessMode !== "downloadedSessionOnly"
           ? []
         : [
             {

@@ -7,18 +7,11 @@ import { useLibraryActivationStore } from "../auth/library-activation-store";
 import { useActivateLibrarySelection } from "../hooks/use-activate-library-selection";
 import { useLibrarySelection } from "../hooks/use-library-selection";
 
-// A stable key to scope library prompts/selections per user + server.
-const getUserKey = (username: string | null, serverUrl: string | null) => {
-  if (!username || !serverUrl) return null;
-  return `${username}::${serverUrl}`;
-};
-
 export const LibrarySelectionGate = () => {
   // Auth + selection state needed to decide whether to auto-select or prompt.
   const status = useAuthStore((state) => state.status);
   const loginRequired = useAuthStore((state) => state.loginRequired);
-  const storedUsername = useAuthStore((state) => state.storedUsername);
-  const serverUrl = useAuthStore((state) => state.serverUrl);
+  const storedUserId = useAuthStore((state) => state.storedUserId);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryName = useAuthStore((state) => state.activeLibraryName);
   const { clearActiveLibrary } = useAuthActions();
@@ -31,10 +24,7 @@ export const LibrarySelectionGate = () => {
   const { libraries, isLoading, isFetching, isFetched, isError, refetch, selectLibrary } =
     useLibrarySelection();
 
-  const userKey = useMemo(
-    () => getUserKey(storedUsername, serverUrl),
-    [serverUrl, storedUsername],
-  );
+  const userKey = useMemo(() => storedUserId?.trim() || null, [storedUserId]);
 
   // Track whether we've prompted or requested for the current user key.
   const promptRef = useRef<string | null>(null);

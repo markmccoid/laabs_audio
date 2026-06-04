@@ -712,7 +712,10 @@ export const useGetItemDetails = (itemId?: string) => {
   // Return appropriate data based on authentication state
   if (status !== "authenticated") {
     return {
-      data: accessMode === "downloadedSessionOnly" ? downloadedFallback : undefined,
+      data:
+        accessMode === "downloadedOnly" || accessMode === "downloadedSessionOnly"
+          ? downloadedFallback
+          : undefined,
       isPending: false,
       isError: false,
       isLoading: false,

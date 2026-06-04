@@ -21,7 +21,6 @@ export type AuthStatus = "hydrating" | "anonymous" | "authenticated" | "offlineO
 export type AccessMode =
   | "hydrating"
   | "firstRunSignInRequired"
-  /** @deprecated Explicit signed-out state requires sign-in before downloaded playback. */
   | "downloadedOnly"
   | "downloadedSessionOnly"
   | "serverSetup"
@@ -33,6 +32,7 @@ export type AuthState = {
   hasOfflineContent: boolean;
   isOnline: boolean | null;
   storedUsername: string | null;
+  storedUserId: string | null;
   serverUrl: string | null;
   accessToken: string | null;
   refreshToken: string | null;
@@ -80,10 +80,7 @@ const getHasStoredSession = (state: {
   refreshToken: string | null;
 }) => Boolean(state.hasStoredCredentials || state.refreshToken || state.accessToken);
 
-const getUserKey = (username: string | null, serverUrl: string | null) => {
-  if (!username || !serverUrl) return null;
-  return `${username}::${serverUrl}`;
-};
+const getUserKey = (userId: string | null | undefined) => userId?.trim() || null;
 
 let refreshPromise: Promise<string | null> | null = null;
 
@@ -95,6 +92,7 @@ export const authStore = createStore<AuthState>()(
       hasOfflineContent: false,
       isOnline: null,
       storedUsername: null,
+      storedUserId: null,
       serverUrl: null,
       accessToken: null,
       refreshToken: null,
@@ -137,9 +135,7 @@ export const authStore = createStore<AuthState>()(
             accessToken: secrets.accessToken,
             refreshToken: secrets.refreshToken,
           });
-          const userKey = activeSession
-            ? getUserKey(activeSession.username, activeSession.serverUrl)
-            : null;
+          const userKey = getUserKey(activeSession?.userId);
           const persistedActiveLibraryId =
             userKey && get().activeLibraryUserKey === userKey ? get().activeLibraryId : null;
           const persistedActiveLibraryName =
@@ -175,6 +171,7 @@ export const authStore = createStore<AuthState>()(
             rememberedSessions: authStorage.getSessionsSnapshot().sessions,
             activeSessionKey: activeSession?.key ?? null,
             storedUsername: activeSession?.username ?? null,
+            storedUserId: activeSession?.userId ?? null,
             serverUrl: activeSession?.serverUrl ?? null,
             hasStoredCredentials,
             hasOfflineContent: offlineContent,
@@ -217,6 +214,7 @@ export const authStore = createStore<AuthState>()(
               rememberedSessions: authStorage.getSessionsSnapshot().sessions,
               activeSessionKey: null,
               storedUsername: null,
+              storedUserId: null,
               serverUrl: null,
               hasStoredCredentials: false,
               hasOfflineContent: offlineContent,
@@ -277,7 +275,7 @@ export const authStore = createStore<AuthState>()(
         setActiveLibrary: (library) => {
           const trimmedId = library.id.trim();
           const trimmedName = library.name.trim();
-          const userKey = getUserKey(get().storedUsername, get().serverUrl);
+          const userKey = getUserKey(get().storedUserId);
           const activeSessionKey = get().activeSessionKey;
           log("setActiveLibrary", {
             id: trimmedId,
@@ -311,14 +309,15 @@ export const authStore = createStore<AuthState>()(
         loginWithPassword: async (username, password, serverUrl, options) => {
           log("login:start", { username, serverUrl });
           const normalizedServerUrl = authService.normalizeServerUrl(serverUrl);
-          const nextUserKey = getUserKey(username, normalizedServerUrl);
           const tokens = await authService.login({
             username,
             password,
             serverUrl: normalizedServerUrl,
           });
+          const nextUserKey = getUserKey(tokens.userId);
           const session = authStorage.upsertSession(
             {
+              userId: tokens.userId,
               username,
               serverUrl: normalizedServerUrl,
               label: options?.label || getDefaultSessionLabel(username, normalizedServerUrl),
@@ -345,6 +344,7 @@ export const authStore = createStore<AuthState>()(
             rememberedSessions: authStorage.getSessionsSnapshot().sessions,
             activeSessionKey: session.key,
             storedUsername: username,
+            storedUserId: tokens.userId,
             serverUrl: normalizedServerUrl,
             accessToken: tokens.accessToken,
             refreshToken: tokens.refreshToken,
@@ -388,11 +388,15 @@ export const authStore = createStore<AuthState>()(
 
           if (!tokens && secrets.password) {
             try {
-              tokens = await authService.login({
+              const loginResult = await authService.login({
                 username: session.username,
                 password: secrets.password,
                 serverUrl: session.serverUrl,
               });
+              if (loginResult.userId !== session.userId) {
+                throw new AuthError("Sign-in returned a different Audiobookshelf user", "INVALID_RESPONSE");
+              }
+              tokens = loginResult;
             } catch (error) {
               if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
                 throw error;
@@ -423,11 +427,12 @@ export const authStore = createStore<AuthState>()(
           });
           authStorage.setActiveSessionKey(session.key);
 
-          const userKey = getUserKey(session.username, session.serverUrl);
+          const userKey = getUserKey(session.userId);
           set((state) => ({
             rememberedSessions: authStorage.getSessionsSnapshot().sessions,
             activeSessionKey: session.key,
             storedUsername: session.username,
+            storedUserId: session.userId,
             serverUrl: session.serverUrl,
             accessToken: tokens.accessToken,
             refreshToken: tokens.refreshToken,
@@ -472,6 +477,7 @@ export const authStore = createStore<AuthState>()(
             rememberedSessions: authStorage.getSessionsSnapshot().sessions,
             activeSessionKey: state.activeSessionKey === sessionKey ? null : state.activeSessionKey,
             storedUsername: state.activeSessionKey === sessionKey ? null : state.storedUsername,
+            storedUserId: state.activeSessionKey === sessionKey ? null : state.storedUserId,
             serverUrl: state.activeSessionKey === sessionKey ? null : state.serverUrl,
             accessToken: state.activeSessionKey === sessionKey ? null : state.accessToken,
             refreshToken: state.activeSessionKey === sessionKey ? null : state.refreshToken,
@@ -549,11 +555,15 @@ export const authStore = createStore<AuthState>()(
               if (currentState.storedUsername && secrets.password) {
                 try {
                   log("refresh:fallback-login");
-                  tokens = await authService.login({
+                  const loginResult = await authService.login({
                     username: currentState.storedUsername,
                     password: secrets.password,
                     serverUrl,
                   });
+                  if (currentState.storedUserId && loginResult.userId !== currentState.storedUserId) {
+                    throw new AuthError("Sign-in returned a different Audiobookshelf user", "INVALID_RESPONSE");
+                  }
+                  tokens = loginResult;
                   log("refresh:fallback-success");
                 } catch (error) {
                   if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
@@ -624,7 +634,21 @@ export const authStore = createStore<AuthState>()(
           }
 
           if (state.activeSessionKey) {
-            await authStorage.clearSessionTokens(state.activeSessionKey);
+            const activeSession = state.rememberedSessions.find(
+              (session) => session.key === state.activeSessionKey,
+            );
+            const sessionsToClear = activeSession
+              ? state.rememberedSessions.filter((session) => session.userId === activeSession.userId)
+              : state.rememberedSessions.filter((session) => session.key === state.activeSessionKey);
+            await Promise.all(
+              sessionsToClear.map((session) =>
+                authStorage.setSessionSecrets(session.key, {
+                  password: null,
+                  accessToken: null,
+                  refreshToken: null,
+                }),
+              ),
+            );
             authStorage.setActiveSessionKey(null);
           }
 
@@ -632,6 +656,7 @@ export const authStore = createStore<AuthState>()(
             rememberedSessions: authStorage.getSessionsSnapshot().sessions,
             activeSessionKey: null,
             storedUsername: null,
+            storedUserId: null,
             serverUrl: null,
             accessToken: null,
             refreshToken: null,
@@ -655,6 +680,7 @@ export const authStore = createStore<AuthState>()(
         activeLibraryId: state.activeLibraryId,
         activeLibraryName: state.activeLibraryName,
         activeLibraryUserKey: state.activeLibraryUserKey,
+        storedUserId: state.storedUserId,
       }),
     },
   ),
@@ -674,9 +700,11 @@ export const selectAccessMode = (state: AuthState): AccessMode => {
   }
 
   if (state.status === "offlineOnly") {
-    return state.loginRequired && Boolean(state.storedUsername && state.serverUrl)
+    return state.loginRequired && Boolean(state.storedUserId && state.serverUrl)
       ? "downloadedSessionOnly"
-      : "firstRunSignInRequired";
+      : state.hasOfflineContent
+        ? "downloadedOnly"
+        : "firstRunSignInRequired";
   }
 
   return "firstRunSignInRequired";

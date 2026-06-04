@@ -1,5 +1,7 @@
 # Remembered User Sessions for Sign-In Switching
 
+Status: Superseded by ADR 0015 for Remembered User Session identity.
+
 LAABS Audio stores multiple Remembered User Sessions so users can restore or switch between sign-ins without re-entering server and username details. Remembered entries are keyed by the User Session identity, not by Audiobookshelf Server alone, because listening state, downloads, credentials, tokens, and Active Library memory are scoped to a specific server and username pair.
 
 ## Consequences

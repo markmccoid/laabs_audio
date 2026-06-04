@@ -20,9 +20,10 @@ export const resolveProgressSyncUserKey = (
   if (override) return override;
   const authState = authStore.getState();
   if (authState.activeLibraryUserKey) return authState.activeLibraryUserKey;
-  if (authState.storedUsername && authState.serverUrl) {
-    return `${authState.storedUsername}::${authState.serverUrl}`;
-  }
+  if (authState.storedUserId) return authState.storedUserId;
+  const downloadOwnerUserId =
+    deviceBooksStore.getState().downloadedOwnerUserIdsById[libraryItemId]?.[0] ?? null;
+  if (downloadOwnerUserId) return downloadOwnerUserId;
   return (
     deviceBooksStore.getState().progressSyncUserKeyByLibraryItemId[libraryItemId] ??
     null

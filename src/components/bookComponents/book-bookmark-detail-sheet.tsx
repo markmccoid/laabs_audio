@@ -12,6 +12,7 @@ import {
   deleteClipTranscriptExportFile,
 } from "@/sharing/clip-transcript-export";
 import {
+  selectDownloadOwnerUserId,
   useDeviceBooksActions,
   useDeviceBooksStore,
   type LocalBookmarkRecord,
@@ -53,11 +54,6 @@ import {
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
-const getUserKey = (username: string | null, serverUrl: string | null) => {
-  if (!username || !serverUrl) return null;
-  return `${username}::${serverUrl}`;
-};
-
 const getClipTranscriptExportErrorMessage = (error: unknown) => {
   if (error instanceof Error && error.message.trim()) return error.message;
   if (typeof error === "object" && error !== null && "message" in error) {
@@ -88,17 +84,19 @@ export const BookBookmarkDetailSheet = () => {
   const draft = useBookAddBookmarkDraft();
   const { addBookmark } = useDeviceBooksActions();
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const storedUsername = useAuthStore((state) => state.storedUsername);
-  const serverUrl = useAuthStore((state) => state.serverUrl);
+  const storedUserId = useAuthStore((state) => state.storedUserId);
   const { libraryItemId: libraryItemIdParam, bookmarkId: bookmarkIdParam } = useLocalSearchParams<{
     libraryItemId?: string | string[];
     bookmarkId?: string | string[];
   }>();
   const libraryItemId = resolveParam(libraryItemIdParam);
   const bookmarkId = resolveParam(bookmarkIdParam);
+  const downloadOwnerUserId = useDeviceBooksStore((state) =>
+    selectDownloadOwnerUserId(state, libraryItemId),
+  );
   const resolvedUserKey = useMemo(
-    () => activeLibraryUserKey ?? getUserKey(storedUsername, serverUrl),
-    [activeLibraryUserKey, serverUrl, storedUsername],
+    () => activeLibraryUserKey ?? storedUserId ?? downloadOwnerUserId,
+    [activeLibraryUserKey, downloadOwnerUserId, storedUserId],
   );
   const bookmark = useDeviceBooksStore((state) =>
     resolvedUserKey && bookmarkId
@@ -259,6 +257,7 @@ export const BookBookmarkDetailSheet = () => {
     try {
       await playerService.restoreListeningPositionAfterPreview();
       await addBookmark(libraryItemId, bookmarkPayload, {
+        userKey: resolvedUserKey,
         localBookmarkId: bookmark.id,
         localNote: localNote.length > 0 ? localNote : null,
         endTimeSeconds: isClipDraft ? draft.clipEndSeconds : null,
