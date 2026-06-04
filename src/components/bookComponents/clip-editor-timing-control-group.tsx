@@ -91,7 +91,7 @@ export const StartingPositionScrubberRevealButton = ({
               borderCurve: "continuous",
               borderWidth: 1,
               borderColor: visible ? themeColors.accent : themeColors.border,
-              backgroundColor: visible ? themeColors.accent : "#EDF2F4",
+              backgroundColor: visible ? themeColors.accent : themeColors.bg,
               alignItems: "center",
               justifyContent: "center",
             },
@@ -127,7 +127,9 @@ const ClipEditorTimingNudgeButton = ({
         minHeight: 52,
         borderRadius: 16,
         borderCurve: "continuous",
-        backgroundColor: "#EDF2F4",
+        borderWidth: 1,
+        borderColor: themeColors.border,
+        backgroundColor: themeColors.bg,
         alignItems: "center",
         justifyContent: "center",
         gap: 2,
@@ -208,7 +210,7 @@ const AnimatedTimingSlider = ({
         maximumValue={Math.max(minimumValue, maximumValue)}
         step={1}
         minimumTrackTintColor={themeColors.accent}
-        maximumTrackTintColor="#D8E0E4"
+        maximumTrackTintColor={themeColors.border}
         thumbTintColor={themeColors.accent}
         disabled={false}
         onSlidingStart={onSliderStart}
@@ -253,7 +255,7 @@ export const ClipEditorTimingControlGroup = ({
         borderCurve: "continuous",
         borderWidth: 1,
         borderColor: themeColors.border,
-        backgroundColor: "#FFFFFF",
+        backgroundColor: themeColors.surface,
         padding: 14,
         gap: 10,
         boxShadow: "0 10px 22px rgba(15, 23, 42, 0.08)",

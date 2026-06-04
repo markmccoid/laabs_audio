@@ -260,7 +260,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
     borderCurve: "continuous" as const,
     borderWidth: 1,
     borderColor: themeColors.border,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: themeColors.surface,
     padding: 14,
     gap: 10,
     boxShadow: "0 10px 22px rgba(15, 23, 42, 0.08)",
@@ -327,7 +327,9 @@ export const BookAddBookmarkClipEditorSheet = () => {
           style={{
             borderRadius: 24,
             borderCurve: "continuous",
-            backgroundColor: "#FFFFFF",
+            borderWidth: 1,
+            borderColor: themeColors.border,
+            backgroundColor: themeColors.surface,
             paddingHorizontal: 16,
             paddingVertical: 18,
             gap: 14,
@@ -458,7 +460,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
                 borderCurve: "continuous",
                 borderWidth: 1,
                 borderColor: isEndPositionLocked ? themeColors.accent : themeColors.border,
-                backgroundColor: isEndPositionLocked ? themeColors.accent : "#EDF2F4",
+                backgroundColor: isEndPositionLocked ? themeColors.accent : themeColors.bg,
                 alignItems: "center",
                 justifyContent: "center",
                 opacity: pressed ? 0.78 : 1,
@@ -530,7 +532,9 @@ export const BookAddBookmarkClipEditorSheet = () => {
                 height: 54,
                 borderRadius: 16,
                 borderCurve: "continuous",
-                backgroundColor: "#EDF2F4",
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                backgroundColor: themeColors.bg,
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 2,
@@ -556,7 +560,9 @@ export const BookAddBookmarkClipEditorSheet = () => {
                 height: 54,
                 borderRadius: 16,
                 borderCurve: "continuous",
-                backgroundColor: "#EDF2F4",
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                backgroundColor: themeColors.bg,
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 2,
@@ -589,7 +595,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
             maximumValue={durationSeconds}
             step={1}
             minimumTrackTintColor={themeColors.accent}
-            maximumTrackTintColor="#D8E0E4"
+            maximumTrackTintColor={themeColors.border}
             thumbTintColor={themeColors.accent}
             disabled={!clipPreviewAvailability.available}
             onSlidingStart={() => {

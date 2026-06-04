@@ -1,0 +1,48 @@
+# New Features and Fixes
+
+Use this file as the tester-facing change log. When making a commit, add a new entry at the top with the commit date, short commit hash, a concise summary, and the main thing testers should verify.
+
+## Recent Changes
+
+- `2026-06-04` `pending` - Fix bookmark and clip editor dark mode styling.
+  Tester focus: verify Add Bookmark, Create Clip, and Clip editor inputs, cards, controls, and sliders use readable dark-mode colors.
+- `2026-06-04` `2c9fb48` - Use ABS user UUID for local state.
+  Tester focus: verify local listening state, downloads, bookmarks, and progress stay tied to the correct Audiobookshelf user after sign-in, sign-out, and user switching.
+- `2026-06-04` `ebaaa02` - Restore home book action menus after auth hydration.
+  Tester focus: verify home screen book menus appear and work after app launch, session restore, and login.
+- `2026-06-03` `9aa64e1` - Add remembered sign-in switching.
+  Tester focus: verify saved server/user sessions can be selected and switched without leaking another user's local state.
+- `2026-06-03` `1c80f09` - Improve home startup shelf handling.
+  Tester focus: verify the home screen loads the expected shelf data on cold launch and after library changes.
+- `2026-05-31` `c0af1b2` - Bump app version to 1.3.9.
+  Tester focus: verify the build reports version 1.3.9 where app version metadata is shown.
+- `2026-05-29` `0d77561` - Harden player progress display.
+  Tester focus: verify player progress renders correctly while streaming, resuming, seeking, and recovering from partial progress data.
+- `2026-05-28` `475b650` - Cancel session queries on logout.
+  Tester focus: verify logout stops in-flight account/library requests and does not show stale user data afterward.
+- `2026-05-28` `04c0af9` - Add playback control intents.
+  Tester focus: verify play, pause, seek, skip, and related controls settle on the correct player state.
+- `2026-05-28` `c5e0b52` - Document playback control intent plan.
+  Tester focus: no app behavior change expected; verify documentation reflects the playback control direction.
+- `2026-05-28` `9e7ee6e` - Version bump.
+  Tester focus: verify app version metadata changed as expected for the build.
+- `2026-05-28` `7d9e33a` - Fix logout session boundaries.
+  Tester focus: verify logout clears protected session access and requires sign-in before playback or account-specific browsing.
+- `2026-05-27` `57a05ce` - Checkpoint auth and playback flow updates.
+  Tester focus: verify login, library selection, playback start, and playback resume still work together.
+- `2026-05-25` `d83f48a` - Improve clip editor scroll and preview messaging.
+  Tester focus: verify clip editing scroll behavior and preview messages on small and large screens.
+- `2026-05-25` `d751203` - Refine bookmark sheet navigation.
+  Tester focus: verify bookmark sheet navigation, selection, and dismissal flows.
+- `2026-05-24` `1a500ac` - Bump version.
+  Tester focus: verify app version metadata changed as expected for the build.
+- `2026-05-24` `b80d5f7` - Refine book series sheet current item handling.
+  Tester focus: verify the current book is identified correctly in series-related sheets.
+- `2026-05-24` `2cee200` - Update bookmark actions menu.
+  Tester focus: verify bookmark menu actions are present, correctly labeled, and perform the expected action.
+- `2026-05-24` `1e72048` - Add finished search filter.
+  Tester focus: verify search filtering can include or isolate finished books as intended.
+- `2026-05-24` `8e5a3d2` - Scope bookmark counts to active user.
+  Tester focus: verify bookmark counts change correctly when switching users and do not include another user's bookmarks.
+- `2026-05-24` `1097027` - Deepen listening position sync.
+  Tester focus: verify listening position sync across app restart, streaming playback, downloaded playback, and server updates.

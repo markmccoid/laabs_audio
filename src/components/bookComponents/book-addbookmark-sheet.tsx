@@ -94,7 +94,7 @@ export const BookAddBookmarkSheet = () => {
   const canSave = Boolean(draft.libraryItemId) && Boolean(trimmedBookmarkName) && !isSaving;
   const canAddClip = Boolean(draft.libraryItemId) && Boolean(trimmedBookmarkName) && !isSaving;
   const timePanelBorderColor = themeColors.border;
-  const fieldBackgroundColor = "#FFFFFF";
+  const fieldBackgroundColor = themeColors.surface;
   const timePanelFillColor = fieldBackgroundColor;
 
   const renderStepButton = (
@@ -314,6 +314,8 @@ export const BookAddBookmarkSheet = () => {
             editable={!isSaving}
             placeholder="Enter a descriptive name"
             placeholderTextColor={themeColors.textMuted}
+            cursorColor={themeColors.accent}
+            selectionColor={themeColors.accent}
             style={{
               borderRadius: 12,
               borderCurve: "continuous",
@@ -458,6 +460,8 @@ export const BookAddBookmarkSheet = () => {
             editable={!isSaving}
             placeholder="Add an optional note"
             placeholderTextColor={themeColors.textMuted}
+            cursorColor={themeColors.accent}
+            selectionColor={themeColors.accent}
             multiline
             textAlignVertical="top"
             style={{
