@@ -208,6 +208,7 @@ export type LibraryItemWithUserState = LibraryItemSummary & {
 export const useGetBooks = () => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const {
     data: userServerState,
     isPending: isUserStatePending,
@@ -234,12 +235,12 @@ export const useGetBooks = () => {
     isLoading,
     ...rest
   } = useQuery({
-    queryKey: queryKeys.libraryBooks(activeLibraryId),
+    queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
     queryFn: async () => {
       if (!activeLibraryId) return [];
       return libraryItemsApi.getItems({ libraryId: activeLibraryId });
     },
-    enabled: status === "authenticated" && !!activeLibraryId,
+    enabled: status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId,
     // Opt-in to React Query persistence for this query only
     meta: { persist: true },
   });
@@ -559,12 +560,13 @@ export type ItemDetailsWithSummary = LibraryItemSummary &
 
 export const useCachedBookSummary = (itemId?: string) => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const queryClient = useQueryClient();
   const downloadedCoverLocalUri = useDeviceBooksStore((state) =>
     itemId ? resolveStoredDownloadCoverUri(state.downloadedBookData[itemId]) : null,
   );
-  const booksQueryKey = queryKeys.libraryBooks(activeLibraryId);
-  const immediateCachedBooks = activeLibraryId
+  const booksQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId);
+  const immediateCachedBooks = activeLibraryUserKey && activeLibraryId
     ? queryClient.getQueryData<LibraryItemsSummary>(booksQueryKey)
     : undefined;
 
@@ -807,6 +809,7 @@ export const useGetFilterData = () => {
 export const useInvalidateQueries = () => {
   const queryClient = useQueryClient();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
 
   return useCallback(
     (queryIdentifier: "booksInProgress" | "books") => {
@@ -817,12 +820,14 @@ export const useInvalidateQueries = () => {
           });
           break;
         case "books":
-          queryClient.invalidateQueries({ queryKey: queryKeys.libraryBooks(activeLibraryId) });
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
+          });
           break;
         default:
           break;
       }
     },
-    [activeLibraryId, queryClient],
+    [activeLibraryId, activeLibraryUserKey, queryClient],
   );
 };

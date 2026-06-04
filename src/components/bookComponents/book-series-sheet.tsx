@@ -22,6 +22,7 @@ export const BookSeriesSheet = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const isOffline = useAuthStore((state) => state.isOnline === false);
   const { data: userServerState } = useGetUserServerState();
   const queryClient = useQueryClient();
@@ -41,8 +42,8 @@ export const BookSeriesSheet = () => {
   const currentAudiobookId = resolveParam(currentAudiobookIdParam);
   const sourceTabParamResolved = resolveParam(sourceTabParam);
   const sourceTab: SourceTab = sourceTabParamResolved === "search" ? "search" : "home";
-  const booksQueryKey = queryKeys.libraryBooks(activeLibraryId);
-  const immediateCatalog = activeLibraryId
+  const booksQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId);
+  const immediateCatalog = activeLibraryUserKey && activeLibraryId
     ? queryClient.getQueryData<LibraryItemsSummary>(booksQueryKey)
     : undefined;
 

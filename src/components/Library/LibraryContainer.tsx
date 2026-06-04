@@ -13,6 +13,7 @@ const LibraryContainer = () => {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const {
     isError: isFilterDataError,
     refetch: refetchFilterData,
@@ -29,7 +30,7 @@ const LibraryContainer = () => {
   const onRefresh = async () => {
     setRefreshing(true);
     await queryClient.refetchQueries({
-      queryKey: queryKeys.libraryBooks(activeLibraryId),
+      queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
       exact: true,
     });
     setRefreshing(false);

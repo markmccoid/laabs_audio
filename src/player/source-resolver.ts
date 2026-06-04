@@ -11,6 +11,11 @@ const buildAbsoluteUrl = (baseUrl: string, path: string) => {
   return `${baseUrl}/${path}`;
 };
 
+const appendToken = (url: string, token: string) => {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}token=${encodeURIComponent(token)}`;
+};
+
 const getAuthContext = () => {
   const { accessToken, serverUrl } = authStore.getState();
   if (!accessToken || !serverUrl) {
@@ -45,10 +50,16 @@ export const resolveTrackSource = (
   }
 
   const requiresAuthHeader = track.mimeType !== "application/vnd.apple.mpegurl";
+  const streamUri = appendToken(uri, accessToken);
 
   return {
-    uri,
-    headers: requiresAuthHeader ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    uri: streamUri,
+    headers: requiresAuthHeader
+      ? {
+          Authorization: `Bearer ${accessToken}`,
+          "Accept-Encoding": "identity",
+        }
+      : undefined,
     mimeType: track.mimeType ?? undefined,
   };
 };

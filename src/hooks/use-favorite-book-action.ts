@@ -72,7 +72,7 @@ export const useFavoriteBookAction = () => {
           exact: true,
         }),
         queryClient.cancelQueries({
-          queryKey: queryKeys.libraryBooks(activeLibraryId),
+          queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
           exact: true,
         }),
         queryClient.cancelQueries({
@@ -85,7 +85,7 @@ export const useFavoriteBookAction = () => {
         queryKeys.userServerState(activeLibraryUserKey),
       );
       const previousLibraryBooks = queryClient.getQueryData<LibraryItemsSummary>(
-        queryKeys.libraryBooks(activeLibraryId),
+        queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
       );
       const previousItemDetails = queryClient.getQueryData<ItemDetails>(
         queryKeys.itemDetails(activeLibraryUserKey, libraryItemId),
@@ -104,7 +104,7 @@ export const useFavoriteBookAction = () => {
       );
 
       queryClient.setQueryData<LibraryItemsSummary>(
-        queryKeys.libraryBooks(activeLibraryId),
+        queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
         (previousBooks) =>
           previousBooks?.map((book) =>
             book.id === libraryItemId
@@ -151,9 +151,9 @@ export const useFavoriteBookAction = () => {
           context?.previousUserServerState,
         );
       }
-      if (activeLibraryId) {
+      if (activeLibraryId && activeLibraryUserKey) {
         queryClient.setQueryData(
-          queryKeys.libraryBooks(activeLibraryId),
+          queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
           context?.previousLibraryBooks,
         );
       }

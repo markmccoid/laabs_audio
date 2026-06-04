@@ -1,7 +1,10 @@
 export const queryKeys = {
-  libraries: ["libraries"] as const,
-  libraryBooks: (libraryId: string | null | undefined) =>
-    ["library", libraryId ?? null, "books"] as const,
+  libraries: (userKey: string | null | undefined) =>
+    ["user", userKey ?? null, "libraries"] as const,
+  libraryBooks: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+  ) => ["user", userKey ?? null, "library", libraryId ?? null, "books"] as const,
   libraryPlaylists: (
     userKey: string | null | undefined,
     libraryId: string | null | undefined,

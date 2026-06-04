@@ -42,18 +42,20 @@ export const OfflineConnectionBanner = () => {
 
       refreshes.push(refreshSession({ force: true }).catch(() => undefined));
 
-      refreshes.push(
-        queryClient.fetchQuery({
-          queryKey: queryKeys.libraries,
-          queryFn: () => librariesApi.getAll(),
-          meta: { persist: true },
-        }),
-      );
-
-      if (activeLibraryId) {
+      if (activeLibraryUserKey) {
         refreshes.push(
           queryClient.fetchQuery({
-            queryKey: queryKeys.libraryBooks(activeLibraryId),
+            queryKey: queryKeys.libraries(activeLibraryUserKey),
+            queryFn: () => librariesApi.getAll(),
+            meta: { persist: true },
+          }),
+        );
+      }
+
+      if (activeLibraryId && activeLibraryUserKey) {
+        refreshes.push(
+          queryClient.fetchQuery({
+            queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
             queryFn: () => libraryItemsApi.getItems({ libraryId: activeLibraryId }),
             meta: { persist: true },
           }),

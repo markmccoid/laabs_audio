@@ -488,10 +488,12 @@ export default function RootLayout() {
             });
         };
 
-        if (activeLibraryId) {
+        if (activeLibraryId && activeLibraryUserKey) {
           prefetches.push(
-            tracePrefetch("library books", queryKeys.libraryBooks(activeLibraryId), () =>
-              libraryItemsApi.getItems({ libraryId: activeLibraryId }),
+            tracePrefetch(
+              "library books",
+              queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
+              () => libraryItemsApi.getItems({ libraryId: activeLibraryId }),
             ),
           );
         }

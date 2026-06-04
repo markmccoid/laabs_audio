@@ -966,6 +966,13 @@ const deleteFileIfExists = async (uri: string) => {
   await deleteFromFileSystem(uri);
 };
 
+const deleteAllBookDownloads = async () => {
+  const downloadsDirectoryUri = resolveDocumentRelativePath(BOOK_DOWNLOADS_DIRECTORY);
+  if (downloadsDirectoryUri) {
+    await deleteFromFileSystem(downloadsDirectoryUri);
+  }
+};
+
 const downloadCoverImage = async (libraryItemId: string) => {
   try {
     // Covers are part of the offline payload and live beside the downloaded audio files.
@@ -3736,7 +3743,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         pendingPlaylistOpsByUser: state.pendingPlaylistOpsByUser,
         homeShelfVisibilityByScope: state.homeShelfVisibilityByScope,
       }),
-      version: 9,
+      version: 10,
       merge: (persistedState, currentState) =>
         mergePersistedDeviceBooksState(persistedState, currentState),
       migrate: (persistedState, version) => {
@@ -3749,7 +3756,17 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         }
 
         if (version < 9) {
+          void deleteAllBookDownloads();
           return base;
+        }
+
+        if (version < 10) {
+          const hasOwnedDownloads = Object.values(
+            typedState.downloadedOwnerUserIdsById ?? {},
+          ).some((ownerUserIds) => ownerUserIds.length > 0);
+          if (!hasOwnedDownloads) {
+            void deleteAllBookDownloads();
+          }
         }
 
         // Ensure newly introduced shelf fields always exist after hydration.

@@ -214,11 +214,11 @@ export const useHomeShelves = () => {
     "browsing",
   );
 
-  const libraryBooksQueryKey = queryKeys.libraryBooks(activeLibraryId);
+  const libraryBooksQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId);
   const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
   const playlistsQueryKey = queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId);
 
-  const immediateCatalog = activeLibraryId
+  const immediateCatalog = activeLibraryUserKey && activeLibraryId
     ? queryClient.getQueryData<LibraryItemsSummary>(libraryBooksQueryKey)
     : undefined;
   const immediateUserServerState = activeLibraryUserKey

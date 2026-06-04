@@ -7,11 +7,12 @@ export const LIBRARIES_QUERY_KEY = queryKeys.libraries;
 
 export const useLibrariesQuery = () => {
   const status = useAuthStore((state) => state.status);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
 
   return useQuery({
-    queryKey: LIBRARIES_QUERY_KEY,
+    queryKey: LIBRARIES_QUERY_KEY(activeLibraryUserKey),
     queryFn: () => librariesApi.getAll(),
-    enabled: status === "authenticated",
+    enabled: status === "authenticated" && Boolean(activeLibraryUserKey),
     meta: { persist: true },
     retry: false,
   });

@@ -41,6 +41,7 @@ export const BookFilterResultsSheet = () => {
   const insets = useSafeAreaInsets();
   const [searchText, setSearchText] = useState("");
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const isOffline = useAuthStore((state) => state.isOnline === false);
   const { data: userServerState } = useGetUserServerState();
   const queryClient = useQueryClient();
@@ -59,8 +60,8 @@ export const BookFilterResultsSheet = () => {
   const sourceTabParamResolved = resolveParam(sourceTabParam);
   const sourceTab: SourceTab = sourceTabParamResolved === "search" ? "search" : "home";
   const deferredSearchText = useDeferredValue(searchText);
-  const booksQueryKey = queryKeys.libraryBooks(activeLibraryId);
-  const immediateCatalog = activeLibraryId
+  const booksQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId);
+  const immediateCatalog = activeLibraryUserKey && activeLibraryId
     ? queryClient.getQueryData<LibraryItemsSummary>(booksQueryKey)
     : undefined;
 

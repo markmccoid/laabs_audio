@@ -358,7 +358,7 @@ export const createAudioEngine = (): AudioEngine => {
       }
       if (state === AudioProState.IDLE && currentTrack) {
         // Reload the last track if the engine was cleared.
-        AudioPro.play(currentTrack, { autoPlay: true });
+        AudioPro.play(currentTrack, { autoPlay: true, headers: currentHeaders });
         return;
       }
       AudioPro.resume();

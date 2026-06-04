@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { fetchLibrariesForResolution, resolveLibrarySelection } from "./library-resolution";
-import { useAuthActions } from "./auth-store";
+import { authStore, useAuthActions } from "./auth-store";
 import { useActivateLibrarySelection } from "../hooks/use-activate-library-selection";
 
 export const useCompleteSessionEntry = () => {
@@ -12,7 +12,11 @@ export const useCompleteSessionEntry = () => {
     returnToLibraryItemId?: string;
     activeLibraryId?: string | null;
   }) => {
-    const response = await fetchLibrariesForResolution();
+    const activeLibraryUserKey = authStore.getState().activeLibraryUserKey;
+    if (!activeLibraryUserKey) {
+      throw new Error("Sign-in did not restore a user session.");
+    }
+    const response = await fetchLibrariesForResolution(activeLibraryUserKey);
     const resolution = resolveLibrarySelection(response.libraries, options?.activeLibraryId);
 
     if (resolution.status === "noLibraries") {

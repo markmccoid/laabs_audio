@@ -17,8 +17,28 @@ export type LibraryActivationResult = {
   catalog: LibraryItemsSummary;
 };
 
+const LIBRARY_ACTIVATION_TIMEOUT_MS = 30000;
+
 const backgroundRefresh = <T>(promise: Promise<T>) => {
   void promise.catch(() => undefined);
+};
+
+const withActivationTimeout = async <T,>(promise: Promise<T>) => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error("Library load timed out. Check the server connection and try again."));
+        }, LIBRARY_ACTIVATION_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 };
 
 const isQueryStale = (queryClient: QueryClient, queryKey: QueryKey) => {
@@ -64,8 +84,10 @@ const refreshActivationQueriesIfStale = (
   activeLibraryUserKey: string,
   library: Library,
 ) => {
-  backgroundRefreshIfStale(queryClient, queryKeys.libraryBooks(library.id), () =>
-    libraryItemsApi.getItems({ libraryId: library.id }),
+  backgroundRefreshIfStale(
+    queryClient,
+    queryKeys.libraryBooks(activeLibraryUserKey, library.id),
+    () => libraryItemsApi.getItems({ libraryId: library.id }),
   );
   backgroundRefreshIfStale(queryClient, queryKeys.userServerState(activeLibraryUserKey), () =>
     fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
@@ -82,7 +104,7 @@ export const activateLibrary = async ({
     throw new Error("Library Activation requires a User Session");
   }
 
-  const catalogQueryKey = queryKeys.libraryBooks(library.id);
+  const catalogQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, library.id);
   const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
   const cachedCatalog = queryClient.getQueryData<LibraryItemsSummary>(catalogQueryKey);
   const cachedUserServerState = queryClient.getQueryData<UserServerState>(userServerStateQueryKey);
@@ -95,20 +117,22 @@ export const activateLibrary = async ({
     return { catalog: cachedCatalog };
   }
 
-  const [catalog] = await Promise.all([
-    cachedCatalog ??
-      queryClient.fetchQuery({
-        queryKey: catalogQueryKey,
-        queryFn: () => libraryItemsApi.getItems({ libraryId: library.id }),
-        meta: { persist: true },
-      }),
-    cachedUserServerState ??
-      queryClient.fetchQuery({
-        queryKey: userServerStateQueryKey,
-        queryFn: () => fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
-        meta: { persist: true },
-      }),
-  ]);
+  const [catalog] = await withActivationTimeout(
+    Promise.all([
+      cachedCatalog ??
+        queryClient.fetchQuery({
+          queryKey: catalogQueryKey,
+          queryFn: () => libraryItemsApi.getItems({ libraryId: library.id }),
+          meta: { persist: true },
+        }),
+      cachedUserServerState ??
+        queryClient.fetchQuery({
+          queryKey: userServerStateQueryKey,
+          queryFn: () => fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
+          meta: { persist: true },
+        }),
+    ]),
+  );
 
   deferBackgroundRefresh(() =>
     refreshActivationQueriesIfStale(queryClient, activeLibraryUserKey, library),

@@ -39,9 +39,9 @@ export const resolveLibrarySelection = (
   return { status: "needsLibrarySelection", libraries };
 };
 
-export const fetchLibrariesForResolution = () =>
+export const fetchLibrariesForResolution = (userKey: string | null | undefined) =>
   queryClient.fetchQuery<LibrariesResponse>({
-    queryKey: queryKeys.libraries,
+    queryKey: queryKeys.libraries(userKey),
     queryFn: () => librariesApi.getAll(),
     meta: { persist: true },
     staleTime: 0,

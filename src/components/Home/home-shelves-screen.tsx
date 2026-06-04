@@ -93,7 +93,7 @@ const HomeShelvesScreen = () => {
     try {
       await Promise.all([
         queryClient.invalidateQueries({
-          queryKey: queryKeys.libraryBooks(activeLibraryId),
+          queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
           exact: true,
         }),
         queryClient.invalidateQueries({
@@ -108,7 +108,7 @@ const HomeShelvesScreen = () => {
 
       await Promise.all([
         queryClient.fetchQuery({
-          queryKey: queryKeys.libraryBooks(activeLibraryId),
+          queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
           queryFn: () => libraryItemsApi.getItems({ libraryId: activeLibraryId }),
           meta: { persist: true },
         }),

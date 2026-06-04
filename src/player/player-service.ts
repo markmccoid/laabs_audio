@@ -346,7 +346,7 @@ class PlayerService {
         this.logQueue("downloaded", queue);
       } else {
         // Fallback to streamed playback when no valid local download metadata is available.
-        const session = await playbackApi.getPlayInfo(libraryItemId);
+        const session = await withPlaybackStartTimeout(playbackApi.getPlayInfo(libraryItemId));
         resolvedLibraryItemId = session.libraryItem.id;
         resolvedBookTitle = session.libraryItem.media.metadata.title || "Unknown";
         resolvedSessionId = session.id;
@@ -467,6 +467,16 @@ class PlayerService {
       if (isStreamedPlaybackStartFailure(error)) {
         if (__DEV__) {
           console.log("[player-service] streamed-start-failure", { libraryItemId, error });
+        }
+        const playbackState = playbackStore.getState();
+        if (playbackState.playbackState === "loading") {
+          playbackState.actions.resetAfterFailedStart({
+            libraryItemId,
+            bookTitle: null,
+            positionMs: 0,
+            rate: DEFAULT_BOOK_PLAYBACK_RATE,
+            error: error instanceof Error ? error.message : "Unable to start streamed playback",
+          });
         }
         throw error;
       }

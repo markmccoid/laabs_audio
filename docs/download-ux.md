@@ -31,6 +31,7 @@ Book audio files download from `src/api/downloads-api.ts` using the active sessi
 - Use `/api/items/{itemId}/file/{ino}/download?token={token}` for native file download tasks.
 - Keep the `Authorization` header for authenticated clients that honor request headers.
 - Send `Accept-Encoding: identity` so reverse proxies do not gzip large media file responses.
+- Old download metadata without UUID owners is not migrated; the app deletes `laabs-downloads` and starts clean.
 
 ## Sheet And Toast Re-Entry
 
