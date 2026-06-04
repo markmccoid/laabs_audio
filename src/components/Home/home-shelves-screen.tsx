@@ -23,7 +23,7 @@ import { markStartupPresentation } from "@/utils/startup-presentation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { InteractionManager, RefreshControl, Text, View } from "react-native";
 import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
 import { HomeShelfSection } from "./home-shelf-section";
@@ -42,6 +42,10 @@ const HomeShelvesScreen = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [shouldRenderCardMenus, setShouldRenderCardMenus] = useState(false);
+  const hasHomeScope =
+    Boolean(activeLibraryId) ||
+    accessMode === "downloadedOnly" ||
+    accessMode === "downloadedSessionOnly";
   const {
     catalogCount,
     progressCount,
@@ -135,9 +139,20 @@ const HomeShelvesScreen = () => {
     [activateLibrarySelection, activeLibraryId],
   );
 
+  useEffect(() => {
+    if (!hasHomeScope || shouldRenderCardMenus) return;
+
+    const interactionTask = InteractionManager.runAfterInteractions(() => {
+      setShouldRenderCardMenus(true);
+    });
+
+    return () => {
+      interactionTask.cancel?.();
+    };
+  }, [hasHomeScope, shouldRenderCardMenus]);
+
   const handleHomeLayout = useCallback(() => {
     if (didMarkHomeShelfDisplayRef.current) return;
-    const hasHomeScope = Boolean(activeLibraryId) || accessMode === "downloadedSessionOnly";
     if (!hasHomeScope) return;
 
     didMarkHomeShelfDisplayRef.current = true;
@@ -169,14 +184,12 @@ const HomeShelvesScreen = () => {
       isOffline: isOnline === false,
     });
 
-    InteractionManager.runAfterInteractions(() => {
-      setShouldRenderCardMenus(true);
-    });
   }, [
     accessMode,
     activeLibraryId,
     activeLibraryUserKey,
     catalogCount,
+    hasHomeScope,
     isOnline,
     progressCount,
     renderStartedAtMs,
