@@ -12,12 +12,17 @@ const SESSION_QUERY_ROOTS = new Set<unknown>([
   "absfilterdata",
 ]);
 
+const isSessionQuery = (query: { queryKey?: readonly unknown[] }) => {
+  const root = Array.isArray(query.queryKey) ? query.queryKey[0] : undefined;
+  return SESSION_QUERY_ROOTS.has(root);
+};
+
 export const clearSessionQueryCache = async (queryClient: QueryClient) => {
   await queryClient.cancelQueries({
-    predicate: (query) => SESSION_QUERY_ROOTS.has(query.queryKey[0]),
+    predicate: isSessionQuery,
   });
   queryClient.removeQueries({
-    predicate: (query) => SESSION_QUERY_ROOTS.has(query.queryKey[0]),
+    predicate: isSessionQuery,
   });
   mmkvQueryPersister.removeClient?.();
 };

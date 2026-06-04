@@ -273,7 +273,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
       params: {
         seriesId,
         seriesName,
-        ...(libraryItemId ? { currentAudiobookId: libraryItemId } : null),
+        ...(libraryItemId ? { currentAudiobookId: libraryItemId } : {}),
         sourceTab,
       },
     });

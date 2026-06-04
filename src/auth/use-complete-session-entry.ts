@@ -30,7 +30,7 @@ export const useCompleteSessionEntry = () => {
           mode: "setup",
           ...(options?.returnToLibraryItemId
             ? { returnToLibraryItemId: options.returnToLibraryItemId }
-            : null),
+            : {}),
         },
       });
       return;

@@ -138,7 +138,9 @@ const fetchJson = async (
     const response = await fetch(url, { ...options, signal });
     if (!response.ok) {
       const message = `Auth request failed (${response.status})`;
-      throw new AuthError(message, "UNAUTHORIZED", response.status);
+      const code =
+        response.status === 401 || response.status === 403 ? "UNAUTHORIZED" : "NETWORK_ERROR";
+      throw new AuthError(message, code, response.status);
     }
     return response.json();
   } catch (error) {
@@ -161,7 +163,9 @@ const fetchOk = async (
     const response = await fetch(url, { ...options, signal });
     if (!response.ok) {
       const message = `Auth request failed (${response.status})`;
-      throw new AuthError(message, "UNAUTHORIZED", response.status);
+      const code =
+        response.status === 401 || response.status === 403 ? "UNAUTHORIZED" : "NETWORK_ERROR";
+      throw new AuthError(message, code, response.status);
     }
   } catch (error) {
     if (error instanceof AuthError) {

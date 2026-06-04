@@ -20,6 +20,7 @@ import { OfflineConnectionBanner } from "../components/offline-connection-banner
 import "../global.css";
 import { extractBookDetailIdFromUrl } from "../navigation/book-links";
 import { playerService } from "../player/player-service";
+import { usePlaybackStore } from "../player/playback-store";
 import { SleepTimerCoordinator } from "../player/sleep-timer-coordinator";
 import { FIVE_MINUTES_MS, queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
@@ -123,6 +124,12 @@ const getReturnToLibraryItemId = (
 const isDownloadedAccessMode = (accessMode: string) =>
   accessMode === "downloadedOnly" || accessMode === "downloadedSessionOnly";
 
+const isActivePlaybackState = (playbackState: string) =>
+  playbackState === "loading" ||
+  playbackState === "ready" ||
+  playbackState === "playing" ||
+  playbackState === "paused";
+
 export default function RootLayout() {
   useApplyAccentThemeOverrides();
   const { status } = useAuthBootstrap();
@@ -133,6 +140,10 @@ export default function RootLayout() {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const rememberedSessionCount = useAuthStore((state) => state.rememberedSessions.length);
+  const playbackState = usePlaybackStore((state) => state.playbackState);
+  const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const playbackQueueLength = usePlaybackStore((state) => state.queue.length);
+  const playbackControlIntent = usePlaybackStore((state) => state.playbackControlIntent);
   const segments = useSegments();
   const globalParams = useGlobalSearchParams<{ libraryItemId?: string | string[] }>();
   const previousStatus = useRef<typeof status | null>(null);
@@ -152,6 +163,11 @@ export default function RootLayout() {
     [globalParams, segments],
   );
   const startupBookLinkId = returnToLibraryItemId ?? initialDeepLinkBookId ?? undefined;
+  const hasActivePlayback = Boolean(
+    playbackLibraryItemId &&
+      isActivePlaybackState(playbackState) &&
+      (playbackQueueLength > 0 || playbackState === "loading" || playbackControlIntent),
+  );
   const renderReady = status !== "hydrating";
   const warmupEligible =
     renderReady &&
@@ -368,7 +384,11 @@ export default function RootLayout() {
     });
 
     // Keep all auth and startup routing decisions in one place to avoid competing redirects.
-    if (accessMode === "firstRunSignInRequired" && !routeState.inLogin) {
+    if (
+      accessMode === "firstRunSignInRequired" &&
+      !hasActivePlayback &&
+      !routeState.inLogin
+    ) {
       logStartupDebug("routeGate:redirect-login-required", {
         startupBookLinkId,
       });
@@ -384,6 +404,7 @@ export default function RootLayout() {
 
     if (
       loginRequired &&
+      !hasActivePlayback &&
       accessMode !== "firstRunSignInRequired" &&
       accessMode !== "downloadedSessionOnly" &&
       !routeState.inLogin
@@ -420,6 +441,7 @@ export default function RootLayout() {
     }
   }, [
     accessMode,
+    hasActivePlayback,
     initialDeepLinkBookId,
     loginRequired,
     rememberedSessionCount,

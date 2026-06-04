@@ -90,7 +90,7 @@ export function SignInListScreen() {
       pathname: "/login/add",
       params: {
         mode,
-        ...(returnToLibraryItemId ? { returnToLibraryItemId } : null),
+        ...(returnToLibraryItemId ? { returnToLibraryItemId } : {}),
       },
     } as never);
   };
@@ -101,7 +101,7 @@ export function SignInListScreen() {
       params: {
         sessionKey: session.key,
         mode,
-        ...(returnToLibraryItemId ? { returnToLibraryItemId } : null),
+        ...(returnToLibraryItemId ? { returnToLibraryItemId } : {}),
       },
     } as never);
   };
