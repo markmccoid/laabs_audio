@@ -441,8 +441,8 @@ export const authStore = createStore<AuthState>()(
             status: computeEntryStatus(true, state.hasOfflineContent),
             lastAuthError: null,
             loginRequired: false,
-            activeLibraryId: null,
-            activeLibraryName: null,
+            activeLibraryId: session.activeLibraryId ?? null,
+            activeLibraryName: session.activeLibraryName ?? null,
             activeLibraryUserKey: userKey,
           }));
         },

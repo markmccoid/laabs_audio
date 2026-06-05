@@ -24,7 +24,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { InteractionManager, RefreshControl, Text, View } from "react-native";
+import { ActivityIndicator, InteractionManager, RefreshControl, Text, View } from "react-native";
 import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
 import { HomeShelfSection } from "./home-shelf-section";
 
@@ -48,6 +48,7 @@ const HomeShelvesScreen = () => {
     accessMode === "downloadedSessionOnly";
   const {
     catalogCount,
+    isCatalogLoading,
     progressCount,
     visibleShelves,
     visibleBookCount,
@@ -257,68 +258,92 @@ const HomeShelvesScreen = () => {
           </Stack.Toolbar.Menu>
         </Stack.Toolbar.Menu>
       </Stack.Toolbar>
-      <Animated.ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        onScroll={scrollHandler}
-        scrollEventThrottle={16}
-        contentContainerStyle={{ paddingTop: 16, paddingBottom: 24, gap: 22 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={() => {
-              void handleRefresh();
-            }}
-            tintColor={themeColors.accent}
-          />
-        }
-      >
-        {refreshMessage ? (
-          <View
+      {isCatalogLoading ? (
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: 24,
+          }}
+        >
+          <ActivityIndicator color={themeColors.accent} />
+          <Text
+            selectable
             style={{
-              marginHorizontal: 18,
-              paddingHorizontal: 12,
-              paddingVertical: 10,
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: themeColors.border,
-              backgroundColor: themeColors.surface,
+              marginTop: 12,
+              color: themeColors.textMuted,
+              fontSize: 15,
+              fontWeight: "600",
             }}
           >
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-              {refreshMessage}
-            </Text>
-          </View>
-        ) : null}
-
-        {visibleShelves.map((shelf: HomeShelf) => (
-          <HomeShelfSection
-            key={`${activeLibraryId ?? "no-library"}:${shelf.id}`}
-            title={shelf.title}
-            books={shelf.books}
-            favoriteByBookId={favoriteByBookId}
-            progressByBookId={progressByBookId}
-            isOffline={isOnline === false}
-            emptyMessage={shelf.emptyMessage}
-            headerHeight={headerHeight}
-            shelfHref={{
-              pathname: "/(tabs)/(home)/bookshelf/[shelfId]",
-              params: { shelfId: shelf.id },
-            }}
-            onRefresh={
-              shelf.kind === "derived" && shelf.id === "discover" ? refreshDiscover : undefined
-            }
-            renderCardMenus={shouldRenderCardMenus}
-            scrollY={scrollY}
-          />
-        ))}
-
-        <Text
-          selectable
-          style={{ color: themeColors.textMuted, fontSize: 13, paddingHorizontal: 18 }}
+            Loading library
+          </Text>
+        </View>
+      ) : (
+        <Animated.ScrollView
+          contentInsetAdjustmentBehavior="automatic"
+          onScroll={scrollHandler}
+          scrollEventThrottle={16}
+          contentContainerStyle={{ paddingTop: 16, paddingBottom: 24, gap: 22 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={() => {
+                void handleRefresh();
+              }}
+              tintColor={themeColors.accent}
+            />
+          }
         >
-          Shelf creation and book assignment are managed in Settings.
-        </Text>
-      </Animated.ScrollView>
+          {refreshMessage ? (
+            <View
+              style={{
+                marginHorizontal: 18,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                backgroundColor: themeColors.surface,
+              }}
+            >
+              <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+                {refreshMessage}
+              </Text>
+            </View>
+          ) : null}
+
+          {visibleShelves.map((shelf: HomeShelf) => (
+            <HomeShelfSection
+              key={`${activeLibraryId ?? "no-library"}:${shelf.id}`}
+              title={shelf.title}
+              books={shelf.books}
+              favoriteByBookId={favoriteByBookId}
+              progressByBookId={progressByBookId}
+              isOffline={isOnline === false}
+              emptyMessage={shelf.emptyMessage}
+              headerHeight={headerHeight}
+              shelfHref={{
+                pathname: "/(tabs)/(home)/bookshelf/[shelfId]",
+                params: { shelfId: shelf.id },
+              }}
+              onRefresh={
+                shelf.kind === "derived" && shelf.id === "discover" ? refreshDiscover : undefined
+              }
+              renderCardMenus={shouldRenderCardMenus}
+              scrollY={scrollY}
+            />
+          ))}
+
+          <Text
+            selectable
+            style={{ color: themeColors.textMuted, fontSize: 13, paddingHorizontal: 18 }}
+          >
+            Shelf creation and book assignment are managed in Settings.
+          </Text>
+        </Animated.ScrollView>
+      )}
     </View>
   );
 };

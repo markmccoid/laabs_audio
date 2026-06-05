@@ -226,7 +226,9 @@ export const useHomeShelves = () => {
     : undefined;
 
   // Subscribe to existing cache values without triggering fetches.
-  const { data: subscribedCatalog } = useQuery<LibraryItemsSummary | undefined>({
+  const { data: subscribedCatalog, isFetching: isCatalogFetching } = useQuery<
+    LibraryItemsSummary | undefined
+  >({
     queryKey: libraryBooksQueryKey,
     queryFn: async () => immediateCatalog,
     enabled: false,
@@ -300,6 +302,14 @@ export const useHomeShelves = () => {
   const catalog = useMemo(
     () => subscribedCatalog ?? immediateCatalog ?? EMPTY_CATALOG,
     [immediateCatalog, subscribedCatalog],
+  );
+  const isCatalogLoading = Boolean(
+    authStatus === "authenticated" &&
+      activeLibraryId &&
+      activeLibraryUserKey &&
+      !subscribedCatalog &&
+      !immediateCatalog &&
+      (isCatalogFetching || isOnline !== false),
   );
   const userServerState = subscribedUserServerState ?? immediateUserServerState;
 
@@ -857,6 +867,7 @@ export const useHomeShelves = () => {
     homeScopeKey,
     catalog,
     catalogCount: catalog.length,
+    isCatalogLoading,
     progressCount,
     shelves:
       authStatus === "authenticated"

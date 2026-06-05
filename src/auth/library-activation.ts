@@ -1,6 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { libraryItemsApi, type LibraryItemsSummary } from "../api/library-items-api";
-import type { UserServerState } from "../api/me-api";
 import { playlistsApi } from "../api/playlists-api";
 import { FIVE_MINUTES_MS } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
@@ -107,9 +106,8 @@ export const activateLibrary = async ({
   const catalogQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, library.id);
   const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
   const cachedCatalog = queryClient.getQueryData<LibraryItemsSummary>(catalogQueryKey);
-  const cachedUserServerState = queryClient.getQueryData<UserServerState>(userServerStateQueryKey);
 
-  if (cachedCatalog && cachedUserServerState) {
+  if (cachedCatalog) {
     deferBackgroundRefresh(() =>
       refreshActivationQueriesIfStale(queryClient, activeLibraryUserKey, library),
     );
@@ -117,23 +115,17 @@ export const activateLibrary = async ({
     return { catalog: cachedCatalog };
   }
 
-  const [catalog] = await withActivationTimeout(
-    Promise.all([
-      cachedCatalog ??
-        queryClient.fetchQuery({
-          queryKey: catalogQueryKey,
-          queryFn: () => libraryItemsApi.getItems({ libraryId: library.id }),
-          meta: { persist: true },
-        }),
-      cachedUserServerState ??
-        queryClient.fetchQuery({
-          queryKey: userServerStateQueryKey,
-          queryFn: () => fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
-          meta: { persist: true },
-        }),
-    ]),
+  const catalog = await withActivationTimeout(
+    queryClient.fetchQuery({
+      queryKey: catalogQueryKey,
+      queryFn: () => libraryItemsApi.getItems({ libraryId: library.id }),
+      meta: { persist: true },
+    }),
   );
 
+  backgroundRefreshIfStale(queryClient, userServerStateQueryKey, () =>
+    fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
+  );
   deferBackgroundRefresh(() =>
     refreshActivationQueriesIfStale(queryClient, activeLibraryUserKey, library),
   );

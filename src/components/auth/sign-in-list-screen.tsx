@@ -61,6 +61,8 @@ export function SignInListScreen() {
   const insets = useSafeAreaInsets();
   const sessions = useAuthStore((state) => state.rememberedSessions);
   const activeSessionKey = useAuthStore((state) => state.activeSessionKey);
+  const storedUserId = useAuthStore((state) => state.storedUserId);
+  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
   const { restoreRememberedSession, removeRememberedSession } = useAuthActions();
@@ -116,14 +118,15 @@ export function SignInListScreen() {
     setLocalError(null);
     setPendingSessionKey(session.key);
     try {
-      if (activeSessionKey && activeSessionKey !== session.key) {
+      const isSameUserSwitch = Boolean(storedUserId && storedUserId === session.userId);
+      if (activeSessionKey && activeSessionKey !== session.key && !isSameUserSwitch) {
         await prepareForUserSessionBoundary();
       }
       await restoreRememberedSession(session.key);
       await completeSessionEntry({
         mode,
         returnToLibraryItemId,
-        activeLibraryId: session.activeLibraryId,
+        activeLibraryId: session.activeLibraryId ?? (isSameUserSwitch ? activeLibraryId : null),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Sign in failed";
