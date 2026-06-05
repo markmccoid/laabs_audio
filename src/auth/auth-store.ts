@@ -7,6 +7,7 @@ import { AuthError, authService } from "./auth-service";
 import {
   authStorage,
   getDefaultSessionLabel,
+  getSessionKey,
   type RememberedSessionRecord,
 } from "./auth-storage";
 import { getJwtExpiry, isTokenExpired } from "./auth-token";
@@ -55,8 +56,11 @@ export type AuthState = {
       username: string,
       password: string,
       serverUrl: string,
-      options?: { label?: string | null },
-    ) => Promise<void>;
+      options?: {
+        label?: string | null;
+        beforeCommit?: (target: { userId: string; sessionKey: string }) => Promise<void>;
+      },
+    ) => Promise<{ userId: string; sessionKey: string }>;
     restoreRememberedSession: (sessionKey: string) => Promise<void>;
     updateRememberedSession: (
       sessionKey: string,
@@ -315,6 +319,8 @@ export const authStore = createStore<AuthState>()(
             serverUrl: normalizedServerUrl,
           });
           const nextUserKey = getUserKey(tokens.userId);
+          const sessionKey = getSessionKey(username, normalizedServerUrl);
+          await options?.beforeCommit?.({ userId: tokens.userId, sessionKey });
           const session = authStorage.upsertSession(
             {
               userId: tokens.userId,
@@ -359,6 +365,7 @@ export const authStore = createStore<AuthState>()(
           }));
 
           log("login:done", { status: "authenticated" });
+          return { userId: tokens.userId, sessionKey: session.key };
         },
 
         restoreRememberedSession: async (sessionKey) => {

@@ -1,5 +1,5 @@
 import { getDefaultSessionLabel } from "@/auth/auth-storage";
-import { prepareForUserSessionBoundary } from "@/auth/session-boundary";
+import { prepareForSignInChange } from "@/auth/session-boundary";
 import { useAuthActions, useAuthStore } from "@/auth/auth-store";
 import { useCompleteSessionEntry } from "@/auth/use-complete-session-entry";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -60,9 +60,7 @@ export function SignInEditScreen() {
         if (isOnline === false) {
           throw new Error("You are offline. Connect to the internet to sign in.");
         }
-        if (activeSessionKey && activeSessionKey !== session.key) {
-          await prepareForUserSessionBoundary();
-        }
+        await prepareForSignInChange({ userId: session.userId, sessionKey: session.key });
         await restoreRememberedSession(session.key);
         await completeSessionEntry({
           mode,

@@ -1,4 +1,4 @@
-import { prepareForUserSessionBoundary } from "@/auth/session-boundary";
+import { prepareForSignInChange } from "@/auth/session-boundary";
 import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
 import { useCompleteSessionEntry } from "@/auth/use-complete-session-entry";
 import { useExplicitLogout } from "@/auth/use-explicit-logout";
@@ -119,9 +119,7 @@ export function SignInListScreen() {
     setPendingSessionKey(session.key);
     try {
       const isSameUserSwitch = Boolean(storedUserId && storedUserId === session.userId);
-      if (activeSessionKey && activeSessionKey !== session.key && !isSameUserSwitch) {
-        await prepareForUserSessionBoundary();
-      }
+      await prepareForSignInChange({ userId: session.userId, sessionKey: session.key });
       await restoreRememberedSession(session.key);
       await completeSessionEntry({
         mode,

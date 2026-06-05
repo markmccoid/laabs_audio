@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-05` `pending` - Close playback correctly when switching sign-ins.
+  Tester focus: verify streamed books close on sign-in changes, downloaded books keep playing only when switching between sign-ins for the same Audiobookshelf user, and different-user switches unload the active book.
 - `2026-06-04` `pending` - Fix bookmark and clip editor dark mode styling.
   Tester focus: verify Add Bookmark, Create Clip, and Clip editor inputs, cards, controls, and sliders use readable dark-mode colors.
 - `2026-06-04` `2c9fb48` - Use ABS user UUID for local state.

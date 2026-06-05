@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
 import { getDefaultSessionLabel } from "@/auth/auth-storage";
+import { prepareForSignInChange } from "@/auth/session-boundary";
 import { useCompleteSessionEntry } from "@/auth/use-complete-session-entry";
 import Dropdown from "@/shared/ui/organisms/dropdown";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -120,6 +121,7 @@ export function SignInFormScreen() {
         sessionLabel.trim() || getDefaultSessionLabel(trimmedUsername, finalServerUrl);
       await loginWithPassword(trimmedUsername, password, finalServerUrl, {
         label: finalLabel,
+        beforeCommit: (target) => prepareForSignInChange(target),
       });
 
       await completeSessionEntry({ mode, returnToLibraryItemId });
