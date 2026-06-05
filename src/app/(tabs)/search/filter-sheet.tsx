@@ -1,24 +1,48 @@
 import { useGetFilterData } from "@/hooks/abs-data-hooks";
 import { FilterOptionsSheet, type FilterSheetType } from "@/components/Library/filter-options-sheet";
-import { useFiltersActions, useFiltersStore } from "@/store/store-filters";
+import {
+  useSearchGenreOperator,
+  useSearchGenres,
+  useSearchSessionActions,
+  useSearchTagOperator,
+  useSearchTags,
+  type SearchFilterOperator,
+} from "@/search/search-session-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
+const FACET_COMMIT_DELAY_MS = 200;
+type FacetDraft = {
+  type: FilterSheetType;
+  selectedValues: string[];
+  operator: SearchFilterOperator;
+};
 
 export default function SearchFilterSheet() {
   const themeColors = useThemeColors();
   const { type: typeParam } = useLocalSearchParams<{ type?: string | string[] }>();
   const type: FilterSheetType = resolveParam(typeParam) === "tags" ? "tags" : "genres";
-  const filterActions = useFiltersActions();
-  const selectedGenres = useFiltersStore((state) => state.genres);
-  const selectedTags = useFiltersStore((state) => state.tags);
-  const genreOperator = useFiltersStore((state) => state.genreOperator);
-  const tagOperator = useFiltersStore((state) => state.tagOperator);
+  const searchActions = useSearchSessionActions();
+  const selectedGenres = useSearchGenres();
+  const selectedTags = useSearchTags();
+  const genreOperator = useSearchGenreOperator();
+  const tagOperator = useSearchTagOperator();
   const { genres, tags, isLoading, isPending, isError } = useGetFilterData();
+  const committedSelectedValues = type === "tags" ? selectedTags : selectedGenres;
+  const committedOperator = type === "tags" ? tagOperator : genreOperator;
+  const [draft, setDraft] = useState<FacetDraft>({
+    type,
+    selectedValues: committedSelectedValues,
+    operator: committedOperator,
+  });
+  const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didInitializeDraftRef = useRef(false);
+  const draftSelectedValues = draft.type === type ? draft.selectedValues : committedSelectedValues;
+  const draftOperator = draft.type === type ? draft.operator : committedOperator;
 
   const options = useMemo(
     () =>
@@ -28,32 +52,63 @@ export default function SearchFilterSheet() {
     [genres, tags, type],
   );
 
-  const selectedValues = type === "tags" ? selectedTags : selectedGenres;
-  const operator = type === "tags" ? tagOperator : genreOperator;
+  useEffect(() => {
+    if (!didInitializeDraftRef.current) {
+      didInitializeDraftRef.current = true;
+      return;
+    }
 
-  const toggleSelectedValue = (value: string) => {
-    if (type === "tags") {
-      if (selectedTags.includes(value)) {
-        filterActions.removeTag(value);
+    if (commitTimeoutRef.current) {
+      clearTimeout(commitTimeoutRef.current);
+    }
+
+    commitTimeoutRef.current = setTimeout(() => {
+      if (type === "tags") {
+        searchActions.setTags(draftSelectedValues);
+        searchActions.setTagOperator(draftOperator);
         return;
       }
-      filterActions.addTag(value);
-      return;
-    }
+      searchActions.setGenres(draftSelectedValues);
+      searchActions.setGenreOperator(draftOperator);
+    }, FACET_COMMIT_DELAY_MS);
 
-    if (selectedGenres.includes(value)) {
-      filterActions.removeGenre(value);
-      return;
-    }
-    filterActions.addGenre(value);
+    return () => {
+      if (commitTimeoutRef.current) {
+        clearTimeout(commitTimeoutRef.current);
+      }
+    };
+  }, [draft, draftOperator, draftSelectedValues, searchActions, type]);
+
+  const toggleSelectedValue = (value: string) => {
+    setDraft((currentDraft) => {
+      const currentValues =
+        currentDraft.type === type ? currentDraft.selectedValues : committedSelectedValues;
+      return {
+        type,
+        operator: currentDraft.type === type ? currentDraft.operator : committedOperator,
+        selectedValues: currentValues.includes(value)
+          ? currentValues.filter((candidate) => candidate !== value)
+          : [...currentValues, value],
+      };
+    });
   };
 
   const clearSelection = () => {
+    setDraft({ type, selectedValues: [], operator: draftOperator });
+  };
+
+  const commitDraftSelection = () => {
+    if (commitTimeoutRef.current) {
+      clearTimeout(commitTimeoutRef.current);
+    }
+
     if (type === "tags") {
-      filterActions.clearTags();
+      searchActions.setTags(draftSelectedValues);
+      searchActions.setTagOperator(draftOperator);
       return;
     }
-    filterActions.clearGenres();
+    searchActions.setGenres(draftSelectedValues);
+    searchActions.setGenreOperator(draftOperator);
   };
 
   return (
@@ -78,18 +133,17 @@ export default function SearchFilterSheet() {
           key={type}
           type={type}
           options={options}
-          selectedValues={selectedValues}
-          operator={operator}
+          selectedValues={draftSelectedValues}
+          operator={draftOperator}
           onToggle={toggleSelectedValue}
           onOperatorChange={(nextOperator) => {
-            if (type === "tags") {
-              filterActions.setTagOperator(nextOperator);
-              return;
-            }
-            filterActions.setGenreOperator(nextOperator);
+            setDraft({ type, selectedValues: draftSelectedValues, operator: nextOperator });
           }}
           onClear={clearSelection}
-          onClose={() => router.back()}
+          onClose={() => {
+            commitDraftSelection();
+            router.back();
+          }}
         />
       )}
     </View>

@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-05` `pending` - Improve cache-first Search responsiveness.
+  Tester focus: verify Search typing is debounced, genre/tag selections show immediately in dark and light mode, filters still honor AND/OR, favorite, finished, and sort choices, and large Search result lists remain responsive.
 - `2026-06-05` `pending` - Close playback correctly when switching sign-ins.
   Tester focus: verify streamed books close on sign-in changes, downloaded books keep playing only when switching between sign-ins for the same Audiobookshelf user, and different-user switches unload the active book.
 - `2026-06-04` `pending` - Fix bookmark and clip editor dark mode styling.

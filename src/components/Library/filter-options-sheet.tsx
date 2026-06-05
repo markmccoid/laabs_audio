@@ -1,4 +1,4 @@
-import type { FilterOperator } from "@/store/store-filters";
+import type { SearchFilterOperator } from "@/search/search-session-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView } from "expo-symbols";
 import React, { useMemo, useState } from "react";
@@ -6,18 +6,30 @@ import { FlatList, Pressable, Text, TextInput, View } from "react-native";
 
 export type FilterSheetType = "genres" | "tags";
 
-const OPERATOR_OPTIONS: { value: FilterOperator; label: string }[] = [
+const OPERATOR_OPTIONS: { value: SearchFilterOperator; label: string }[] = [
   { value: "and", label: "AND" },
   { value: "or", label: "OR" },
 ];
+
+const withAlpha = (hexColor: string, alpha: number) => {
+  const normalized = hexColor.trim().replace("#", "");
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return null;
+  }
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+};
 
 type FilterOptionsSheetProps = {
   type: FilterSheetType;
   options: string[];
   selectedValues: string[];
-  operator: FilterOperator;
+  operator: SearchFilterOperator;
   onToggle: (value: string) => void;
-  onOperatorChange: (operator: FilterOperator) => void;
+  onOperatorChange: (operator: SearchFilterOperator) => void;
   onClear: () => void;
   onClose: () => void;
 };
@@ -35,6 +47,8 @@ export const FilterOptionsSheet = ({
   const themeColors = useThemeColors();
   const [searchValue, setSearchValue] = useState("");
   const title = type === "genres" ? "Genres" : "Tags";
+  const selectedOptionBackground =
+    withAlpha(themeColors.accent, 0.16) ?? themeColors.surface;
 
   const filteredOptions = useMemo(() => {
     const normalizedSearch = searchValue.trim().toLowerCase();
@@ -176,7 +190,9 @@ export const FilterOptionsSheet = ({
                 gap: 10,
                 paddingHorizontal: 16,
                 paddingVertical: 12,
-                backgroundColor: isSelected ? themeColors.accentForeground : "transparent",
+                borderLeftWidth: isSelected ? 3 : 0,
+                borderLeftColor: themeColors.accent,
+                backgroundColor: isSelected ? selectedOptionBackground : "transparent",
               }}
             >
               <View

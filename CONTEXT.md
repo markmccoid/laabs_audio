@@ -48,6 +48,10 @@ _Avoid_: Bookshelf, catalog
 The one Library currently selected for browsing, shelves, search, and library-scoped audiobook queries.
 _Avoid_: Current library, selected library
 
+**Search Result Set**:
+The ordered Audiobook Identities from the Active Library that match the user's Search text, genre/tag filters, Favorite filter, Finished filter, and sort choice.
+_Avoid_: Catalog, filtered books, search data
+
 **Library Selection**:
 The user-facing choice of which Library becomes the Active Library for a User Session.
 _Avoid_: Library picker, library prompt

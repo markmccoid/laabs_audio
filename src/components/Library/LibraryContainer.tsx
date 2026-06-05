@@ -1,7 +1,14 @@
 import { useAuthStore } from "@/auth/auth-store";
-import { useGetBooks, useGetFilterData } from "@/hooks/abs-data-hooks";
+import { useGetFilterData } from "@/hooks/abs-data-hooks";
 import { queryKeys } from "@/query/query-keys";
-import { useFiltersActions, useFiltersStore } from "@/store/store-filters";
+import {
+  useSearchFavoriteFilter,
+  useSearchFinishedOnly,
+  useSearchGenres,
+  useSearchSessionActions,
+  useSearchTags,
+} from "@/search/search-session-store";
+import { useSearchResults } from "@/search/use-search-results";
 import { FlashList } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
@@ -18,14 +25,15 @@ const LibraryContainer = () => {
     isError: isFilterDataError,
     refetch: refetchFilterData,
   } = useGetFilterData();
-  const filterActions = useFiltersActions();
-  const favoriteFilter = useFiltersStore((state) => state.favoriteFilter);
-  const finishedOnly = useFiltersStore((state) => state.finishedOnly);
-  const selectedGenres = useFiltersStore((state) => state.genres);
-  const selectedTags = useFiltersStore((state) => state.tags);
-  const { data, isLoading, isPending } = useGetBooks();
+  const searchActions = useSearchSessionActions();
+  const favoriteFilter = useSearchFavoriteFilter();
+  const finishedOnly = useSearchFinishedOnly();
+  const selectedGenres = useSearchGenres();
+  const selectedTags = useSearchTags();
+  const { itemById, resultIds, favoriteIds, finishedIds, isLoading, isPending } =
+    useSearchResults();
 
-  if (isLoading || isPending || !data) return null;
+  if (isLoading || isPending) return null;
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -46,28 +54,37 @@ const LibraryContainer = () => {
           selectedGenres={selectedGenres}
           selectedTags={selectedTags}
           isFilterDataError={isFilterDataError}
-          onCycleFavoriteFilter={() => filterActions.cycleFavoriteFilter()}
-          onClearFavoriteFilter={() => filterActions.clearFavoriteFilter()}
-          onToggleFinishedOnly={() => filterActions.toggleFinishedOnly()}
-          onClearFinishedOnly={() => filterActions.clearFinishedOnly()}
+          onCycleFavoriteFilter={() => searchActions.cycleFavoriteFilter()}
+          onClearFavoriteFilter={() => searchActions.clearFavoriteFilter()}
+          onToggleFinishedOnly={() => searchActions.toggleFinishedOnly()}
+          onClearFinishedOnly={() => searchActions.clearFinishedOnly()}
           onOpenSheet={(sheetType) =>
             router.push({
               pathname: "/(tabs)/search/filter-sheet",
               params: { type: sheetType },
             })
           }
-          onRemoveGenre={(genre) => filterActions.removeGenre(genre)}
-          onRemoveTag={(tag) => filterActions.removeTag(tag)}
+          onRemoveGenre={(genre) => searchActions.removeGenre(genre)}
+          onRemoveTag={(tag) => searchActions.removeTag(tag)}
           onRetryFilterData={() => {
             void refetchFilterData();
           }}
         />
       }
-      data={data}
+      data={resultIds}
+      keyExtractor={(item) => item}
       onRefresh={onRefresh}
       refreshing={refreshing}
-      renderItem={({ item }) => {
-        return <LibraryItem libraryItem={item} />;
+      renderItem={({ item: libraryItemId }) => {
+        const libraryItem = itemById.get(libraryItemId);
+        if (!libraryItem) return null;
+        return (
+          <LibraryItem
+            libraryItem={libraryItem}
+            isFavorite={favoriteIds.has(libraryItemId)}
+            isFinished={finishedIds.has(libraryItemId)}
+          />
+        );
       }}
       contentContainerStyle={{
         paddingBottom: 24,

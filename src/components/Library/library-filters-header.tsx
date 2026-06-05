@@ -3,12 +3,12 @@ import { SymbolView, type SFSymbol } from "expo-symbols";
 import React from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import type { FilterSheetType } from "./filter-options-sheet";
-import type { FavoriteFilter } from "@/store/store-filters";
+import type { SearchFavoriteFilter } from "@/search/search-session-store";
 
 type LibraryFiltersHeaderProps = {
   selectedGenres: string[];
   selectedTags: string[];
-  favoriteFilter: FavoriteFilter;
+  favoriteFilter: SearchFavoriteFilter;
   finishedOnly: boolean;
   isFilterDataError: boolean;
   onOpenSheet: (sheetType: FilterSheetType) => void;
@@ -22,6 +22,18 @@ type LibraryFiltersHeaderProps = {
 };
 
 const BUTTON_LABEL_SIZE = 13;
+
+const withAlpha = (hexColor: string, alpha: number) => {
+  const normalized = hexColor.trim().replace("#", "");
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return null;
+  }
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+};
 
 const FilterSheetButton = ({
   icon,
@@ -70,6 +82,7 @@ const SelectedFilterChip = ({
   onPress: () => void;
 }) => {
   const themeColors = useThemeColors();
+  const selectedChipBackground = withAlpha(themeColors.accent, 0.16) ?? themeColors.surface;
 
   return (
     <Pressable
@@ -77,8 +90,8 @@ const SelectedFilterChip = ({
       style={{
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: themeColors.border,
-        backgroundColor: themeColors.accentForeground,
+        borderColor: themeColors.accent,
+        backgroundColor: selectedChipBackground,
         paddingHorizontal: 10,
         paddingVertical: 5,
         flexDirection: "row",

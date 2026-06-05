@@ -3,11 +3,14 @@ import { BookFlashListRow } from "@/components/books/book-flashlist-row";
 
 type Props = {
   libraryItem: LibraryItemSummary & { isFinished?: boolean };
+  isFavorite?: boolean;
+  isFinished?: boolean;
 };
-const LibraryItem = ({ libraryItem }: Props) => (
+const LibraryItem = ({ libraryItem, isFavorite = false, isFinished }: Props) => (
   <BookFlashListRow
     book={libraryItem}
-    isFinished={Boolean(libraryItem.isFinished)}
+    isFavorite={isFavorite}
+    isFinished={isFinished ?? Boolean(libraryItem.isFinished)}
     href={`/(tabs)/search/${libraryItem.id}`}
   />
 );

@@ -1,19 +1,44 @@
 import { useAuthStore } from "@/auth/auth-store";
 import LibraryContainer from "@/components/Library/LibraryContainer";
-import { useFiltersActions, useSortDirection, useSortedBy } from "@/store/store-filters";
+import {
+  useSearchSessionActions,
+  useSearchSortDirection,
+  useSearchSortedBy,
+} from "@/search/search-session-store";
 import { router, Stack } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+
+const SEARCH_COMMIT_DELAY_MS = 300;
 
 export default function SearchIndex() {
   const status = useAuthStore((state) => state.status);
-  const filterActions = useFiltersActions();
-  const sortedBy = useSortedBy();
-  const sortDirection = useSortDirection();
+  const searchActions = useSearchSessionActions();
+  const sortedBy = useSearchSortedBy();
+  const sortDirection = useSearchSortDirection();
+  const searchCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (status === "authenticated") return;
     router.replace("/(tabs)/(home)");
   }, [status]);
+
+  useEffect(
+    () => () => {
+      if (searchCommitTimeoutRef.current) {
+        clearTimeout(searchCommitTimeoutRef.current);
+      }
+    },
+    [],
+  );
+
+  const commitSearchText = (value: string) => {
+    if (searchCommitTimeoutRef.current) {
+      clearTimeout(searchCommitTimeoutRef.current);
+    }
+    searchCommitTimeoutRef.current = setTimeout(() => {
+      searchActions.setSearchText(value);
+    }, SEARCH_COMMIT_DELAY_MS);
+  };
 
   if (status !== "authenticated") {
     return null;
@@ -26,7 +51,7 @@ export default function SearchIndex() {
         placement="automatic"
         placeholder="Search"
         onChangeText={(e) => {
-          filterActions.setSearchValue(e.nativeEvent.text);
+          commitSearchText(e.nativeEvent.text);
         }}
       />
 
@@ -37,12 +62,12 @@ export default function SearchIndex() {
             <Stack.Toolbar.MenuAction
               icon="arrow.up"
               isOn={sortDirection === "asc"}
-              onPress={() => filterActions.setSortDirection("asc")}
+              onPress={() => searchActions.setSortDirection("asc")}
             />
             <Stack.Toolbar.MenuAction
               icon="arrow.down"
               isOn={sortDirection === "desc"}
-              onPress={() => filterActions.setSortDirection("desc")}
+              onPress={() => searchActions.setSortDirection("desc")}
             />
           </Stack.Toolbar.Menu>
 
@@ -66,7 +91,7 @@ export default function SearchIndex() {
           <Stack.Toolbar.Badge>{sortDirection === "asc" ? "↑" : "↓"}</Stack.Toolbar.Badge>
           {/* Author */}
           <Stack.Toolbar.MenuAction
-            onPress={() => filterActions.setSortedBy("author")}
+            onPress={() => searchActions.setSortedBy("author")}
             isOn={sortedBy === "author"}
           >
             <Stack.Toolbar.Icon sf="person" />
@@ -74,7 +99,7 @@ export default function SearchIndex() {
           </Stack.Toolbar.MenuAction>
           {/* Title */}
           <Stack.Toolbar.MenuAction
-            onPress={() => filterActions.setSortedBy("title")}
+            onPress={() => searchActions.setSortedBy("title")}
             isOn={sortedBy === "title"}
           >
             <Stack.Toolbar.Icon sf="book" />
@@ -82,7 +107,7 @@ export default function SearchIndex() {
           </Stack.Toolbar.MenuAction>
           {/* Added Date */}
           <Stack.Toolbar.MenuAction
-            onPress={() => filterActions.setSortedBy("addedAt")}
+            onPress={() => searchActions.setSortedBy("addedAt")}
             isOn={sortedBy === "addedAt"}
           >
             <Stack.Toolbar.Icon sf="calendar.badge.plus" />
@@ -90,7 +115,7 @@ export default function SearchIndex() {
           </Stack.Toolbar.MenuAction>
           {/* Duration */}
           <Stack.Toolbar.MenuAction
-            onPress={() => filterActions.setSortedBy("duration")}
+            onPress={() => searchActions.setSortedBy("duration")}
             isOn={sortedBy === "duration"}
           >
             <Stack.Toolbar.Icon sf="clock" />
@@ -98,7 +123,7 @@ export default function SearchIndex() {
           </Stack.Toolbar.MenuAction>
           {/* Published Year */}
           <Stack.Toolbar.MenuAction
-            onPress={() => filterActions.setSortedBy("publishedYear")}
+            onPress={() => searchActions.setSortedBy("publishedYear")}
             isOn={sortedBy === "publishedYear"}
           >
             <Stack.Toolbar.Icon sf="calendar" />
