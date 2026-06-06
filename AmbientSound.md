@@ -46,7 +46,7 @@ Once a track is selected:
 
 - the picker sheet dismisses
 - `AudioPro.ambientPlay()` starts the track in a loop
-- `AudioPro.ambientSetVolume()` applies the saved per-track volume
+- `AudioPro.ambientSetVolume()` applies the saved per-book ambient volume
 - the main player shows a compact control row with:
   - play/pause for ambient only
   - the selected track name
@@ -82,27 +82,27 @@ Persisted fields:
 - `isEnabled`
 - `tracksById`
 - `trackOrder`
-- `attachedTrackIdByLibraryItemId`
-- `resumeStateByLibraryItemId`
+- `ambientPlaybackPreferenceByLibraryItemId`
 
 Track metadata:
 
 - `id`
-- `uri`
+- `relativePath`
 - `fileName`
-- `volume`
 - `importedAt`
 
-Per-book resume metadata:
+Per-book ambient playback preference:
 
 - `trackId`
 - `positionMs`
+- `volume`
 
 Default behavior:
 
 - `isEnabled` defaults to `false`
-- track volume defaults to `0.2`
+- per-book ambient volume defaults to `0.2`
 - volume is stored in raw AudioPro scale `0.0` to `1.0`
+- imported ambient tracks do not carry volume; volume belongs to each book's ambient playback preference
 
 ### Service Layer
 
@@ -156,6 +156,7 @@ Required behavior:
 - resuming the book resumes ambient playback when appropriate
 - stopping or unloading the book saves ambient position before clearing playback
 - changing books saves the previous book's ambient position before loading the next session
+- changing the selected ambient track for the same book keeps the book's ambient volume and resets the ambient position
 
 ### Routes and UI Files
 
@@ -172,7 +173,7 @@ Key route and UI files:
 - only local Files / iCloud import is supported
 - no remote ambient catalog exists yet
 - ambient controls only exist on the main-player screen
-- ambient selection and ambient resume position are tied to the active book
+- ambient selection, resume position, and volume are tied to the active book
 - disabling ambient removes it from the main player until re-enabled
 
 ## Maintenance Notes

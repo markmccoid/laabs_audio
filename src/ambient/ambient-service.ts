@@ -11,9 +11,8 @@ import {
 import {
   type AmbientPlaybackState,
   ambientStore,
-  DEFAULT_AMBIENT_VOLUME,
   isAmbientTrackAvailable,
-  selectAmbientResumeStateForBook,
+  selectAmbientPlaybackPreferenceForBook,
   selectAttachedAmbientTrackForBook,
 } from "@/store/store-ambient";
 
@@ -156,9 +155,12 @@ const loadTrackForBookSession = (
     throw new Error("Ambient track path is unavailable in this build.");
   }
 
-  const savedResumeState = selectAmbientResumeStateForBook(state, libraryItemId);
+  const preference = selectAmbientPlaybackPreferenceForBook(state, libraryItemId);
+  if (!preference || preference.trackId !== trackId) {
+    throw new Error("Ambient playback preference is unavailable in this build.");
+  }
   const resumePositionMs =
-    savedResumeState?.trackId === trackId ? clampAmbientPositionMs(savedResumeState.positionMs) : 0;
+    preference.trackId === trackId ? clampAmbientPositionMs(preference.positionMs) : 0;
 
   stopAmbientNative();
   AudioPro.ambientPlay({
@@ -168,7 +170,7 @@ const loadTrackForBookSession = (
   if (resumePositionMs > 0) {
     AudioPro.ambientSeekTo(resumePositionMs);
   }
-  AudioPro.ambientSetVolume(track.volume);
+  AudioPro.ambientSetVolume(preference.volume);
 
   const actions = ambientStore.getState().actions;
   if (shouldAmbientBePlaying(playbackState)) {
@@ -231,7 +233,6 @@ export const ambientService = {
       id: trackId,
       relativePath,
       fileName,
-      volume: DEFAULT_AMBIENT_VOLUME,
       importedAt: Date.now(),
     });
   },
@@ -256,7 +257,6 @@ export const ambientService = {
 
     const actions = ambientStore.getState().actions;
     actions.removeTrackFromAllBookAttachments(trackId);
-    actions.clearResumeStateForTrack(trackId);
     actions.removeTrack(trackId);
     if (isActiveTrack) {
       resetAmbientSessionProgress();
@@ -370,14 +370,17 @@ export const ambientService = {
     ambientStore.getState().actions.clearActiveSession();
   },
 
-  setTrackVolume(trackId: string, volume: number) {
+  setPreferenceVolumeForBook(libraryItemId: string | null, volume: number) {
+    if (!libraryItemId) return;
+
     const state = ambientStore.getState();
-    if (!state.tracksById[trackId]) return;
+    const preference = selectAmbientPlaybackPreferenceForBook(state, libraryItemId);
+    if (!preference) return;
 
     const clampedVolume = Math.max(0, Math.min(1, volume));
-    state.actions.setTrackVolume(trackId, clampedVolume);
+    state.actions.setPreferenceVolumeForBook(libraryItemId, clampedVolume);
 
-    if (state.activeTrackId === trackId) {
+    if (state.activeTrackId === preference.trackId && state.activeLibraryItemId === libraryItemId) {
       AudioPro.ambientSetVolume(clampedVolume);
     }
   },

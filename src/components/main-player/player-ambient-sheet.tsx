@@ -3,16 +3,75 @@ import SliderWithBubble from "@/components/sliders/slider-with-bubble";
 import { usePlaybackStore } from "@/player";
 import {
   isAmbientTrackAvailable,
+  selectAmbientPlaybackPreferenceForBook,
   selectAttachedAmbientTrackForBook,
   useAmbientStore,
 } from "@/store/store-ambient";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 
 const formatVolumeLabel = (volume: number) => `${Math.round(volume * 100)}%`;
+
+type AmbientVolumeControlProps = {
+  initialVolume: number;
+  libraryItemId: string | null;
+  sliderWidth: number;
+  trackName: string;
+};
+
+const AmbientVolumeControl = ({
+  initialVolume,
+  libraryItemId,
+  sliderWidth,
+  trackName,
+}: AmbientVolumeControlProps) => {
+  const themeColors = useThemeColors();
+  const [draftVolume, setDraftVolume] = useState(initialVolume);
+
+  return (
+    <View
+      style={{
+        borderRadius: 18,
+        borderCurve: "continuous",
+        backgroundColor: themeColors.surface,
+        borderWidth: 1,
+        borderColor: themeColors.border,
+        paddingHorizontal: 14,
+        paddingVertical: 14,
+        gap: 12,
+      }}
+    >
+      <View style={{ gap: 4 }}>
+        <Text selectable style={{ color: themeColors.text, fontSize: 16, fontWeight: "700" }}>
+          Ambient Volume
+        </Text>
+        <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+          {trackName} · {formatVolumeLabel(draftVolume)}
+        </Text>
+      </View>
+      <SliderWithBubble
+        bubbleLabel={formatVolumeLabel(draftVolume)}
+        bubbleMinWidth={76}
+        style={{ width: sliderWidth, alignSelf: "center" }}
+        minimumTrackTintColor={themeColors.accent}
+        maximumTrackTintColor={themeColors.border}
+        thumbTintColor={themeColors.accent}
+        minimumValue={0}
+        maximumValue={1}
+        step={0.01}
+        value={draftVolume}
+        onValueChange={(value: number) => setDraftVolume(value)}
+        onSlidingComplete={(value: number) => {
+          setDraftVolume(value);
+          ambientService.setPreferenceVolumeForBook(libraryItemId, value);
+        }}
+      />
+    </View>
+  );
+};
 
 const PlayerAmbientSheet = () => {
   const themeColors = useThemeColors();
@@ -27,6 +86,9 @@ const PlayerAmbientSheet = () => {
   const attachedTrack = useAmbientStore((state) =>
     selectAttachedAmbientTrackForBook(state, currentLibraryItemId),
   );
+  const ambientPreference = useAmbientStore((state) =>
+    selectAmbientPlaybackPreferenceForBook(state, currentLibraryItemId),
+  );
   const allTracks = useMemo(
     () => trackOrder.map((trackId) => tracksById[trackId]).filter(Boolean),
     [trackOrder, tracksById],
@@ -38,7 +100,6 @@ const PlayerAmbientSheet = () => {
   const totalTrackCount = allTracks.length;
   const canAttachTrack = Boolean(currentLibraryItemId) && hasLoadedBook;
   const sliderWidth = Math.max(220, width - 96);
-  const [draftVolume, setDraftVolume] = useState(attachedTrack?.volume ?? 0);
   const helperText = useMemo(() => {
     if (!canAttachTrack) return "Load a book before attaching ambient audio.";
     if (ambientTracks.length > 0) return "Choose a track to start looped ambient playback.";
@@ -47,10 +108,6 @@ const PlayerAmbientSheet = () => {
     }
     return "Import tracks from Settings > Ambient Audio before using ambient playback here.";
   }, [ambientTracks.length, canAttachTrack, totalTrackCount]);
-
-  useEffect(() => {
-    setDraftVolume(attachedTrack?.volume ?? 0);
-  }, [attachedTrack?.id, attachedTrack?.volume]);
 
   return (
     <View
@@ -138,9 +195,6 @@ const PlayerAmbientSheet = () => {
                       >
                         {track.fileName}
                       </Text>
-                      <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
-                        Default volume {formatVolumeLabel(track.volume)}
-                      </Text>
                     </View>
                     {isSelected ? (
                       <SymbolView
@@ -170,45 +224,14 @@ const PlayerAmbientSheet = () => {
           </View>
         ) : null}
 
-        {isEnabled && attachedTrack ? (
-          <View
-            style={{
-              borderRadius: 18,
-              borderCurve: "continuous",
-              backgroundColor: themeColors.surface,
-              borderWidth: 1,
-              borderColor: themeColors.border,
-              paddingHorizontal: 14,
-              paddingVertical: 14,
-              gap: 12,
-            }}
-          >
-            <View style={{ gap: 4 }}>
-              <Text selectable style={{ color: themeColors.text, fontSize: 16, fontWeight: "700" }}>
-                Ambient Volume
-              </Text>
-              <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-                {attachedTrack.fileName} · {formatVolumeLabel(draftVolume)}
-              </Text>
-            </View>
-            <SliderWithBubble
-              bubbleLabel={formatVolumeLabel(draftVolume)}
-              bubbleMinWidth={76}
-              style={{ width: sliderWidth, alignSelf: "center" }}
-              minimumTrackTintColor={themeColors.accent}
-              maximumTrackTintColor={themeColors.border}
-              thumbTintColor={themeColors.accent}
-              minimumValue={0}
-              maximumValue={1}
-              step={0.01}
-              value={draftVolume}
-              onValueChange={(value: number) => setDraftVolume(value)}
-              onSlidingComplete={(value: number) => {
-                setDraftVolume(value);
-                ambientService.setTrackVolume(attachedTrack.id, value);
-              }}
-            />
-          </View>
+        {isEnabled && attachedTrack && ambientPreference ? (
+          <AmbientVolumeControl
+            key={`${currentLibraryItemId ?? "none"}:${ambientPreference.trackId}`}
+            initialVolume={ambientPreference.volume}
+            libraryItemId={currentLibraryItemId}
+            sliderWidth={sliderWidth}
+            trackName={attachedTrack.fileName}
+          />
         ) : null}
       </ScrollView>
 

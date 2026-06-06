@@ -144,6 +144,10 @@ _Avoid_: Now playing, current player book, selected playback book
 The listening speed preference for an audiobook, scoped to a User Session when the user is signed in.
 _Avoid_: Global speed, book speed
 
+**Ambient Playback Preference**:
+A LAABS Audio local preference for an Audiobook Identity that remembers which imported ambient audio track should play with that audiobook, where that ambient track should resume, and how loud it should be for that audiobook.
+_Avoid_: Ambient book metadata, global ambient settings, per-track volume
+
 **Playback Start Attempt**:
 A user-requested attempt to make an audiobook become Active Playback.
 _Avoid_: Pending load, playback request, loading state

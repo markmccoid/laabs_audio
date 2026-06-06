@@ -6,8 +6,6 @@ import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
 
-const formatVolumeLabel = (volume: number) => `${Math.round(volume * 100)}%`;
-
 export const SettingsAmbientScreen = () => {
   const themeColors = useThemeColors();
   const isEnabled = useAmbientStore((state) => state.isEnabled);
@@ -200,9 +198,6 @@ export const SettingsAmbientScreen = () => {
                       style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
                     >
                       {track.fileName}
-                    </Text>
-                    <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
-                      Default volume {formatVolumeLabel(track.volume)}
                     </Text>
                   </View>
                   <Pressable

@@ -12,7 +12,9 @@ export const AmbientCoordinator = () => {
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const attachedTrackIdForLoadedBook = useAmbientStore((state) =>
-    libraryItemId ? state.attachedTrackIdByLibraryItemId[libraryItemId] ?? null : null,
+    libraryItemId
+      ? state.ambientPlaybackPreferenceByLibraryItemId[libraryItemId]?.trackId ?? null
+      : null,
   );
   const hasLoadedBook = Boolean(libraryItemId) && queueLength > 0;
   const previousPlaybackState = useRef(playbackState);
