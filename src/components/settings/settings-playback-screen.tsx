@@ -1,7 +1,7 @@
 import { useSettingsActions, useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 export const SettingsPlaybackScreen = () => {
@@ -11,35 +11,31 @@ export const SettingsPlaybackScreen = () => {
   const defaultBookProgressTimeDisplay = useSettingsStore(
     (state) => state.defaultBookProgressTimeDisplay,
   );
-  const [backwardSkipDraft, setBackwardSkipDraft] = useState(() => String(seekBackwardSeconds));
-  const [forwardSkipDraft, setForwardSkipDraft] = useState(() => String(seekForwardSeconds));
+  const [backwardSkipDraft, setBackwardSkipDraft] = useState<string | null>(null);
+  const [forwardSkipDraft, setForwardSkipDraft] = useState<string | null>(null);
   const { setDefaultBookProgressTimeDisplay, setSeekBackwardSeconds, setSeekForwardSeconds } =
     useSettingsActions();
-
-  useEffect(() => {
-    setBackwardSkipDraft(String(seekBackwardSeconds));
-  }, [seekBackwardSeconds]);
-
-  useEffect(() => {
-    setForwardSkipDraft(String(seekForwardSeconds));
-  }, [seekForwardSeconds]);
+  const backwardSkipValue = backwardSkipDraft ?? String(seekBackwardSeconds);
+  const forwardSkipValue = forwardSkipDraft ?? String(seekForwardSeconds);
 
   const commitBackwardSkipDraft = () => {
-    const parsedSeconds = Number.parseInt(backwardSkipDraft.trim(), 10);
+    const parsedSeconds = Number.parseInt(backwardSkipValue.trim(), 10);
     if (Number.isNaN(parsedSeconds)) {
-      setBackwardSkipDraft(String(seekBackwardSeconds));
+      setBackwardSkipDraft(null);
       return;
     }
     setSeekBackwardSeconds(parsedSeconds);
+    setBackwardSkipDraft(null);
   };
 
   const commitForwardSkipDraft = () => {
-    const parsedSeconds = Number.parseInt(forwardSkipDraft.trim(), 10);
+    const parsedSeconds = Number.parseInt(forwardSkipValue.trim(), 10);
     if (Number.isNaN(parsedSeconds)) {
-      setForwardSkipDraft(String(seekForwardSeconds));
+      setForwardSkipDraft(null);
       return;
     }
     setSeekForwardSeconds(parsedSeconds);
+    setForwardSkipDraft(null);
   };
 
   return (
@@ -93,7 +89,7 @@ export const SettingsPlaybackScreen = () => {
                 Backward
               </Text>
               <TextInput
-                value={backwardSkipDraft}
+                value={backwardSkipValue}
                 onChangeText={(nextValue) => setBackwardSkipDraft(nextValue.replace(/[^0-9]/g, ""))}
                 onBlur={commitBackwardSkipDraft}
                 onEndEditing={commitBackwardSkipDraft}
@@ -123,7 +119,7 @@ export const SettingsPlaybackScreen = () => {
                 Forward
               </Text>
               <TextInput
-                value={forwardSkipDraft}
+                value={forwardSkipValue}
                 onChangeText={(nextValue) => setForwardSkipDraft(nextValue.replace(/[^0-9]/g, ""))}
                 onBlur={commitForwardSkipDraft}
                 onEndEditing={commitForwardSkipDraft}
@@ -148,7 +144,7 @@ export const SettingsPlaybackScreen = () => {
             </View>
           </View>
           <Text selectable style={{ color: themeColors.textMuted, fontSize: 12, marginTop: 2 }}>
-            Lock screen forward and backward see will use Backward value.
+            Lock screen skip controls use the matching forward and backward values.
           </Text>
         </View>
 

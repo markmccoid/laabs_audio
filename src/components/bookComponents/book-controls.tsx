@@ -104,6 +104,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const playbackControlIntent = usePlaybackStore((state) => state.playbackControlIntent);
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const chapterCount = usePlaybackStore((state) => state.chapterIndex.length);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const isDownloaded = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
@@ -158,6 +159,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
     (viewedBookState === "playing" ||
       viewedBookState === "paused" ||
       viewedBookState === "loaded-active");
+  const canUseChapterControls = canControl && chapterCount > 0;
   const canToggle =
     hasBookId && !isLoading && !hasActivePlaybackControlIntent && (isOnline !== false || isDownloaded);
 
@@ -212,12 +214,12 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
   };
 
   const handlePreviousChapter = async () => {
-    if (!canControl) return;
+    if (!canUseChapterControls) return;
     await playerService.previousChapter();
   };
 
   const handleNextChapter = async () => {
-    if (!canControl) return;
+    if (!canUseChapterControls) return;
     await playerService.nextChapter();
   };
 
@@ -279,7 +281,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
             accessibilityLabel="Previous chapter"
             icon={previousChapterIcon}
             onPress={handlePreviousChapter}
-            disabled={!canControl}
+            disabled={!canUseChapterControls}
             iconSize={24}
             tintColor={baseTintColor}
             pressedBackgroundColor={themeColors.bg}
@@ -331,7 +333,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
             accessibilityLabel="Next chapter"
             icon={nextChapterIcon}
             onPress={handleNextChapter}
-            disabled={!canControl}
+            disabled={!canUseChapterControls}
             iconSize={24}
             tintColor={baseTintColor}
             pressedBackgroundColor={themeColors.bg}

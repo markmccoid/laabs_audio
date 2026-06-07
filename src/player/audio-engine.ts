@@ -1,4 +1,5 @@
 import { Asset } from "expo-asset";
+import { NativeModules } from "react-native";
 import {
   AudioPro,
   AudioProContentType,
@@ -8,7 +9,7 @@ import {
   type AudioProTrack,
 } from "react-native-audio-pro";
 import { DEFAULT_BOOK_COVER } from "../constants/default-book-cover";
-import { settingsStore } from "../store/settings-store";
+import { settingsStore, type RemoteCommandMode } from "../store/settings-store";
 import type { PitchCorrectionQuality, PlaybackQueueItem, PlaybackSource } from "./types";
 
 type AudioHeaders = {
@@ -16,10 +17,32 @@ type AudioHeaders = {
   artwork?: Record<string, string>;
 };
 
+type AudioProRuntimeConfig = {
+  contentType: AudioProContentType;
+  progressIntervalMs: number;
+  remoteCommandMode: RemoteCommandMode;
+  showNextPrevControls: boolean;
+  showSkipControls: boolean;
+  disableLockScreenSeek: boolean;
+  skipIntervalMs: number;
+  skipForwardIntervalMs: number;
+  skipBackwardIntervalMs: number;
+};
+
+type AudioProWithLiveConfiguration = typeof AudioPro & {
+  updateConfiguration?: (options: AudioProRuntimeConfig) => void;
+};
+
+type NativeAudioProWithLiveConfiguration = {
+  updateConfiguration?: (options: AudioProRuntimeConfig) => void;
+};
+
 // Adapter layer that keeps the rest of the app insulated from the underlying player.
 export type AudioEngineEvents = {
   onEnded?: () => void;
   onError?: (error: Error) => void;
+  onRemoteNext?: () => void;
+  onRemotePrevious?: () => void;
   onStatus?: (status: AudioEngineStatus) => void;
 };
 
@@ -164,7 +187,8 @@ const isReadyState = (state: AudioProState) =>
 export const createAudioEngine = (): AudioEngine => {
   let events: AudioEngineEvents = {};
   let subscription: { remove: () => void } | null = null;
-  let configured = false;
+  let configuredKey: string | null = null;
+  let hasConfigured = false;
   let currentState: AudioProState = AudioProState.IDLE;
   let currentTrack: AudioProTrack | null = null;
   let currentHeaders: AudioHeaders | undefined;
@@ -177,25 +201,64 @@ export const createAudioEngine = (): AudioEngine => {
   };
   let stateWaiters: StateWaiter[] = [];
 
-  // Configure AudioPro once; options are applied on the next play() call.
-  const configure = () => {
-    if (configured) return;
-    // AudioPro exposes one skip interval for lock controls, so use the forward value as source.
-    const skipIntervalMs = Math.max(
-      1000,
-      Math.round(settingsStore.getState().seekBackwardSeconds * 1000),
-    );
-    AudioPro.configure({
+  const buildAudioProConfig = (): AudioProRuntimeConfig => {
+    const {
+      disableLockScreenSeek,
+      remoteCommandMode,
+      seekBackwardSeconds,
+      seekForwardSeconds,
+    } = settingsStore.getState();
+    const skipBackwardIntervalMs = Math.max(1000, Math.round(seekBackwardSeconds * 1000));
+    const skipForwardIntervalMs = Math.max(1000, Math.round(seekForwardSeconds * 1000));
+    return {
       // Speech keeps pitch aligned for audiobook-style speed changes.
       contentType: AudioProContentType.SPEECH,
       progressIntervalMs: UPDATE_INTERVAL_MS,
-      showNextPrevControls: false,
-      showSkipControls: true,
-      skipIntervalMs,
-    });
-    AudioPro.setProgressInterval(UPDATE_INTERVAL_MS);
-    configured = true;
+      remoteCommandMode,
+      showNextPrevControls: remoteCommandMode === "next-prev",
+      showSkipControls: remoteCommandMode === "skip-intervals",
+      disableLockScreenSeek,
+      // Compatibility for stale AudioPro JS builds that only know one skip interval.
+      skipIntervalMs: skipBackwardIntervalMs,
+      skipForwardIntervalMs,
+      skipBackwardIntervalMs,
+    };
   };
+
+  const configure = () => {
+    const config = buildAudioProConfig();
+    const nextConfiguredKey = JSON.stringify(config);
+    if (configuredKey === nextConfiguredKey) return;
+
+    if (hasConfigured) {
+      const liveAudioPro = AudioPro as AudioProWithLiveConfiguration;
+      if (typeof liveAudioPro.updateConfiguration === "function") {
+        liveAudioPro.updateConfiguration(config);
+      } else {
+        AudioPro.configure(config);
+        const nativeAudioPro = NativeModules.AudioPro as
+          | NativeAudioProWithLiveConfiguration
+          | undefined;
+        nativeAudioPro?.updateConfiguration?.(config);
+      }
+    } else {
+      AudioPro.configure(config);
+      hasConfigured = true;
+    }
+    AudioPro.setProgressInterval(UPDATE_INTERVAL_MS);
+    configuredKey = nextConfiguredKey;
+  };
+
+  settingsStore.subscribe((state, previousState) => {
+    if (
+      state.disableLockScreenSeek !== previousState.disableLockScreenSeek ||
+      state.remoteCommandMode !== previousState.remoteCommandMode ||
+      state.seekBackwardSeconds !== previousState.seekBackwardSeconds ||
+      state.seekForwardSeconds !== previousState.seekForwardSeconds
+    ) {
+      configure();
+    }
+  });
 
   const settleStateWaiters = (event?: AudioProEvent) => {
     const pending: StateWaiter[] = [];
@@ -281,6 +344,14 @@ export const createAudioEngine = (): AudioEngine => {
           rejectStateWaiters(new Error(event.payload.error));
           events.onError?.(new Error(event.payload.error));
         }
+        break;
+      }
+      case AudioProEventType.REMOTE_NEXT: {
+        events.onRemoteNext?.();
+        break;
+      }
+      case AudioProEventType.REMOTE_PREV: {
+        events.onRemotePrevious?.();
         break;
       }
       default:

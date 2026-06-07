@@ -278,6 +278,14 @@ class PlayerService {
       onStatus: (status) => {
         void this.handleStatus(status);
       },
+      onRemoteNext: () => {
+        if (settingsStore.getState().remoteCommandMode !== "next-prev") return;
+        void this.nextChapter();
+      },
+      onRemotePrevious: () => {
+        if (settingsStore.getState().remoteCommandMode !== "next-prev") return;
+        void this.previousChapter();
+      },
     });
   }
 
@@ -2361,10 +2369,7 @@ class PlayerService {
     if (state.playbackControlIntent) return;
     if (!state.queue.length) return;
 
-    if (!state.chapterIndex.length) {
-      await this.nextTrack();
-      return;
-    }
+    if (!state.chapterIndex.length) return;
 
     const currentChapter = this.resolveCurrentChapter(state);
     if (!currentChapter) return;
@@ -2383,10 +2388,7 @@ class PlayerService {
     if (state.playbackControlIntent) return;
     if (!state.queue.length) return;
 
-    if (!state.chapterIndex.length) {
-      await this.previousTrack();
-      return;
-    }
+    if (!state.chapterIndex.length) return;
 
     const currentChapter = this.resolveCurrentChapter(state);
     if (!currentChapter) return;

@@ -160,6 +160,10 @@ _Avoid_: Transition, touch guard, pending command
 The player condition where the user-facing audio engine has reached the requested listening state, such as playing or paused, even if follow-up progress or cache work is still running.
 _Avoid_: Fully synced state, settled playback
 
+**Remote Command Mode**:
+The device-level preference that chooses which secondary controls LAABS Audio exposes on system playback surfaces, such as chapter navigation, skip intervals, or neither.
+_Avoid_: remove command mode, lock screen mode
+
 **Bookmark**:
 A saved reference to a meaningful place in an audiobook.
 
@@ -467,6 +471,10 @@ _Avoid_: Five minute window, scrubber window
 - If a user-initiated **Listening Position** change fails, the **Displayed Listening Position** should return to the last trusted position.
 - **Displayed Listening Position** is derived from saved and live progress evidence, not a separate durable listening state.
 - Player and browsing surfaces should use the same **Displayed Listening Position** for **Active Playback**.
+- **Remote Command Mode** may expose skip interval controls, next and previous controls, or no secondary controls on system playback surfaces.
+- When **Remote Command Mode** exposes skip interval controls, those controls use the app's forward and backward skip interval preferences.
+- When **Remote Command Mode** exposes next and previous controls, those controls change the **Listening Position** through chapter navigation only.
+- If **Active Playback** has no chapter data, next and previous remote commands do not change the **Listening Position**.
 - During a **Playback Start Attempt**, player surfaces may show the attempted audiobook's **Displayed Listening Position** before it becomes **Active Playback**.
 - During a **Playback Start Attempt**, browsing surfaces should keep using **Active Playback** for live **Displayed Listening Position** until the attempted audiobook becomes **Active Playback**.
 - For inactive audiobooks, an **Automatic Progress Sample** is display evidence but not an automatic winner over farther server progress.

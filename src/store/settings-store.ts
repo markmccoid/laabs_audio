@@ -12,6 +12,8 @@ export const DEFAULT_SEEK_BACKWARD_SECONDS = 15;
 export const DEFAULT_SEEK_FORWARD_SECONDS = 30;
 export const MIN_SKIP_SECONDS = 5;
 export const MAX_SKIP_SECONDS = 120;
+export type RemoteCommandMode = "next-prev" | "skip-intervals" | "none";
+export const DEFAULT_REMOTE_COMMAND_MODE: RemoteCommandMode = "skip-intervals";
 export const HOME_PREVIEW_SIZE_SMALL = "small";
 export const HOME_PREVIEW_SIZE_MEDIUM = "medium";
 export const HOME_PREVIEW_SIZE_LARGE = "large";
@@ -117,6 +119,8 @@ export type SettingsState = {
   darkAccentColorOverride: string | null;
   progressLoggingEnabled: boolean;
   useTokenWithCoverImages: boolean;
+  disableLockScreenSeek: boolean;
+  remoteCommandMode: RemoteCommandMode;
   showFavoriteBadgeOnCovers: boolean;
   showFinishedBadgeOnCovers: boolean;
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>;
@@ -136,6 +140,8 @@ export type SettingsState = {
     resetDarkAccentColorOverride: () => void;
     setProgressLoggingEnabled: (enabled: boolean) => void;
     setUseTokenWithCoverImages: (enabled: boolean) => void;
+    setDisableLockScreenSeek: (enabled: boolean) => void;
+    setRemoteCommandMode: (mode: RemoteCommandMode) => void;
     setShowFavoriteBadgeOnCovers: (enabled: boolean) => void;
     setShowFinishedBadgeOnCovers: (enabled: boolean) => void;
     setHomeShelfVisibility: (scopeKey: string | null, shelfId: string, isVisible: boolean) => void;
@@ -169,6 +175,8 @@ export const settingsStore = createStore<SettingsState>()(
       darkAccentColorOverride: null,
       progressLoggingEnabled: true,
       useTokenWithCoverImages: false,
+      disableLockScreenSeek: true,
+      remoteCommandMode: DEFAULT_REMOTE_COMMAND_MODE,
       showFavoriteBadgeOnCovers: true,
       showFinishedBadgeOnCovers: true,
       homeShelvesByScope: {},
@@ -212,6 +220,9 @@ export const settingsStore = createStore<SettingsState>()(
           set({ progressLoggingEnabled }),
         setUseTokenWithCoverImages: (useTokenWithCoverImages) =>
           set({ useTokenWithCoverImages }),
+        setDisableLockScreenSeek: (disableLockScreenSeek) =>
+          set({ disableLockScreenSeek }),
+        setRemoteCommandMode: (remoteCommandMode) => set({ remoteCommandMode }),
         setShowFavoriteBadgeOnCovers: (showFavoriteBadgeOnCovers) =>
           set({ showFavoriteBadgeOnCovers }),
         setShowFinishedBadgeOnCovers: (showFinishedBadgeOnCovers) =>
@@ -393,10 +404,12 @@ export const settingsStore = createStore<SettingsState>()(
         darkAccentColorOverride: state.darkAccentColorOverride,
         progressLoggingEnabled: state.progressLoggingEnabled,
         useTokenWithCoverImages: state.useTokenWithCoverImages,
+        disableLockScreenSeek: state.disableLockScreenSeek,
+        remoteCommandMode: state.remoteCommandMode,
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 11,
+      version: 13,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -413,6 +426,8 @@ export const settingsStore = createStore<SettingsState>()(
             darkAccentColorOverride: null,
             progressLoggingEnabled: true,
             useTokenWithCoverImages: false,
+            disableLockScreenSeek: true,
+            remoteCommandMode: DEFAULT_REMOTE_COMMAND_MODE,
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
           };
@@ -465,6 +480,14 @@ export const settingsStore = createStore<SettingsState>()(
             version >= 6
               ? state.useTokenWithCoverImages ?? false
               : false,
+          disableLockScreenSeek:
+            version >= 12
+              ? state.disableLockScreenSeek ?? true
+              : true,
+          remoteCommandMode:
+            version >= 13
+              ? state.remoteCommandMode ?? DEFAULT_REMOTE_COMMAND_MODE
+              : DEFAULT_REMOTE_COMMAND_MODE,
           homeShelvesByScope:
             version >= 11
               ? state.homeShelvesByScope ?? EMPTY_HOME_SHELVES_BY_SCOPE

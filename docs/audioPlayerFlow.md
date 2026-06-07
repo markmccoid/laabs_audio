@@ -99,6 +99,14 @@ Result:
 
 Progress updates come from the audio engine **once per second** (configured in `audio-engine`).
 
+AudioPro configuration is built from System and Playback settings:
+
+- `remoteCommandMode` chooses skip interval controls, next/previous controls, or no secondary system playback controls.
+- `disableLockScreenSeek` controls whether iOS lock screen and Control Center scrubbing is available.
+- `seekForwardSeconds` and `seekBackwardSeconds` become independent lock screen skip intervals.
+
+The first engine setup calls `AudioPro.configure()`. Later changes to these settings call `AudioPro.updateConfiguration()` with the full merged configuration so active system playback surfaces update without waiting for the next `play()`.
+
 `playerService` syncs progress when:
 
 - **Every 5 minutes** during playback
@@ -303,7 +311,9 @@ const handlePreviousChapter = async () => {
 };
 ```
 
-**Multi-track note:** chapter positions are stored as **absolute book time**. Jumping to a chapter uses `seekTo`, which handles track switching automatically. If the book has no chapter index, `nextChapter`/`previousChapter` fall back to next/previous track.
+**Multi-track note:** chapter positions are stored as **absolute book time**. Jumping to a chapter uses `seekTo`, which handles track switching automatically. If the book has no chapter index, `nextChapter`/`previousChapter` do not change position.
+
+When system playback surfaces expose next and previous controls, `REMOTE_NEXT` and `REMOTE_PREV` use the same chapter navigation behavior. These commands never skip raw audio tracks.
 
 ### Next / Previous Track (Ignore Chapters)
 

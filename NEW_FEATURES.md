@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-07` `pending` - Add AudioPro remote command mode settings.
+  Tester focus: verify System Settings can switch lock screen controls between skip intervals, chapter next/previous, and none; verify skip intervals use the configured forward/backward values; verify remote next/previous moves chapters only and does nothing for books without chapter data.
 - `2026-06-06` `pending` - Store ambient volume per audiobook.
   Tester focus: verify two books can use the same ambient track with different volumes, switching ambient tracks on one book keeps that book's volume, and imported ambient track rows no longer show a default volume.
 - `2026-06-05` `pending` - Improve cache-first Search responsiveness.
