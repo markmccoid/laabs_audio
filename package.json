@@ -45,7 +45,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
-    "react-native-audio-pro": "^10.1.2",
+    "react-native-audio-pro": "file:../laabs-react-native-audio-pro",
     "react-native-blob-util": "^0.24.7",
     "react-native-gesture-handler": "~2.31.1",
     "react-native-markdown-display": "^7.0.2",

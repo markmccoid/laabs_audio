@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-07` `pending` - Refine ambient audio sheet controls.
+  Tester focus: verify selecting ambient audio keeps the sheet open, the selected track appears first with its position at sheet open, Fine Volume limits ambient volume to 50% per book, and the local AudioPro package still resolves for development builds.
 - `2026-06-07` `pending` - Add AudioPro remote command mode settings.
   Tester focus: verify System Settings can switch lock screen controls between skip intervals, chapter next/previous, and none; verify skip intervals use the configured forward/backward values; verify remote next/previous moves chapters only and does nothing for books without chapter data.
 - `2026-06-06` `pending` - Store ambient volume per audiobook.

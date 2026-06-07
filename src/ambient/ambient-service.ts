@@ -370,6 +370,22 @@ export const ambientService = {
     ambientStore.getState().actions.clearActiveSession();
   },
 
+  getPositionSnapshotForBook(libraryItemId: string | null) {
+    if (!libraryItemId) return null;
+
+    const state = ambientStore.getState();
+    const preference = selectAmbientPlaybackPreferenceForBook(state, libraryItemId);
+    if (!preference) return null;
+
+    const isActiveForBook =
+      state.activeTrackId === preference.trackId && state.activeLibraryItemId === libraryItemId;
+
+    return {
+      trackId: preference.trackId,
+      positionMs: isActiveForBook ? getTrackedAmbientPositionMs() : preference.positionMs,
+    };
+  },
+
   setPreferenceVolumeForBook(libraryItemId: string | null, volume: number) {
     if (!libraryItemId) return;
 
@@ -377,11 +393,27 @@ export const ambientService = {
     const preference = selectAmbientPlaybackPreferenceForBook(state, libraryItemId);
     if (!preference) return;
 
-    const clampedVolume = Math.max(0, Math.min(1, volume));
+    const maxVolume = preference.fineVolume ? 0.5 : 1;
+    const clampedVolume = Math.max(0, Math.min(maxVolume, volume));
     state.actions.setPreferenceVolumeForBook(libraryItemId, clampedVolume);
 
     if (state.activeTrackId === preference.trackId && state.activeLibraryItemId === libraryItemId) {
       AudioPro.ambientSetVolume(clampedVolume);
+    }
+  },
+
+  setPreferenceFineVolumeForBook(libraryItemId: string | null, fineVolume: boolean) {
+    if (!libraryItemId) return;
+
+    const state = ambientStore.getState();
+    const preference = selectAmbientPlaybackPreferenceForBook(state, libraryItemId);
+    if (!preference) return;
+
+    const nextVolume = fineVolume ? Math.min(preference.volume, 0.5) : preference.volume;
+    state.actions.setPreferenceFineVolumeForBook(libraryItemId, fineVolume);
+
+    if (state.activeTrackId === preference.trackId && state.activeLibraryItemId === libraryItemId) {
+      AudioPro.ambientSetVolume(nextVolume);
     }
   },
 };

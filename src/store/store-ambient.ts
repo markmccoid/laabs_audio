@@ -23,6 +23,7 @@ export type AmbientPlaybackPreferenceRecord = {
   trackId: string;
   positionMs: number;
   volume: number;
+  fineVolume: boolean;
 };
 
 type PersistedAmbientState = {
@@ -51,6 +52,7 @@ export type AmbientStoreState = PersistedAmbientState &
       addTrack: (track: AmbientTrackRecord) => void;
       removeTrack: (trackId: string) => void;
       setPreferenceVolumeForBook: (libraryItemId: string, volume: number) => void;
+      setPreferenceFineVolumeForBook: (libraryItemId: string, fineVolume: boolean) => void;
       attachTrackToBook: (trackId: string, libraryItemId: string) => void;
       detachTrackFromBook: (libraryItemId: string) => void;
       removeTrackFromAllBookAttachments: (trackId: string) => void;
@@ -169,15 +171,20 @@ const normalizeAmbientPlaybackPreferences = (
 
     const candidate = value as Partial<AmbientPlaybackPreferenceRecord>;
     if (typeof candidate.trackId !== "string" || !validTrackIds.has(candidate.trackId)) return;
+    const fineVolume = typeof candidate.fineVolume === "boolean" ? candidate.fineVolume : false;
 
     nextPreferences[libraryItemId] = {
       trackId: candidate.trackId,
       positionMs: clampAmbientPosition(
         typeof candidate.positionMs === "number" ? candidate.positionMs : 0,
       ),
-      volume: clampAmbientVolume(
-        typeof candidate.volume === "number" ? candidate.volume : DEFAULT_AMBIENT_VOLUME,
+      volume: Math.min(
+        fineVolume ? 0.5 : 1,
+        clampAmbientVolume(
+          typeof candidate.volume === "number" ? candidate.volume : DEFAULT_AMBIENT_VOLUME,
+        ),
       ),
+      fineVolume,
     };
   });
 
@@ -230,10 +237,36 @@ export const ambientStore = createStore<AmbientStoreState>()(
 
             const nextPreference = {
               ...existingPreference,
-              volume: clampAmbientVolume(volume),
+              volume: Math.min(existingPreference.fineVolume ? 0.5 : 1, clampAmbientVolume(volume)),
             };
 
             if (existingPreference.volume === nextPreference.volume) return state;
+
+            return {
+              ambientPlaybackPreferenceByLibraryItemId: {
+                ...state.ambientPlaybackPreferenceByLibraryItemId,
+                [libraryItemId]: nextPreference,
+              },
+            };
+          }),
+        setPreferenceFineVolumeForBook: (libraryItemId, fineVolume) =>
+          set((state) => {
+            if (!libraryItemId.trim()) return state;
+            const existingPreference = state.ambientPlaybackPreferenceByLibraryItemId[libraryItemId];
+            if (!existingPreference) return state;
+
+            const nextPreference = {
+              ...existingPreference,
+              fineVolume,
+              volume: fineVolume ? Math.min(existingPreference.volume, 0.5) : existingPreference.volume,
+            };
+
+            if (
+              existingPreference.fineVolume === nextPreference.fineVolume &&
+              existingPreference.volume === nextPreference.volume
+            ) {
+              return state;
+            }
 
             return {
               ambientPlaybackPreferenceByLibraryItemId: {
@@ -256,6 +289,7 @@ export const ambientStore = createStore<AmbientStoreState>()(
                   trackId,
                   positionMs: 0,
                   volume: existingPreference?.volume ?? DEFAULT_AMBIENT_VOLUME,
+                  fineVolume: existingPreference?.fineVolume ?? false,
                 },
               },
             };
