@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-08` `b43a3a8` - Add Diagnostics Timing Logs for Startup, Library Switching, and Login.
+  Tester focus: verify "Shadow SQLite" settings screen has a "Diagnostics Timing Logs" section with Refresh, Export, and Clear buttons; verify initial app startup, library switching, and login events are logged with realistic durations; verify Export opens the native share modal with the logs formatted as JSON.
 - `2026-06-08` `9ea5a28` - Ensure progress consistency between playing and idle states.
   Tester focus: verify that when stopping a book or starting a new book, the previous book's progress pill on the home shelf does not revert to a stale value and matches the player slider position exactly.
 - `2026-06-08` `cf43646` - Fix home screen progress pills not showing.

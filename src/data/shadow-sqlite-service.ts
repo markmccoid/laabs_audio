@@ -1,6 +1,6 @@
 import * as SQLite from "expo-sqlite";
 import type { SQLiteBindValue } from "expo-sqlite";
-import { libraryItemsApi, type LibraryItemSummary } from "@/api/library-items-api";
+import { libraryItemsApi, type LibraryItemSummary, type LibraryItemsSummary } from "@/api/library-items-api";
 import { meApi, type UserBookProgress } from "@/api/me-api";
 import { itemsApi } from "@/api/items-api";
 import { authStore } from "@/auth/auth-store";
@@ -556,6 +556,18 @@ CREATE INDEX IF NOT EXISTS idx_local_bookmarks_lookup
   ON local_bookmarks(user_id, library_item_id, start_time_seconds);
 CREATE INDEX IF NOT EXISTS idx_favorites_lookup
   ON user_favorites(user_id, library_item_id);
+
+CREATE TABLE IF NOT EXISTS timing_logs (
+  id TEXT PRIMARY KEY NOT NULL,
+  category TEXT NOT NULL,
+  event_name TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  duration_ms INTEGER,
+  metadata TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_timing_logs_category
+  ON timing_logs(category, created_at);
 `;
 
 const initializeShadowDatabaseInternal = async () => {
@@ -2237,6 +2249,7 @@ export const clearShadowDatabase = () =>
     const db = await getDb();
     await db.execAsync(`
       DROP VIEW IF EXISTS effective_progress;
+      DROP TABLE IF EXISTS timing_logs;
       DROP TABLE IF EXISTS library_catalog_fts;
       DROP TABLE IF EXISTS item_detail_snapshots;
       DROP TABLE IF EXISTS user_favorites;
@@ -2266,4 +2279,78 @@ export const getLatestShadowRunId = async () => {
     `SELECT id FROM library_refresh_runs ORDER BY started_at DESC LIMIT 1`,
   );
   return rows[0]?.id ?? null;
+};
+
+export type TimingLog = {
+  id: string;
+  category: string;
+  eventName: string;
+  startedAt: number;
+  durationMs: number | null;
+  metadata: string | null;
+  createdAt: number;
+};
+
+export const recordTimingLog = async (
+  category: string,
+  eventName: string,
+  startedAt: number,
+  metadata?: Record<string, any>,
+) => {
+  try {
+    const db = await getDb();
+    await initializeShadowDatabaseInternal();
+    const nowMs = Date.now();
+    const durationMs = nowMs - startedAt;
+    const id = `timing_${nowMs}_${Math.random().toString(36).slice(2, 10)}`;
+    const metadataStr = metadata ? JSON.stringify(metadata) : null;
+    await db.runAsync(
+      `INSERT INTO timing_logs (id, category, event_name, started_at, duration_ms, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, category, eventName, startedAt, durationMs, metadataStr, nowMs],
+    );
+  } catch (error) {
+    if (__DEV__) {
+      console.warn("[timing-logger] Failed to write timing log", error);
+    }
+  }
+};
+
+export const getTimingLogs = async (limit: number = 200): Promise<TimingLog[]> => {
+  try {
+    const db = await getDb();
+    await initializeShadowDatabaseInternal();
+    const rows = await db.getAllAsync<any>(
+      `SELECT id, category, event_name AS eventName, started_at AS startedAt, duration_ms AS durationMs, metadata, created_at AS createdAt
+       FROM timing_logs
+       ORDER BY created_at DESC
+       LIMIT ?`,
+      [limit],
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      category: row.category,
+      eventName: row.eventName,
+      startedAt: row.startedAt,
+      durationMs: row.durationMs,
+      metadata: row.metadata,
+      createdAt: row.createdAt,
+    }));
+  } catch (error) {
+    if (__DEV__) {
+      console.warn("[timing-logger] Failed to fetch timing logs", error);
+    }
+    return [];
+  }
+};
+
+export const clearTimingLogs = async (): Promise<void> => {
+  try {
+    const db = await getDb();
+    await initializeShadowDatabaseInternal();
+    await db.runAsync(`DELETE FROM timing_logs`);
+  } catch (error) {
+    if (__DEV__) {
+      console.warn("[timing-logger] Failed to clear timing logs", error);
+    }
+  }
 };

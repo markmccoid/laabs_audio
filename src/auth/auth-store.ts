@@ -11,6 +11,7 @@ import {
   type RememberedSessionRecord,
 } from "./auth-storage";
 import { getJwtExpiry, isTokenExpired } from "./auth-token";
+import { recordTimingLog } from "../data/shadow-sqlite-service";
 
 const log = (...args: unknown[]) => {
   if (__DEV__) {
@@ -312,63 +313,81 @@ export const authStore = createStore<AuthState>()(
 
         loginWithPassword: async (username, password, serverUrl, options) => {
           log("login:start", { username, serverUrl });
+          const startedAt = Date.now();
           const normalizedServerUrl = authService.normalizeServerUrl(serverUrl);
-          const tokens = await authService.login({
-            username,
-            password,
-            serverUrl: normalizedServerUrl,
-          });
-          const nextUserKey = getUserKey(tokens.userId);
-          const sessionKey = getSessionKey(username, normalizedServerUrl);
-          await options?.beforeCommit?.({ userId: tokens.userId, sessionKey });
-          const session = authStorage.upsertSession(
-            {
-              userId: tokens.userId,
+          try {
+            const tokens = await authService.login({
               username,
+              password,
               serverUrl: normalizedServerUrl,
-              label: options?.label || getDefaultSessionLabel(username, normalizedServerUrl),
+            });
+            const nextUserKey = getUserKey(tokens.userId);
+            const sessionKey = getSessionKey(username, normalizedServerUrl);
+            await options?.beforeCommit?.({ userId: tokens.userId, sessionKey });
+            const session = authStorage.upsertSession(
+              {
+                userId: tokens.userId,
+                username,
+                serverUrl: normalizedServerUrl,
+                label: options?.label || getDefaultSessionLabel(username, normalizedServerUrl),
+                activeLibraryId: null,
+                activeLibraryName: null,
+                needsAttention: false,
+                lastError: null,
+              },
+              { makeActive: true },
+            );
+
+            await authStorage.setSessionSecrets(session.key, {
+              password,
+              accessToken: tokens.accessToken,
+              refreshToken: tokens.refreshToken,
+            });
+
+            log("login:stored", {
+              hasAccessToken: Boolean(tokens.accessToken),
+              hasRefreshToken: Boolean(tokens.refreshToken),
+            });
+
+            set((state) => ({
+              rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+              activeSessionKey: session.key,
+              storedUsername: username,
+              storedUserId: tokens.userId,
+              serverUrl: normalizedServerUrl,
+              accessToken: tokens.accessToken,
+              refreshToken: tokens.refreshToken,
+              accessTokenExpiresAt: getJwtExpiry(tokens.accessToken),
+              hasStoredCredentials: true,
+              status: computeEntryStatus(true, state.hasOfflineContent),
+              lastAuthError: null,
+              loginRequired: false,
               activeLibraryId: null,
               activeLibraryName: null,
-              needsAttention: false,
-              lastError: null,
-            },
-            { makeActive: true },
-          );
+              activeLibraryUserKey: nextUserKey,
+            }));
 
-          await authStorage.setSessionSecrets(session.key, {
-            password,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-          });
-
-          log("login:stored", {
-            hasAccessToken: Boolean(tokens.accessToken),
-            hasRefreshToken: Boolean(tokens.refreshToken),
-          });
-
-          set((state) => ({
-            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
-            activeSessionKey: session.key,
-            storedUsername: username,
-            storedUserId: tokens.userId,
-            serverUrl: normalizedServerUrl,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-            accessTokenExpiresAt: getJwtExpiry(tokens.accessToken),
-            hasStoredCredentials: true,
-            status: computeEntryStatus(true, state.hasOfflineContent),
-            lastAuthError: null,
-            loginRequired: false,
-            activeLibraryId: null,
-            activeLibraryName: null,
-            activeLibraryUserKey: nextUserKey,
-          }));
-
-          log("login:done", { status: "authenticated" });
-          return { userId: tokens.userId, sessionKey: session.key };
+            log("login:done", { status: "authenticated" });
+            void recordTimingLog("login", "login_with_password", startedAt, {
+              username,
+              serverUrl: normalizedServerUrl,
+              success: true,
+            });
+            return { userId: tokens.userId, sessionKey: session.key };
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            void recordTimingLog("login", "login_with_password", startedAt, {
+              username,
+              serverUrl: normalizedServerUrl,
+              success: false,
+              error: errorMessage,
+            });
+            throw error;
+          }
         },
 
         restoreRememberedSession: async (sessionKey) => {
+          const startedAt = Date.now();
           const snapshot = authStorage.getSessionsSnapshot();
           const session = snapshot.sessions.find((item) => item.key === sessionKey);
           if (!session) {
@@ -379,79 +398,96 @@ export const authStore = createStore<AuthState>()(
             throw new AuthError("Offline", "NETWORK_ERROR");
           }
 
-          const secrets = await authStorage.getSessionSecrets(session.key);
-          let tokens: { accessToken: string; refreshToken: string } | null = null;
+          try {
+            const secrets = await authStorage.getSessionSecrets(session.key);
+            let tokens: { accessToken: string; refreshToken: string } | null = null;
 
-          if (secrets.refreshToken) {
-            try {
-              tokens = await authService.refresh(session.serverUrl, secrets.refreshToken);
-            } catch (error) {
-              if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
-                throw error;
+            if (secrets.refreshToken) {
+              try {
+                tokens = await authService.refresh(session.serverUrl, secrets.refreshToken);
+              } catch (error) {
+                if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
+                  throw error;
+                }
+                tokens = null;
               }
-              tokens = null;
             }
-          }
 
-          if (!tokens && secrets.password) {
-            try {
-              const loginResult = await authService.login({
-                username: session.username,
-                password: secrets.password,
-                serverUrl: session.serverUrl,
+            if (!tokens && secrets.password) {
+              try {
+                const loginResult = await authService.login({
+                  username: session.username,
+                  password: secrets.password,
+                  serverUrl: session.serverUrl,
+                });
+                if (loginResult.userId !== session.userId) {
+                  throw new AuthError("Sign-in returned a different Audiobookshelf user", "INVALID_RESPONSE");
+                }
+                tokens = loginResult;
+              } catch (error) {
+                if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
+                  throw error;
+                }
+                tokens = null;
+              }
+            }
+
+            if (!tokens) {
+              authStorage.updateSession(session.key, {
+                needsAttention: true,
+                lastError: "Sign in needed",
               });
-              if (loginResult.userId !== session.userId) {
-                throw new AuthError("Sign-in returned a different Audiobookshelf user", "INVALID_RESPONSE");
-              }
-              tokens = loginResult;
-            } catch (error) {
-              if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
-                throw error;
-              }
-              tokens = null;
+              set({
+                rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+                lastAuthError: "Sign in needed",
+              });
+              throw new AuthError("Sign in needed", "UNAUTHORIZED");
             }
-          }
 
-          if (!tokens) {
+            await authStorage.setSessionSecrets(session.key, {
+              accessToken: tokens.accessToken,
+              refreshToken: tokens.refreshToken,
+            });
             authStorage.updateSession(session.key, {
-              needsAttention: true,
-              lastError: "Sign in needed",
+              needsAttention: false,
+              lastError: null,
             });
-            set({
+            authStorage.setActiveSessionKey(session.key);
+
+            const userKey = getUserKey(session.userId);
+            set((state) => ({
               rememberedSessions: authStorage.getSessionsSnapshot().sessions,
-              lastAuthError: "Sign in needed",
+              activeSessionKey: session.key,
+              storedUsername: session.username,
+              storedUserId: session.userId,
+              serverUrl: session.serverUrl,
+              accessToken: tokens.accessToken,
+              refreshToken: tokens.refreshToken,
+              accessTokenExpiresAt: getJwtExpiry(tokens.accessToken),
+              hasStoredCredentials: Boolean(secrets.password),
+              status: computeEntryStatus(true, state.hasOfflineContent),
+              lastAuthError: null,
+              loginRequired: false,
+              activeLibraryId: session.activeLibraryId ?? null,
+              activeLibraryName: session.activeLibraryName ?? null,
+              activeLibraryUserKey: userKey,
+            }));
+
+            void recordTimingLog("login", "restore_remembered_session", startedAt, {
+              username: session.username,
+              serverUrl: session.serverUrl,
+              success: true,
             });
-            throw new AuthError("Sign in needed", "UNAUTHORIZED");
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            void recordTimingLog("login", "restore_remembered_session", startedAt, {
+              username: session.username,
+              serverUrl: session.serverUrl,
+              success: false,
+              error: errorMessage,
+            });
+            throw error;
           }
-
-          await authStorage.setSessionSecrets(session.key, {
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-          });
-          authStorage.updateSession(session.key, {
-            needsAttention: false,
-            lastError: null,
-          });
-          authStorage.setActiveSessionKey(session.key);
-
-          const userKey = getUserKey(session.userId);
-          set((state) => ({
-            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
-            activeSessionKey: session.key,
-            storedUsername: session.username,
-            storedUserId: session.userId,
-            serverUrl: session.serverUrl,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-            accessTokenExpiresAt: getJwtExpiry(tokens.accessToken),
-            hasStoredCredentials: Boolean(secrets.password),
-            status: computeEntryStatus(true, state.hasOfflineContent),
-            lastAuthError: null,
-            loginRequired: false,
-            activeLibraryId: session.activeLibraryId ?? null,
-            activeLibraryName: session.activeLibraryName ?? null,
-            activeLibraryUserKey: userKey,
-          }));
         },
 
         updateRememberedSession: async (sessionKey, values) => {

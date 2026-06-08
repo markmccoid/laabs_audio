@@ -2,6 +2,7 @@ import { activateLibrary } from "@/auth/library-activation";
 import { libraryActivationStore } from "@/auth/library-activation-store";
 import { authStore, useAuthStore } from "@/auth/auth-store";
 import { queryClient } from "@/query/query-client";
+import { recordTimingLog } from "@/data/shadow-sqlite-service";
 import { getBookDetailHref } from "@/navigation/book-links";
 import { playerService } from "@/player/player-service";
 import type { Library } from "@/types/absTypes";
@@ -38,6 +39,7 @@ export const runLibraryActivationSelection = async (
     return;
   }
 
+  const startedAt = Date.now();
   activationState.actions.start(library);
   router.replace("/(tabs)/(home)");
   await waitForNextFrame();
@@ -61,13 +63,34 @@ export const runLibraryActivationSelection = async (
       router.replace(getBookDetailHref(returnToLibraryItemId));
       await waitForNextFrame();
       activationState.actions.clear();
+      void recordTimingLog("library_switch", "activation_selection", startedAt, {
+        libraryId: library.id,
+        libraryName: library.name,
+        mode: options.mode,
+        returnToLibraryItemId,
+        success: true,
+      });
       return;
     }
 
     await waitForNextFrame();
     activationState.actions.clear();
+    void recordTimingLog("library_switch", "activation_selection", startedAt, {
+      libraryId: library.id,
+      libraryName: library.name,
+      mode: options.mode,
+      success: true,
+    });
   } catch (error) {
     activationState.actions.fail(error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    void recordTimingLog("library_switch", "activation_selection", startedAt, {
+      libraryId: library.id,
+      libraryName: library.name,
+      mode: options.mode,
+      success: false,
+      error: errorMessage,
+    });
   }
 };
 

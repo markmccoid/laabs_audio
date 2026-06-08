@@ -5,6 +5,7 @@ import { FIVE_MINUTES_MS } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import type { Library } from "../types/absTypes";
+import { recordTimingLog } from "../data/shadow-sqlite-service";
 
 type ActivateLibraryOptions = {
   library: Library;
@@ -103,6 +104,7 @@ export const activateLibrary = async ({
     throw new Error("Library Activation requires a User Session");
   }
 
+  const startedAt = Date.now();
   const catalogQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, library.id);
   const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
   const cachedCatalog = queryClient.getQueryData<LibraryItemsSummary>(catalogQueryKey);
@@ -112,23 +114,48 @@ export const activateLibrary = async ({
       refreshActivationQueriesIfStale(queryClient, activeLibraryUserKey, library),
     );
 
+    void recordTimingLog("library_switch", "activate_library_fetch", startedAt, {
+      libraryId: library.id,
+      libraryName: library.name,
+      cached: true,
+      catalogCount: cachedCatalog.length,
+    });
     return { catalog: cachedCatalog };
   }
 
-  const catalog = await withActivationTimeout(
-    queryClient.fetchQuery({
-      queryKey: catalogQueryKey,
-      queryFn: () => libraryItemsApi.getItems({ libraryId: library.id }),
-      meta: { persist: true },
-    }),
-  );
+  try {
+    const catalog = await withActivationTimeout(
+      queryClient.fetchQuery({
+        queryKey: catalogQueryKey,
+        queryFn: () => libraryItemsApi.getItems({ libraryId: library.id }),
+        meta: { persist: true },
+      }),
+    );
 
-  backgroundRefreshIfStale(queryClient, userServerStateQueryKey, () =>
-    fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
-  );
-  deferBackgroundRefresh(() =>
-    refreshActivationQueriesIfStale(queryClient, activeLibraryUserKey, library),
-  );
+    backgroundRefreshIfStale(queryClient, userServerStateQueryKey, () =>
+      fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
+    );
+    deferBackgroundRefresh(() =>
+      refreshActivationQueriesIfStale(queryClient, activeLibraryUserKey, library),
+    );
 
-  return { catalog };
+    void recordTimingLog("library_switch", "activate_library_fetch", startedAt, {
+      libraryId: library.id,
+      libraryName: library.name,
+      cached: false,
+      catalogCount: catalog.length,
+      success: true,
+    });
+    return { catalog };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    void recordTimingLog("library_switch", "activate_library_fetch", startedAt, {
+      libraryId: library.id,
+      libraryName: library.name,
+      cached: false,
+      success: false,
+      error: errorMessage,
+    });
+    throw error;
+  }
 };

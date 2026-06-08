@@ -3,6 +3,7 @@ import {
   getShadowLibraryReadiness,
   refreshShadowLibraryCatalog,
   refreshShadowUserOverlays,
+  recordTimingLog,
   type ShadowCatalogRefreshResult,
   type ShadowLibraryReadiness,
   type ShadowOverlayRefreshResult,
@@ -59,6 +60,7 @@ export const sqliteRefreshCoordinator = {
     const existing = refreshCoordinatorRuntimeState.inFlightByScope.get(key);
     if (existing) return existing;
 
+    const startedAt = Date.now();
     const task = (async () => {
       const readiness = await getShadowLibraryReadiness({
         catalogMs: SQLITE_CATALOG_STALE_MS,
@@ -69,13 +71,43 @@ export const sqliteRefreshCoordinator = {
       const result: RefreshResult = { readiness };
 
       if (shouldRefreshCatalog) {
+        const catalogStart = Date.now();
         result.catalog = await refreshShadowLibraryCatalog();
+        void recordTimingLog("library_switch", "sqlite_refresh_catalog", catalogStart, {
+          userId: scope.userId,
+          libraryId: scope.libraryId,
+          status: result.catalog.status,
+          expected: result.catalog.totalExpected,
+          seen: result.catalog.totalSeen,
+          inserted: result.catalog.inserted,
+          updated: result.catalog.updated,
+          unchanged: result.catalog.unchanged,
+          error: result.catalog.error,
+        });
       }
       if (shouldRefreshOverlay) {
+        const overlayStart = Date.now();
         result.overlay = await refreshShadowUserOverlays();
+        void recordTimingLog("library_switch", "sqlite_refresh_overlay", overlayStart, {
+          userId: scope.userId,
+          libraryId: scope.libraryId,
+          status: result.overlay.status,
+          serverProgressRows: result.overlay.serverProgressRows,
+          pendingProgressRows: result.overlay.pendingProgressRows,
+          favoriteRows: result.overlay.favoriteRows,
+          error: result.overlay.error,
+        });
       }
 
       invalidateSqliteQueries(options.queryClient);
+
+      void recordTimingLog("library_switch", "sqlite_refresh_active_library", startedAt, {
+        userId: scope.userId,
+        libraryId: scope.libraryId,
+        shouldRefreshCatalog,
+        shouldRefreshOverlay,
+      });
+
       return result;
     })().finally(() => {
       refreshCoordinatorRuntimeState.inFlightByScope.delete(key);

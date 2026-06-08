@@ -8,6 +8,9 @@ import {
   refreshShadowLibraryCatalog,
   refreshShadowUserOverlays,
   runShadowSearchTest,
+  getTimingLogs,
+  clearTimingLogs,
+  type TimingLog,
   type ShadowCatalogRefreshResult,
   type ShadowDatabaseSummary,
   type ShadowOverlayRefreshResult,
@@ -16,7 +19,7 @@ import {
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView } from "expo-symbols";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, ScrollView, Share, Text, TextInput, View } from "react-native";
 
 type ActionName =
   | "init"
@@ -25,7 +28,9 @@ type ActionName =
   | "search"
   | "detail"
   | "summary"
-  | "clear";
+  | "clear"
+  | "timing_logs_clear"
+  | "timing_logs_load";
 
 const formatMs = (value: number | null | undefined) =>
   typeof value === "number" ? `${Math.max(0, Math.round(value))}ms` : "-";
@@ -239,6 +244,147 @@ const SummaryPanel = ({ summary }: { summary: ShadowDatabaseSummary | null }) =>
   );
 };
 
+const TimingLogItem = ({
+  log,
+  isExpanded,
+  onToggle,
+}: {
+  log: TimingLog;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) => {
+  const themeColors = useThemeColors();
+  const dateStr = useMemo(() => {
+    try {
+      return new Date(log.createdAt).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+    } catch {
+      return "-";
+    }
+  }, [log.createdAt]);
+
+  const parsedMetadata = useMemo(() => {
+    if (!log.metadata) return null;
+    try {
+      return JSON.parse(log.metadata);
+    } catch {
+      return log.metadata;
+    }
+  }, [log.metadata]);
+
+  // Accent color based on category
+  const categoryColor = useMemo(() => {
+    switch (log.category) {
+      case "startup":
+        return "#10b981"; // Emerald green
+      case "library_switch":
+        return "#3b82f6"; // Blue
+      case "login":
+        return "#a855f7"; // Purple
+      default:
+        return themeColors.textMuted;
+    }
+  }, [log.category, themeColors.textMuted]);
+
+  return (
+    <View
+      style={{
+        borderBottomWidth: 1,
+        borderBottomColor: themeColors.border,
+        paddingVertical: 10,
+        gap: 6,
+      }}
+    >
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <View style={{ flex: 1, gap: 4 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <Text selectable style={{ color: themeColors.text, fontSize: 14, fontWeight: "600" }}>
+              {log.eventName}
+            </Text>
+            <View
+              style={{
+                backgroundColor: `${categoryColor}15`,
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                borderRadius: 4,
+                borderWidth: 0.5,
+                borderColor: `${categoryColor}30`,
+              }}
+            >
+              <Text
+                selectable
+                style={{
+                  color: categoryColor,
+                  fontSize: 10,
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                }}
+              >
+                {log.category}
+              </Text>
+            </View>
+          </View>
+          <Text selectable style={{ color: themeColors.textMuted, fontSize: 11 }}>
+            {dateStr}
+          </Text>
+        </View>
+        <View style={{ alignItems: "flex-end", gap: 4 }}>
+          <Text selectable style={{ color: themeColors.text, fontSize: 14, fontWeight: "700" }}>
+            {formatMs(log.durationMs)}
+          </Text>
+          {parsedMetadata ? (
+            <Pressable
+              onPress={onToggle}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 2,
+                opacity: pressed ? 0.6 : 1,
+              })}
+            >
+              <Text style={{ color: themeColors.textMuted, fontSize: 11 }}>
+                {isExpanded ? "Hide Details" : "Show Details"}
+              </Text>
+              <SymbolView
+                name={isExpanded ? "chevron.up" : "chevron.down"}
+                size={10}
+                tintColor={themeColors.textMuted}
+              />
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+
+      {isExpanded && parsedMetadata ? (
+        <View
+          style={{
+            backgroundColor: themeColors.bg,
+            borderRadius: 6,
+            padding: 8,
+            marginTop: 4,
+            borderWidth: 0.5,
+            borderColor: themeColors.border,
+          }}
+        >
+          <Text
+            selectable
+            style={{
+              fontFamily: "Courier",
+              fontSize: 11,
+              color: themeColors.text,
+            }}
+          >
+            {JSON.stringify(parsedMetadata, null, 2)}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+};
+
 export const SettingsShadowSqliteScreen = () => {
   const themeColors = useThemeColors();
   const status = useAuthStore((state) => state.status);
@@ -251,9 +397,20 @@ export const SettingsShadowSqliteScreen = () => {
   const [overlayResult, setOverlayResult] = useState<ShadowOverlayRefreshResult | null>(null);
   const [searchResult, setSearchResult] = useState<ShadowSearchResult | null>(null);
   const [summary, setSummary] = useState<ShadowDatabaseSummary | null>(null);
+  const [timingLogs, setTimingLogs] = useState<TimingLog[]>([]);
+  const [expandedLogIds, setExpandedLogIds] = useState<Record<string, boolean>>({});
 
   const canUseShadowDb = status === "authenticated" && Boolean(activeLibraryId);
   const isBusy = busyAction !== null;
+
+  const loadLogs = useCallback(async () => {
+    try {
+      const logs = await getTimingLogs(50);
+      setTimingLogs(logs);
+    } catch (error) {
+      console.warn("Failed to load timing logs", error);
+    }
+  }, []);
 
   const runAction = useCallback(
     async (action: ActionName, task: () => Promise<string | null | undefined>) => {
@@ -263,6 +420,7 @@ export const SettingsShadowSqliteScreen = () => {
         const nextMessage = await task();
         setMessage(nextMessage ?? "Done");
         setSummary(await getShadowDatabaseSummary());
+        await loadLogs();
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         setMessage(errorMessage);
@@ -270,7 +428,7 @@ export const SettingsShadowSqliteScreen = () => {
         setBusyAction(null);
       }
     },
-    [],
+    [loadLogs],
   );
 
   useEffect(() => {
@@ -280,7 +438,39 @@ export const SettingsShadowSqliteScreen = () => {
       .catch((error) => {
         setMessage(error instanceof Error ? error.message : String(error));
       });
-  }, [canUseShadowDb]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadLogs();
+  }, [canUseShadowDb, loadLogs]);
+
+  const handleExportLogs = useCallback(async () => {
+    try {
+      const allLogs = await getTimingLogs(500);
+      const shareMessage = JSON.stringify(allLogs, null, 2);
+      await Share.share({
+        title: "Laabs Audio Timing Logs",
+        message: shareMessage,
+      });
+    } catch (error) {
+      Alert.alert("Export Failed", error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
+  const handleClearLogs = useCallback(() => {
+    Alert.alert("Clear Timing Logs?", "This will delete all persistent startup and performance timing logs.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Clear",
+        style: "destructive",
+        onPress: () =>
+          runAction("timing_logs_clear", async () => {
+            await clearTimingLogs();
+            setTimingLogs([]);
+            setExpandedLogIds({});
+            return "Timing logs cleared";
+          }),
+      },
+    ]);
+  }, [runAction]);
 
   const activeLabel = useMemo(
     () => activeLibraryName || activeLibraryId || "No Active Library",
@@ -445,6 +635,70 @@ export const SettingsShadowSqliteScreen = () => {
 
         <Section title="Database Summary">
           <SummaryPanel summary={summary} />
+        </Section>
+
+        <Section title="Diagnostics Timing Logs">
+          <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
+            <View style={{ flex: 1, minWidth: 100 }}>
+              <ActionButton
+                title={busyAction === "timing_logs_load" ? "Loading..." : "Refresh Logs"}
+                icon="clock.arrow.2.circlepath"
+                disabled={isBusy}
+                onPress={() =>
+                  runAction("timing_logs_load", async () => {
+                    await loadLogs();
+                    return "Timing logs refreshed";
+                  })
+                }
+              />
+            </View>
+            <View style={{ flex: 1, minWidth: 100 }}>
+              <ActionButton
+                title="Export Logs"
+                icon="square.and.arrow.up"
+                disabled={timingLogs.length === 0}
+                onPress={handleExportLogs}
+              />
+            </View>
+            <View style={{ flex: 1, minWidth: 100 }}>
+              <ActionButton
+                title="Clear Logs"
+                icon="trash"
+                disabled={timingLogs.length === 0 || isBusy}
+                onPress={handleClearLogs}
+              />
+            </View>
+          </View>
+
+          {timingLogs.length === 0 ? (
+            <Text
+              selectable
+              style={{
+                color: themeColors.textMuted,
+                fontSize: 13,
+                textAlign: "center",
+                paddingVertical: 12,
+              }}
+            >
+              No timing logs recorded yet.
+            </Text>
+          ) : (
+            <View style={{ gap: 2 }}>
+              {timingLogs.map((log) => (
+                <TimingLogItem
+                  key={log.id}
+                  log={log}
+                  isExpanded={Boolean(expandedLogIds[log.id])}
+                  onToggle={() =>
+                    setExpandedLogIds((prev) => ({
+                      ...prev,
+                      [log.id]: !prev[log.id],
+                    }))
+                  }
+                />
+              ))}
+            </View>
+          )}
         </Section>
       </ScrollView>
     </View>

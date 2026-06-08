@@ -261,6 +261,32 @@ export const recordHomeShelfDisplay = (payload: StartupTracePayload) => {
   trace.didPrintHomeShelfDisplaySummary = true;
   logStartupEvent("home shelf display", payload);
 
+  // Write timings to SQLite timing_logs table asynchronously
+  import("../data/shadow-sqlite-service")
+    .then(({ recordTimingLog }) => {
+      const originTimestamp = Date.now() - (displayAtMs - trace.originMs);
+      void recordTimingLog(
+        "startup",
+        "overall_startup",
+        originTimestamp,
+        payload
+      );
+      trace.measures.forEach((measure) => {
+        const startTimestamp = Date.now() - (displayAtMs - measure.startedAtMs);
+        void recordTimingLog(
+          "startup",
+          measure.label,
+          startTimestamp,
+          measure.payload
+        );
+      });
+    })
+    .catch((error) => {
+      if (__DEV__) {
+        console.warn("[startup-timing] Failed to record timing logs in SQLite", error);
+      }
+    });
+
   if (__DEV__) {
     const queryRestoreMeasure = findMeasure(trace, "query restore complete");
     const queryPayload = queryRestoreMeasure?.payload ?? {};
