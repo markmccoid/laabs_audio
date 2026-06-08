@@ -866,20 +866,16 @@ const upsertCatalogItem = async (
   };
 };
 
-const getExistingCatalogRowsForPage = async (
+const getExistingLibraryCatalogItems = async (
   db: Db,
   context: AuthContext,
-  libraryItemIds: string[],
-) => {
-  if (libraryItemIds.length === 0) return new Map<string, CatalogRow>();
-  const placeholders = libraryItemIds.map(() => "?").join(", ");
+): Promise<Map<string, CatalogRow>> => {
   const rows = await db.getAllAsync<CatalogRow>(
     `SELECT library_item_id, server_updated_at, is_missing
      FROM library_catalog_items
      WHERE user_id = ?
-       AND library_id = ?
-       AND library_item_id IN (${placeholders})`,
-    [context.userId, context.libraryId, ...libraryItemIds],
+       AND library_id = ?`,
+    [context.userId, context.libraryId],
   );
   return new Map(rows.map((row) => [row.library_item_id, row]));
 };
@@ -911,6 +907,9 @@ export const refreshShadowLibraryCatalog = (pageSize = DEFAULT_PAGE_SIZE) =>
     });
 
     try {
+      const existingItems = await getExistingLibraryCatalogItems(db, context);
+      const seenServerIds = new Set<string>();
+
       let page = 0;
       do {
         const networkStartedAt = now();
@@ -925,23 +924,35 @@ export const refreshShadowLibraryCatalog = (pageSize = DEFAULT_PAGE_SIZE) =>
 
         const writeStartedAt = now();
         await runInTransaction(db, async () => {
-          const existingRows = await getExistingCatalogRowsForPage(
-            db,
-            context,
-            response.results.map((book) => book.id),
-          );
           for (const book of response.results) {
+            seenServerIds.add(book.id);
+            const existing = existingItems.get(book.id);
+
+            const wasInserted = !existing;
+            const wasUpdated = !wasInserted && (existing.server_updated_at ?? 0) !== book.updatedAt;
+            const wasMissing = Boolean(existing?.is_missing);
+
+            if (!wasInserted && !wasUpdated && !wasMissing) {
+              unchanged++;
+              continue;
+            }
+
             const stats = await upsertCatalogItem(
               db,
               context,
               book,
               runId,
               now(),
-              existingRows.get(book.id) ?? null,
+              existing
+                ? {
+                    library_item_id: book.id,
+                    server_updated_at: existing.server_updated_at,
+                    is_missing: existing.is_missing ? 1 : 0,
+                  }
+                : null,
             );
             inserted += stats.inserted;
             updated += stats.updated;
-            unchanged += stats.unchanged;
           }
           await db.runAsync(
             `UPDATE library_refresh_runs
@@ -958,18 +969,36 @@ export const refreshShadowLibraryCatalog = (pageSize = DEFAULT_PAGE_SIZE) =>
 
       let missingMarked = 0;
       const finalizeStartedAt = now();
+
+      const missingIds: string[] = [];
+      for (const [localId, localItem] of existingItems.entries()) {
+        if (!seenServerIds.has(localId) && localItem.is_missing === 0) {
+          missingIds.push(localId);
+        }
+      }
+
+      if (missingIds.length > 0) {
+        await runInTransaction(db, async () => {
+          const CHUNK_SIZE = 500;
+          for (let i = 0; i < missingIds.length; i += CHUNK_SIZE) {
+            const chunk = missingIds.slice(i, i + CHUNK_SIZE);
+            const placeholders = chunk.map(() => "?").join(", ");
+            const result = await db.runAsync(
+              `UPDATE library_catalog_items
+               SET is_missing = 1,
+                   missing_since = COALESCE(missing_since, ?),
+                   updated_at = ?
+               WHERE user_id = ?
+                 AND library_id = ?
+                 AND library_item_id IN (${placeholders})`,
+              [finalizeStartedAt, finalizeStartedAt, context.userId, context.libraryId, ...chunk],
+            );
+            missingMarked += result.changes;
+          }
+        });
+      }
+
       await runInTransaction(db, async () => {
-        const result = await db.runAsync(
-          `UPDATE library_catalog_items
-           SET is_missing = 1,
-               missing_since = COALESCE(missing_since, ?),
-               updated_at = ?
-          WHERE user_id = ?
-            AND library_id = ?
-            AND (last_seen_refresh_run_id IS NULL OR last_seen_refresh_run_id != ?)`,
-          [finalizeStartedAt, finalizeStartedAt, context.userId, context.libraryId, runId],
-        );
-        missingMarked = result.changes;
         await db.runAsync(
           `UPDATE libraries
            SET last_catalog_refresh_at = ?, updated_at = ?
@@ -977,6 +1006,7 @@ export const refreshShadowLibraryCatalog = (pageSize = DEFAULT_PAGE_SIZE) =>
           [finalizeStartedAt, finalizeStartedAt, context.userId, context.libraryId],
         );
       });
+
       finalizeElapsedMs = now() - finalizeStartedAt;
       const completedAt = now();
       await db.runAsync(
