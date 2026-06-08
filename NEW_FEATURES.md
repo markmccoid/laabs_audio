@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-08` `9ea5a28` - Ensure progress consistency between playing and idle states.
+  Tester focus: verify that when stopping a book or starting a new book, the previous book's progress pill on the home shelf does not revert to a stale value and matches the player slider position exactly.
 - `2026-06-08` `cf43646` - Fix home screen progress pills not showing.
   Tester focus: verify that every book card with listening progress on any home shelf (e.g. Recently Added, Continue Listening, playlist or custom shelves) displays a progress pill with time elapsed/remaining, and the progress line displays correctly.
 - `2026-06-07` `pending` - Refine ambient audio sheet controls.

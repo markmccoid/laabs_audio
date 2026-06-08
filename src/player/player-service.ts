@@ -1,8 +1,10 @@
 import {
   createEmptyUserServerState,
   meApi,
+  type UserBookProgress,
   type UserServerState,
 } from "../api/me-api";
+import { upsertShadowServerProgressProjection } from "../data/shadow-sqlite-service";
 import { playbackApi } from "../api/playback-api";
 import { sessionsApi } from "../api/sessions-api";
 import { buildCoverUrls } from "../api/cover-urls";
@@ -2919,40 +2921,58 @@ class PlayerService {
       return;
     }
 
+    const previousState = queryClient.getQueryData<UserServerState>(
+      queryKeys.userServerState(activeLibraryUserKey),
+    );
+    const previousProgress = previousState?.progressByLibraryItemId[payload.libraryItemId];
+    const now = Date.now();
+    const resolvedDuration =
+      payload.durationSeconds > 0 ? payload.durationSeconds : (previousProgress?.duration ?? 0);
+    const progressPercent =
+      resolvedDuration > 0
+        ? Math.max(0, Math.min(1, payload.currentTimeSeconds / resolvedDuration))
+        : (previousProgress?.progressPercent ?? 0);
+
+    const nextProgress: UserBookProgress = {
+      progressId: previousProgress?.progressId ?? `${payload.libraryItemId}:local`,
+      libraryItemId: payload.libraryItemId,
+      mediaItemId: previousProgress?.mediaItemId,
+      duration: resolvedDuration,
+      progressPercent,
+      currentTime: payload.currentTimeSeconds,
+      isFinished: payload.isFinished,
+      hideFromContinueListening: previousProgress?.hideFromContinueListening ?? false,
+      startedAt: previousProgress?.startedAt ?? now,
+      finishedAt: payload.isFinished ? (previousProgress?.finishedAt ?? now) : null,
+      lastUpdate: now,
+    };
+
     queryClient.setQueryData<UserServerState>(
       queryKeys.userServerState(activeLibraryUserKey),
-      (previousState) => {
-        const nextState: UserServerState =
-          previousState ?? createEmptyUserServerState(activeLibraryUserKey);
-        const previousProgress = nextState.progressByLibraryItemId[payload.libraryItemId];
-        const now = Date.now();
-        const resolvedDuration =
-          payload.durationSeconds > 0 ? payload.durationSeconds : (previousProgress?.duration ?? 0);
-        const progressPercent =
-          resolvedDuration > 0
-            ? Math.max(0, Math.min(1, payload.currentTimeSeconds / resolvedDuration))
-            : (previousProgress?.progressPercent ?? 0);
-
+      (oldState) => {
+        const nextState = oldState ?? createEmptyUserServerState(activeLibraryUserKey);
         return {
           ...nextState,
           progressByLibraryItemId: {
             ...nextState.progressByLibraryItemId,
-            [payload.libraryItemId]: {
-              progressId: previousProgress?.progressId ?? `${payload.libraryItemId}:local`,
-              libraryItemId: payload.libraryItemId,
-              duration: resolvedDuration,
-              progressPercent,
-              currentTime: payload.currentTimeSeconds,
-              isFinished: payload.isFinished,
-              hideFromContinueListening: previousProgress?.hideFromContinueListening ?? false,
-              startedAt: previousProgress?.startedAt ?? now,
-              finishedAt: payload.isFinished ? (previousProgress?.finishedAt ?? now) : null,
-              lastUpdate: now,
-            },
+            [payload.libraryItemId]: nextProgress,
           },
         };
       },
     );
+
+    upsertShadowServerProgressProjection(activeLibraryUserKey, nextProgress)
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+      })
+      .catch((error) => {
+        if (__DEV__) {
+          console.warn(
+            "[sqlite-progress] Unable to upsert server progress projection during playback",
+            error,
+          );
+        }
+      });
   }
 
   private logDebug(message: string) {

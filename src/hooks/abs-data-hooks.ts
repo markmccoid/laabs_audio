@@ -19,6 +19,7 @@ import {
 } from "../api/me-api";
 import { selectAccessMode, useAuthActions, useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
+import { upsertShadowServerProgressProjection } from "../data/shadow-sqlite-service";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import type { Bookmark } from "../types/absTypes";
 import {
@@ -368,61 +369,78 @@ export const useReconcileBookProgress = (libraryItemId?: string) => {
         const serverLastUpdate =
           typeof progress.lastUpdate === "number" ? progress.lastUpdate : Date.now();
 
+        const previousState = queryClient.getQueryData<UserServerState>(
+          queryKeys.userServerState(activeLibraryUserKey),
+        );
+        const previousProgress =
+          previousState?.progressByLibraryItemId[resolvedLibraryItemId];
+        if (previousProgress && previousProgress.lastUpdate > serverLastUpdate) {
+          return;
+        }
+
+        const resolvedDuration =
+          progress.duration > 0
+            ? progress.duration
+            : previousProgress?.duration ?? 0;
+        const resolvedProgressPercent =
+          typeof progress.progress === "number"
+            ? progress.progress
+            : resolvedDuration > 0
+              ? Math.max(
+                  0,
+                  Math.min(1, progress.currentTime / resolvedDuration),
+                )
+              : previousProgress?.progressPercent ?? 0;
+
+        const nextProgress: UserBookProgress = {
+          progressId:
+            progress.id ??
+            previousProgress?.progressId ??
+            `${resolvedLibraryItemId}:server`,
+          libraryItemId: resolvedLibraryItemId,
+          mediaItemId: progress.mediaItemId || previousProgress?.mediaItemId,
+          duration: resolvedDuration,
+          progressPercent: resolvedProgressPercent,
+          currentTime: progress.currentTime,
+          isFinished: Boolean(progress.isFinished),
+          hideFromContinueListening: Boolean(
+            progress.hideFromContinueListening,
+          ),
+          startedAt: progress.startedAt ?? previousProgress?.startedAt ?? serverLastUpdate,
+          finishedAt:
+            progress.finishedAt ??
+            (progress.isFinished
+              ? previousProgress?.finishedAt ?? serverLastUpdate
+              : null),
+          lastUpdate: serverLastUpdate,
+        };
+
         queryClient.setQueryData<UserServerState>(
           queryKeys.userServerState(activeLibraryUserKey),
-          (previousState) => {
-            const nextState: UserServerState =
-              previousState ?? createEmptyUserServerState(activeLibraryUserKey);
-            const previousProgress =
-              nextState.progressByLibraryItemId[resolvedLibraryItemId];
-            if (previousProgress && previousProgress.lastUpdate > serverLastUpdate) {
-              return nextState;
-            }
-
-            const resolvedDuration =
-              progress.duration > 0
-                ? progress.duration
-                : previousProgress?.duration ?? 0;
-            const resolvedProgressPercent =
-              typeof progress.progress === "number"
-                ? progress.progress
-                : resolvedDuration > 0
-                  ? Math.max(
-                      0,
-                      Math.min(1, progress.currentTime / resolvedDuration),
-                    )
-                  : previousProgress?.progressPercent ?? 0;
-
+          (oldState) => {
+            const nextState = oldState ?? createEmptyUserServerState(activeLibraryUserKey);
             return {
               ...nextState,
               progressByLibraryItemId: {
                 ...nextState.progressByLibraryItemId,
-                [resolvedLibraryItemId]: {
-                  progressId:
-                    progress.id ??
-                    previousProgress?.progressId ??
-                    `${resolvedLibraryItemId}:server`,
-                  libraryItemId: resolvedLibraryItemId,
-                  mediaItemId: progress.mediaItemId || previousProgress?.mediaItemId,
-                  duration: resolvedDuration,
-                  progressPercent: resolvedProgressPercent,
-                  currentTime: progress.currentTime,
-                  isFinished: Boolean(progress.isFinished),
-                  hideFromContinueListening: Boolean(
-                    progress.hideFromContinueListening,
-                  ),
-                  startedAt: progress.startedAt ?? previousProgress?.startedAt ?? serverLastUpdate,
-                  finishedAt:
-                    progress.finishedAt ??
-                    (progress.isFinished
-                      ? previousProgress?.finishedAt ?? serverLastUpdate
-                      : null),
-                  lastUpdate: serverLastUpdate,
-                },
+                [resolvedLibraryItemId]: nextProgress,
               },
             };
           },
         );
+
+        upsertShadowServerProgressProjection(activeLibraryUserKey, nextProgress)
+          .then(() => {
+            void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+          })
+          .catch((error) => {
+            if (__DEV__) {
+              console.warn(
+                "[sqlite-progress] Unable to upsert server progress during book reconcile",
+                error,
+              );
+            }
+          });
       })
       .catch(() => undefined);
 
