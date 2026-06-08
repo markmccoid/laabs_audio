@@ -10,10 +10,10 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Toaster } from "react-native-sonner";
 import { Uniwind } from "uniwind";
 import { AmbientCoordinator } from "../ambient/ambient-coordinator";
-import { libraryItemsApi } from "../api/library-items-api";
 import { selectAccessMode, useAuthStore } from "../auth/auth-store";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
 import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
+import { useSqliteActiveLibraryRefresh } from "../data/sqlite/use-sqlite-active-library-refresh";
 import { LibraryActivationOverlay } from "../components/library-activation-overlay";
 import { LibrarySelectionGate } from "../components/library-selection-gate";
 import { OfflineConnectionBanner } from "../components/offline-connection-banner";
@@ -132,6 +132,7 @@ const isActivePlaybackState = (playbackState: string) =>
 
 export default function RootLayout() {
   useApplyAccentThemeOverrides();
+  useSqliteActiveLibraryRefresh();
   const { status } = useAuthBootstrap();
   const navigationTheme = useNavigationTheme();
   const themeColors = useThemeColors();
@@ -509,16 +510,6 @@ export default function RootLayout() {
               });
             });
         };
-
-        if (activeLibraryId && activeLibraryUserKey) {
-          prefetches.push(
-            tracePrefetch(
-              "library books",
-              queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
-              () => libraryItemsApi.getItems({ libraryId: activeLibraryId }),
-            ),
-          );
-        }
 
         if (activeLibraryUserKey) {
           prefetches.push(

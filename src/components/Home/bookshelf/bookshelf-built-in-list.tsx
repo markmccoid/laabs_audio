@@ -62,11 +62,20 @@ export const BookshelfBuiltInList = ({
   const listEmptyMessage = normalizedQuery
     ? `No books match "${searchText.trim()}".`
     : emptyMessage;
+  const listExtraData = useMemo(
+    () => ({
+      favoriteByBookId,
+      isOffline,
+      progressByBookId,
+    }),
+    [favoriteByBookId, isOffline, progressByBookId],
+  );
 
   return (
     <FlashList
       ref={listRef}
       data={filteredBooks}
+      extraData={listExtraData}
       keyExtractor={(book) => book.id}
       renderItem={({ item }) => (
         <BookshelfBuiltInItem

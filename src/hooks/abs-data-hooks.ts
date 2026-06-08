@@ -78,7 +78,6 @@ export const useLibraries = () => {
 //~ - ----------------------------------------------------
 type Filters = {
   searchValue?: string;
-  searchDescription?: boolean;
   searchTitleAuthor?: boolean;
   genres?: string[];
   genreOperator?: "and" | "or";
@@ -91,7 +90,6 @@ const createFilterConfig = (filters: Filters) => ({
   search: {
     enabled: filters.searchValue && filters.searchValue.trim() !== "",
     term: filters.searchValue?.toLowerCase().trim(),
-    searchDescription: filters.searchDescription,
     searchTitleAuthor: filters.searchTitleAuthor,
   },
   hasAudio: {
@@ -152,9 +150,7 @@ const applyFilters = <T extends LibraryItemWithUserState>(
     // Search filter
     if (filterConfig.search.enabled) {
       const searchTerm = filterConfig.search.term;
-      let matchesSearch = false;
       let titleAuthorSearch = false;
-      let descriptionSearch = false;
 
       if (filterConfig.search.searchTitleAuthor) {
         titleAuthorSearch = !!(
@@ -162,14 +158,8 @@ const applyFilters = <T extends LibraryItemWithUserState>(
           (book.author && book.author.toLowerCase().includes(searchTerm || ""))
         );
       }
-      if (filterConfig.search.searchDescription) {
-        descriptionSearch = !!(
-          book.description && book.description.toLowerCase().includes(searchTerm || "")
-        );
-      }
 
-      matchesSearch = titleAuthorSearch || descriptionSearch;
-      if (!matchesSearch) return false;
+      if (!titleAuthorSearch) return false;
     }
 
     // Audio files filter
@@ -218,7 +208,6 @@ export const useGetBooks = () => {
   const sortedBy = useSortedBy();
   const sortDirection = useSortDirection();
   const searchValue = useSearchValue();
-  const searchDescription = useFiltersStore((state) => state.searchDescription);
   const searchTitleAuthor = useFiltersStore((state) => state.searchTitleAuthor);
   const genres = useGenres();
   const genreOperator = useGenreOperator();
@@ -286,7 +275,6 @@ export const useGetBooks = () => {
       tagOperator,
       favoriteFilter,
       finishedOnly,
-      searchDescription,
       searchTitleAuthor,
     });
 
@@ -304,7 +292,6 @@ export const useGetBooks = () => {
     tagOperator,
     favoriteFilter,
     finishedOnly,
-    searchDescription,
     searchTitleAuthor,
   ]);
 

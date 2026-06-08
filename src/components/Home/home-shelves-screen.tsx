@@ -1,11 +1,10 @@
-import { libraryItemsApi } from "@/api/library-items-api";
 import { playlistsApi } from "@/api/playlists-api";
 import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
+import { sqliteRefreshCoordinator } from "@/data/sqlite/refresh-coordinator";
 import { type HomeShelf, useHomeShelves } from "@/hooks/use-home-shelves";
 import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
 import { useLibrarySelection } from "@/hooks/use-library-selection";
 import { queryKeys } from "@/query/query-keys";
-import { fetchReconciledUserServerState } from "@/query/user-server-state-reconcile";
 import {
   HOME_PREVIEW_SIZE_LARGE,
   HOME_PREVIEW_SIZE_MEDIUM,
@@ -93,37 +92,21 @@ const HomeShelvesScreen = () => {
 
     try {
       await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
-          exact: true,
-        }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.userServerState(activeLibraryUserKey),
-          exact: true,
-        }),
+        sqliteRefreshCoordinator.refreshActiveLibrary(
+          { userId: activeLibraryUserKey, libraryId: activeLibraryId },
+          { forceCatalog: true, forceOverlay: true, queryClient },
+        ),
         queryClient.invalidateQueries({
           queryKey: queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId),
           exact: true,
         }),
       ]);
 
-      await Promise.all([
-        queryClient.fetchQuery({
-          queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
-          queryFn: () => libraryItemsApi.getItems({ libraryId: activeLibraryId }),
-          meta: { persist: true },
-        }),
-        queryClient.fetchQuery({
-          queryKey: queryKeys.userServerState(activeLibraryUserKey),
-          queryFn: () => fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
-          meta: { persist: true },
-        }),
-        queryClient.fetchQuery({
-          queryKey: queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId),
-          queryFn: () => playlistsApi.getLibraryPlaylists(activeLibraryId),
-          meta: { persist: true },
-        }),
-      ]);
+      await queryClient.fetchQuery({
+        queryKey: queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId),
+        queryFn: () => playlistsApi.getLibraryPlaylists(activeLibraryId),
+        meta: { persist: true },
+      });
     } catch {
       setRefreshMessage("Refresh failed. Pull down to try again.");
     } finally {

@@ -163,6 +163,7 @@ export const ShelfBookCard = ({
   const progressPercent = durationSeconds > 0 ? progressSeconds / durationSeconds : 0;
   const visualProgressPercent = progress?.isFinished ? 1 : progressPercent;
   const showProgressLabel = progressSeconds > 0 || Boolean(progress?.isFinished);
+  const showProgressLine = showProgressLabel && durationSeconds > 0;
   const progressDisplay =
     progressDisplayState.bookId === book.id &&
     progressDisplayState.defaultDisplay === defaultProgressTimeDisplay
@@ -252,24 +253,26 @@ export const ShelfBookCard = ({
           />
         ) : null}
       </View>
-      <View
-        style={{
-          width: coverSize,
-          height: 5,
-          borderRadius: 999,
-          borderCurve: "continuous",
-          overflow: "hidden",
-          backgroundColor: "rgba(148, 163, 184, 0.35)",
-        }}
-      >
+      {showProgressLine ? (
         <View
           style={{
-            width: `${visualProgressPercent * 100}%`,
-            height: "100%",
-            backgroundColor: themeColors.accent,
+            width: coverSize,
+            height: 5,
+            borderRadius: 999,
+            borderCurve: "continuous",
+            overflow: "hidden",
+            backgroundColor: "rgba(148, 163, 184, 0.35)",
           }}
-        />
-      </View>
+        >
+          <View
+            style={{
+              width: `${visualProgressPercent * 100}%`,
+              height: "100%",
+              backgroundColor: themeColors.accent,
+            }}
+          />
+        </View>
+      ) : null}
       {/* <Text
           selectable
           numberOfLines={1}

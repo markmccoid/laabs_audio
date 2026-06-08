@@ -1,6 +1,6 @@
 import { useAuthStore } from "@/auth/auth-store";
+import { sqliteRefreshCoordinator } from "@/data/sqlite/refresh-coordinator";
 import { useGetFilterData } from "@/hooks/abs-data-hooks";
-import { queryKeys } from "@/query/query-keys";
 import {
   useSearchFavoriteFilter,
   useSearchFinishedOnly,
@@ -13,6 +13,7 @@ import { FlashList } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import React, { useState } from "react";
+import { Pressable, Text, View } from "react-native";
 import { LibraryFiltersHeader } from "./library-filters-header";
 import LibraryItem from "./LibraryItem";
 
@@ -30,19 +31,63 @@ const LibraryContainer = () => {
   const finishedOnly = useSearchFinishedOnly();
   const selectedGenres = useSearchGenres();
   const selectedTags = useSearchTags();
-  const { itemById, resultIds, favoriteIds, finishedIds, isLoading, isPending } =
+  const { itemById, resultIds, favoriteIds, finishedIds, readiness, isLoading, isPending } =
     useSearchResults();
 
-  if (isLoading || isPending) return null;
+  const isPreparingInitialSearch = Boolean(
+    (isLoading || isPending) &&
+      (!readiness || !readiness.hasCatalogRows) &&
+      readiness?.lastCatalogRefreshStatus !== "failed",
+  );
+  const initialCatalogFailed = Boolean(
+    readiness && !readiness.hasCatalogRows && readiness.lastCatalogRefreshStatus === "failed",
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await queryClient.refetchQueries({
-      queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
-      exact: true,
-    });
-    setRefreshing(false);
+    try {
+      await sqliteRefreshCoordinator.refreshActiveLibrary(
+        { userId: activeLibraryUserKey, libraryId: activeLibraryId },
+        { forceCatalog: true, forceOverlay: true, queryClient },
+      );
+    } finally {
+      setRefreshing(false);
+    }
   };
+
+  if (isPreparingInitialSearch) {
+    return (
+      <View className="flex-1 items-center justify-center px-6">
+        <Text className="text-center text-base font-semibold text-text">
+          Preparing library search...
+        </Text>
+      </View>
+    );
+  }
+
+  if (initialCatalogFailed) {
+    return (
+      <View className="flex-1 items-center justify-center px-6">
+        <Text className="text-center text-base font-semibold text-text">
+          Library search could not be prepared.
+        </Text>
+        <Text className="mt-2 text-center text-sm text-text-muted">
+          Reconnect and retry, or use Shadow SQLite diagnostics from Settings.
+        </Text>
+        <Pressable
+          className="mt-5 rounded-full bg-accent px-4 py-2"
+          disabled={refreshing}
+          onPress={() => {
+            void onRefresh();
+          }}
+        >
+          <Text className="text-sm font-semibold text-accent-foreground">
+            {refreshing ? "Retrying..." : "Retry"}
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <FlashList

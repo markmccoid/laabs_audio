@@ -40,6 +40,13 @@ export type LibraryItemSummary = {
 
 export type LibraryItemsSummary = LibraryItemSummary[];
 
+export type LibraryItemsSummaryPage = {
+  results: LibraryItemsSummary;
+  total: number;
+  limit: number;
+  page: number;
+};
+
 export type FavoriteOrFinishedItem = {
   itemId: string;
   title: string;
@@ -57,9 +64,36 @@ const requireLibraryId = (libraryId: string, requestName: string) => {
 };
 
 export const libraryItemsApi = {
-  async getItems(params: GetLibraryItemsParams): Promise<LibraryItemsSummary> {
+  toSummary(item: LibraryItem): LibraryItemSummary {
+    const coverUrls = buildCoverUrls(item.id);
+
+    return {
+      id: item.id,
+      title: item.media.metadata.title,
+      subtitle: item.media.metadata.subtitle,
+      author: item.media.metadata.authorName,
+      seriesName: item.media.metadata.seriesName,
+      series: item.media.metadata.seriesName,
+      publishedDate: item.media.metadata.publishedDate,
+      publishedYear: item.media.metadata.publishedYear,
+      narratedBy: item.media.metadata.narratorName,
+      description: item.media.metadata.description,
+      duration: item.media.duration,
+      addedAt: item.addedAt,
+      updatedAt: item.updatedAt,
+      cover: coverUrls.thumb,
+      coverFull: coverUrls.full,
+      numAudioFiles: item.media.numAudioFiles,
+      ebookFormat: item.media?.ebookFormat,
+      genres: item.media.metadata.genres,
+      tags: item.media.tags,
+      asin: item.media.metadata.asin,
+    };
+  },
+
+  async getItemsPage(params: GetLibraryItemsParams): Promise<LibraryItemsSummaryPage> {
     const { filterType, filterValue, sortBy, page, limit } = params;
-    const libraryId = requireLibraryId(params.libraryId, "libraryItemsApi.getItems");
+    const libraryId = requireLibraryId(params.libraryId, "libraryItemsApi.getItemsPage");
 
     const query = new URLSearchParams();
 
@@ -81,37 +115,19 @@ export const libraryItemsApi = {
 
     const suffix = query.toString();
     const url = `/api/libraries/${libraryId}/items${suffix ? `?${suffix}` : ""}`;
-
     const responseData = await absClient.get<GetLibraryItemsResponse>(url);
 
-    return responseData.results.map((item) => {
-      const coverUrls = buildCoverUrls(item.id);
+    return {
+      results: responseData.results.map(libraryItemsApi.toSummary),
+      total: responseData.total,
+      limit: responseData.limit,
+      page: responseData.page,
+    };
+  },
 
-      return {
-        id: item.id,
-        title: item.media.metadata.title,
-        subtitle: item.media.metadata.subtitle,
-        author: item.media.metadata.authorName,
-        seriesName: item.media.metadata.seriesName,
-        series: item.media.metadata.seriesName,
-        publishedDate: item.media.metadata.publishedDate,
-        publishedYear: item.media.metadata.publishedYear,
-        narratedBy: item.media.metadata.narratorName,
-        description: item.media.metadata.description,
-        duration: item.media.duration,
-        addedAt: item.addedAt,
-        updatedAt: item.updatedAt,
-        cover: coverUrls.thumb,
-        coverFull: coverUrls.full,
-        numAudioFiles: item.media.numAudioFiles,
-        ebookFormat: item.media?.ebookFormat,
-        genres: item.media.metadata.genres,
-        tags: item.media.tags,
-        asin: item.media.metadata.asin,
-        // _searchCore: `${item.media.metadata.title.toLowerCase()} ${item.media.metadata.subtitle?.toLowerCase()} ${item.media.metadata.authorName?.toLowerCase()}`,
-        // _searchDesc: item.media.metadata.description.toLowerCase(), // Only used if toggle is on
-      };
-    });
+  async getItems(params: GetLibraryItemsParams): Promise<LibraryItemsSummary> {
+    const responseData = await libraryItemsApi.getItemsPage(params);
+    return responseData.results;
   },
 
   async getFinishedItems(libraryId: string): Promise<LibraryItem[]> {

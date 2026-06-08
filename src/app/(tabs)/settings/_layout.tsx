@@ -24,6 +24,10 @@ const SettingLayout = () => {
         options={{ title: "Progress Logs", headerTransparent: true }}
       />
       <Stack.Screen
+        name="shadow-sqlite"
+        options={{ title: "Shadow SQLite", headerTransparent: true }}
+      />
+      <Stack.Screen
         name="bookshelf-editor"
         options={{
           headerShown: false,

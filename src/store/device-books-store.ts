@@ -340,6 +340,7 @@ export type PendingProgressSync = {
   intentId?: string;
   libraryItemId: string;
   mediaItemId?: string | null;
+  duration?: number;
   currentTime: number;
   isFinished: boolean;
   intentKind?: "position_sample" | "mark_finished" | "mark_unread";
@@ -484,6 +485,7 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
       libraryItemId: string,
       payload: {
         currentTime: number;
+        duration?: number;
         isFinished: boolean;
         updatedAt?: number;
         intentKind?: PendingProgressSync["intentKind"];
@@ -1651,6 +1653,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 `progress_intent_${updatedAt}_${Math.random().toString(36).slice(2, 10)}`,
               libraryItemId,
               mediaItemId: payload.mediaItemId ?? previous?.mediaItemId ?? null,
+              duration: Math.max(0, Math.floor(payload.duration ?? previous?.duration ?? 0)),
               currentTime: queuedCurrentTime,
               isFinished,
               intentKind:

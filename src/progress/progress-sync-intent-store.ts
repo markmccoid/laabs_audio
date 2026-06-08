@@ -9,6 +9,11 @@ import {
   type ProgressSyncIntentKind,
   type ProgressSyncIntentTrigger,
 } from "./progress-sync-intents";
+import {
+  deleteShadowPendingProgressIntent,
+  upsertShadowPendingProgressIntent,
+} from "@/data/shadow-sqlite-service";
+import { queryClient } from "@/query/query-client";
 
 const createProgressIntentId = () =>
   `progress_intent_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -55,6 +60,7 @@ export const recordProgressSyncIntent = (payload: {
   libraryItemId: string;
   mediaItemId?: string | null;
   currentTimeSeconds: number;
+  durationSeconds?: number;
   isFinished: boolean;
   trigger: ProgressSyncIntentTrigger | string;
   intentKind?: ProgressSyncIntentKind;
@@ -80,6 +86,7 @@ export const recordProgressSyncIntent = (payload: {
     payload.libraryItemId,
     {
       currentTime: payload.currentTimeSeconds,
+      duration: payload.durationSeconds,
       isFinished: payload.isFinished,
       updatedAt,
       intentKind,
@@ -97,7 +104,20 @@ export const recordProgressSyncIntent = (payload: {
     },
   );
 
-  return getPendingProgressSyncIntent(payload.libraryItemId, userKey);
+  const intent = getPendingProgressSyncIntent(payload.libraryItemId, userKey);
+  if (intent) {
+    void upsertShadowPendingProgressIntent(userKey, intent)
+      .then(() => {
+        void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+      })
+      .catch((error) => {
+        if (__DEV__) {
+          console.warn("[sqlite-progress] Unable to upsert pending progress", error);
+        }
+      });
+  }
+
+  return intent;
 };
 
 export const clearSyncedProgressSyncIntent = (payload: {
@@ -115,6 +135,15 @@ export const clearSyncedProgressSyncIntent = (payload: {
   deviceBooksStore
     .getState()
     .actions.clearPendingProgressSync(payload.libraryItemId, { userKey });
+  void deleteShadowPendingProgressIntent(userKey, payload.libraryItemId)
+    .then(() => {
+      void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+    })
+    .catch((error) => {
+      if (__DEV__) {
+        console.warn("[sqlite-progress] Unable to delete pending progress", error);
+      }
+    });
 };
 
 export const getProgressIntentUpdatedAt = (intent: PendingProgressSync | null) =>

@@ -4,7 +4,7 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import type { Href } from "expo-router";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
 import { ShelfBookCard } from "./shelf-book-card";
@@ -41,6 +41,16 @@ export const HomeShelfSection = ({
   const [sectionTop, setSectionTop] = useState(0);
   const [listTop, setListTop] = useState(0);
   const menuContentTop = sectionTop + listTop + 118;
+  const listExtraData = useMemo(
+    () => ({
+      favoriteByBookId,
+      isOffline,
+      menuContentTop,
+      progressByBookId,
+      renderCardMenus,
+    }),
+    [favoriteByBookId, isOffline, menuContentTop, progressByBookId, renderCardMenus],
+  );
 
   return (
     <View
@@ -122,6 +132,7 @@ export const HomeShelfSection = ({
         >
           <FlatList
             data={books}
+            extraData={listExtraData}
             horizontal
             keyExtractor={(book) => book.id}
             renderItem={({ item }) => (

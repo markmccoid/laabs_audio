@@ -6,6 +6,11 @@ import {
   type UserServerState,
 } from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
+import {
+  upsertShadowPendingProgressIntent,
+  upsertShadowServerProgressProjection,
+} from "@/data/shadow-sqlite-service";
+import type { SqliteHomeProjection } from "@/data/sqlite/home-repository";
 import { useFavoriteBookAction } from "@/hooks/use-favorite-book-action";
 import {
   resolveStoredDownloadCoverUri,
@@ -24,7 +29,7 @@ import {
   recordProgressSyncIntent,
 } from "@/progress/progress-sync-intent-store";
 import { queryKeys } from "@/query/query-keys";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Alert } from "react-native";
 import { toast } from "react-native-sonner";
@@ -93,6 +98,104 @@ const updateUserServerStateProgress = (
       },
     },
   };
+};
+
+const buildOptimisticProgress = (
+  book: LibraryItemSummary,
+  previousProgress: UserBookProgress | undefined,
+  payload: {
+    currentTimeSeconds?: number;
+    durationSeconds?: number;
+    isFinished?: boolean;
+    hideFromContinueListening?: boolean;
+    progressId?: string;
+  },
+): UserBookProgress => {
+  const updatedAt = Date.now();
+  const resolvedDuration = Math.max(
+    0,
+    Math.floor(payload.durationSeconds ?? previousProgress?.duration ?? book.duration ?? 0),
+  );
+  const resolvedCurrentTime = Math.max(
+    0,
+    Math.floor(payload.currentTimeSeconds ?? previousProgress?.currentTime ?? 0),
+  );
+  const resolvedIsFinished = payload.isFinished ?? previousProgress?.isFinished ?? false;
+  const resolvedHideFromContinueListening =
+    payload.hideFromContinueListening ??
+    previousProgress?.hideFromContinueListening ??
+    false;
+  const progressPercent =
+    resolvedDuration > 0
+      ? Math.max(0, Math.min(1, resolvedCurrentTime / resolvedDuration))
+      : (previousProgress?.progressPercent ?? 0);
+  return {
+    progressId:
+      payload.progressId ??
+      previousProgress?.progressId ??
+      `${book.id}:optimistic`,
+    libraryItemId: book.id,
+    mediaItemId: previousProgress?.mediaItemId,
+    duration: resolvedDuration,
+    progressPercent,
+    currentTime: resolvedCurrentTime,
+    isFinished: resolvedIsFinished,
+    hideFromContinueListening: resolvedHideFromContinueListening,
+    startedAt: previousProgress?.startedAt ?? updatedAt,
+    finishedAt: resolvedIsFinished ? (previousProgress?.finishedAt ?? updatedAt) : null,
+    lastUpdate: updatedAt,
+  };
+};
+
+const updateSqliteHomeProjectionProgress = (
+  queryClient: QueryClient,
+  book: LibraryItemSummary,
+  previousProgress: UserBookProgress | undefined,
+  payload: {
+    currentTimeSeconds?: number;
+    durationSeconds?: number;
+    isFinished?: boolean;
+    hideFromContinueListening?: boolean;
+    progressId?: string;
+  },
+) => {
+  const nextProgress = buildOptimisticProgress(book, previousProgress, payload);
+  const shouldShowInContinueListening =
+    nextProgress.currentTime > 0 &&
+    !nextProgress.isFinished &&
+    !nextProgress.hideFromContinueListening;
+
+  queryClient.setQueriesData<SqliteHomeProjection>(
+    {
+      predicate: (query) =>
+        Array.isArray(query.queryKey) && query.queryKey.includes("homeProjection"),
+    },
+    (previousProjection) => {
+      if (!previousProjection) return previousProjection;
+
+      const catalogById = new Map(previousProjection.catalogById);
+      catalogById.set(book.id, book);
+
+      const progressByBookId = {
+        ...previousProjection.progressByBookId,
+        [book.id]: nextProgress,
+      };
+
+      const withoutBook = previousProjection.continueListening.filter(
+        (item) => item.id !== book.id,
+      );
+      const continueListening = shouldShowInContinueListening
+        ? [book, ...withoutBook]
+        : withoutBook;
+
+      return {
+        ...previousProjection,
+        catalogById,
+        progressByBookId,
+        continueListening,
+      };
+    },
+  );
 };
 
 export const useShelfBookCardMenuActions = ({
@@ -179,6 +282,11 @@ export const useShelfBookCardMenuActions = ({
     );
 
     if (activeLibraryUserKey) {
+      updateSqliteHomeProjectionProgress(queryClient, book, progress, {
+        currentTimeSeconds: durationSeconds,
+        durationSeconds,
+        isFinished: true,
+      });
       queryClient.setQueryData<UserServerState>(
         queryKeys.userServerState(activeLibraryUserKey),
         (previousState) =>
@@ -196,6 +304,16 @@ export const useShelfBookCardMenuActions = ({
         libraryItemId: book.id,
         durationSeconds,
       });
+      if (activeLibraryUserKey) {
+        await upsertShadowServerProgressProjection(
+          activeLibraryUserKey,
+          buildOptimisticProgress(book, progress, {
+            currentTimeSeconds: durationSeconds,
+            durationSeconds,
+            isFinished: true,
+          }),
+        );
+      }
       toast.success("Marked read");
       return;
     }
@@ -204,11 +322,15 @@ export const useShelfBookCardMenuActions = ({
       const intent = recordProgressSyncIntent({
         libraryItemId: book.id,
         currentTimeSeconds: durationSeconds,
+        durationSeconds,
         isFinished: true,
         title: book.title,
         trigger: "mark_read",
         intentKind: "mark_finished",
       });
+      if (activeLibraryUserKey && intent) {
+        await upsertShadowPendingProgressIntent(activeLibraryUserKey, intent);
+      }
       await meApi.updateProgress(book.id, {
         currentTime: durationSeconds,
         isFinished: true,
@@ -217,6 +339,18 @@ export const useShelfBookCardMenuActions = ({
         libraryItemId: book.id,
         syncedThroughUpdatedAt: intent?.updatedAt ?? Date.now(),
       });
+      if (activeLibraryUserKey) {
+        await upsertShadowServerProgressProjection(
+          activeLibraryUserKey,
+          buildOptimisticProgress(book, progress, {
+            currentTimeSeconds: durationSeconds,
+            durationSeconds,
+            isFinished: true,
+            progressId: progress?.progressId,
+          }),
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.booksInProgress(activeLibraryId),
       });
@@ -224,14 +358,19 @@ export const useShelfBookCardMenuActions = ({
       return;
     }
 
-    recordProgressSyncIntent({
+    const offlineIntent = recordProgressSyncIntent({
       libraryItemId: book.id,
       currentTimeSeconds: durationSeconds,
+      durationSeconds,
       isFinished: true,
       title: book.title,
       trigger: "mark_read_offline",
       intentKind: "mark_finished",
     });
+    if (activeLibraryUserKey && offlineIntent) {
+      await upsertShadowPendingProgressIntent(activeLibraryUserKey, offlineIntent);
+    }
+    void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
     toast.success("Marked read offline");
   };
 
@@ -244,6 +383,12 @@ export const useShelfBookCardMenuActions = ({
     );
 
     if (activeLibraryUserKey) {
+      updateSqliteHomeProjectionProgress(queryClient, book, progress, {
+        currentTimeSeconds: 0,
+        durationSeconds,
+        isFinished: false,
+        progressId: progress?.progressId,
+      });
       queryClient.setQueryData<UserServerState>(
         queryKeys.userServerState(activeLibraryUserKey),
         (previousState) =>
@@ -261,11 +406,15 @@ export const useShelfBookCardMenuActions = ({
       const intent = recordProgressSyncIntent({
         libraryItemId: book.id,
         currentTimeSeconds: 0,
+        durationSeconds,
         isFinished: false,
         title: book.title,
         trigger: "mark_unread",
         intentKind: "mark_unread",
       });
+      if (activeLibraryUserKey && intent) {
+        await upsertShadowPendingProgressIntent(activeLibraryUserKey, intent);
+      }
       await meApi.updateProgress(book.id, {
         currentTime: 0,
         isFinished: false,
@@ -275,6 +424,19 @@ export const useShelfBookCardMenuActions = ({
         libraryItemId: book.id,
         syncedThroughUpdatedAt: intent?.updatedAt ?? Date.now(),
       });
+      if (activeLibraryUserKey) {
+        await upsertShadowServerProgressProjection(
+          activeLibraryUserKey,
+          buildOptimisticProgress(book, progress, {
+            currentTimeSeconds: 0,
+            durationSeconds,
+            isFinished: false,
+            hideFromContinueListening: progress?.hideFromContinueListening ?? false,
+            progressId: progress?.progressId,
+          }),
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.booksInProgress(activeLibraryId),
       });
@@ -282,14 +444,19 @@ export const useShelfBookCardMenuActions = ({
       return;
     }
 
-    recordProgressSyncIntent({
+    const offlineIntent = recordProgressSyncIntent({
       libraryItemId: book.id,
       currentTimeSeconds: 0,
+      durationSeconds,
       isFinished: false,
       title: book.title,
       trigger: "mark_unread_offline",
       intentKind: "mark_unread",
     });
+    if (activeLibraryUserKey && offlineIntent) {
+      await upsertShadowPendingProgressIntent(activeLibraryUserKey, offlineIntent);
+    }
+    void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
     toast.success("Marked unread offline");
   };
 
@@ -300,10 +467,23 @@ export const useShelfBookCardMenuActions = ({
     }
 
     const nextHiddenValue = !progress.hideFromContinueListening;
+    const updatedAt = Date.now();
+    updateSqliteHomeProjectionProgress(queryClient, book, progress, {
+      currentTimeSeconds: progress.currentTime,
+      durationSeconds: progress.duration,
+      hideFromContinueListening: nextHiddenValue,
+      isFinished: progress.isFinished,
+      progressId: progress.progressId,
+    });
     await meApi.updateProgress(book.id, {
       currentTime: progress.currentTime,
       isFinished: progress.isFinished,
       hideFromContinueListening: nextHiddenValue,
+    });
+    await upsertShadowServerProgressProjection(activeLibraryUserKey, {
+      ...progress,
+      hideFromContinueListening: nextHiddenValue,
+      lastUpdate: updatedAt,
     });
     queryClient.setQueryData<UserServerState>(
       queryKeys.userServerState(activeLibraryUserKey),
@@ -317,6 +497,7 @@ export const useShelfBookCardMenuActions = ({
           progressId: progress.progressId,
         }),
     );
+    void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
     void queryClient.invalidateQueries({
       queryKey: queryKeys.booksInProgress(activeLibraryId),
     });
@@ -373,6 +554,7 @@ export const useShelfBookCardMenuActions = ({
             setBusyAction("finished");
             void (isMarkedFinished ? syncUnfinishedProgress() : syncFinishedProgress())
               .catch(() => {
+                void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
                 toast.error(
                   isMarkedFinished ? "Unable to mark as unread" : "Unable to mark as read",
                 );
@@ -393,6 +575,7 @@ export const useShelfBookCardMenuActions = ({
     try {
       await toggleContinueListeningVisibility();
     } catch {
+      void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
       toast.error(`Unable to ${continueListeningVisibilityLabel.toLowerCase()}`);
     } finally {
       setBusyAction(null);

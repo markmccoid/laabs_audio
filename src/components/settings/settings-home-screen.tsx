@@ -12,6 +12,7 @@ type SettingsRowProps = {
     | "/(tabs)/settings/authentication"
     | "/(tabs)/settings/bookshelves"
     | "/(tabs)/settings/progress-logs"
+    | "/(tabs)/settings/shadow-sqlite"
     | "/(tabs)/settings/playback"
     | "/(tabs)/settings/system"
     | "/(tabs)/settings/testRoute";
@@ -164,6 +165,12 @@ export const SettingsHomeScreen = () => {
               title="Progress Logs"
               subtitle="Inspect restore, queue, and sync diagnostics"
               icon="list.bullet.rectangle.portrait"
+            />
+            <SettingsRow
+              href="/(tabs)/settings/shadow-sqlite"
+              title="Shadow SQLite"
+              subtitle="Stress test library storage, overlays, and SQL search"
+              icon="cylinder.split.1x2"
               isLast
             />
             {/* <SettingsRow

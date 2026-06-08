@@ -1,12 +1,9 @@
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { libraryItemsApi } from "@/api/library-items-api";
-import { normalizeUserProgressByLibraryItemId, type UserBookProgress } from "@/api/me-api";
+import { useEffect, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/auth/auth-store";
+import { sqliteRefreshCoordinator } from "@/data/sqlite/refresh-coordinator";
+import { sqliteSearchRepository } from "@/data/sqlite/search-repository";
 import { queryKeys } from "@/query/query-keys";
-import { useGetUserServerState } from "@/hooks/abs-data-hooks";
-import { buildLibrarySearchIndex } from "./library-search-index";
-import { deriveSearchResultSet } from "./derive-search-result-set";
 import {
   useSearchFavoriteFilter,
   useSearchFinishedOnly,
@@ -19,21 +16,11 @@ import {
   useSearchText,
 } from "./search-session-store";
 
-const isDev = () => typeof __DEV__ !== "undefined" && __DEV__;
-
-const now = () => {
-  if (typeof performance !== "undefined" && typeof performance.now === "function") {
-    return performance.now();
-  }
-  return Date.now();
-};
-
-const logPerformance = (label: string, payload: Record<string, number | string>) => {
-  if (!isDev()) return;
-  console.log("[search-performance]", label, payload);
-};
+const EMPTY_ITEM_BY_ID = new Map();
+const EMPTY_ID_SET = new Set<string>();
 
 export const useSearchResults = () => {
+  const queryClient = useQueryClient();
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
@@ -46,81 +33,24 @@ export const useSearchResults = () => {
   const finishedOnly = useSearchFinishedOnly();
   const sortedBy = useSearchSortedBy();
   const sortDirection = useSearchSortDirection();
-  const {
-    data: userServerState,
-    isPending: isUserStatePending,
-    isLoading: isUserStateLoading,
-    isError: isUserStateError,
-  } = useGetUserServerState();
 
-  const {
-    data: libraryItems,
-    isPending,
-    isError,
-    isLoading,
-    ...rest
-  } = useQuery({
-    queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
-    queryFn: async () => {
-      if (!activeLibraryId) return [];
-      return libraryItemsApi.getItems({ libraryId: activeLibraryId });
-    },
-    enabled: status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId,
-    meta: { persist: true },
-  });
-
-  const searchIndex = useMemo(() => {
-    const books = libraryItems ?? [];
-    const startedAt = now();
-    const index = buildLibrarySearchIndex(books);
-    logPerformance("index-build", {
-      items: books.length,
-      ms: Math.round(now() - startedAt),
-    });
-    return index;
-  }, [libraryItems]);
-
-  const favoriteIds = useMemo(
-    () => new Set(Object.keys(userServerState?.favoriteByLibraryItemId ?? {})),
-    [userServerState?.favoriteByLibraryItemId],
-  );
-
-  const finishedIds = useMemo(() => {
-    const progressByLibraryItemId = normalizeUserProgressByLibraryItemId(
-      userServerState as
-        | (typeof userServerState & { progressByBookId?: Record<string, UserBookProgress> })
-        | undefined,
-    );
-    return new Set(
-      Object.values(progressByLibraryItemId)
-        .filter((progress) => progress.isFinished)
-        .map((progress) => progress.libraryItemId),
-    );
-  }, [userServerState]);
-
-  const searchResultSet = useMemo(
-    () =>
-      deriveSearchResultSet(searchIndex, {
-        searchText,
-        genres,
-        genreOperator,
-        tags,
-        tagOperator,
-        favoriteFilter,
-        finishedOnly,
-        sortedBy,
-        sortDirection,
-        favoriteIds,
-        finishedIds,
-      }),
+  const searchParams = useMemo(
+    () => ({
+      query: searchText,
+      genres,
+      genreOperator,
+      tags,
+      tagOperator,
+      favoriteFilter,
+      finishedOnly,
+      sortBy: sortedBy,
+      sortDirection,
+    }),
     [
       favoriteFilter,
-      favoriteIds,
-      finishedIds,
       finishedOnly,
       genreOperator,
       genres,
-      searchIndex,
       searchText,
       sortDirection,
       sortedBy,
@@ -129,27 +59,61 @@ export const useSearchResults = () => {
     ],
   );
 
+  const enabled = status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
+  const readinessQuery = useQuery({
+    queryKey: queryKeys.sqliteLibraryReadiness(activeLibraryUserKey, activeLibraryId),
+    queryFn: () => sqliteSearchRepository.getReadiness(),
+    enabled,
+  });
+  const readiness = readinessQuery.data;
+
+  useEffect(() => {
+    if (!enabled || !activeLibraryUserKey || !activeLibraryId) return;
+    if (!readiness || readiness.hasCatalogRows) return;
+
+    void sqliteRefreshCoordinator
+      .refreshActiveLibrary(
+        { userId: activeLibraryUserKey, libraryId: activeLibraryId },
+        { forceCatalog: true, forceOverlay: true, queryClient },
+      )
+      .catch(() => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.sqliteLibraryReadiness(activeLibraryUserKey, activeLibraryId),
+        });
+      });
+  }, [activeLibraryId, activeLibraryUserKey, enabled, queryClient, readiness]);
+
+  const searchQuery = useQuery({
+    queryKey: queryKeys.sqliteSearchResultSet(activeLibraryUserKey, activeLibraryId, searchParams),
+    queryFn: () => sqliteSearchRepository.querySearchResultSet(searchParams),
+    enabled: enabled && Boolean(readiness?.hasCatalogRows),
+  });
+
   if (status !== "authenticated") {
     return {
-      itemById: searchIndex.itemById,
+      itemById: EMPTY_ITEM_BY_ID,
       resultIds: [],
-      favoriteIds,
-      finishedIds,
+      favoriteIds: EMPTY_ID_SET,
+      finishedIds: EMPTY_ID_SET,
+      readiness: null,
       isPending: false,
       isError: false,
       isLoading: false,
       error: null,
+      refetch: searchQuery.refetch,
     };
   }
 
   return {
-    itemById: searchIndex.itemById,
-    resultIds: searchResultSet.resultIds,
-    favoriteIds,
-    finishedIds,
-    isPending: isPending || isUserStatePending,
-    isError: isError || isUserStateError,
-    isLoading: isLoading || isUserStateLoading,
-    ...rest,
+    itemById: searchQuery.data?.itemById ?? EMPTY_ITEM_BY_ID,
+    resultIds: searchQuery.data?.resultIds ?? [],
+    favoriteIds: searchQuery.data?.favoriteIds ?? EMPTY_ID_SET,
+    finishedIds: searchQuery.data?.finishedIds ?? EMPTY_ID_SET,
+    readiness: readiness ?? null,
+    isPending: readinessQuery.isPending || searchQuery.isPending,
+    isError: readinessQuery.isError || searchQuery.isError,
+    isLoading: readinessQuery.isLoading || searchQuery.isLoading,
+    error: readinessQuery.error ?? searchQuery.error,
+    refetch: searchQuery.refetch,
   };
 };

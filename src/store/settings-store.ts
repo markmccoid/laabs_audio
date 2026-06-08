@@ -150,7 +150,7 @@ export type SettingsState = {
     clearHomeShelf: (scopeKey: string | null, shelfId: string) => void;
     setDailyDiscoverShelf: (
       scopeKey: string | null,
-      payload: { dateKey: string; seed: number; bookIds: string[] },
+      payload: { dateKey: string; seed: number; bookIds: string[]; updatedAt?: number },
     ) => void;
   };
 };
@@ -362,12 +362,14 @@ export const settingsStore = createStore<SettingsState>()(
           if (!normalizedScopeKey || !normalizedDateKey) return;
 
           const dedupedBookIds = dedupeShelfOrder(payload.bookIds);
+          const updatedAt = Math.max(0, Math.floor(payload.updatedAt ?? Date.now()));
 
           set((state) => {
             const existing = state.discoverShelfByScope[normalizedScopeKey];
             const unchanged =
               existing?.dateKey === normalizedDateKey &&
               existing?.seed === payload.seed &&
+              existing?.updatedAt === updatedAt &&
               existing?.bookIds.length === dedupedBookIds.length &&
               existing.bookIds.every((bookId, index) => bookId === dedupedBookIds[index]);
 
@@ -381,7 +383,7 @@ export const settingsStore = createStore<SettingsState>()(
                   dateKey: normalizedDateKey,
                   seed: payload.seed,
                   bookIds: dedupedBookIds,
-                  updatedAt: Date.now(),
+                  updatedAt,
                 },
               },
             };

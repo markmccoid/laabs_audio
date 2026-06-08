@@ -6,6 +6,7 @@ import {
   type UserServerState,
 } from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
+import { setShadowFavoriteProjection } from "@/data/shadow-sqlite-service";
 import { queryKeys } from "@/query/query-keys";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "react-native-sonner";
@@ -92,6 +93,20 @@ export const useFavoriteBookAction = () => {
       );
       const nextIsFavorite = !isFavorite;
 
+      void setShadowFavoriteProjection(
+        activeLibraryUserKey,
+        libraryItemId,
+        nextIsFavorite,
+      )
+        .then(() => {
+          void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+        })
+        .catch((error) => {
+          if (__DEV__) {
+            console.warn("[sqlite-favorite] Unable to update favorite projection", error);
+          }
+        });
+
       queryClient.setQueryData<UserServerState>(
         queryKeys.userServerState(activeLibraryUserKey),
         (previousState) =>
@@ -139,6 +154,7 @@ export const useFavoriteBookAction = () => {
     },
     onSuccess: (_data, variables) => {
       toast.success(variables.isFavorite ? "Removed from favorites" : "Marked as favorite");
+      void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.itemDetails(activeLibraryUserKey, variables.libraryItemId),
         exact: true,
@@ -161,6 +177,15 @@ export const useFavoriteBookAction = () => {
         queryKeys.itemDetails(activeLibraryUserKey, variables.libraryItemId),
         context?.previousItemDetails,
       );
+      if (activeLibraryUserKey) {
+        void setShadowFavoriteProjection(
+          activeLibraryUserKey,
+          variables.libraryItemId,
+          variables.isFavorite,
+        ).finally(() => {
+          void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+        });
+      }
       toast.error(variables.isFavorite ? "Unable to remove favorite" : "Unable to mark favorite");
     },
   });

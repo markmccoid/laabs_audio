@@ -1,13 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LibraryItemSummary, LibraryItemsSummary } from "../api/library-items-api";
-import {
-  normalizeUserProgressByLibraryItemId,
-  type UserBookProgress,
-  type UserServerState,
-} from "../api/me-api";
+import { type UserBookProgress } from "../api/me-api";
 import { playlistsApi } from "../api/playlists-api";
 import { selectAccessMode, useAuthStore } from "../auth/auth-store";
+import { sqliteHomeRepository } from "../data/sqlite/home-repository";
+import { sqliteRefreshCoordinator } from "../data/sqlite/refresh-coordinator";
+import { sqliteSearchRepository } from "../data/sqlite/search-repository";
 import { useDisplayedListeningPositionRecord } from "../progress/displayed-listening-position";
 import { usePlaybackStore } from "../player/playback-store";
 import { queryKeys } from "../query/query-keys";
@@ -18,7 +17,6 @@ import {
   toHomeShelfScopeKey,
   useDeviceBooksStore,
   type HomeDerivedShelfId,
-  type PendingProgressSync,
   type PlaylistShelfSyncState,
 } from "../store/device-books-store";
 import { toDownloadedBookSummary } from "../store/downloaded-book-helpers";
@@ -32,10 +30,6 @@ import {
   markStartup,
   measureStartupSync,
 } from "../utils/dev-startup-tracing";
-
-type LegacyUserServerState = UserServerState & {
-  progressByBookId?: Record<string, UserBookProgress>;
-};
 
 export type HomeDerivedShelf = {
   kind: "derived";
@@ -89,11 +83,14 @@ const EMPTY_CUSTOM_SHELVES: {
   updatedAt: number;
 }[] = [];
 const EMPTY_CATALOG: LibraryItemsSummary = [];
-const EMPTY_PENDING_PROGRESS: Record<string, PendingProgressSync> = {};
+const EMPTY_CATALOG_BY_ID = new Map<string, LibraryItemSummary>();
 const EMPTY_FAVORITES_BY_BOOK: Record<string, true> = {};
+const EMPTY_PROGRESS_BY_BOOK: Record<string, UserBookProgress> = {};
 const EMPTY_ORDER: string[] = [];
 const EMPTY_SHELF_SETTINGS_BY_ID: Record<string, HomeShelfSettings> = {};
 const PERSIST_META = { persist: true } as const;
+const HOME_SQLITE_SHELF_FETCH_LIMIT = 250;
+const DISCOVER_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
 
 const reorderByIds = <T extends { id: string }>(items: T[], orderedIds: string[]) => {
@@ -118,36 +115,6 @@ const reorderByIds = <T extends { id: string }>(items: T[], orderedIds: string[]
 
 const toDailySeedKey = (date = new Date()) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-
-const hashSeed = (value: string) => {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-};
-
-const mulberry32 = (seed: number) => {
-  let value = seed >>> 0;
-  return () => {
-    value += 0x6d2b79f5;
-    let t = value;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-};
-
-const seededShuffle = <T,>(items: T[], seedKey: string) => {
-  const result = [...items];
-  const random = mulberry32(hashSeed(seedKey));
-  for (let index = result.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
-  }
-  return result;
-};
 
 const buildLocalProgress = (payload: {
   libraryItemId: string;
@@ -200,8 +167,10 @@ export const useHomeShelves = () => {
     [],
   );
   const didLogDerivationRef = useRef(false);
-
+  const discoverRefreshInFlightRef = useRef<Promise<void> | null>(null);
+  const [discoverClockMs, setDiscoverClockMs] = useState(() => Date.now());
   const queryClient = useQueryClient();
+
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const authStatus = useAuthStore((state) => state.status);
@@ -214,37 +183,7 @@ export const useHomeShelves = () => {
     "browsing",
   );
 
-  const libraryBooksQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId);
-  const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
   const playlistsQueryKey = queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId);
-
-  const immediateCatalog = activeLibraryUserKey && activeLibraryId
-    ? queryClient.getQueryData<LibraryItemsSummary>(libraryBooksQueryKey)
-    : undefined;
-  const immediateUserServerState = activeLibraryUserKey
-    ? queryClient.getQueryData<UserServerState>(userServerStateQueryKey)
-    : undefined;
-
-  // Subscribe to existing cache values without triggering fetches.
-  const { data: subscribedCatalog, isFetching: isCatalogFetching } = useQuery<
-    LibraryItemsSummary | undefined
-  >({
-    queryKey: libraryBooksQueryKey,
-    queryFn: async () => immediateCatalog,
-    enabled: false,
-    initialData: immediateCatalog,
-    // Keep persistence metadata on shared query options for this key.
-    meta: PERSIST_META,
-  });
-
-  const { data: subscribedUserServerState } = useQuery<UserServerState | undefined>({
-    queryKey: userServerStateQueryKey,
-    queryFn: async () => immediateUserServerState,
-    enabled: false,
-    initialData: immediateUserServerState,
-    // Keep persistence metadata on shared query options for this key.
-    meta: PERSIST_META,
-  });
 
   const { data: libraryPlaylists } = useQuery({
     queryKey: playlistsQueryKey,
@@ -271,11 +210,6 @@ export const useHomeShelves = () => {
   const suppressedPlaylistIds = useDeviceBooksStore((state) =>
     selectSuppressedPlaylistIdsByScope(state, homeScopeKey),
   );
-  const pendingProgressByItemId = useDeviceBooksStore((state) =>
-    activeLibraryUserKey
-      ? state.pendingProgressByUser[activeLibraryUserKey] ?? EMPTY_PENDING_PROGRESS
-      : EMPTY_PENDING_PROGRESS,
-  );
   const upsertPlaylistsFromServer = useDeviceBooksStore((state) => state.actions.upsertPlaylistsFromServer);
   const markMissingPlaylists = useDeviceBooksStore((state) => state.actions.markMissingPlaylists);
   const downloadedDetailsById = useDeviceBooksStore((state) => state.downloadedDetailsById);
@@ -299,65 +233,111 @@ export const useHomeShelves = () => {
     homeScopeKey ? state.homeShelvesByScope[homeScopeKey]?.shelfOrder ?? EMPTY_ORDER : EMPTY_ORDER,
   );
 
-  const catalog = useMemo(
-    () => subscribedCatalog ?? immediateCatalog ?? EMPTY_CATALOG,
-    [immediateCatalog, subscribedCatalog],
+  const discoverSnapshotUpdatedAt =
+    typeof storedDiscoverShelf?.updatedAt === "number" ? storedDiscoverShelf.updatedAt : 0;
+  const hasFreshDiscoverSnapshot = Boolean(
+    storedDiscoverShelf &&
+      discoverSnapshotUpdatedAt > 0 &&
+      discoverClockMs - discoverSnapshotUpdatedAt < DISCOVER_REFRESH_INTERVAL_MS,
   );
+  const discoverHomeItemCount =
+    shelfSettingsById.discover?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT;
+  const catalogItemIdsToResolve = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...customShelvesRaw.flatMap((shelf) => shelf.bookIds),
+          ...playlistShelvesRaw.flatMap((shelf) => shelf.bookIds),
+          ...Object.keys(downloadedDetailsById),
+          ...(hasFreshDiscoverSnapshot ? storedDiscoverShelf?.bookIds ?? [] : []),
+        ].filter(Boolean)),
+      ),
+    [
+      customShelvesRaw,
+      downloadedDetailsById,
+      hasFreshDiscoverSnapshot,
+      playlistShelvesRaw,
+      storedDiscoverShelf,
+    ],
+  );
+  const homeProjectionParams = useMemo(
+    () => ({
+      catalogItemIds: catalogItemIdsToResolve,
+      continueListeningLimit: Math.max(
+        HOME_SQLITE_SHELF_FETCH_LIMIT,
+        shelfSettingsById.continueListening?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+      ),
+      recentlyAddedLimit: Math.max(
+        HOME_SQLITE_SHELF_FETCH_LIMIT,
+        shelfSettingsById.recentlyAdded?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+      ),
+    }),
+    [
+      catalogItemIdsToResolve,
+      shelfSettingsById.continueListening?.homeItemCount,
+      shelfSettingsById.recentlyAdded?.homeItemCount,
+    ],
+  );
+
+  const readinessQuery = useQuery({
+    queryKey: queryKeys.sqliteLibraryReadiness(activeLibraryUserKey, activeLibraryId),
+    queryFn: () => sqliteSearchRepository.getReadiness(),
+    enabled:
+      authStatus === "authenticated" &&
+      Boolean(activeLibraryId) &&
+      Boolean(activeLibraryUserKey),
+  });
+  const readiness = readinessQuery.data;
+  const hasReadySqliteHome =
+    readiness?.hasCatalogRows === true && Boolean(readiness.lastOverlayRefreshAt);
+
+  const homeProjectionQuery = useQuery({
+    queryKey: queryKeys.sqliteHomeProjection(
+      activeLibraryUserKey,
+      activeLibraryId,
+      homeProjectionParams,
+    ),
+    queryFn: () => sqliteHomeRepository.getHomeProjection(homeProjectionParams),
+    enabled:
+      authStatus === "authenticated" &&
+      Boolean(activeLibraryId) &&
+      Boolean(activeLibraryUserKey) &&
+      hasReadySqliteHome,
+    placeholderData: (previousData, previousQuery) => {
+      const previousKey = previousQuery?.queryKey;
+      if (!Array.isArray(previousKey)) return undefined;
+      return previousKey[2] === activeLibraryUserKey && previousKey[4] === activeLibraryId
+        ? previousData
+        : undefined;
+    },
+  });
+  const homeProjection = homeProjectionQuery.data;
+
   const isCatalogLoading = Boolean(
     authStatus === "authenticated" &&
       activeLibraryId &&
       activeLibraryUserKey &&
-      !subscribedCatalog &&
-      !immediateCatalog &&
-      (isCatalogFetching || isOnline !== false),
+      !homeProjection &&
+      (homeProjectionQuery.isFetching ||
+        readinessQuery.isFetching ||
+        !readiness ||
+        !readiness.hasCatalogRows ||
+        !readiness.lastOverlayRefreshAt) &&
+      !homeProjectionQuery.error &&
+      !readinessQuery.error,
   );
-  const userServerState = subscribedUserServerState ?? immediateUserServerState;
 
-  const catalogById = useMemo(() => {
-    return measureStartupSync(
-      "home catalog index",
-      () => {
-        const map = new Map<string, LibraryItemSummary>();
-        catalog.forEach((book) => {
-          map.set(book.id, book);
-        });
-        return map;
-      },
-      (map) => ({
-        catalogCount: catalog.length,
-        indexedCount: map.size,
-      }),
-    );
-  }, [catalog]);
+  const catalogById = homeProjection?.catalogById ?? EMPTY_CATALOG_BY_ID;
+  const catalog = useMemo(
+    () => Array.from(catalogById.values()),
+    [catalogById],
+  );
 
   const progressByBookId = useMemo(() => {
     return measureStartupSync(
       "home progress projection",
       () => {
-        const normalizedProgress = {
-          ...normalizeUserProgressByLibraryItemId(
-            userServerState as LegacyUserServerState | undefined,
-          ),
-        };
-
-        Object.values(pendingProgressByItemId).forEach((pendingProgress) => {
-          if (!pendingProgress?.libraryItemId) return;
-          const previous = normalizedProgress[pendingProgress.libraryItemId];
-          const book = catalogById.get(pendingProgress.libraryItemId);
-          const candidate = buildLocalProgress({
-            libraryItemId: pendingProgress.libraryItemId,
-            currentTime: pendingProgress.currentTime,
-            duration: previous?.duration ?? book?.duration ?? 0,
-            isFinished: pendingProgress.isFinished,
-            updatedAt: pendingProgress.updatedAt,
-            previous,
-          });
-
-          normalizedProgress[pendingProgress.libraryItemId] = preferDisplayProgress(
-            previous,
-            candidate,
-          );
-        });
+        const normalizedProgress = { ...(homeProjection?.progressByBookId ?? EMPTY_PROGRESS_BY_BOOK) };
 
         if (playbackLibraryItemId && displayedListeningPosition) {
           const displayedCurrentTime = msToSeconds(displayedListeningPosition.positionMs);
@@ -383,73 +363,55 @@ export const useHomeShelves = () => {
           }
         }
 
+
         return normalizedProgress;
       },
       (progress) => ({
         progressCount: Object.keys(progress).length,
-        pendingProgressCount: Object.keys(pendingProgressByItemId).length,
         hasDisplayedListeningPosition: Boolean(displayedListeningPosition),
       }),
     );
   }, [
     catalogById,
     displayedListeningPosition,
-    pendingProgressByItemId,
+    homeProjection?.progressByBookId,
     playbackLibraryItemId,
-    userServerState,
   ]);
 
   const favoriteByBookId = useMemo(
-    () => userServerState?.favoriteByLibraryItemId ?? EMPTY_FAVORITES_BY_BOOK,
-    [userServerState],
+    () => homeProjection?.favoriteByBookId ?? EMPTY_FAVORITES_BY_BOOK,
+    [homeProjection?.favoriteByBookId],
   );
 
   const continueListening = useMemo(() => {
     return measureStartupSync(
       "home continue listening projection",
-      () => {
-        const sortedProgress = Object.values(progressByBookId)
-          .filter((progress) => {
-            const hasStarted =
-              Math.max(0, Math.floor(progress.currentTime ?? 0)) > 0 ||
-              (progress.progressPercent ?? 0) > 0;
-            return (
-              hasStarted &&
-              !progress.isFinished &&
-              !progress.hideFromContinueListening
-            );
-          })
-          .sort((a, b) => b.lastUpdate - a.lastUpdate);
-
-        const books = sortedProgress
-          .map((progress) => catalogById.get(progress.libraryItemId))
-          .filter((book): book is LibraryItemSummary => Boolean(book));
-
-        return books;
-      },
+      () => homeProjection?.continueListening ?? EMPTY_CATALOG,
       (books) => ({
         progressCount: Object.keys(progressByBookId).length,
         bookCount: books.length,
       }),
     );
-  }, [catalogById, progressByBookId]);
+  }, [homeProjection?.continueListening, progressByBookId]);
 
   const recentlyAdded = useMemo(() => {
     return measureStartupSync(
       "home recently added projection",
-      () => [...catalog].sort((a, b) => b.addedAt - a.addedAt),
+      () => homeProjection?.recentlyAdded ?? EMPTY_CATALOG,
       (books) => ({
-        catalogCount: catalog.length,
+        catalogCount: homeProjection?.activeCatalogRows ?? 0,
         bookCount: books.length,
       }),
     );
-  }, [catalog]);
+  }, [homeProjection?.activeCatalogRows, homeProjection?.recentlyAdded]);
 
   const downloaded = useMemo(() => {
     return measureStartupSync(
       "home downloaded projection",
       () => {
-        const downloadedBooks = recentlyAdded.filter((book) => Boolean(downloadedDetailsById[book.id]));
+        const downloadedBooks = Object.keys(downloadedDetailsById)
+          .map((bookId) => catalogById.get(bookId))
+          .filter((book): book is LibraryItemSummary => Boolean(book));
         return reorderByIds(downloadedBooks, downloadedShelfOrder);
       },
       (books) => ({
@@ -457,7 +419,7 @@ export const useHomeShelves = () => {
         bookCount: books.length,
       }),
     );
-  }, [downloadedDetailsById, downloadedShelfOrder, recentlyAdded]);
+  }, [catalogById, downloadedDetailsById, downloadedShelfOrder]);
 
   const offlineDownloaded = useMemo(() => {
     return measureStartupSync(
@@ -486,76 +448,100 @@ export const useHomeShelves = () => {
     );
   }, [downloadedBookData, downloadedDetailsById, downloadedOwnerUserIdsById, downloadedShelfOrder]);
 
-  const discoverDateKey = toDailySeedKey();
-  const hasDiscoverSnapshotForToday = storedDiscoverShelf?.dateKey === discoverDateKey;
-  const unreadBooks = useMemo(() => {
-    return measureStartupSync(
-      "home unread projection",
-      () => catalog.filter((book) => !progressByBookId[book.id]),
-      (books) => ({
-        catalogCount: catalog.length,
-        progressCount: Object.keys(progressByBookId).length,
-        bookCount: books.length,
-      }),
-    );
-  }, [catalog, progressByBookId]);
-  const discoverHomeItemCount =
-    shelfSettingsById.discover?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT;
-  const discoverSeed = hasDiscoverSnapshotForToday
-    ? storedDiscoverShelf.seed
-    : hashSeed(`${homeScopeKey ?? "anonymous"}:${discoverDateKey}`);
-
   const discover = useMemo(() => {
     return measureStartupSync(
       "home discover projection",
       () => {
-        const unreadById = new Map(unreadBooks.map((book) => [book.id, book]));
-        const shuffledUnread = seededShuffle(unreadBooks, String(discoverSeed));
-
-        if (!hasDiscoverSnapshotForToday || !storedDiscoverShelf) {
-          return shuffledUnread.slice(0, discoverHomeItemCount);
-        }
+        if (!hasFreshDiscoverSnapshot || !storedDiscoverShelf) return EMPTY_CATALOG;
 
         const preferredDiscover: LibraryItemSummary[] = [];
         const seen = new Set<string>();
 
         storedDiscoverShelf.bookIds.forEach((bookId) => {
-          const unreadBook = unreadById.get(bookId);
-          if (!unreadBook || seen.has(unreadBook.id)) return;
-          preferredDiscover.push(unreadBook);
-          seen.add(unreadBook.id);
-        });
-
-        shuffledUnread.forEach((book) => {
-          if (seen.has(book.id)) return;
+          const book = catalogById.get(bookId);
+          if (!book || progressByBookId[book.id] || seen.has(book.id)) return;
           preferredDiscover.push(book);
+          seen.add(book.id);
         });
 
         return preferredDiscover.slice(0, discoverHomeItemCount);
       },
       (books) => ({
-        unreadCount: unreadBooks.length,
+        snapshotCount: storedDiscoverShelf?.bookIds.length ?? 0,
         bookCount: books.length,
-        hasDiscoverSnapshotForToday,
+        hasFreshDiscoverSnapshot,
       }),
     );
-  }, [discoverHomeItemCount, discoverSeed, hasDiscoverSnapshotForToday, storedDiscoverShelf, unreadBooks]);
+  }, [
+    catalogById,
+    discoverHomeItemCount,
+    hasFreshDiscoverSnapshot,
+    progressByBookId,
+    storedDiscoverShelf,
+  ]);
 
   useEffect(() => {
-    if (!homeScopeKey) return;
-    if (hasDiscoverSnapshotForToday) return;
-    setDailyDiscoverShelf(homeScopeKey, {
-      dateKey: discoverDateKey,
-      seed: discoverSeed,
-      bookIds: discover.map((book) => book.id),
-    });
+    if (!discoverSnapshotUpdatedAt) return;
+
+    const remainingMs =
+      DISCOVER_REFRESH_INTERVAL_MS - (Date.now() - discoverSnapshotUpdatedAt);
+    if (remainingMs <= 0) return;
+
+    const timeout = setTimeout(() => {
+      setDiscoverClockMs(Date.now());
+    }, remainingMs + 1000);
+
+    return () => clearTimeout(timeout);
+  }, [discoverSnapshotUpdatedAt]);
+
+  const loadDiscoverSnapshot = useCallback(async () => {
+    if (!homeScopeKey || !activeLibraryId || !activeLibraryUserKey) return;
+    if (
+      authStatus !== "authenticated" ||
+      !hasReadySqliteHome
+    ) {
+      return;
+    }
+
+    if (discoverRefreshInFlightRef.current) {
+      await discoverRefreshInFlightRef.current;
+      return;
+    }
+
+    const refreshStartedAt = Date.now();
+    const refreshPromise = sqliteHomeRepository
+      .getDiscoverCandidates(Math.max(50, discoverHomeItemCount * 3))
+      .then((candidateBooks) => {
+        setDailyDiscoverShelf(homeScopeKey, {
+          dateKey: toDailySeedKey(new Date(refreshStartedAt)),
+          seed: refreshStartedAt,
+          bookIds: candidateBooks.slice(0, discoverHomeItemCount).map((book) => book.id),
+          updatedAt: refreshStartedAt,
+        });
+        setDiscoverClockMs(Date.now());
+      })
+      .finally(() => {
+        discoverRefreshInFlightRef.current = null;
+      });
+
+    discoverRefreshInFlightRef.current = refreshPromise;
+    await refreshPromise;
   }, [
-    discover,
-    discoverDateKey,
-    discoverSeed,
-    hasDiscoverSnapshotForToday,
+    activeLibraryId,
+    activeLibraryUserKey,
+    authStatus,
+    discoverHomeItemCount,
+    hasReadySqliteHome,
     homeScopeKey,
     setDailyDiscoverShelf,
+  ]);
+
+  useEffect(() => {
+    if (hasFreshDiscoverSnapshot) return;
+    void loadDiscoverSnapshot();
+  }, [
+    hasFreshDiscoverSnapshot,
+    loadDiscoverSnapshot,
   ]);
 
   useEffect(() => {
@@ -581,21 +567,34 @@ export const useHomeShelves = () => {
     upsertPlaylistsFromServer,
   ]);
 
+  // Trigger a forced refresh on first library load when there's no catalog data
+  useEffect(() => {
+    if (!authStatus || authStatus !== "authenticated") return;
+    if (!activeLibraryId || !activeLibraryUserKey) return;
+    if (!readiness) return;
+    if (readiness.hasCatalogRows && readiness.lastOverlayRefreshAt) return;
+
+    void sqliteRefreshCoordinator
+      .refreshActiveLibrary(
+        { userId: activeLibraryUserKey, libraryId: activeLibraryId },
+        {
+          forceCatalog: !readiness.hasCatalogRows,
+          forceOverlay: !readiness.lastOverlayRefreshAt,
+          queryClient,
+        },
+      )
+      .catch(() => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.sqliteLibraryReadiness(activeLibraryUserKey, activeLibraryId),
+        });
+      });
+  }, [activeLibraryId, activeLibraryUserKey, authStatus, queryClient, readiness]);
+
   const refreshDiscover = useCallback(() => {
-    if (!homeScopeKey) return;
-
-    const refreshSeed = Date.now();
-    const refreshedBooks = seededShuffle(
-      unreadBooks,
-      `${refreshSeed}:${homeScopeKey}:${discoverDateKey}`,
-    );
-
-    setDailyDiscoverShelf(homeScopeKey, {
-      dateKey: discoverDateKey,
-      seed: refreshSeed,
-      bookIds: refreshedBooks.slice(0, discoverHomeItemCount).map((book) => book.id),
-    });
-  }, [discoverDateKey, discoverHomeItemCount, homeScopeKey, setDailyDiscoverShelf, unreadBooks]);
+    void loadDiscoverSnapshot();
+  }, [
+    loadDiscoverSnapshot,
+  ]);
 
   const suppressedPlaylistIdSet = useMemo(
     () =>
@@ -824,11 +823,8 @@ export const useHomeShelves = () => {
     [visibleShelves],
   );
   const progressCount = useMemo(
-    () =>
-      userServerState
-        ? Object.keys(normalizeUserProgressByLibraryItemId(userServerState)).length
-        : 0,
-    [userServerState],
+    () => Object.keys(progressByBookId).length,
+    [progressByBookId],
   );
 
   useLayoutEffect(() => {
@@ -837,7 +833,7 @@ export const useHomeShelves = () => {
     logStartupDuration("home shelves hook to layout", derivationStartedAtMs, {
       accessMode,
       authStatus,
-      catalogCount: catalog.length,
+      catalogCount: homeProjection?.activeCatalogRows ?? catalog.length,
       progressCount,
       shelfCount: orderedShelves.length,
       visibleShelfCount: visibleShelves.length,
@@ -856,6 +852,7 @@ export const useHomeShelves = () => {
     catalog.length,
     customShelvesRaw.length,
     derivationStartedAtMs,
+    homeProjection?.activeCatalogRows,
     orderedShelves.length,
     playlistShelvesRaw.length,
     progressCount,
@@ -866,7 +863,7 @@ export const useHomeShelves = () => {
   return {
     homeScopeKey,
     catalog,
-    catalogCount: catalog.length,
+    catalogCount: homeProjection?.activeCatalogRows ?? catalog.length,
     isCatalogLoading,
     progressCount,
     shelves:

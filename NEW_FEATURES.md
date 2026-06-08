@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-08` `cf43646` - Fix home screen progress pills not showing.
+  Tester focus: verify that every book card with listening progress on any home shelf (e.g. Recently Added, Continue Listening, playlist or custom shelves) displays a progress pill with time elapsed/remaining, and the progress line displays correctly.
 - `2026-06-07` `pending` - Refine ambient audio sheet controls.
   Tester focus: verify selecting ambient audio keeps the sheet open, the selected track appears first with its position at sheet open, Fine Volume limits ambient volume to 50% per book, and the local AudioPro package still resolves for development builds.
 - `2026-06-07` `pending` - Add AudioPro remote command mode settings.
