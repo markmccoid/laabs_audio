@@ -17,28 +17,10 @@ export type LibraryActivationResult = {
   catalog: LibraryItemsSummary;
 };
 
-const LIBRARY_ACTIVATION_TIMEOUT_MS = 30000;
+
 
 const backgroundRefresh = <T>(promise: Promise<T>) => {
   void promise.catch(() => undefined);
-};
-
-const withActivationTimeout = async <T,>(promise: Promise<T>) => {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error("Library load timed out. Check the server connection and try again."));
-        }, LIBRARY_ACTIVATION_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-  }
 };
 
 const isQueryStale = (queryClient: QueryClient, queryKey: QueryKey) => {
@@ -124,12 +106,8 @@ export const activateLibrary = async ({
   }
 
   try {
-    const catalog = await withActivationTimeout(
-      queryClient.fetchQuery({
-        queryKey: catalogQueryKey,
-        queryFn: () => libraryItemsApi.getItems({ libraryId: library.id }),
-        meta: { persist: true },
-      }),
+    backgroundRefreshIfStale(queryClient, catalogQueryKey, () =>
+      libraryItemsApi.getItems({ libraryId: library.id }),
     );
 
     backgroundRefreshIfStale(queryClient, userServerStateQueryKey, () =>
@@ -143,10 +121,10 @@ export const activateLibrary = async ({
       libraryId: library.id,
       libraryName: library.name,
       cached: false,
-      catalogCount: catalog.length,
+      catalogCount: 0,
       success: true,
     });
-    return { catalog };
+    return { catalog: [] };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     void recordTimingLog("library_switch", "activate_library_fetch", startedAt, {

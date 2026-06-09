@@ -10,6 +10,7 @@ export type GetLibraryItemsParams = {
   filterType?: FilterType;
   filterValue?: string;
   sortBy?: string;
+  sortDesc?: boolean;
   page?: number;
   limit?: number;
 };
@@ -103,6 +104,9 @@ export const libraryItemsApi = {
 
     if (sortBy) {
       query.set("sort", sortBy);
+      if (params.sortDesc) {
+        query.set("desc", "1");
+      }
     }
 
     if (typeof page === "number") {

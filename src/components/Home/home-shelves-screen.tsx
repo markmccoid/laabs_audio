@@ -2,6 +2,7 @@ import { playlistsApi } from "@/api/playlists-api";
 import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
 import { sqliteRefreshCoordinator } from "@/data/sqlite/refresh-coordinator";
 import { type HomeShelf, useHomeShelves } from "@/hooks/use-home-shelves";
+import { useLibraryActivationStore } from "@/auth/library-activation-store";
 import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
 import { useLibrarySelection } from "@/hooks/use-library-selection";
 import { queryKeys } from "@/query/query-keys";
@@ -55,6 +56,7 @@ const HomeShelvesScreen = () => {
     progressByBookId,
     refreshDiscover,
   } = useHomeShelves();
+  const activationProgress = useLibraryActivationStore((state) => state.progress);
   const activateLibrarySelection = useActivateLibrarySelection();
   const {
     libraries,
@@ -262,6 +264,38 @@ const HomeShelvesScreen = () => {
           >
             Loading library
           </Text>
+
+          {activationProgress && activationProgress.totalExpected > 0 ? (
+            <View style={{ width: "100%", maxWidth: 320, marginTop: 24, alignItems: "center" }}>
+              <Text
+                style={{
+                  color: themeColors.textMuted,
+                  fontSize: 13,
+                  fontWeight: "500",
+                  marginBottom: 8,
+                }}
+              >
+                Loading books {activationProgress.totalSeen} of {activationProgress.totalExpected}
+              </Text>
+              <View
+                style={{
+                  width: "100%",
+                  height: 6,
+                  backgroundColor: themeColors.border,
+                  borderRadius: 3,
+                  overflow: "hidden",
+                }}
+              >
+                <View
+                  style={{
+                    height: "100%",
+                    width: `${Math.min(100, Math.max(0, (activationProgress.totalSeen / activationProgress.totalExpected) * 100))}%`,
+                    backgroundColor: themeColors.accent,
+                  }}
+                />
+              </View>
+            </View>
+          ) : null}
         </View>
       ) : (
         <Animated.ScrollView

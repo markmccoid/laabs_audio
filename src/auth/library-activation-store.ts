@@ -8,8 +8,10 @@ type LibraryActivationState = {
   status: LibraryActivationStatus;
   library: Library | null;
   errorMessage: string | null;
+  progress: { totalSeen: number; totalExpected: number } | null;
   actions: {
     start: (library: Library) => void;
+    updateProgress: (totalSeen: number, totalExpected: number) => void;
     fail: (error: unknown) => void;
     clear: () => void;
   };
@@ -24,13 +26,21 @@ export const libraryActivationStore = createStore<LibraryActivationState>()((set
   status: "idle",
   library: null,
   errorMessage: null,
+  progress: null,
   actions: {
     start: (library) => {
       set({
         status: "activating",
         library,
         errorMessage: null,
+        progress: null,
       });
+    },
+    updateProgress: (totalSeen, totalExpected) => {
+      set((state) => ({
+        ...state,
+        progress: { totalSeen, totalExpected },
+      }));
     },
     fail: (error) => {
       set((state) => ({
@@ -44,6 +54,7 @@ export const libraryActivationStore = createStore<LibraryActivationState>()((set
         status: "idle",
         library: null,
         errorMessage: null,
+        progress: null,
       });
     },
   },

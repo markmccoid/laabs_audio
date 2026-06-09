@@ -6,7 +6,7 @@ import { useAuthStore } from "@/auth/auth-store";
 import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
-import { ActivityIndicator, Modal, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 export const LibraryActivationOverlay = () => {
   const themeColors = useThemeColors();
@@ -14,6 +14,7 @@ export const LibraryActivationOverlay = () => {
   const status = useLibraryActivationStore((state) => state.status);
   const library = useLibraryActivationStore((state) => state.library);
   const errorMessage = useLibraryActivationStore((state) => state.errorMessage);
+  const progress = useLibraryActivationStore((state) => state.progress);
   const { clear } = useLibraryActivationActions();
   const activateSelection = useActivateLibrarySelection();
 
@@ -33,17 +34,22 @@ export const LibraryActivationOverlay = () => {
   const isFailed = status === "failed";
 
   return (
-    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}>
+    <View
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 24,
+        backgroundColor: themeColors.bg,
+        zIndex: 9999,
+        elevation: 9999,
+      }}
+    >
       <View
-        style={{
-          flex: 1,
-          alignItems: "center",
-          justifyContent: "center",
-          paddingHorizontal: 24,
-          backgroundColor: themeColors.bg,
-        }}
-      >
-        <View
           style={{
             width: "100%",
             maxWidth: 360,
@@ -83,6 +89,38 @@ export const LibraryActivationOverlay = () => {
               : `Preparing ${library.name} for browsing.`}
           </Text>
 
+          {!isFailed && progress && progress.totalExpected > 0 ? (
+            <View style={{ width: "100%", marginTop: 24, alignItems: "center" }}>
+              <Text
+                style={{
+                  color: themeColors.textMuted,
+                  fontSize: 13,
+                  fontWeight: "500",
+                  marginBottom: 8,
+                }}
+              >
+                Loading books {progress.totalSeen} of {progress.totalExpected}
+              </Text>
+              <View
+                style={{
+                  width: "100%",
+                  height: 6,
+                  backgroundColor: themeColors.border,
+                  borderRadius: 3,
+                  overflow: "hidden",
+                }}
+              >
+                <View
+                  style={{
+                    height: "100%",
+                    width: `${Math.min(100, Math.max(0, (progress.totalSeen / progress.totalExpected) * 100))}%`,
+                    backgroundColor: themeColors.accent,
+                  }}
+                />
+              </View>
+            </View>
+          ) : null}
+
           {isFailed ? (
             <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
               <Pressable
@@ -120,7 +158,6 @@ export const LibraryActivationOverlay = () => {
             </View>
           ) : null}
         </View>
-      </View>
-    </Modal>
+    </View>
   );
 };

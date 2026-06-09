@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-09` `8acccbc` - Optimize initial sync speed, fix iOS UI lockup, and fix streaming/download bug.
+  Tester focus: verify that active library sync completes much faster with SQLite bulk upserts and the UI remains responsive (no lockups) during sync. Verify that initial library loading doesn't lock up touch interactions on iOS. Verify that after loading a library for the first time, books can be successfully streamed or downloaded without any server/file errors.
 - `2026-06-08` `648b517` - Optimize library catalog refresh using In-Memory Diffing.
   Tester focus: verify that active library catalog refresh completes significantly faster (sub-second on subsequent runs); verify that adding/removing books on the ABS server still synchronizes correctly to the app shelves.
 - `2026-06-08` `b43a3a8` - Add Diagnostics Timing Logs for Startup, Library Switching, and Login.
