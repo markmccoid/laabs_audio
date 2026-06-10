@@ -1,5 +1,9 @@
-import { authStore } from "../auth/auth-store";
 import { AuthUnavailableError, authFetch } from "./auth-fetch";
+
+let authErrorHandler: ((message: string) => void) | null = null;
+export const setAuthErrorHandler = (handler: (message: string) => void) => {
+  authErrorHandler = handler;
+};
 
 export class AbsApiError extends Error {
   constructor(
@@ -63,7 +67,7 @@ const handleAuthUnavailable = (error: AuthUnavailableError): never => {
   }
 
   if (error.code === "TOKEN_REFRESH_FAILED" || error.code === "UNAUTHENTICATED") {
-    authStore.getState().actions.setLoginRequired(true, "Login required to stream");
+    if (authErrorHandler) authErrorHandler("Login required to stream");
     throw new AbsAuthRequiredError("Login required");
   }
 
@@ -86,7 +90,7 @@ export const absClient = {
 
     if (response.status === 401) {
       log("[abs-client] response:401", { method, path });
-      authStore.getState().actions.setLoginRequired(true, "Login required to stream");
+      if (authErrorHandler) authErrorHandler("Login required to stream");
       throw new AbsAuthRequiredError("Login required");
     }
 

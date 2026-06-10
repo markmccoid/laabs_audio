@@ -17,6 +17,7 @@ import {
   HStack,
   Host,
   List,
+  Picker,
   Section,
   Spacer,
   Text as SwiftText,
@@ -29,7 +30,9 @@ import {
   buttonStyle,
   foregroundStyle,
   padding,
+  pickerStyle,
   shapes,
+  tag,
 } from "@expo/ui/swift-ui/modifiers";
 import { useState } from "react";
 import { Platform, Pressable, ScrollView, Switch, Text, View } from "react-native";
@@ -133,12 +136,12 @@ const REMOTE_COMMAND_MODE_OPTIONS: {
 }[] = [
   {
     value: DEFAULT_REMOTE_COMMAND_MODE,
-    label: "Skip intervals",
+    label: "Skip by Seconds",
     description: "Show skip forward and backward controls.",
   },
   {
     value: "next-prev",
-    label: "Chapters",
+    label: "Skip by Chapters",
     description: "Show next and previous controls for chapter navigation.",
   },
   {
@@ -268,7 +271,7 @@ const SystemSettingsFallback = () => {
           }}
         >
           <Text selectable style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}>
-            Playback Controls
+            Lock Screen Controls
           </Text>
           <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
             Controls how system playback surfaces behave outside the app.
@@ -289,7 +292,7 @@ const SystemSettingsFallback = () => {
           >
             <View style={{ gap: 8 }}>
               <Text selectable style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
-                Remote command mode
+                Options
               </Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 {REMOTE_COMMAND_MODE_OPTIONS.map((option) => {
@@ -510,25 +513,19 @@ export const SettingsSystemScreen = () => {
           </DisclosureGroup>
         </Section>
 
-        <Section title="Playback Controls">
-          <VStack spacing={8} alignment="leading">
-            <SwiftText modifiers={[bold()]}>Remote command mode</SwiftText>
+        <Section title="Lock Screen Controls">
+          <Picker
+            label="Options"
+            selection={remoteCommandMode}
+            onSelectionChange={setRemoteCommandMode as any}
+            modifiers={[pickerStyle("menu")]}
+          >
             {REMOTE_COMMAND_MODE_OPTIONS.map((option) => (
-              <Button
-                key={option.value}
-                label={`${option.label}${remoteCommandMode === option.value ? " (Current)" : ""}`}
-                onPress={() => setRemoteCommandMode(option.value)}
-                modifiers={[buttonStyle("borderless")]}
-              />
+              <SwiftText key={option.value} modifiers={[tag(option.value)]}>
+                {option.label}
+              </SwiftText>
             ))}
-            <SwiftText>
-              {
-                REMOTE_COMMAND_MODE_OPTIONS.find(
-                  (option) => option.value === remoteCommandMode,
-                )?.description
-              }
-            </SwiftText>
-          </VStack>
+          </Picker>
           <Toggle isOn={disableLockScreenSeek} onIsOnChange={setDisableLockScreenSeek}>
             <SwiftText>Disable lock screen seek</SwiftText>
             <SwiftText>Prevent scrubbing from Lock Screen and Now Playing controls.</SwiftText>

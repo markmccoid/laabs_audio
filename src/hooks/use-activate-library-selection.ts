@@ -2,7 +2,7 @@ import { activateLibrary } from "@/auth/library-activation";
 import { libraryActivationStore } from "@/auth/library-activation-store";
 import { authStore, useAuthStore } from "@/auth/auth-store";
 import { queryClient } from "@/query/query-client";
-import { recordTimingLog } from "@/data/shadow-sqlite-service";
+import { recordTimingLog } from "@/data/sqlite/timing-logger";
 import { getBookDetailHref } from "@/navigation/book-links";
 import { playerService } from "@/player/player-service";
 import type { Library } from "@/types/absTypes";

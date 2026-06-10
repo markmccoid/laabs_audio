@@ -262,7 +262,7 @@ export const recordHomeShelfDisplay = (payload: StartupTracePayload) => {
   logStartupEvent("home shelf display", payload);
 
   // Write timings to SQLite timing_logs table asynchronously
-  import("../data/shadow-sqlite-service")
+  import("../data/sqlite/timing-logger")
     .then(({ recordTimingLog }) => {
       const originTimestamp = Date.now() - (displayAtMs - trace.originMs);
       void recordTimingLog(

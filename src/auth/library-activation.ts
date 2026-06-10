@@ -5,7 +5,7 @@ import { FIVE_MINUTES_MS } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import type { Library } from "../types/absTypes";
-import { recordTimingLog } from "../data/shadow-sqlite-service";
+import { recordTimingLog } from "../data/sqlite/timing-logger";
 
 type ActivateLibraryOptions = {
   library: Library;

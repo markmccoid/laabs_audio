@@ -1,6 +1,27 @@
 import { AuthError, authService } from "../auth/auth-service";
 import { getJwtExpiry, isTokenExpired } from "../auth/auth-token";
-import { authStore, getAuthState } from "../auth/auth-store";
+
+export type AuthProvider = {
+  getAccessToken: () => string | null;
+  getAccessTokenExpiresAt: () => number | null;
+  getServerUrl: () => string | null;
+  getIsOnline: () => boolean | null;
+  getIsAnonymous: () => boolean;
+  refreshSession: (forceRefresh: boolean) => Promise<string | null>;
+  setLoginRequired: (required: boolean, message: string) => void;
+};
+
+let authProvider: AuthProvider | null = null;
+export const setAuthProvider = (provider: AuthProvider) => {
+  authProvider = provider;
+};
+
+const getProvider = (): AuthProvider => {
+  if (!authProvider) {
+    throw new Error("AuthProvider not configured");
+  }
+  return authProvider;
+};
 
 export class AuthUnavailableError extends Error {
   constructor(
@@ -35,16 +56,15 @@ const withAuthHeader = (headers: HeadersInit | undefined, token: string) => {
 };
 
 const ensureAccessToken = async (forceRefresh = false) => {
-  const state = getAuthState();
-  const { accessToken, accessTokenExpiresAt } = state;
+  const provider = getProvider();
+  const accessToken = provider.getAccessToken();
+  const accessTokenExpiresAt = provider.getAccessTokenExpiresAt();
 
   if (!forceRefresh && accessToken && !isTokenExpired(accessTokenExpiresAt)) {
     return accessToken;
   }
 
-  const refreshed = await authStore.getState().actions.refreshSession({
-    force: forceRefresh,
-  });
+  const refreshed = await provider.refreshSession(forceRefresh);
 
   return refreshed;
 };
@@ -53,25 +73,26 @@ export const authFetch = async (
   path: string,
   options: RequestInit = {}
 ): Promise<Response> => {
-  const state = getAuthState();
+  const provider = getProvider();
   const method = (options.method ?? "GET").toUpperCase();
 
-  if (state.status === "anonymous") {
+  if (provider.getIsAnonymous()) {
     throw new AuthUnavailableError(
       "User is not authenticated",
       "UNAUTHENTICATED"
     );
   }
 
-  if (state.isOnline === false) {
+  if (provider.getIsOnline() === false) {
     throw new AuthUnavailableError("Offline", "OFFLINE");
   }
 
-  if (!state.serverUrl) {
+  const serverUrl = provider.getServerUrl();
+  if (!serverUrl) {
     throw new AuthUnavailableError("Missing server URL", "MISSING_SERVER_URL");
   }
 
-  const url = buildUrl(state.serverUrl, path);
+  const url = buildUrl(serverUrl, path);
 
   let token: string | null = null;
   try {
@@ -83,9 +104,7 @@ export const authFetch = async (
     if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
       throw new AuthUnavailableError("Offline", "OFFLINE");
     }
-    authStore
-      .getState()
-      .actions.setLoginRequired(true, "Login required to stream");
+    provider.setLoginRequired(true, "Login required to stream");
     throw new AuthUnavailableError(
       "Unable to refresh session",
       "TOKEN_REFRESH_FAILED"
@@ -96,9 +115,7 @@ export const authFetch = async (
     if (__DEV__) {
       console.warn("[auth-fetch] token:missing", { method, path });
     }
-    authStore
-      .getState()
-      .actions.setLoginRequired(true, "Login required to stream");
+    provider.setLoginRequired(true, "Login required to stream");
     throw new AuthUnavailableError(
       "Unable to refresh session",
       "TOKEN_REFRESH_FAILED"
@@ -130,28 +147,28 @@ export const authFetch = async (
     );
   }
   if (!refreshed) {
-    authStore
-      .getState()
-      .actions.setLoginRequired(true, "Login required to stream");
+    provider.setLoginRequired(true, "Login required to stream");
     throw new AuthUnavailableError(
       "Unable to refresh session",
       "TOKEN_REFRESH_FAILED"
     );
   }
 
-  return fetch(buildUrl(state.serverUrl, path), {
+  return fetch(buildUrl(serverUrl, path), {
     ...options,
     headers: withAuthHeader(options.headers, refreshed),
   });
 };
 
 export const shouldRefreshSoon = () => {
-  const { accessToken, accessTokenExpiresAt } = getAuthState();
+  const provider = getProvider();
+  const accessToken = provider.getAccessToken();
+  const accessTokenExpiresAt = provider.getAccessTokenExpiresAt();
   if (!accessToken) return true;
   return isTokenExpired(accessTokenExpiresAt, 2 * 60 * 1000);
 };
 
 export const getAccessTokenExpiry = () => {
-  const { accessToken } = getAuthState();
+  const accessToken = getProvider().getAccessToken();
   return getJwtExpiry(accessToken);
 };

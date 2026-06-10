@@ -11,7 +11,9 @@ import {
   type RememberedSessionRecord,
 } from "./auth-storage";
 import { getJwtExpiry, isTokenExpired } from "./auth-token";
-import { recordTimingLog } from "../data/shadow-sqlite-service";
+import { recordTimingLog } from "../data/sqlite/timing-logger";
+import { setAuthErrorHandler } from "../api/abs-client";
+import { setAuthProvider } from "../api/auth-fetch";
 
 const log = (...args: unknown[]) => {
   if (__DEV__) {
@@ -728,6 +730,22 @@ export const authStore = createStore<AuthState>()(
     },
   ),
 );
+
+setAuthErrorHandler((message) => {
+  authStore.getState().actions.setLoginRequired(true, message);
+});
+
+setAuthProvider({
+  getAccessToken: () => authStore.getState().accessToken,
+  getAccessTokenExpiresAt: () => authStore.getState().accessTokenExpiresAt,
+  getServerUrl: () => authStore.getState().serverUrl,
+  getIsOnline: () => authStore.getState().isOnline,
+  getIsAnonymous: () => authStore.getState().status === "anonymous",
+  refreshSession: (forceRefresh: boolean) =>
+    authStore.getState().actions.refreshSession({ force: forceRefresh }),
+  setLoginRequired: (required: boolean, message: string) =>
+    authStore.getState().actions.setLoginRequired(required, message),
+});
 
 export const useAuthStore = <T>(selector: (state: AuthState) => T) => useStore(authStore, selector);
 

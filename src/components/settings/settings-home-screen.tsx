@@ -105,6 +105,13 @@ export const SettingsHomeScreen = () => {
   const themeColors = useThemeColors();
   const status = useAuthStore((state) => state.status);
   const isAuthenticated = status === "authenticated";
+  const storedUsername = useAuthStore((state) => state.storedUsername);
+  const serverUrl = useAuthStore((state) => state.serverUrl);
+
+  const signInsSubtitle =
+    isAuthenticated && storedUsername && serverUrl
+      ? `${storedUsername} \n${serverUrl.replace(/^https?:\/\//, "")}`
+      : "Add, switch, edit, or remove Audiobookshelf sign-ins";
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
@@ -128,7 +135,7 @@ export const SettingsHomeScreen = () => {
           <SettingsRow
             href="/login"
             title="Sign-Ins"
-            subtitle="Add, switch, edit, or remove Audiobookshelf sign-ins"
+            subtitle={signInsSubtitle}
             icon="person.crop.circle"
             isLast
           />

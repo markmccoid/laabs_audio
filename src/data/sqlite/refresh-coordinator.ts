@@ -3,11 +3,11 @@ import {
   getShadowLibraryReadiness,
   refreshShadowLibraryCatalog,
   refreshShadowUserOverlays,
-  recordTimingLog,
   type ShadowCatalogRefreshResult,
   type ShadowLibraryReadiness,
   type ShadowOverlayRefreshResult,
 } from "../shadow-sqlite-service";
+import { recordTimingLog } from "./timing-logger";
 
 export const SQLITE_CATALOG_STALE_MS = 15 * 60 * 1000;
 export const SQLITE_OVERLAY_STALE_MS = 2 * 60 * 1000;

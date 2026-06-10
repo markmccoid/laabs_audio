@@ -8,14 +8,16 @@ import {
   refreshShadowLibraryCatalog,
   refreshShadowUserOverlays,
   runShadowSearchTest,
-  getTimingLogs,
-  clearTimingLogs,
-  type TimingLog,
   type ShadowCatalogRefreshResult,
   type ShadowDatabaseSummary,
   type ShadowOverlayRefreshResult,
   type ShadowSearchResult,
 } from "@/data/shadow-sqlite-service";
+import {
+  clearTimingLogs,
+  getTimingLogs,
+  type TimingLog,
+} from "@/data/sqlite/timing-logger";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView } from "expo-symbols";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
