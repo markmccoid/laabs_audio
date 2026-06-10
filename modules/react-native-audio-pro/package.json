@@ -1,0 +1,130 @@
+{
+	"name": "react-native-audio-pro",
+	"version": "11.0.0-beta.2",
+	"description": "A React Native module for audio playback from remote URLs, ideal for audiobook and podcast apps, with background playback, lock screen notification controls on Android and iOS, and web support.",
+	"source": "./src/index",
+	"react-native": "./src/index",
+	"web": "./src/index",
+	"main": "./lib/commonjs/index.js",
+	"module": "./lib/module/index.js",
+	"scripts": {
+		"example": "yarn workspace react-native-audio-pro-example",
+		"test": "jest",
+		"check": "yarn lint && yarn typecheck && yarn prepare && yarn test",
+		"typecheck": "tsc",
+		"lint": "eslint \"**/*.{js,ts,tsx}\"",
+		"clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
+		"prepare": "bob build",
+		"release": "release-it"
+	},
+	"exports": {
+		".": {
+			"import": {
+				"types": "./lib/typescript/module/src/index.d.ts",
+				"default": "./lib/module/index.js"
+			},
+			"require": {
+				"types": "./lib/typescript/commonjs/src/index.d.ts",
+				"default": "./lib/commonjs/index.js"
+			}
+		}
+	},
+	"files": [
+		"src",
+		"lib",
+		"android",
+		"ios",
+		"cpp",
+		"*.podspec",
+		"react-native.config.js",
+		"README.md",
+		"LICENSE",
+		"!ios/build",
+		"!android/build",
+		"!android/gradle",
+		"!android/gradlew",
+		"!android/gradlew.bat",
+		"!android/local.properties",
+		"!**/__tests__",
+		"!**/__fixtures__",
+		"!**/__mocks__",
+		"!**/.*",
+		"!**/*.spec.{js,ts,tsx}",
+		"!**/*.test.{js,ts,tsx}",
+		"!**/*.map",
+		"!**/.DS_Store",
+		"!scripts",
+		"!example",
+		"!docs",
+		"!coverage",
+		"!android/src/test",
+		"!android/src/androidTest",
+		"!ios/Tests",
+		"!**/build",
+		"!**/reports",
+		"!**/test-results",
+		"!**/tmp"
+	],
+	"keywords": [
+		"react-native",
+		"ios",
+		"android",
+		"web",
+		"react-native-web"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/evergrace-co/react-native-audio-pro.git"
+	},
+	"author": "Brad Flood <hey@bradflood.com> (https://github.com/bradfloodx)",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/evergrace-co/react-native-audio-pro/issues"
+	},
+	"homepage": "https://github.com/evergrace-co/react-native-audio-pro#readme",
+	"publishConfig": {
+		"registry": "https://registry.npmjs.org/"
+	},
+	"devDependencies": {
+		"@commitlint/config-conventional": "^19.6.0",
+		"@evilmartians/lefthook": "^1.5.0",
+		"@react-native/eslint-config": "^0.73.1",
+		"@release-it/conventional-changelog": "^9.0.2",
+		"@types/jest": "^29.5.5",
+		"@types/react": "^18.2.44",
+		"@typescript-eslint/eslint-plugin": "^8.31.0",
+		"@typescript-eslint/parser": "^8.31.0",
+		"commitlint": "^19.6.1",
+		"del-cli": "^5.1.0",
+		"eslint": "^8.51.0",
+		"eslint-config-prettier": "^9.0.0",
+		"eslint-import-resolver-typescript": "^4.3.4",
+		"eslint-plugin-import": "^2.31.0",
+		"eslint-plugin-jest": "^28.11.0",
+		"eslint-plugin-prettier": "^5.0.1",
+		"jest": "^29.7.0",
+		"jest-environment-jsdom": "^29.7.0",
+		"prettier": "^3.0.3",
+		"react": "19.0.0",
+		"react-native": "0.78.1",
+		"react-native-builder-bob": "^0.36.0",
+		"react-test-renderer": "19.0.0",
+		"release-it": "^17.10.0",
+		"turbo": "^1.10.7",
+		"typescript": "^5.2.2"
+	},
+	"resolutions": {
+		"@types/react": "^18.2.44"
+	},
+	"peerDependencies": {
+		"react": "*",
+		"react-native": "*"
+	},
+	"workspaces": [
+		"example"
+	],
+	"packageManager": "yarn@4.12.0",
+	"dependencies": {
+		"zustand": "^5.0.3"
+	}
+}

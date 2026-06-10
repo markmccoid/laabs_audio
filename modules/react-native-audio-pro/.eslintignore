@@ -1,0 +1,11 @@
+# Ignore coverage reports
+coverage/
+coverage/**/*
+
+# Ignore generated files
+lib/
+android/generated/
+ios/generated/
+
+# Ignore node_modules
+node_modules/

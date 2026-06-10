@@ -1,0 +1,4 @@
+<resources>
+  <string name="audiopro_channel_name">Audio Pro Playback</string>
+  <string name="audiopro_channel_description">Audio playback controls for react-native-audio-pro</string>
+</resources>

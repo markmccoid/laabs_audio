@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-09` `04629ce` - Fix custom skip intervals and lock screen slider seeking on iOS in AudioPro.
+  Tester focus: verify that custom skip forward and backward intervals (e.g. 30s forward, 15s backward) are correctly applied and displayed on the lock screen instead of defaulting to 15s. Verify that enabling "disable lock screen seek" correctly disables and hides the progress scrubber/slider on the iOS lock screen.
 - `2026-06-09` `8acccbc` - Optimize initial sync speed, fix iOS UI lockup, and fix streaming/download bug.
   Tester focus: verify that active library sync completes much faster with SQLite bulk upserts and the UI remains responsive (no lockups) during sync. Verify that initial library loading doesn't lock up touch interactions on iOS. Verify that after loading a library for the first time, books can be successfully streamed or downloaded without any server/file errors.
 - `2026-06-08` `648b517` - Optimize library catalog refresh using In-Memory Diffing.
