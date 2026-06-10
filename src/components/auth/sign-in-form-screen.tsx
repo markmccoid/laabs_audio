@@ -1,4 +1,10 @@
-import { router, useLocalSearchParams } from "expo-router";
+import { getDefaultSessionLabel } from "@/auth/auth-storage";
+import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
+import { prepareForSignInChange } from "@/auth/session-boundary";
+import { useCompleteSessionEntry } from "@/auth/use-complete-session-entry";
+import Dropdown from "@/shared/ui/organisms/dropdown";
+import { useThemeColors } from "@/theme/use-app-theme";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
 import {
@@ -11,12 +17,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
-import { getDefaultSessionLabel } from "@/auth/auth-storage";
-import { prepareForSignInChange } from "@/auth/session-boundary";
-import { useCompleteSessionEntry } from "@/auth/use-complete-session-entry";
-import Dropdown from "@/shared/ui/organisms/dropdown";
-import { useThemeColors } from "@/theme/use-app-theme";
 
 const SERVER_PROTOCOLS = ["https://", "http://"] as const;
 type ServerProtocol = (typeof SERVER_PROTOCOLS)[number];
@@ -136,21 +136,21 @@ export function SignInFormScreen() {
   const form = (
     <View
       className={
-        isSheet ? "rounded-t-3xl bg-surface px-6 pb-8 pt-6" : "flex-1 bg-bg px-6 pb-8 pt-24"
+        isSheet ? "rounded-t-3xl bg-surface px-6 pb-8 pt-6" : "flex-1 bg-bg px-6 pb-8 pt-4"
       }
     >
-      <View className="flex-row items-center justify-between">
-        <Text className="text-3xl font-semibold text-text">Add Sign-In</Text>
-        {isSheet ? (
+      {isSheet ? (
+        <View className="flex-row items-center justify-between">
+          <Text className="text-3xl font-semibold text-text">Add Sign-In</Text>
           <Pressable
             onPress={handleClose}
             className="rounded-full border border-border bg-bg px-3 py-1"
           >
             <Text className="text-sm text-text-muted">Close</Text>
           </Pressable>
-        ) : null}
-      </View>
-      <Text className="mt-2 text-text-muted">
+        </View>
+      ) : null}
+      <Text className={isSheet ? "mt-2 text-text-muted" : "text-text-muted mb-2"}>
         {isSheet
           ? "Login required to stream. Offline downloads remain available."
           : "Enter your Audiobookshelf sign-in details."}
@@ -323,11 +323,36 @@ export function SignInFormScreen() {
         className="flex-1 bg-bg"
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
+        <Stack.Screen
+          options={{
+            headerShown: true,
+            headerTransparent: true,
+            title: "Add Sign-In",
+            headerLeft: () =>
+              accessMode !== "firstRunSignInRequired" ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Back"
+                  onPress={handleCancel}
+                  hitSlop={12}
+                  style={{ flexDirection: "row", alignItems: "center", marginLeft: -8, padding: 8 }}
+                >
+                  <SymbolView
+                    name="chevron.left"
+                    tintColor={themeColors.accent}
+                    size={24}
+                    weight="semibold"
+                  />
+                </Pressable>
+              ) : null,
+          }}
+        />
         <ScrollView
           className="flex-1"
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           automaticallyAdjustKeyboardInsets
+          contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={{ flexGrow: 1 }}
           showsVerticalScrollIndicator={false}
         >

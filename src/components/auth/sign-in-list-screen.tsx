@@ -5,7 +5,7 @@ import { useExplicitLogout } from "@/auth/use-explicit-logout";
 import type { RememberedSessionRecord } from "@/auth/auth-storage";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { MenuView, type MenuAction, type NativeActionEvent } from "@expo/ui/community/menu";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
@@ -198,31 +198,39 @@ export function SignInListScreen() {
           gap: 14,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <View style={{ flex: 1 }}>
-            <Text selectable style={{ color: themeColors.text, fontSize: 28, fontWeight: "700" }}>
-              Sign-Ins
-            </Text>
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 14, marginTop: 4 }}>
-              Choose which Audiobookshelf sign-in to use.
-            </Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Add Sign-In"
-            onPress={openAdd}
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: 21,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: themeColors.accent,
-            }}
-          >
-            <SymbolView name="plus" tintColor={themeColors.accentForeground} size={20} />
-          </Pressable>
-        </View>
+        <Stack.Screen
+          options={{
+            headerShown: true,
+            headerTransparent: true,
+            title: "Sign-Ins",
+            headerLeft: () =>
+              accessMode !== "firstRunSignInRequired" ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Back"
+                  onPress={() => router.back()}
+                  hitSlop={12}
+                  style={{ flexDirection: "row", alignItems: "center", marginLeft: -8, padding: 8 }}
+                >
+                  <SymbolView name="chevron.left" tintColor={themeColors.accent} size={24} weight="semibold" />
+                </Pressable>
+              ) : null,
+            headerRight: () => (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Add Sign-In"
+                onPress={openAdd}
+                hitSlop={12}
+              >
+                <SymbolView name="plus" tintColor={themeColors.accent} size={24} />
+              </Pressable>
+            ),
+          }}
+        />
+
+        <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
+          Choose which Audiobookshelf sign-in to use.
+        </Text>
 
         {localError ? (
           <Text selectable style={{ color: "#dc2626", fontSize: 14 }}>
@@ -364,24 +372,6 @@ export function SignInListScreen() {
           })
         )}
 
-        {accessMode !== "firstRunSignInRequired" ? (
-          <Pressable
-            onPress={() => router.back()}
-            style={{
-              borderRadius: 14,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: themeColors.border,
-              backgroundColor: themeColors.surface,
-              paddingHorizontal: 14,
-              paddingVertical: 12,
-            }}
-          >
-            <Text style={{ color: themeColors.text, fontSize: 16, fontWeight: "700", textAlign: "center" }}>
-              Done
-            </Text>
-          </Pressable>
-        ) : null}
       </ScrollView>
     </View>
   );

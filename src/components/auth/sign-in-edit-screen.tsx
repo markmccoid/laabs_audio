@@ -1,9 +1,9 @@
 import { getDefaultSessionLabel } from "@/auth/auth-storage";
+import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
 import { prepareForSignInChange } from "@/auth/session-boundary";
-import { useAuthActions, useAuthStore } from "@/auth/auth-store";
 import { useCompleteSessionEntry } from "@/auth/use-complete-session-entry";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
 import {
@@ -23,6 +23,7 @@ export function SignInEditScreen() {
   const themeColors = useThemeColors();
   const sessions = useAuthStore((state) => state.rememberedSessions);
   const activeSessionKey = useAuthStore((state) => state.activeSessionKey);
+  const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
   const { updateRememberedSession, restoreRememberedSession } = useAuthActions();
   const completeSessionEntry = useCompleteSessionEntry();
@@ -79,6 +80,10 @@ export function SignInEditScreen() {
     }
   };
 
+  const handleCancel = () => {
+    router.back();
+  };
+
   if (!session) {
     return (
       <View
@@ -117,6 +122,30 @@ export function SignInEditScreen() {
       style={{ flex: 1, backgroundColor: themeColors.bg }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          headerTransparent: true,
+          title: "Add Sign-In",
+          headerLeft: () =>
+            accessMode !== "firstRunSignInRequired" ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Back"
+                onPress={handleCancel}
+                hitSlop={12}
+                style={{ flexDirection: "row", alignItems: "center", marginLeft: -8, padding: 8 }}
+              >
+                <SymbolView
+                  name="chevron.left"
+                  tintColor={themeColors.accent}
+                  size={24}
+                  weight="semibold"
+                />
+              </Pressable>
+            ) : null,
+        }}
+      />
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
@@ -140,7 +169,14 @@ export function SignInEditScreen() {
 
         <View style={{ gap: 12 }}>
           <View>
-            <Text style={{ color: themeColors.textMuted, fontSize: 14, fontWeight: "600", marginBottom: 8 }}>
+            <Text
+              style={{
+                color: themeColors.textMuted,
+                fontSize: 14,
+                fontWeight: "600",
+                marginBottom: 8,
+              }}
+            >
               Session Label
             </Text>
             <TextInput
@@ -166,7 +202,14 @@ export function SignInEditScreen() {
           </View>
 
           <View>
-            <Text style={{ color: themeColors.textMuted, fontSize: 14, fontWeight: "600", marginBottom: 8 }}>
+            <Text
+              style={{
+                color: themeColors.textMuted,
+                fontSize: 14,
+                fontWeight: "600",
+                marginBottom: 8,
+              }}
+            >
               Username
             </Text>
             <Text selectable style={{ color: themeColors.text, fontSize: 16 }}>
@@ -175,7 +218,14 @@ export function SignInEditScreen() {
           </View>
 
           <View>
-            <Text style={{ color: themeColors.textMuted, fontSize: 14, fontWeight: "600", marginBottom: 8 }}>
+            <Text
+              style={{
+                color: themeColors.textMuted,
+                fontSize: 14,
+                fontWeight: "600",
+                marginBottom: 8,
+              }}
+            >
               Server
             </Text>
             <Text selectable style={{ color: themeColors.text, fontSize: 16 }}>
@@ -184,7 +234,14 @@ export function SignInEditScreen() {
           </View>
 
           <View>
-            <Text style={{ color: themeColors.textMuted, fontSize: 14, fontWeight: "600", marginBottom: 8 }}>
+            <Text
+              style={{
+                color: themeColors.textMuted,
+                fontSize: 14,
+                fontWeight: "600",
+                marginBottom: 8,
+              }}
+            >
               Password
             </Text>
             <View
@@ -265,7 +322,7 @@ export function SignInEditScreen() {
         </Pressable>
 
         <Pressable
-          onPress={() => router.back()}
+          onPress={handleCancel}
           disabled={isSaving}
           style={{
             borderWidth: 1,
@@ -277,7 +334,14 @@ export function SignInEditScreen() {
             paddingVertical: 12,
           }}
         >
-          <Text style={{ color: themeColors.text, fontSize: 16, fontWeight: "700", textAlign: "center" }}>
+          <Text
+            style={{
+              color: themeColors.text,
+              fontSize: 16,
+              fontWeight: "700",
+              textAlign: "center",
+            }}
+          >
             Cancel
           </Text>
         </Pressable>
