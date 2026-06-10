@@ -1119,13 +1119,6 @@ class AudioPro: RCTEventEmitter {
 		time: Double? = nil,
 		duration: Double? = nil
 	) {
-		if settingDisableLockScreenSeek {
-			nowPlayingInfo.removeValue(forKey: MPNowPlayingInfoPropertyElapsedPlaybackTime)
-			nowPlayingInfo.removeValue(forKey: MPMediaItemPropertyPlaybackDuration)
-			nowPlayingInfo.removeValue(forKey: MPNowPlayingInfoPropertyPlaybackRate)
-			return
-		}
-
 		if let time = time {
 			nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = time
 		}

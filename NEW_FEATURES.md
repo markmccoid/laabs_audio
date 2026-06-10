@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-09` `pending` - Make lock screen progress visible when seeking is disabled on iOS.
+  Tester focus: verify that enabling "disable lock screen seek" keeps the progress slider visible and advancing on the lock screen, but the user cannot interact with it to seek.
 - `2026-06-09` `04629ce` - Fix custom skip intervals and lock screen slider seeking on iOS in AudioPro.
   Tester focus: verify that custom skip forward and backward intervals (e.g. 30s forward, 15s backward) are correctly applied and displayed on the lock screen instead of defaulting to 15s. Verify that enabling "disable lock screen seek" correctly disables and hides the progress scrubber/slider on the iOS lock screen.
 - `2026-06-09` `8acccbc` - Optimize initial sync speed, fix iOS UI lockup, and fix streaming/download bug.
