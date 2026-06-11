@@ -1,12 +1,13 @@
-import type { LibraryItemsSummary } from "@/api/library-items-api";
-import { normalizeUserProgressByLibraryItemId, type UserBookProgress } from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { BookFlashListRow } from "@/components/books/book-flashlist-row";
-import { useGetUserServerState } from "@/hooks/abs-data-hooks";
+import {
+  sqliteSearchRepository,
+  type SqliteSearchParams,
+} from "@/data/sqlite/search-repository";
 import { queryKeys } from "@/query/query-keys";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useDeferredValue, useMemo, useState } from "react";
 import { Text, View } from "react-native";
@@ -43,8 +44,6 @@ export const BookFilterResultsSheet = () => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const isOffline = useAuthStore((state) => state.isOnline === false);
-  const { data: userServerState } = useGetUserServerState();
-  const queryClient = useQueryClient();
   const {
     filterType: filterTypeParam,
     filterValue: filterValueParam,
@@ -60,52 +59,41 @@ export const BookFilterResultsSheet = () => {
   const sourceTabParamResolved = resolveParam(sourceTabParam);
   const sourceTab: SourceTab = sourceTabParamResolved === "search" ? "search" : "home";
   const deferredSearchText = useDeferredValue(searchText);
-  const booksQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId);
-  const immediateCatalog = activeLibraryUserKey && activeLibraryId
-    ? queryClient.getQueryData<LibraryItemsSummary>(booksQueryKey)
-    : undefined;
+  const filterSearchParams = useMemo<SqliteSearchParams>(() => {
+    if (!filterType || !filterValue) return {};
 
-  const { data: subscribedCatalog } = useQuery<LibraryItemsSummary>({
-    queryKey: booksQueryKey,
-    queryFn: async () => immediateCatalog ?? [],
-    enabled: false,
-    initialData: immediateCatalog,
-    meta: { persist: true },
+    switch (filterType) {
+      case "genre":
+        return { genres: [filterValue], sortBy: "title", sortDirection: "asc" };
+      case "tag":
+        return { tags: [filterValue], sortBy: "title", sortDirection: "asc" };
+      case "author":
+        return { author: filterValue, sortBy: "title", sortDirection: "asc" };
+      case "narrator":
+      default:
+        return { narrator: filterValue, sortBy: "title", sortDirection: "asc" };
+    }
+  }, [filterType, filterValue]);
+
+  const { data: filterResultSet } = useQuery({
+    queryKey: queryKeys.sqliteSearchResultSet(
+      activeLibraryUserKey,
+      activeLibraryId,
+      filterSearchParams,
+    ),
+    queryFn: () => sqliteSearchRepository.querySearchResultSet(filterSearchParams),
+    enabled:
+      Boolean(activeLibraryUserKey) &&
+      Boolean(activeLibraryId) &&
+      Boolean(filterType) &&
+      Boolean(filterValue),
   });
 
-  const catalog = useMemo(
-    () => subscribedCatalog ?? immediateCatalog ?? [],
-    [immediateCatalog, subscribedCatalog],
+  const matchingBooks = useMemo(
+    () => (filterType && filterValue ? filterResultSet?.rows ?? [] : []),
+    [filterResultSet?.rows, filterType, filterValue],
   );
-  const progressByBookId = useMemo(
-    () =>
-      normalizeUserProgressByLibraryItemId(
-        userServerState as
-          | (typeof userServerState & { progressByBookId?: Record<string, UserBookProgress> })
-          | undefined,
-      ),
-    [userServerState],
-  );
-
-  const matchingBooks = useMemo(() => {
-    if (!filterType || !filterValue) return [];
-
-    return catalog.filter((book) => {
-      if (filterType === "genre") {
-        return book.genres.includes(filterValue);
-      }
-
-      if (filterType === "tag") {
-        return book.tags.includes(filterValue);
-      }
-
-      if (filterType === "author") {
-        return (book.author ?? "") === filterValue;
-      }
-
-      return (book.narratedBy ?? "") === filterValue;
-    });
-  }, [catalog, filterType, filterValue]);
+  const finishedIds = filterResultSet?.finishedIds;
   const normalizedSearchQuery = useMemo(
     () => deferredSearchText.trim().toLocaleLowerCase(),
     [deferredSearchText],
@@ -169,7 +157,7 @@ export const BookFilterResultsSheet = () => {
             <BookFlashListRow
               book={item}
               isOffline={isOffline}
-              isFinished={Boolean(progressByBookId[item.id]?.isFinished)}
+              isFinished={Boolean(finishedIds?.has(item.id))}
               onPress={() => handleBookPress(item.id)}
             />
           )}

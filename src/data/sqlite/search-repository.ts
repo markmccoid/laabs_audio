@@ -1,4 +1,5 @@
 import {
+  getShadowItemSummariesByIds,
   getShadowLibraryReadiness,
   initializeShadowDatabase,
   queryShadowSearchResults,
@@ -18,4 +19,5 @@ export const sqliteSearchRepository = {
   initialize: initializeShadowDatabase,
   getReadiness: getShadowLibraryReadiness,
   querySearchResultSet: queryShadowSearchResults,
+  getItemSummariesByIds: getShadowItemSummariesByIds,
 };

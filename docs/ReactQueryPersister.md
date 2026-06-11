@@ -26,7 +26,6 @@ To prevent startup cache misses, all observers of persisted keys must carry the 
 ## Query Key Structure
 
 - `["libraries"]`
-- `["library", libraryId, "books"]`
 - `["user", userKey, "library", libraryId, "playlists"]`
 - `["library", libraryId, "filterData"]`
 - `["library", libraryId, "booksInProgress"]`
@@ -35,10 +34,14 @@ To prevent startup cache misses, all observers of persisted keys must carry the 
   `userMediaProgress`. It is user/session-bearing data until item metadata and item user state are
   split into separate queries.
 
+The full library catalog is **not** persisted in React Query/MMKV. It lives in the SQLite shadow
+database (`docs/shadow-sqlite-tables.md`), which backs search, browse, home shelf projections,
+series/filter sheets, and single-item summary lookups. SQLite-backed queries use the `["sqlite", ...]`
+key prefix and are never dehydrated.
+
 ## Persisted Queries (today)
 
 - Libraries query (`useLibrariesQuery`)
-- Library books (`useGetBooks`)
 - Library playlists (`useHomeShelves`)
 - User server state (`useGetUserServerState`)
 - Library filter data (`useGetFilterData`)
@@ -49,10 +52,12 @@ To prevent startup cache misses, all observers of persisted keys must carry the 
 
 After auth becomes authenticated and an active library context exists, app bootstrap prefetches:
 
-- `queryKeys.libraryBooks(activeLibraryId)` via `libraryItemsApi.getItems(...)`
 - `queryKeys.userServerState(activeLibraryUserKey)` via `meApi.getUserServerState()`
 
 Prefetch is stale-aware (5 minute `staleTime`), so it only fetches when cached data is stale.
+Catalog readiness is handled separately: home/search hooks check
+`queryKeys.sqliteLibraryReadiness` and trigger `sqliteRefreshCoordinator.refreshActiveLibrary`
+when the SQLite catalog is empty or stale.
 
 ## First Login Library Resolution
 
@@ -62,18 +67,21 @@ First login performs a fresh Libraries query before normal browsing begins:
 
 If exactly one Library is returned, Library Activation runs before it becomes the Active Library. If multiple Libraries are returned, the app routes to Library Selection without setting a temporary Active Library. Library Activation can use remembered data immediately, and fetches only missing required activation data before committing the Active Library:
 
-- `queryKeys.libraryBooks(activeLibraryId)`
 - `queryKeys.userServerState(activeLibraryUserKey)`
+
+The catalog itself is refreshed into SQLite by the home/search readiness flow after the Active
+Library is committed; activation does not fetch the catalog.
 
 `queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId)` may prefetch in the background, but it does not block Library Activation. This prevents the Home screen from appearing blank during the initial data load after choosing a Library without making cached library switches wait for a server refresh.
 
 ## Home Manual Refresh
 
-Home pull-to-refresh invalidates and refetches the main persisted Home keys:
+Home pull-to-refresh invalidates and refetches the main persisted Home keys plus the SQLite
+shadow data:
 
-- `queryKeys.libraryBooks(activeLibraryId)`
 - `queryKeys.userServerState(activeLibraryUserKey)`
 - `queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId)`
+- SQLite catalog/overlay via `sqliteRefreshCoordinator.refreshActiveLibrary`
 
 This guarantees users can fetch newly added books, latest progress, and playlist shelf changes on demand.
 

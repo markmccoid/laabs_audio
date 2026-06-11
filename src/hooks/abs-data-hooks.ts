@@ -1,18 +1,12 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { sortBy } from "es-toolkit";
 import { useCallback, useEffect, useMemo } from "react";
 import { itemsApi, type ItemDetails } from "../api/items-api";
 import { librariesApi, type LibraryFilterData } from "../api/libraries-api";
-import {
-  libraryItemsApi,
-  type LibraryItemSummary,
-  type LibraryItemsSummary,
-} from "../api/library-items-api";
+import { type LibraryItemSummary } from "../api/library-items-api";
 import { seriesApi, type SeriesWithProgress } from "../api/series-api";
 import {
   meApi,
   createEmptyUserServerState,
-  normalizeUserProgressByLibraryItemId,
   type ItemsInProgressSummary,
   type UserBookProgress,
   type UserServerState,
@@ -20,20 +14,8 @@ import {
 import { selectAccessMode, useAuthActions, useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
 import { upsertShadowServerProgressProjection } from "../data/shadow-sqlite-service";
+import { sqliteSearchRepository } from "../data/sqlite/search-repository";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
-import type { Bookmark } from "../types/absTypes";
-import {
-  useFavoriteFilter,
-  useFinishedOnly,
-  useFiltersStore,
-  useGenreOperator,
-  useGenres,
-  useSearchValue,
-  useSortDirection,
-  useSortedBy,
-  useTagOperator,
-  useTags,
-} from "../store/store-filters";
 import {
   deviceBooksStore,
   resolveStoredDownloadCoverUri,
@@ -69,260 +51,6 @@ export const useLibraries = () => {
     libraries,
     activeLibrary: activeLibraryId ?? "",
     setActiveLibrary: handleSetActiveLibrary,
-  };
-};
-
-//# ----------------------------------------------
-//# useGetBooks Filter Helpers
-//# ----------------------------------------------
-//~ Create a filter configuration object for easy management
-//~ - ----------------------------------------------------
-type Filters = {
-  searchValue?: string;
-  searchTitleAuthor?: boolean;
-  genres?: string[];
-  genreOperator?: "and" | "or";
-  tags?: string[];
-  tagOperator?: "and" | "or";
-  favoriteFilter?: "all" | "only" | "exclude";
-  finishedOnly?: boolean;
-};
-const createFilterConfig = (filters: Filters) => ({
-  search: {
-    enabled: filters.searchValue && filters.searchValue.trim() !== "",
-    term: filters.searchValue?.toLowerCase().trim(),
-    searchTitleAuthor: filters.searchTitleAuthor,
-  },
-  hasAudio: {
-    enabled: true, // Always filter for books with audio
-    condition: (book: LibraryItemSummary) => (book.numAudioFiles || 0) > 0,
-  },
-  // Genre and tag operators apply within each group; the groups still combine via top-level AND.
-  genre: {
-    enabled: (filters?.genres?.length ?? 0) > 0,
-    values: filters?.genres,
-    condition: (book: LibraryItemSummary) =>
-      filters.genreOperator === "or"
-        ? (filters.genres?.some((genre) => book.genres?.includes(genre)) ?? true)
-        : (filters.genres?.every((genre) => book.genres?.includes(genre)) ?? true),
-  },
-  tags: {
-    enabled: (filters?.tags?.length ?? 0) > 0,
-    values: filters?.tags,
-    condition: (book: LibraryItemSummary) =>
-      filters.tagOperator === "or"
-        ? (filters.tags?.some((tag) => book.tags?.includes(tag)) ?? true)
-        : (filters.tags?.every((tag) => book.tags?.includes(tag)) ?? true),
-  },
-  favorites: {
-    enabled: (filters?.favoriteFilter ?? "all") !== "all",
-    mode: filters.favoriteFilter ?? "all",
-    condition: (book: LibraryItemWithUserState) => {
-      switch (filters.favoriteFilter) {
-        case "only":
-          return book.isFavorite === true;
-        case "exclude":
-          return book.isFavorite === false;
-        case "all":
-        default:
-          return true;
-      }
-    },
-  },
-  finished: {
-    enabled: filters.finishedOnly === true,
-    condition: (book: LibraryItemWithUserState) => book.isFinished === true,
-  },
-  // rating: {
-  //   enabled: additionalFilters.minRating != null,
-  //   minValue: additionalFilters.minRating,
-  //   condition: (book) => (book.rating || 0) >= additionalFilters.minRating,
-  // },
-});
-//~ - ----------------------------------------------------
-//~ Single pass filter function that applies all filters at once
-//~ - ----------------------------------------------------
-const applyFilters = <T extends LibraryItemWithUserState>(
-  books: T[],
-  filterConfig: ReturnType<typeof createFilterConfig>,
-) => {
-  if (!books?.length) return books;
-  return books.filter((book) => {
-    // Search filter
-    if (filterConfig.search.enabled) {
-      const searchTerm = filterConfig.search.term;
-      let titleAuthorSearch = false;
-
-      if (filterConfig.search.searchTitleAuthor) {
-        titleAuthorSearch = !!(
-          (book.title && book.title.toLowerCase().includes(searchTerm || "")) ||
-          (book.author && book.author.toLowerCase().includes(searchTerm || ""))
-        );
-      }
-
-      if (!titleAuthorSearch) return false;
-    }
-
-    // Audio files filter
-    if (filterConfig.hasAudio.enabled) {
-      if (!filterConfig.hasAudio.condition(book)) return false;
-    }
-
-    if (filterConfig.genre.enabled) {
-      if (!filterConfig.genre.condition(book)) return false;
-    }
-    if (filterConfig.tags.enabled) {
-      if (!filterConfig.tags.condition(book)) return false;
-    }
-    if (filterConfig.favorites.enabled) {
-      if (!filterConfig.favorites.condition(book)) return false;
-    }
-    if (filterConfig.finished.enabled) {
-      if (!filterConfig.finished.condition(book)) return false;
-    }
-    // Add other filters here as needed
-    // Each filter should return false if the book doesn't match
-    return true; // Book passes all filters
-  });
-};
-
-export type LibraryItemWithUserState = LibraryItemSummary & {
-  userProgress: UserBookProgress | null;
-  userBookmarks: Bookmark[];
-  currentTime: number;
-  isFinished: boolean;
-  isFavorite: boolean;
-};
-//# ----------------------------------------------
-//# useGetBooks Filter Setup
-//# ----------------------------------------------
-export const useGetBooks = () => {
-  const status = useAuthStore((state) => state.status);
-  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const {
-    data: userServerState,
-    isPending: isUserStatePending,
-    isLoading: isUserStateLoading,
-    isError: isUserStateError,
-  } = useGetUserServerState();
-  const sortedBy = useSortedBy();
-  const sortDirection = useSortDirection();
-  const searchValue = useSearchValue();
-  const searchTitleAuthor = useFiltersStore((state) => state.searchTitleAuthor);
-  const genres = useGenres();
-  const genreOperator = useGenreOperator();
-  const tags = useTags();
-  const tagOperator = useTagOperator();
-  const favoriteFilter = useFavoriteFilter();
-  const finishedOnly = useFinishedOnly();
-
-  // Always call useQuery, but disable it when not authenticated
-  const {
-    data: rawData,
-    isPending,
-    isError,
-    isLoading,
-    ...rest
-  } = useQuery({
-    queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
-    queryFn: async () => {
-      if (!activeLibraryId) return [];
-      return libraryItemsApi.getItems({ libraryId: activeLibraryId });
-    },
-    enabled: status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId,
-    // Opt-in to React Query persistence for this query only
-    meta: { persist: true },
-  });
-
-  const mergedData = useMemo<LibraryItemWithUserState[] | undefined>(() => {
-    if (!rawData?.length) return rawData as LibraryItemWithUserState[] | undefined;
-
-    const progressByLibraryItemId = normalizeUserProgressByLibraryItemId(
-      userServerState as
-        | (typeof userServerState & { progressByBookId?: Record<string, UserBookProgress> })
-        | undefined,
-    );
-    const bookmarksByLibraryItemId =
-      userServerState?.bookmarksByLibraryItemId ??
-      // Compatibility for older persisted query shape.
-      (userServerState as typeof userServerState & { bookmarksByBookId?: Record<string, Bookmark[]> })
-        ?.bookmarksByBookId ??
-      {};
-    const favoriteByLibraryItemId = userServerState?.favoriteByLibraryItemId ?? {};
-
-    return rawData.map((book) => {
-      const userProgress = progressByLibraryItemId[book.id] ?? null;
-      return {
-        ...book,
-        userProgress,
-        userBookmarks: bookmarksByLibraryItemId[book.id] ?? [],
-        currentTime: userProgress?.currentTime ?? 0,
-        isFinished: userProgress?.isFinished ?? false,
-        isFavorite: Boolean(favoriteByLibraryItemId[book.id]),
-      };
-    });
-  }, [rawData, userServerState]);
-
-  // Always call useMemo hooks
-  const filteredData = useMemo(() => {
-    if (!mergedData?.length) return mergedData;
-
-    const filterConfig = createFilterConfig({
-      searchValue,
-      genres,
-      genreOperator,
-      tags,
-      tagOperator,
-      favoriteFilter,
-      finishedOnly,
-      searchTitleAuthor,
-    });
-
-    // Early return if no filters are active
-    const hasActiveFilters = Object.values(filterConfig).some((filter) => filter.enabled);
-    if (!hasActiveFilters) return mergedData;
-
-    return applyFilters(mergedData, filterConfig);
-  }, [
-    mergedData,
-    searchValue,
-    genres,
-    genreOperator,
-    tags,
-    tagOperator,
-    favoriteFilter,
-    finishedOnly,
-    searchTitleAuthor,
-  ]);
-
-  const sortedData = useMemo(() => {
-    if (!filteredData?.length) return filteredData;
-    const sorted = sortBy(filteredData, [sortedBy]);
-    // reverse if desc
-    if (sortDirection === "desc") return sorted.reverse();
-    // if (sortDirection === "desc") return reverse(sorted);
-
-    return sorted;
-  }, [filteredData, sortedBy, sortDirection]);
-
-  // Return appropriate data based on authentication state
-  if (status !== "authenticated") {
-    return {
-      data: undefined,
-      isPending: false,
-      isError: false,
-      isLoading: false,
-      error: null,
-    };
-  }
-
-  return {
-    data: sortedData,
-    isPending: isPending || isUserStatePending,
-    isError: isError || isUserStateError,
-    isLoading: isLoading || isUserStateLoading,
-    ...rest,
   };
 };
 
@@ -564,31 +292,27 @@ export type ItemDetailsWithSummary = LibraryItemSummary &
   };
 
 export const useCachedBookSummary = (itemId?: string) => {
+  const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const queryClient = useQueryClient();
   const downloadedCoverLocalUri = useDeviceBooksStore((state) =>
     itemId ? resolveStoredDownloadCoverUri(state.downloadedBookData[itemId]) : null,
   );
-  const booksQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId);
-  const immediateCachedBooks = activeLibraryUserKey && activeLibraryId
-    ? queryClient.getQueryData<LibraryItemsSummary>(booksQueryKey)
-    : undefined;
+  const itemIds = useMemo(() => (itemId ? [itemId] : []), [itemId]);
 
-  // Subscribe to the existing books query cache without triggering a fetch.
-  const { data: cachedBooks } = useQuery<LibraryItemsSummary>({
-    queryKey: booksQueryKey,
-    queryFn: async () => immediateCachedBooks ?? [],
-    enabled: false,
-    // Ensure first render can synchronously read already-cached books data.
-    initialData: immediateCachedBooks,
-    // Preserve persist opt-in for the shared library-books query key.
-    meta: { persist: true },
+  const { data: summaryById } = useQuery({
+    queryKey: queryKeys.sqliteItemSummaries(activeLibraryUserKey, activeLibraryId, itemIds),
+    queryFn: () => sqliteSearchRepository.getItemSummariesByIds(itemIds),
+    enabled:
+      status === "authenticated" &&
+      !!activeLibraryUserKey &&
+      !!activeLibraryId &&
+      itemIds.length > 0,
   });
 
-  const summaryFromQueryCache = useMemo(() => {
+  const summaryFromSqlite = useMemo(() => {
     if (!itemId) return null;
-    const summary = (cachedBooks ?? immediateCachedBooks)?.find((book) => book.id === itemId) ?? null;
+    const summary = summaryById?.get(itemId) ?? null;
     if (!summary) return null;
 
     const coverUri = resolveBookCoverUri(summary, downloadedCoverLocalUri);
@@ -600,9 +324,9 @@ export const useCachedBookSummary = (itemId?: string) => {
       cover: coverUri,
       coverFull: coverUri,
     };
-  }, [cachedBooks, downloadedCoverLocalUri, immediateCachedBooks, itemId]);
+  }, [downloadedCoverLocalUri, itemId, summaryById]);
 
-  return summaryFromQueryCache ?? null;
+  return summaryFromSqlite;
 };
 
 export const useGetItemDetails = (itemId?: string) => {
@@ -807,32 +531,4 @@ export const useGetFilterData = () => {
     error,
     ...rest,
   };
-};
-//# ----------------------------------------------
-//# useInvalidateQueries
-//# ----------------------------------------------
-export const useInvalidateQueries = () => {
-  const queryClient = useQueryClient();
-  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-
-  return useCallback(
-    (queryIdentifier: "booksInProgress" | "books") => {
-      switch (queryIdentifier) {
-        case "booksInProgress":
-          queryClient.invalidateQueries({
-            queryKey: queryKeys.booksInProgress(activeLibraryId),
-          });
-          break;
-        case "books":
-          queryClient.invalidateQueries({
-            queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
-          });
-          break;
-        default:
-          break;
-      }
-    },
-    [activeLibraryId, activeLibraryUserKey, queryClient],
-  );
 };

@@ -1,10 +1,6 @@
 export const queryKeys = {
   libraries: (userKey: string | null | undefined) =>
     ["user", userKey ?? null, "libraries"] as const,
-  libraryBooks: (
-    userKey: string | null | undefined,
-    libraryId: string | null | undefined,
-  ) => ["user", userKey ?? null, "library", libraryId ?? null, "books"] as const,
   libraryPlaylists: (
     userKey: string | null | undefined,
     libraryId: string | null | undefined,
@@ -31,6 +27,12 @@ export const queryKeys = {
     params: unknown,
   ) =>
     ["sqlite", "user", userKey ?? null, "library", libraryId ?? null, "homeProjection", params] as const,
+  sqliteItemSummaries: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+    itemIds: readonly string[],
+  ) =>
+    ["sqlite", "user", userKey ?? null, "library", libraryId ?? null, "itemSummaries", itemIds] as const,
   itemDetails: (
     userKey: string | null | undefined,
     itemId: string | null | undefined,

@@ -2,6 +2,7 @@ import { activateLibrary } from "@/auth/library-activation";
 import { libraryActivationStore } from "@/auth/library-activation-store";
 import { authStore, useAuthStore } from "@/auth/auth-store";
 import { queryClient } from "@/query/query-client";
+import { sqliteSearchRepository } from "@/data/sqlite/search-repository";
 import { recordTimingLog } from "@/data/sqlite/timing-logger";
 import { getBookDetailHref } from "@/navigation/book-links";
 import { playerService } from "@/player/player-service";
@@ -14,10 +15,17 @@ type ActivateLibrarySelectionOptions = {
   returnToLibraryItemId?: string | null;
 };
 
-const didCatalogIncludeItem = (
-  catalog: Awaited<ReturnType<typeof activateLibrary>>["catalog"],
-  libraryItemId: string | null | undefined,
-) => Boolean(libraryItemId && catalog.some((item) => item.id === libraryItemId));
+// Requires the target library to already be active (auth store) so the
+// SQLite lookup is scoped to the right catalog.
+const isItemInActiveCatalog = async (libraryItemId: string | null | undefined) => {
+  if (!libraryItemId) return false;
+  try {
+    const summaries = await sqliteSearchRepository.getItemSummariesByIds([libraryItemId]);
+    return summaries.has(libraryItemId);
+  } catch {
+    return false;
+  }
+};
 
 const waitForNextFrame = () =>
   new Promise<void>((resolve) => {
@@ -45,7 +53,7 @@ export const runLibraryActivationSelection = async (
   await waitForNextFrame();
 
   try {
-    const result = await activateLibrary({
+    await activateLibrary({
       library,
       activeLibraryUserKey: authState.activeLibraryUserKey,
       queryClient,
@@ -58,7 +66,7 @@ export const runLibraryActivationSelection = async (
     if (
       options.mode === "setup" &&
       returnToLibraryItemId &&
-      didCatalogIncludeItem(result.catalog, returnToLibraryItemId)
+      (await isItemInActiveCatalog(returnToLibraryItemId))
     ) {
       router.replace(getBookDetailHref(returnToLibraryItemId));
       await waitForNextFrame();

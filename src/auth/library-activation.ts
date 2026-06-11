@@ -1,5 +1,4 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { libraryItemsApi, type LibraryItemsSummary } from "../api/library-items-api";
 import { playlistsApi } from "../api/playlists-api";
 import { FIVE_MINUTES_MS } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
@@ -12,12 +11,6 @@ type ActivateLibraryOptions = {
   activeLibraryUserKey: string | null;
   queryClient: QueryClient;
 };
-
-export type LibraryActivationResult = {
-  catalog: LibraryItemsSummary;
-};
-
-
 
 const backgroundRefresh = <T>(promise: Promise<T>) => {
   void promise.catch(() => undefined);
@@ -66,74 +59,36 @@ const refreshActivationQueriesIfStale = (
   activeLibraryUserKey: string,
   library: Library,
 ) => {
-  backgroundRefreshIfStale(
-    queryClient,
-    queryKeys.libraryBooks(activeLibraryUserKey, library.id),
-    () => libraryItemsApi.getItems({ libraryId: library.id }),
-  );
   backgroundRefreshIfStale(queryClient, queryKeys.userServerState(activeLibraryUserKey), () =>
     fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
   );
   prefetchPlaylistsIfStale(queryClient, activeLibraryUserKey, library.id);
 };
 
+// Catalog data lives in the SQLite shadow database; the home/search hooks
+// trigger a catalog refresh via sqliteLibraryReadiness once the library
+// becomes active. Activation only warms the compact per-user queries.
 export const activateLibrary = async ({
   library,
   activeLibraryUserKey,
   queryClient,
-}: ActivateLibraryOptions): Promise<LibraryActivationResult> => {
+}: ActivateLibraryOptions): Promise<void> => {
   if (!activeLibraryUserKey) {
     throw new Error("Library Activation requires a User Session");
   }
 
   const startedAt = Date.now();
-  const catalogQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, library.id);
-  const userServerStateQueryKey = queryKeys.userServerState(activeLibraryUserKey);
-  const cachedCatalog = queryClient.getQueryData<LibraryItemsSummary>(catalogQueryKey);
 
-  if (cachedCatalog) {
-    deferBackgroundRefresh(() =>
-      refreshActivationQueriesIfStale(queryClient, activeLibraryUserKey, library),
-    );
+  backgroundRefreshIfStale(queryClient, queryKeys.userServerState(activeLibraryUserKey), () =>
+    fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
+  );
+  deferBackgroundRefresh(() =>
+    refreshActivationQueriesIfStale(queryClient, activeLibraryUserKey, library),
+  );
 
-    void recordTimingLog("library_switch", "activate_library_fetch", startedAt, {
-      libraryId: library.id,
-      libraryName: library.name,
-      cached: true,
-      catalogCount: cachedCatalog.length,
-    });
-    return { catalog: cachedCatalog };
-  }
-
-  try {
-    backgroundRefreshIfStale(queryClient, catalogQueryKey, () =>
-      libraryItemsApi.getItems({ libraryId: library.id }),
-    );
-
-    backgroundRefreshIfStale(queryClient, userServerStateQueryKey, () =>
-      fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
-    );
-    deferBackgroundRefresh(() =>
-      refreshActivationQueriesIfStale(queryClient, activeLibraryUserKey, library),
-    );
-
-    void recordTimingLog("library_switch", "activate_library_fetch", startedAt, {
-      libraryId: library.id,
-      libraryName: library.name,
-      cached: false,
-      catalogCount: 0,
-      success: true,
-    });
-    return { catalog: [] };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    void recordTimingLog("library_switch", "activate_library_fetch", startedAt, {
-      libraryId: library.id,
-      libraryName: library.name,
-      cached: false,
-      success: false,
-      error: errorMessage,
-    });
-    throw error;
-  }
+  void recordTimingLog("library_switch", "activate_library_fetch", startedAt, {
+    libraryId: library.id,
+    libraryName: library.name,
+    success: true,
+  });
 };

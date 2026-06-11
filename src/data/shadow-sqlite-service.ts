@@ -72,6 +72,8 @@ export type ShadowSearchParams = {
   genreOperator?: "and" | "or";
   tags?: string[];
   tagOperator?: "and" | "or";
+  author?: string;
+  narrator?: string;
   favoriteFilter?: "all" | "only" | "exclude";
   finishedOnly?: boolean;
   sortBy?: "addedAt" | "author" | "title" | "duration" | "publishedYear";
@@ -1068,6 +1070,41 @@ export const fetchShadowDetailSnapshot = (libraryItemId: string) =>
     return { libraryItemId, serverUpdatedAt: detail.updatedAt, fetchedAt };
   });
 
+// Stay below SQLite's bind-variable limit when resolving large ID lists.
+const SUMMARY_LOOKUP_CHUNK_SIZE = 400;
+
+export const getShadowItemSummariesByIds = async (
+  libraryItemIds: string[],
+): Promise<Map<string, LibraryItemSummary>> => {
+  const itemById = new Map<string, LibraryItemSummary>();
+  const ids = Array.from(new Set(libraryItemIds.filter(Boolean)));
+  if (ids.length === 0) return itemById;
+
+  const context = requireAuthContext();
+  const db = await getDb();
+  await initializeShadowDatabaseInternal();
+
+  for (let index = 0; index < ids.length; index += SUMMARY_LOOKUP_CHUNK_SIZE) {
+    const chunk = ids.slice(index, index + SUMMARY_LOOKUP_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const rows = await db.getAllAsync<SummaryRow>(
+      `SELECT library_item_id, summary_json
+       FROM library_catalog_items
+       WHERE user_id = ?
+         AND library_id = ?
+         AND is_missing = 0
+         AND library_item_id IN (${placeholders})`,
+      [context.userId, context.libraryId, ...chunk],
+    );
+
+    for (const row of rows) {
+      itemById.set(row.library_item_id, JSON.parse(row.summary_json) as LibraryItemSummary);
+    }
+  }
+
+  return itemById;
+};
+
 const buildFacetClause = (
   tableName: "catalog_item_genres" | "catalog_item_tags",
   values: string[],
@@ -1157,6 +1194,16 @@ export const runShadowSearchTest = async (
         "",
       ),
     );
+  }
+
+  if (params.author) {
+    clauses.push("COALESCE(item.author, '') = ?");
+    sqlParams.push(params.author);
+  }
+
+  if (params.narrator) {
+    clauses.push("COALESCE(item.narrator, '') = ?");
+    sqlParams.push(params.narrator);
   }
 
   if (params.favoriteFilter === "only") {
@@ -1293,6 +1340,16 @@ export const queryShadowSearchResults = async (
         "",
       ),
     );
+  }
+
+  if (params.author) {
+    clauses.push("COALESCE(item.author, '') = ?");
+    sqlParams.push(params.author);
+  }
+
+  if (params.narrator) {
+    clauses.push("COALESCE(item.narrator, '') = ?");
+    sqlParams.push(params.narrator);
   }
 
   if (params.favoriteFilter === "only") {

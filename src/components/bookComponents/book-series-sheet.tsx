@@ -1,13 +1,14 @@
-import type { LibraryItemsSummary, LibraryItemSummary } from "@/api/library-items-api";
+import type { LibraryItemSummary } from "@/api/library-items-api";
 import { normalizeUserProgressByLibraryItemId, type UserBookProgress } from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { BookFlashListRow } from "@/components/books/book-flashlist-row";
+import { sqliteSearchRepository } from "@/data/sqlite/search-repository";
 import { useGetSeriesWithProgress, useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { getBookDetailHref } from "@/navigation/book-links";
 import { queryKeys } from "@/query/query-keys";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useMemo } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
@@ -25,7 +26,6 @@ export const BookSeriesSheet = () => {
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const isOffline = useAuthStore((state) => state.isOnline === false);
   const { data: userServerState } = useGetUserServerState();
-  const queryClient = useQueryClient();
   const {
     seriesId: seriesIdParam,
     seriesName: seriesNameParam,
@@ -42,22 +42,6 @@ export const BookSeriesSheet = () => {
   const currentAudiobookId = resolveParam(currentAudiobookIdParam);
   const sourceTabParamResolved = resolveParam(sourceTabParam);
   const sourceTab: SourceTab = sourceTabParamResolved === "search" ? "search" : "home";
-  const booksQueryKey = queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId);
-  const immediateCatalog = activeLibraryUserKey && activeLibraryId
-    ? queryClient.getQueryData<LibraryItemsSummary>(booksQueryKey)
-    : undefined;
-
-  const { data: subscribedCatalog } = useQuery<LibraryItemsSummary>({
-    queryKey: booksQueryKey,
-    queryFn: async () => immediateCatalog ?? [],
-    enabled: false,
-    initialData: immediateCatalog,
-    meta: { persist: true },
-  });
-  const catalog = useMemo(
-    () => subscribedCatalog ?? immediateCatalog ?? [],
-    [immediateCatalog, subscribedCatalog],
-  );
   const {
     data: seriesWithProgress,
     isLoading,
@@ -78,13 +62,24 @@ export const BookSeriesSheet = () => {
     () => seriesWithProgress?.progress?.libraryItemIds ?? [],
     [seriesWithProgress?.progress?.libraryItemIds],
   );
+  const { data: seriesItemById } = useQuery({
+    queryKey: queryKeys.sqliteItemSummaries(
+      activeLibraryUserKey,
+      activeLibraryId,
+      seriesLibraryItemIds,
+    ),
+    queryFn: () => sqliteSearchRepository.getItemSummariesByIds(seriesLibraryItemIds),
+    enabled:
+      Boolean(activeLibraryUserKey) &&
+      Boolean(activeLibraryId) &&
+      seriesLibraryItemIds.length > 0,
+  });
   const seriesBooks = useMemo(() => {
-    if (!seriesLibraryItemIds.length || !catalog.length) return [];
-    const catalogById = new Map(catalog.map((item) => [item.id, item]));
+    if (!seriesLibraryItemIds.length || !seriesItemById?.size) return [];
     return seriesLibraryItemIds
-      .map((libraryItemId) => catalogById.get(libraryItemId))
+      .map((libraryItemId) => seriesItemById.get(libraryItemId))
       .filter((book): book is LibraryItemSummary => Boolean(book));
-  }, [catalog, seriesLibraryItemIds]);
+  }, [seriesItemById, seriesLibraryItemIds]);
 
   const missingBooksCount = Math.max(0, seriesLibraryItemIds.length - seriesBooks.length);
 

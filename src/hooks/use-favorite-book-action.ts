@@ -1,4 +1,3 @@
-import type { LibraryItemsSummary } from "@/api/library-items-api";
 import { favoritesApi } from "@/api/favorites-api";
 import { itemsApi, type ItemDetails } from "@/api/items-api";
 import {
@@ -20,7 +19,6 @@ type ToggleFavoriteVariables = {
 
 type ToggleFavoriteContext = {
   previousUserServerState?: UserServerState;
-  previousLibraryBooks?: LibraryItemsSummary;
   previousItemDetails?: ItemDetails;
 };
 
@@ -73,10 +71,6 @@ export const useFavoriteBookAction = () => {
           exact: true,
         }),
         queryClient.cancelQueries({
-          queryKey: queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
-          exact: true,
-        }),
-        queryClient.cancelQueries({
           queryKey: queryKeys.itemDetails(activeLibraryUserKey, libraryItemId),
           exact: true,
         }),
@@ -84,9 +78,6 @@ export const useFavoriteBookAction = () => {
 
       const previousUserServerState = queryClient.getQueryData<UserServerState>(
         queryKeys.userServerState(activeLibraryUserKey),
-      );
-      const previousLibraryBooks = queryClient.getQueryData<LibraryItemsSummary>(
-        queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
       );
       const previousItemDetails = queryClient.getQueryData<ItemDetails>(
         queryKeys.itemDetails(activeLibraryUserKey, libraryItemId),
@@ -118,20 +109,6 @@ export const useFavoriteBookAction = () => {
           ),
       );
 
-      queryClient.setQueryData<LibraryItemsSummary>(
-        queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
-        (previousBooks) =>
-          previousBooks?.map((book) =>
-            book.id === libraryItemId
-              ? {
-                  ...book,
-                  tags: nextTags,
-                  isFavorite: nextIsFavorite,
-                }
-              : book,
-          ) ?? previousBooks,
-      );
-
       queryClient.setQueryData<ItemDetails>(
         queryKeys.itemDetails(activeLibraryUserKey, libraryItemId),
         (previousDetails) =>
@@ -148,7 +125,6 @@ export const useFavoriteBookAction = () => {
 
       return {
         previousUserServerState,
-        previousLibraryBooks,
         previousItemDetails,
       };
     },
@@ -165,12 +141,6 @@ export const useFavoriteBookAction = () => {
         queryClient.setQueryData(
           queryKeys.userServerState(activeLibraryUserKey),
           context?.previousUserServerState,
-        );
-      }
-      if (activeLibraryId && activeLibraryUserKey) {
-        queryClient.setQueryData(
-          queryKeys.libraryBooks(activeLibraryUserKey, activeLibraryId),
-          context?.previousLibraryBooks,
         );
       }
       queryClient.setQueryData(

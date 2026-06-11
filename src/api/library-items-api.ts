@@ -129,11 +129,6 @@ export const libraryItemsApi = {
     };
   },
 
-  async getItems(params: GetLibraryItemsParams): Promise<LibraryItemsSummary> {
-    const responseData = await libraryItemsApi.getItemsPage(params);
-    return responseData.results;
-  },
-
   async getFinishedItems(libraryId: string): Promise<LibraryItem[]> {
     const libraryIdToUse = requireLibraryId(libraryId, "libraryItemsApi.getFinishedItems");
 
