@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-11` `pending` - Stabilize rapid skip controls during playback.
+  Tester focus: while audio is playing, rapidly tap skip forward/backward and verify the slider moves to the accumulated target without jumping back, playback stays in the correct play/pause state, and pressing pause immediately after skipping actually stops audio.
 - `2026-06-09` `pending` - Enhance settings UI with new Lock Screen controls, active Sign-Ins display, and resolve Auth/API module circular dependencies.
   Tester focus: Under System Settings, verify the "Lock Screen Controls" section has a working options Picker ("Skip by Seconds", "Skip by Chapters", "None") and does not crash when clicked. Verify the main Settings home page shows the active username/server URL in the "Sign-Ins" subtitle. Verify the app builds and runs without circular dependency warnings.
 - `2026-06-09` `pending` - Make lock screen progress visible when seeking is disabled on iOS.

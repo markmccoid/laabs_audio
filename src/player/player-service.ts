@@ -65,6 +65,9 @@ const STALE_ZERO_PROGRESS_GUARD_SECONDS = 5;
 const LOAD_PROGRESS_FETCH_TIMEOUT_MS = 350;
 const POST_PREVIEW_STATUS_GUARD_MS = 2000;
 const POST_PREVIEW_RESTORED_POSITION_TOLERANCE_MS = 1500;
+const SKIP_BURST_SETTLE_MS = 300;
+const SKIP_BURST_MAX_MS = 2000;
+const NATIVE_SEEK_PAUSE_GUARD_MS = 1500;
 type ProgressSyncReason =
   | "interval"
   | "pause"
@@ -107,6 +110,13 @@ type ClipPreviewSession = {
   restoreState: ClipPreviewRestoreState;
   currentTrackIndex: number;
   stoppedAtEnd: boolean;
+};
+
+type SkipBurst = {
+  libraryItemId: string;
+  targetPositionMs: number;
+  startedAt: number;
+  lastUpdatedAt: number;
 };
 
 export type PlaybackControlResult =
@@ -162,6 +172,11 @@ class PlayerService {
   private localStreamFallbackInFlight = false;
   private playbackStartAttemptId = 0;
   private playbackControlIntentClearTimeout: ReturnType<typeof setTimeout> | null = null;
+  private pendingSkipBurst: SkipBurst | null = null;
+  private skipBurstSettleTimeout: ReturnType<typeof setTimeout> | null = null;
+  private skipBurstMaxTimeout: ReturnType<typeof setTimeout> | null = null;
+  private skipSeekInFlight: Promise<void> | null = null;
+  private nativeSeekPauseGuardUntilMs = 0;
   private clipPreviewSession: ClipPreviewSession | null = null;
   private postPreviewStatusGuard:
     | {
@@ -237,6 +252,104 @@ class PlayerService {
     }
   }
 
+  private clearSkipBurstTimers() {
+    if (this.skipBurstSettleTimeout) {
+      clearTimeout(this.skipBurstSettleTimeout);
+      this.skipBurstSettleTimeout = null;
+    }
+    if (this.skipBurstMaxTimeout) {
+      clearTimeout(this.skipBurstMaxTimeout);
+      this.skipBurstMaxTimeout = null;
+    }
+  }
+
+  private cancelPendingSkipBurst() {
+    this.clearSkipBurstTimers();
+    this.pendingSkipBurst = null;
+  }
+
+  private getSkipBasePositionMs(state: PlaybackStoreState) {
+    if (this.pendingSkipBurst?.libraryItemId === state.libraryItemId) {
+      return this.pendingSkipBurst.targetPositionMs;
+    }
+
+    const displayedPosition = state.libraryItemId
+      ? displayedListeningPositionStore.getState().byLibraryItemId[state.libraryItemId]
+      : null;
+    return displayedPosition?.positionMs ?? state.positionMs;
+  }
+
+  private scheduleSkipBurstFlush() {
+    const burst = this.pendingSkipBurst;
+    if (!burst) return;
+
+    if (this.skipBurstSettleTimeout) {
+      clearTimeout(this.skipBurstSettleTimeout);
+    }
+    this.skipBurstSettleTimeout = setTimeout(() => {
+      this.skipBurstSettleTimeout = null;
+      void this.flushPendingSkipBurst();
+    }, SKIP_BURST_SETTLE_MS);
+
+    if (!this.skipBurstMaxTimeout) {
+      const remainingMaxMs = Math.max(0, SKIP_BURST_MAX_MS - (Date.now() - burst.startedAt));
+      this.skipBurstMaxTimeout = setTimeout(() => {
+        this.skipBurstMaxTimeout = null;
+        void this.flushPendingSkipBurst();
+      }, remainingMaxMs);
+    }
+  }
+
+  private async flushPendingSkipBurst() {
+    const burst = this.pendingSkipBurst;
+    if (!burst || this.skipSeekInFlight) return;
+
+    this.pendingSkipBurst = null;
+    this.clearSkipBurstTimers();
+
+    const seekPromise = this.seekToImmediate(burst.targetPositionMs, {
+      confirmDisplayedPosition: playbackStore.getState().playbackState !== "playing",
+      rollbackOptimisticPositionMs: burst.targetPositionMs,
+      syncProgress: true,
+      allowDuringPlaybackControlIntent: true,
+    }).catch((error) => {
+      if (__DEV__) {
+        console.warn("[player-service] skip-burst:seek-failed", {
+          libraryItemId: burst.libraryItemId,
+          targetPositionMs: burst.targetPositionMs,
+          error,
+        });
+      }
+    });
+
+    this.skipSeekInFlight = seekPromise;
+    try {
+      await seekPromise;
+    } finally {
+      if (this.skipSeekInFlight === seekPromise) {
+        this.skipSeekInFlight = null;
+      }
+    }
+
+    const nextBurst = this.pendingSkipBurst as SkipBurst | null;
+    if (!nextBurst) return;
+
+    const quietWindowElapsed = Date.now() - nextBurst.lastUpdatedAt >= SKIP_BURST_SETTLE_MS;
+    const maxWindowElapsed = Date.now() - nextBurst.startedAt >= SKIP_BURST_MAX_MS;
+    if (quietWindowElapsed || maxWindowElapsed) {
+      await this.flushPendingSkipBurst();
+    } else {
+      this.scheduleSkipBurstFlush();
+    }
+  }
+
+  private async flushPendingSkipBurstBeforeExit() {
+    await this.flushPendingSkipBurst();
+    if (this.skipSeekInFlight) {
+      await this.skipSeekInFlight.catch(() => undefined);
+    }
+  }
+
   private async waitForDownloadedPlaybackProgress() {
     const startedAt = Date.now();
     const initialTrackPositionMs = await this.engine.getPositionMs();
@@ -293,6 +406,7 @@ class PlayerService {
 
   destroy() {
     this.initialized = false;
+    this.cancelPendingSkipBurst();
   }
 
   private logQueue(context: string, queue: PlaybackQueueItem[]) {
@@ -746,6 +860,7 @@ class PlayerService {
   }
 
   private async unloadAndResetPlayback(options?: { preservePlaybackControlIntent?: boolean }) {
+    this.cancelPendingSkipBurst();
     const preservedPlaybackControlIntent = options?.preservePlaybackControlIntent
       ? playbackStore.getState().playbackControlIntent
       : null;
@@ -769,6 +884,7 @@ class PlayerService {
   }
 
   private async closeActiveBookForTransition() {
+    await this.flushPendingSkipBurstBeforeExit();
     const state = playbackStore.getState();
     if (!state.queue.length) {
       await this.unloadAndResetPlayback();
@@ -810,6 +926,7 @@ class PlayerService {
   }
 
   async endActivePlaybackForLogout() {
+    await this.flushPendingSkipBurstBeforeExit();
     const state = playbackStore.getState();
     if (!state.queue.length) {
       await this.unloadAndResetPlayback();
@@ -1792,6 +1909,7 @@ class PlayerService {
       state?: PlaybackStoreState;
     },
   ) {
+    await this.flushPendingSkipBurstBeforeExit();
     const state = options?.state ?? playbackStore.getState();
     const signature = this.getPauseSyncSignature(state);
     const now = Date.now();
@@ -1816,6 +1934,7 @@ class PlayerService {
 
   private async performPause(options?: { syncProgress?: boolean; updatePlaybackStore?: boolean }) {
     this.logDebug("pause");
+    await this.flushPendingSkipBurstBeforeExit();
     await this.engine.pause();
     this.logSnapshot("after pause");
     if (options?.updatePlaybackStore !== false) {
@@ -1930,6 +2049,7 @@ class PlayerService {
   }
 
   async finishActiveBook(payload: { libraryItemId: string; durationSeconds?: number }) {
+    this.cancelPendingSkipBurst();
     const state = playbackStore.getState();
     if (state.libraryItemId !== payload.libraryItemId || !state.queue.length) {
       throw new Error("Active playback session not found");
@@ -2011,9 +2131,17 @@ class PlayerService {
     }
   }
 
-  async seekTo(positionMs: number, options?: { syncProgress?: boolean }) {
+  private async seekToImmediate(
+    positionMs: number,
+    options?: {
+      confirmDisplayedPosition?: boolean;
+      syncProgress?: boolean;
+      rollbackOptimisticPositionMs?: number;
+      allowDuringPlaybackControlIntent?: boolean;
+    },
+  ) {
     const state = playbackStore.getState();
-    if (state.playbackControlIntent) return;
+    if (state.playbackControlIntent && !options?.allowDuringPlaybackControlIntent) return;
     if (!state.queue.length) return;
     this.logDebug(`seekTo: ${positionMs}`);
 
@@ -2026,6 +2154,9 @@ class PlayerService {
     const trackPositionMs = Math.max(0, boundedPosition - targetTrack.startOffsetMs);
     const isPlaying = state.playbackState === "playing";
     const isFinished = state.durationMs > 0 && boundedPosition >= state.durationMs - secondsToMs(3);
+    if (isPlaying) {
+      this.nativeSeekPauseGuardUntilMs = Date.now() + NATIVE_SEEK_PAUSE_GUARD_MS;
+    }
 
     displayedListeningPositionStore.getState().actions.startUserPositionChange({
       libraryItemId: state.libraryItemId as string,
@@ -2046,7 +2177,9 @@ class PlayerService {
     } catch (error) {
       displayedListeningPositionStore
         .getState()
-        .actions.rollbackUserPositionChange(state.libraryItemId as string);
+        .actions.rollbackUserPositionChange(state.libraryItemId as string, {
+          optimisticPositionMs: options?.rollbackOptimisticPositionMs,
+        });
       throw error;
     }
 
@@ -2054,12 +2187,19 @@ class PlayerService {
       positionMs: boundedPosition,
       trackPositionMs,
     });
-    displayedListeningPositionStore.getState().actions.confirmUserPositionChange({
-      libraryItemId: state.libraryItemId as string,
-      positionMs: boundedPosition,
-      durationMs: state.durationMs,
-      isFinished,
-    });
+    if (options?.confirmDisplayedPosition !== false) {
+      displayedListeningPositionStore.getState().actions.confirmUserPositionChange(
+        {
+          libraryItemId: state.libraryItemId as string,
+          positionMs: boundedPosition,
+          durationMs: state.durationMs,
+          isFinished,
+        },
+        {
+          optimisticPositionMs: options?.rollbackOptimisticPositionMs,
+        },
+      );
+    }
     const chapterAtPosition = findChapterForPosition(state.chapterIndex, boundedPosition);
     playbackStore.getState().actions.setCurrentChapter(chapterAtPosition?.id ?? null);
     this.lastTrackedPositionMs = boundedPosition;
@@ -2068,15 +2208,50 @@ class PlayerService {
     }
   }
 
+  async seekTo(positionMs: number, options?: { syncProgress?: boolean }) {
+    this.cancelPendingSkipBurst();
+    if (this.skipSeekInFlight) {
+      await this.skipSeekInFlight.catch(() => undefined);
+    }
+    await this.seekToImmediate(positionMs, options);
+  }
+
   async skipBy(seconds: number, goBackwards: boolean = false) {
     const state = playbackStore.getState();
     if (state.playbackControlIntent) return;
-    if (!state.queue.length) return;
+    if (!state.queue.length || !state.libraryItemId) return;
     let skipMs = secondsToMs(seconds);
     if (goBackwards) {
       skipMs = -skipMs;
     }
-    await this.seekTo(state.positionMs + skipMs);
+    const now = Date.now();
+    const basePositionMs = this.getSkipBasePositionMs(state);
+    const maxPosition = state.durationMs > 0 ? state.durationMs : basePositionMs + skipMs;
+    const targetPositionMs = Math.max(0, Math.min(basePositionMs + skipMs, maxPosition));
+    const isFinished =
+      state.durationMs > 0 && targetPositionMs >= state.durationMs - secondsToMs(3);
+
+    const existingBurst =
+      this.pendingSkipBurst?.libraryItemId === state.libraryItemId ? this.pendingSkipBurst : null;
+    if (this.pendingSkipBurst && !existingBurst) {
+      this.cancelPendingSkipBurst();
+    }
+
+    this.pendingSkipBurst = {
+      libraryItemId: state.libraryItemId,
+      targetPositionMs,
+      startedAt: existingBurst?.startedAt ?? now,
+      lastUpdatedAt: now,
+    };
+
+    displayedListeningPositionStore.getState().actions.startUserPositionChange({
+      libraryItemId: state.libraryItemId,
+      positionMs: targetPositionMs,
+      durationMs: state.durationMs,
+      isFinished,
+    });
+
+    this.scheduleSkipBurstFlush();
   }
 
   async playClipPreview(payload: {
@@ -2326,6 +2501,7 @@ class PlayerService {
   }
 
   async nextTrack() {
+    this.cancelPendingSkipBurst();
     const state = playbackStore.getState();
     const nextIndex = state.currentTrackIndex + 1;
     if (nextIndex >= state.queue.length) {
@@ -2345,6 +2521,7 @@ class PlayerService {
   }
 
   async previousTrack() {
+    this.cancelPendingSkipBurst();
     const state = playbackStore.getState();
     if (!state.queue.length) return;
 
@@ -2503,14 +2680,20 @@ class PlayerService {
     };
     const previousPlaybackState = state.playbackState;
     let didTransitionToNonPlaying = false;
+    const isNativeSeekPauseGuardActive = Date.now() < this.nativeSeekPauseGuardUntilMs;
 
     // Keep store playbackState aligned with engine state.
     if (status.isPlaying && state.playbackState !== "playing") {
+      this.nativeSeekPauseGuardUntilMs = 0;
       updates.playbackState = "playing";
       // Playback can resume from system controls/background without going through play().
       // Reconcile and reapply persisted speed on this transition.
       void this.reconcilePlaybackRate("status-transition");
-    } else if (!status.isPlaying && state.playbackState === "playing") {
+    } else if (
+      !status.isPlaying &&
+      state.playbackState === "playing" &&
+      !isNativeSeekPauseGuardActive
+    ) {
       updates.playbackState = "paused";
       didTransitionToNonPlaying = true;
     }

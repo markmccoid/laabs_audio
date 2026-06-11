@@ -80,6 +80,8 @@ export type AudioEngine = {
 const UPDATE_INTERVAL_MS = 1000;
 const DEFAULT_READY_TIMEOUT_MS = 15000;
 const DEFAULT_PLAYING_TIMEOUT_MS = 15000;
+const DEFAULT_SEEK_TIMEOUT_MS = 5000;
+const SEEK_COMPLETE_TOLERANCE_MS = 1500;
 // AudioPro requires a valid artwork URL/string for each track.
 const DEFAULT_ARTWORK = DEFAULT_BOOK_COVER;
 
@@ -332,6 +334,13 @@ export const createAudioEngine = (): AudioEngine => {
         events.onStatus?.(toStatus(position, duration, currentState));
         break;
       }
+      case AudioProEventType.SEEK_COMPLETE: {
+        const position = event.payload?.position ?? AudioPro.getTimings().position;
+        const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
+        settleStateWaiters(event);
+        events.onStatus?.(toStatus(position, duration, currentState));
+        break;
+      }
       case AudioProEventType.TRACK_ENDED: {
         const position = event.payload?.position ?? AudioPro.getTimings().position;
         const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
@@ -439,6 +448,16 @@ export const createAudioEngine = (): AudioEngine => {
     },
     async seek(positionMs) {
       AudioPro.seekTo(positionMs);
+      await waitForState(
+        "seek to complete",
+        (event) => {
+          if (event?.type !== AudioProEventType.SEEK_COMPLETE) return false;
+          const completedPosition = event.payload?.position ?? AudioPro.getTimings().position;
+          return Math.abs(completedPosition - positionMs) <= SEEK_COMPLETE_TOLERANCE_MS;
+        },
+        DEFAULT_SEEK_TIMEOUT_MS,
+        { allowImmediate: false },
+      );
     },
     async setRate(rate) {
       AudioPro.setPlaybackSpeed(rate);

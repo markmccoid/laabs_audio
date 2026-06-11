@@ -207,6 +207,10 @@ _Avoid_: Playback cursor
 The audiobook position shown by player and browsing surfaces while LAABS Audio is resolving, starting, or playing an audiobook.
 _Avoid_: Slider position, UI progress, playback cursor
 
+**Skip Burst**:
+A group of repeated skip interval commands that the user intends as one accumulated Listening Position change.
+_Avoid_: Multiple seeks, skip spam
+
 **Resume Resolution**:
 The decision that chooses the Listening Position when opening an audiobook from saved local, queued, or server progress.
 _Avoid_: Truth, resume merge
@@ -367,6 +371,7 @@ _Avoid_: Five minute window, scrubber window
 - A failed **Playback Start Attempt** may leave no **Active Playback**.
 - Only one **Playback Control Intent** may be active at a time.
 - Play and pause controls should follow **Audible Playback State**, not completion of follow-up progress or cache work.
+- A **Skip Burst** is not a **Playback Control Intent** because it changes **Listening Position**, not **Audible Playback State**.
 - **Downloaded-Only Mode** allows local playback of Downloaded Audio Assets without a signed-in User Session.
 - **Signed-Out Required Sign-In** is not an **Offline User Session**.
 - A user in **Signed-Out Required Sign-In** is not signed in.
@@ -468,11 +473,20 @@ _Avoid_: Five minute window, scrubber window
 - Newer local listening evidence includes a user-initiated **Listening Position** change, playback progress that reaches the chosen **Listening Position**, a pause/stop/background sync point, or a new **Progress Sync Intent** for the audiobook.
 - A user-initiated **Listening Position** change includes slider scrubbing, skip controls, chapter navigation, and **Play from Bookmark**.
 - A user-initiated **Listening Position** change should update the **Displayed Listening Position** immediately while the playback engine catches up.
+- A **Skip Burst** should update the **Displayed Listening Position** as the skip intervals accumulate.
+- A **Skip Burst** changes the whole-audiobook **Listening Position**, not the current audio file's local position.
+- A **Skip Burst** cannot move the **Listening Position** before the start or after the end of the audiobook.
+- A **Skip Burst** may include both forward and backward skip interval commands.
+- A pending **Skip Burst** should be applied before leaving **Active Playback** or recording lifecycle progress.
+- A direct user position command replaces a pending **Skip Burst**.
+- Applying a **Skip Burst** should preserve the current **Audible Playback State**.
 - If a user-initiated **Listening Position** change fails, the **Displayed Listening Position** should return to the last trusted position.
+- A failed **Skip Burst** should not replace a newer user-intended **Displayed Listening Position**.
 - **Displayed Listening Position** is derived from saved and live progress evidence, not a separate durable listening state.
 - Player and browsing surfaces should use the same **Displayed Listening Position** for **Active Playback**.
 - **Remote Command Mode** may expose skip interval controls, next and previous controls, or no secondary controls on system playback surfaces.
 - When **Remote Command Mode** exposes skip interval controls, those controls use the app's forward and backward skip interval preferences.
+- Skip interval controls on system playback surfaces follow the same **Skip Burst** rules as in-app skip interval controls.
 - When **Remote Command Mode** exposes next and previous controls, those controls change the **Listening Position** through chapter navigation only.
 - If **Active Playback** has no chapter data, next and previous remote commands do not change the **Listening Position**.
 - During a **Playback Start Attempt**, player surfaces may show the attempted audiobook's **Displayed Listening Position** before it becomes **Active Playback**.
@@ -498,6 +512,7 @@ _Avoid_: Five minute window, scrubber window
 - App backgrounding or playback interruption creates a local **Progress Sync Intent** before any server sync attempt.
 - Pausing playback creates a local **Progress Sync Intent** before any server sync attempt.
 - Seeking to a new **Listening Position** creates a local **Progress Sync Intent** before any server sync attempt.
+- A **Skip Burst** creates one **Progress Sync Intent** for the applied **Listening Position**.
 - Stopping playback or switching audiobooks creates a local **Progress Sync Intent** before closing a **Streamed Playback Session**.
 - Reaching the natural end of an audiobook creates an **Explicit Progress Change** to finished before any server sync attempt.
 - Interval sync while playback continues does not create a **Progress Sync Intent** unless remote sync fails.

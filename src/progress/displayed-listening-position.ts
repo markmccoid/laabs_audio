@@ -38,8 +38,14 @@ type DisplayedListeningPositionState = {
     acceptFreshServerProgress: (payload: SetDisplayedPositionPayload) => void;
     markPlaybackProgress: (payload: SetDisplayedPositionPayload) => void;
     startUserPositionChange: (payload: SetDisplayedPositionPayload) => void;
-    confirmUserPositionChange: (payload: SetDisplayedPositionPayload) => void;
-    rollbackUserPositionChange: (libraryItemId: string) => void;
+    confirmUserPositionChange: (
+      payload: SetDisplayedPositionPayload,
+      options?: { optimisticPositionMs?: number },
+    ) => void;
+    rollbackUserPositionChange: (
+      libraryItemId: string,
+      options?: { optimisticPositionMs?: number },
+    ) => void;
     clear: (libraryItemId: string) => void;
     clearAll: () => void;
   };
@@ -48,6 +54,7 @@ type DisplayedListeningPositionState = {
 const toPositionMs = (value: number) => Math.max(0, Math.floor(value));
 const toDurationMs = (value?: number) => Math.max(0, Math.floor(value ?? 0));
 const now = () => Date.now();
+const OPTIMISTIC_POSITION_SETTLE_TOLERANCE_MS = 1500;
 
 const mergeDurationMs = (current: DisplayedListeningPosition | undefined, durationMs?: number) =>
   Math.max(toDurationMs(durationMs), current?.durationMs ?? 0);
@@ -111,6 +118,13 @@ export const displayedListeningPositionStore = createStore<DisplayedListeningPos
         const current = get().byLibraryItemId[payload.libraryItemId];
         if (!current) return;
         const positionMs = toPositionMs(payload.positionMs);
+        if (
+          current.optimisticPositionMs !== null &&
+          Math.abs(positionMs - current.optimisticPositionMs) >
+            OPTIMISTIC_POSITION_SETTLE_TOLERANCE_MS
+        ) {
+          return;
+        }
         if (!isAtOrPastResumePosition(current, positionMs)) return;
 
         const durationMs = mergeDurationMs(current, payload.durationMs);
@@ -154,11 +168,28 @@ export const displayedListeningPositionStore = createStore<DisplayedListeningPos
           },
         }));
       },
-      confirmUserPositionChange: (payload) => {
+      confirmUserPositionChange: (payload, options) => {
         const current = get().byLibraryItemId[payload.libraryItemId];
         if (!current) return;
         const positionMs = toPositionMs(payload.positionMs);
         const durationMs = mergeDurationMs(current, payload.durationMs);
+        if (
+          typeof options?.optimisticPositionMs === "number" &&
+          current.optimisticPositionMs !== toPositionMs(options.optimisticPositionMs)
+        ) {
+          set((state) => ({
+            byLibraryItemId: {
+              ...state.byLibraryItemId,
+              [payload.libraryItemId]: {
+                ...current,
+                durationMs,
+                hasLocalEvidence: true,
+                lastTrustedPositionMs: positionMs,
+              },
+            },
+          }));
+          return;
+        }
         set((state) => ({
           byLibraryItemId: {
             ...state.byLibraryItemId,
@@ -177,9 +208,15 @@ export const displayedListeningPositionStore = createStore<DisplayedListeningPos
           },
         }));
       },
-      rollbackUserPositionChange: (libraryItemId) => {
+      rollbackUserPositionChange: (libraryItemId, options) => {
         const current = get().byLibraryItemId[libraryItemId];
         if (!current || current.optimisticPositionMs === null) return;
+        if (
+          typeof options?.optimisticPositionMs === "number" &&
+          current.optimisticPositionMs !== toPositionMs(options.optimisticPositionMs)
+        ) {
+          return;
+        }
         set((state) => ({
           byLibraryItemId: {
             ...state.byLibraryItemId,
