@@ -18,6 +18,13 @@ import {
   type PendingProgressSync,
 } from "@/store/device-books-store";
 import { libraryActivationStore } from "@/auth/library-activation-store";
+import {
+  buildSearchExpression,
+  type ShadowSearchParams,
+} from "./sqlite/search-expression";
+import { normalizeText } from "./sqlite/text-normalization";
+
+export type { ShadowSearchParams } from "./sqlite/search-expression";
 
 const DEFAULT_PAGE_SIZE = 500;
 const SEARCH_SAMPLE_LIMIT = 50;
@@ -66,27 +73,9 @@ export type ShadowOverlayRefreshResult = {
   error?: string | null;
 };
 
-export type ShadowSearchParams = {
-  query?: string;
-  genres?: string[];
-  genreOperator?: "and" | "or";
-  tags?: string[];
-  tagOperator?: "and" | "or";
-  author?: string;
-  narrator?: string;
-  favoriteFilter?: "all" | "only" | "exclude";
-  finishedOnly?: boolean;
-  sortBy?: "addedAt" | "author" | "title" | "duration" | "publishedYear";
-  sortDirection?: "asc" | "desc";
-};
-
 export type ShadowSearchResult = {
   totalCount: number;
   rows: LibraryItemSummary[];
-  itemById?: Map<string, LibraryItemSummary>;
-  resultIds?: string[];
-  favoriteIds?: Set<string>;
-  finishedIds?: Set<string>;
   sqlElapsedMs: number;
   mapElapsedMs: number;
   usedFts: boolean;
@@ -95,6 +84,15 @@ export type ShadowSearchResult = {
   progressRows: number;
   favoriteRows: number;
   localBookmarkRows: number;
+};
+
+export type ShadowSearchResultSet = {
+  totalCount: number;
+  resultIds: string[];
+  favoriteIds: Set<string>;
+  finishedIds: Set<string>;
+  usedFts: boolean;
+  sqlElapsedMs: number;
 };
 
 export type ShadowRunSummary = {
@@ -237,29 +235,10 @@ const requireAuthContext = (): AuthContext => {
 const boolToInt = (value: boolean | null | undefined) => (value ? 1 : 0);
 const sqliteBool = (value: unknown) => Number(value ?? 0) === 1;
 
-const normalizeText = (value: string | null | undefined) =>
-  (value ?? "")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-
-const normalizeFacetValues = (values: string[] | null | undefined) =>
-  Array.from(new Set((values ?? []).map(normalizeText).filter(Boolean)));
-
 const toPublishedYearSort = (value: string | null | undefined) => {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) ? parsed : 0;
 };
-
-const toFtsQuery = (value: string | null | undefined) =>
-  normalizeText(value)
-    .split(" ")
-    .map((token) => token.replace(/[^a-z0-9_]/gi, ""))
-    .filter(Boolean)
-    .map((token) => `${token}*`)
-    .join(" ");
 
 const getCount = async (db: Db, source: string, params: BindValues = []) => {
   const rows = await db.getAllAsync<CountRow>(source, params);
@@ -1105,46 +1084,6 @@ export const getShadowItemSummariesByIds = async (
   return itemById;
 };
 
-const buildFacetClause = (
-  tableName: "catalog_item_genres" | "catalog_item_tags",
-  values: string[],
-  operator: "and" | "or",
-  params: BindValues,
-) => {
-  const normalized = normalizeFacetValues(values);
-  if (normalized.length === 0) return "";
-
-  params.push(...normalized);
-  const placeholders = normalized.map(() => "?").join(", ");
-  const comparator = operator === "and" ? `= ${normalized.length}` : ">= 1";
-
-  return `AND item.library_item_id IN (
-    SELECT library_item_id
-    FROM ${tableName}
-    WHERE user_id = ?
-      AND library_id = ?
-      AND normalized_value IN (${placeholders})
-    GROUP BY library_item_id
-    HAVING COUNT(DISTINCT normalized_value) ${comparator}
-  )`;
-};
-
-const sortColumnFor = (sortBy: NonNullable<ShadowSearchParams["sortBy"]>) => {
-  switch (sortBy) {
-    case "author":
-      return "item.author_sort";
-    case "title":
-      return "item.title_sort";
-    case "duration":
-      return "item.duration";
-    case "publishedYear":
-      return "item.published_year_sort";
-    case "addedAt":
-    default:
-      return "item.added_at";
-  }
-};
-
 export const runShadowSearchTest = async (
   params: ShadowSearchParams = {},
 ): Promise<ShadowSearchResult> => {
@@ -1152,98 +1091,19 @@ export const runShadowSearchTest = async (
   const db = await getDb();
   await initializeShadowDatabaseInternal();
 
-  const query = toFtsQuery(params.query);
-  const usedFts = query.length > 0;
-  const sqlParams: BindValues = [context.userId, context.libraryId];
-  const joins: string[] = [];
-  const clauses: string[] = [
-    "item.user_id = ?",
-    "item.library_id = ?",
-    "item.is_missing = 0",
-    "COALESCE(item.num_audio_files, 0) > 0",
-  ];
-
-  if (usedFts) {
-    joins.push(`JOIN library_catalog_fts fts
-      ON fts.user_id = item.user_id
-      AND fts.library_id = item.library_id
-      AND fts.library_item_id = item.library_item_id`);
-    clauses.push("library_catalog_fts MATCH ?");
-    sqlParams.push(query);
-  }
-
-  const genreValues = normalizeFacetValues(params.genres);
-  if (genreValues.length > 0) {
-    sqlParams.push(context.userId, context.libraryId);
-    clauses.push(
-      buildFacetClause(
-        "catalog_item_genres",
-        genreValues,
-        params.genreOperator ?? "or",
-        sqlParams,
-      ).replace(/^AND\s+/, ""),
-    );
-  }
-
-  const tagValues = normalizeFacetValues(params.tags);
-  if (tagValues.length > 0) {
-    sqlParams.push(context.userId, context.libraryId);
-    clauses.push(
-      buildFacetClause("catalog_item_tags", tagValues, params.tagOperator ?? "or", sqlParams).replace(
-        /^AND\s+/,
-        "",
-      ),
-    );
-  }
-
-  if (params.author) {
-    clauses.push("COALESCE(item.author, '') = ?");
-    sqlParams.push(params.author);
-  }
-
-  if (params.narrator) {
-    clauses.push("COALESCE(item.narrator, '') = ?");
-    sqlParams.push(params.narrator);
-  }
-
-  if (params.favoriteFilter === "only") {
-    clauses.push(`EXISTS (
-      SELECT 1 FROM user_favorites favorite
-      WHERE favorite.user_id = item.user_id
-        AND favorite.library_item_id = item.library_item_id
-    )`);
-  } else if (params.favoriteFilter === "exclude") {
-    clauses.push(`NOT EXISTS (
-      SELECT 1 FROM user_favorites favorite
-      WHERE favorite.user_id = item.user_id
-        AND favorite.library_item_id = item.library_item_id
-    )`);
-  }
-
-  if (params.finishedOnly) {
-    clauses.push(`EXISTS (
-      SELECT 1 FROM effective_progress progress
-      WHERE progress.user_id = item.user_id
-        AND progress.library_id = item.library_id
-        AND progress.library_item_id = item.library_item_id
-        AND progress.is_finished = 1
-    )`);
-  }
-
-  const whereSql = clauses.join("\nAND ");
-  const fromSql = `FROM library_catalog_items item ${joins.join("\n")}`;
-  const sortDirection = params.sortDirection === "asc" ? "ASC" : "DESC";
-  const sortBy = params.sortBy ?? "addedAt";
-  const orderSql = `ORDER BY ${sortColumnFor(sortBy)} ${sortDirection}, item.library_item_id ASC`;
+  const expression = buildSearchExpression(
+    { userId: context.userId, libraryId: context.libraryId },
+    params,
+  );
 
   const sqlStarted = now();
   const totalRows = await db.getAllAsync<CountRow>(
-    `SELECT COUNT(*) AS count ${fromSql} WHERE ${whereSql}`,
-    sqlParams,
+    `SELECT COUNT(*) AS count ${expression.fromSql} WHERE ${expression.whereSql}`,
+    expression.bindings,
   );
   const rows = await db.getAllAsync<SearchRow>(
-    `SELECT item.summary_json ${fromSql} WHERE ${whereSql} ${orderSql} LIMIT ${SEARCH_SAMPLE_LIMIT}`,
-    sqlParams,
+    `SELECT item.summary_json ${expression.fromSql} WHERE ${expression.whereSql} ${expression.orderSql} LIMIT ${SEARCH_SAMPLE_LIMIT}`,
+    expression.bindings,
   );
   const sqlElapsedMs = now() - sqlStarted;
 
@@ -1281,7 +1141,7 @@ export const runShadowSearchTest = async (
     rows: summaries,
     sqlElapsedMs,
     mapElapsedMs,
-    usedFts,
+    usedFts: expression.usedFts,
     activeCatalogRows,
     missingCatalogRows,
     progressRows,
@@ -1292,177 +1152,45 @@ export const runShadowSearchTest = async (
 
 export const queryShadowSearchResults = async (
   params: ShadowSearchParams = {},
-): Promise<Required<Pick<ShadowSearchResult, "itemById" | "resultIds" | "favoriteIds" | "finishedIds">> &
-  Omit<ShadowSearchResult, "itemById" | "resultIds" | "favoriteIds" | "finishedIds">> => {
+): Promise<ShadowSearchResultSet> => {
   const context = requireAuthContext();
   const db = await getDb();
   await initializeShadowDatabaseInternal();
 
-  const query = toFtsQuery(params.query);
-  const usedFts = query.length > 0;
-  const sqlParams: BindValues = [context.userId, context.libraryId];
-  const joins: string[] = [];
-  const clauses: string[] = [
-    "item.user_id = ?",
-    "item.library_id = ?",
-    "item.is_missing = 0",
-    "COALESCE(item.num_audio_files, 0) > 0",
-  ];
-
-  if (usedFts) {
-    joins.push(`JOIN library_catalog_fts fts
-      ON fts.user_id = item.user_id
-      AND fts.library_id = item.library_id
-      AND fts.library_item_id = item.library_item_id`);
-    clauses.push("library_catalog_fts MATCH ?");
-    sqlParams.push(query);
-  }
-
-  const genreValues = normalizeFacetValues(params.genres);
-  if (genreValues.length > 0) {
-    sqlParams.push(context.userId, context.libraryId);
-    clauses.push(
-      buildFacetClause(
-        "catalog_item_genres",
-        genreValues,
-        params.genreOperator ?? "or",
-        sqlParams,
-      ).replace(/^AND\s+/, ""),
-    );
-  }
-
-  const tagValues = normalizeFacetValues(params.tags);
-  if (tagValues.length > 0) {
-    sqlParams.push(context.userId, context.libraryId);
-    clauses.push(
-      buildFacetClause("catalog_item_tags", tagValues, params.tagOperator ?? "or", sqlParams).replace(
-        /^AND\s+/,
-        "",
-      ),
-    );
-  }
-
-  if (params.author) {
-    clauses.push("COALESCE(item.author, '') = ?");
-    sqlParams.push(params.author);
-  }
-
-  if (params.narrator) {
-    clauses.push("COALESCE(item.narrator, '') = ?");
-    sqlParams.push(params.narrator);
-  }
-
-  if (params.favoriteFilter === "only") {
-    clauses.push(`EXISTS (
-      SELECT 1 FROM user_favorites favorite
-      WHERE favorite.user_id = item.user_id
-        AND favorite.library_item_id = item.library_item_id
-    )`);
-  } else if (params.favoriteFilter === "exclude") {
-    clauses.push(`NOT EXISTS (
-      SELECT 1 FROM user_favorites favorite
-      WHERE favorite.user_id = item.user_id
-        AND favorite.library_item_id = item.library_item_id
-    )`);
-  }
-
-  if (params.finishedOnly) {
-    clauses.push(`EXISTS (
-      SELECT 1 FROM effective_progress progress
-      WHERE progress.user_id = item.user_id
-        AND progress.library_id = item.library_id
-        AND progress.library_item_id = item.library_item_id
-        AND progress.is_finished = 1
-    )`);
-  }
-
-  const whereSql = clauses.join("\nAND ");
-  const fromSql = `FROM library_catalog_items item ${joins.join("\n")}`;
-  const sortDirection = params.sortDirection === "asc" ? "ASC" : "DESC";
-  const sortBy = params.sortBy ?? "addedAt";
-  const orderSql = `ORDER BY ${sortColumnFor(sortBy)} ${sortDirection}, item.library_item_id ASC`;
-  const countSql = `SELECT COUNT(*) AS count ${fromSql} WHERE ${whereSql}`;
-  const rowsSql = `SELECT
-       item.summary_json,
-       EXISTS (
-         SELECT 1 FROM user_favorites favorite
-         WHERE favorite.user_id = item.user_id
-           AND favorite.library_item_id = item.library_item_id
-       ) AS is_favorite,
-       EXISTS (
-         SELECT 1 FROM effective_progress progress
-         WHERE progress.user_id = item.user_id
-           AND progress.library_id = item.library_id
-           AND progress.library_item_id = item.library_item_id
-           AND progress.is_finished = 1
-       ) AS is_finished
-     ${fromSql}
-     WHERE ${whereSql}
-     ${orderSql}`;
+  const expression = buildSearchExpression(
+    { userId: context.userId, libraryId: context.libraryId },
+    params,
+  );
 
   const sqlStarted = now();
-  const totalRows = await db.getAllAsync<CountRow>(countSql, sqlParams);
-  const rows = await db.getAllAsync<SearchRow>(
-    rowsSql,
-    sqlParams,
-  );
+  // The full ordered id list doubles as the total count, so no COUNT(*) pass.
+  // Favorite/finished flags come from two whole-set reads instead of per-row
+  // EXISTS probes; consumers only membership-test these sets, so supersets
+  // scoped to the user are equivalent.
+  const [idRows, favoriteRows, finishedRows] = await Promise.all([
+    db.getAllAsync<{ library_item_id: string }>(
+      `SELECT item.library_item_id ${expression.fromSql} WHERE ${expression.whereSql} ${expression.orderSql}`,
+      expression.bindings,
+    ),
+    db.getAllAsync<{ library_item_id: string }>(
+      `SELECT library_item_id FROM user_favorites WHERE user_id = ?`,
+      [context.userId],
+    ),
+    db.getAllAsync<{ library_item_id: string }>(
+      `SELECT library_item_id FROM effective_progress
+       WHERE user_id = ? AND library_id = ? AND is_finished = 1`,
+      [context.userId, context.libraryId],
+    ),
+  ]);
   const sqlElapsedMs = now() - sqlStarted;
 
-  const mapStarted = now();
-  const itemById = new Map<string, LibraryItemSummary>();
-  const resultIds: string[] = [];
-  const favoriteIds = new Set<string>();
-  const finishedIds = new Set<string>();
-
-  for (const row of rows) {
-    const summary = JSON.parse(row.summary_json) as LibraryItemSummary;
-    itemById.set(summary.id, summary);
-    resultIds.push(summary.id);
-    if (sqliteBool(row.is_favorite)) favoriteIds.add(summary.id);
-    if (sqliteBool(row.is_finished)) finishedIds.add(summary.id);
-  }
-  const mapElapsedMs = now() - mapStarted;
-
-  const [activeCatalogRows, missingCatalogRows, progressRows, favoriteRows, localBookmarkRows] =
-    await Promise.all([
-      getCount(
-        db,
-        `SELECT COUNT(*) AS count FROM library_catalog_items
-         WHERE user_id = ? AND library_id = ? AND is_missing = 0`,
-        [context.userId, context.libraryId],
-      ),
-      getCount(
-        db,
-        `SELECT COUNT(*) AS count FROM library_catalog_items
-         WHERE user_id = ? AND library_id = ? AND is_missing = 1`,
-        [context.userId, context.libraryId],
-      ),
-      getCount(db, `SELECT COUNT(*) AS count FROM user_server_progress WHERE user_id = ?`, [
-        context.userId,
-      ]),
-      getCount(db, `SELECT COUNT(*) AS count FROM user_favorites WHERE user_id = ?`, [
-        context.userId,
-      ]),
-      getCount(db, `SELECT COUNT(*) AS count FROM local_bookmarks WHERE user_id = ?`, [
-        context.userId,
-      ]),
-    ]);
-
   return {
-    totalCount: totalRows[0]?.count ?? 0,
-    rows: Array.from(itemById.values()),
-    itemById,
-    resultIds,
-    favoriteIds,
-    finishedIds,
+    totalCount: idRows.length,
+    resultIds: idRows.map((row) => row.library_item_id),
+    favoriteIds: new Set(favoriteRows.map((row) => row.library_item_id)),
+    finishedIds: new Set(finishedRows.map((row) => row.library_item_id)),
+    usedFts: expression.usedFts,
     sqlElapsedMs,
-    mapElapsedMs,
-    usedFts,
-    activeCatalogRows,
-    missingCatalogRows,
-    progressRows,
-    favoriteRows,
-    localBookmarkRows,
   };
 };
 

@@ -1,9 +1,13 @@
 import { useAuthStore } from "@/auth/auth-store";
-import { BookFlashListRow } from "@/components/books/book-flashlist-row";
+import {
+  BookFlashListRow,
+  BookFlashListRowPlaceholder,
+} from "@/components/books/book-flashlist-row";
 import {
   sqliteSearchRepository,
   type SqliteSearchParams,
 } from "@/data/sqlite/search-repository";
+import { useWindowedItemSummaries } from "@/data/sqlite/use-windowed-item-summaries";
 import { queryKeys } from "@/query/query-keys";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
@@ -59,7 +63,10 @@ export const BookFilterResultsSheet = () => {
   const sourceTabParamResolved = resolveParam(sourceTabParam);
   const sourceTab: SourceTab = sourceTabParamResolved === "search" ? "search" : "home";
   const deferredSearchText = useDeferredValue(searchText);
-  const filterSearchParams = useMemo<SqliteSearchParams>(() => {
+  const normalizedSearchQuery = deferredSearchText.trim();
+  const hasSearchText = normalizedSearchQuery.length > 0;
+
+  const baseFilterParams = useMemo<SqliteSearchParams>(() => {
     if (!filterType || !filterValue) return {};
 
     switch (filterType) {
@@ -75,6 +82,23 @@ export const BookFilterResultsSheet = () => {
     }
   }, [filterType, filterValue]);
 
+  // The in-sheet text search runs through the same Search Expression (FTS over
+  // title/subtitle/author/narrator/series) instead of client-side substring
+  // matching, so it covers the full result set without resolving summaries.
+  const filterSearchParams = useMemo<SqliteSearchParams>(
+    () => ({
+      ...baseFilterParams,
+      query: hasSearchText ? normalizedSearchQuery : undefined,
+    }),
+    [baseFilterParams, hasSearchText, normalizedSearchQuery],
+  );
+
+  const hasValidFilter =
+    Boolean(activeLibraryUserKey) &&
+    Boolean(activeLibraryId) &&
+    Boolean(filterType) &&
+    Boolean(filterValue);
+
   const { data: filterResultSet } = useQuery({
     queryKey: queryKeys.sqliteSearchResultSet(
       activeLibraryUserKey,
@@ -82,37 +106,27 @@ export const BookFilterResultsSheet = () => {
       filterSearchParams,
     ),
     queryFn: () => sqliteSearchRepository.querySearchResultSet(filterSearchParams),
-    enabled:
-      Boolean(activeLibraryUserKey) &&
-      Boolean(activeLibraryId) &&
-      Boolean(filterType) &&
-      Boolean(filterValue),
+    enabled: hasValidFilter,
   });
 
-  const matchingBooks = useMemo(
-    () => (filterType && filterValue ? filterResultSet?.rows ?? [] : []),
-    [filterResultSet?.rows, filterType, filterValue],
-  );
+  // Unsearched base set, used only for the "(N total matches)" caption while
+  // the user types; cached from before typing began.
+  const { data: baseResultSet } = useQuery({
+    queryKey: queryKeys.sqliteSearchResultSet(
+      activeLibraryUserKey,
+      activeLibraryId,
+      baseFilterParams,
+    ),
+    queryFn: () => sqliteSearchRepository.querySearchResultSet(baseFilterParams),
+    enabled: hasValidFilter && hasSearchText,
+  });
+
+  const resultIds = useMemo(() => filterResultSet?.resultIds ?? [], [filterResultSet?.resultIds]);
   const finishedIds = filterResultSet?.finishedIds;
-  const normalizedSearchQuery = useMemo(
-    () => deferredSearchText.trim().toLocaleLowerCase(),
-    [deferredSearchText],
-  );
-  const filteredMatchingBooks = useMemo(() => {
-    if (!normalizedSearchQuery) {
-      return matchingBooks;
-    }
-
-    return matchingBooks.filter((book) => {
-      const normalizedTitle = book.title.toLocaleLowerCase();
-      const normalizedAuthor = (book.author ?? "").toLocaleLowerCase();
-
-      return (
-        normalizedTitle.includes(normalizedSearchQuery) ||
-        normalizedAuthor.includes(normalizedSearchQuery)
-      );
-    });
-  }, [matchingBooks, normalizedSearchQuery]);
+  const totalMatches = hasSearchText
+    ? baseResultSet?.totalCount ?? filterResultSet?.totalCount ?? 0
+    : filterResultSet?.totalCount ?? 0;
+  const { itemById, onViewableItemsChanged } = useWindowedItemSummaries(resultIds);
 
   const handleBookPress = (libraryItemId: string) => {
     const destination =
@@ -151,31 +165,35 @@ export const BookFilterResultsSheet = () => {
         </View>
       ) : (
         <FlashList
-          data={filteredMatchingBooks}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <BookFlashListRow
-              book={item}
-              isOffline={isOffline}
-              isFinished={Boolean(finishedIds?.has(item.id))}
-              onPress={() => handleBookPress(item.id)}
-            />
-          )}
+          data={resultIds}
+          keyExtractor={(item) => item}
+          onViewableItemsChanged={onViewableItemsChanged}
+          renderItem={({ item: libraryItemId }) => {
+            const book = itemById.get(libraryItemId);
+            if (!book) return <BookFlashListRowPlaceholder />;
+            return (
+              <BookFlashListRow
+                book={book}
+                isOffline={isOffline}
+                isFinished={Boolean(finishedIds?.has(libraryItemId))}
+                onPress={() => handleBookPress(libraryItemId)}
+              />
+            );
+          }}
           ListHeaderComponent={
             <View className="p-2 gap-1">
               <Text selectable style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
                 {filterLabel}: {filterValue}
               </Text>
               <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
-                {filteredMatchingBooks.length} cached{" "}
-                {filteredMatchingBooks.length === 1 ? "book" : "books"}
-                {normalizedSearchQuery ? ` (${matchingBooks.length} total matches)` : ""}
+                {resultIds.length} cached {resultIds.length === 1 ? "book" : "books"}
+                {hasSearchText ? ` (${totalMatches} total matches)` : ""}
               </Text>
             </View>
           }
           ListEmptyComponent={
             <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
-              {normalizedSearchQuery
+              {hasSearchText
                 ? "No books match the current search."
                 : `No cached books match this ${filterLabel.toLowerCase()}.`}
             </Text>

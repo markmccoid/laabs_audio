@@ -52,6 +52,10 @@ _Avoid_: Current library, selected library
 The ordered Audiobook Identities from the Active Library that match the user's Search text, genre/tag filters, Favorite filter, Finished filter, and sort choice.
 _Avoid_: Catalog, filtered books, search data
 
+**Search Expression**:
+The single SQL realization (joins, match clauses, sort, bind values) of a Search Result Set's matching criteria, built purely from an explicit user/library scope plus search params. Both the production Search reader and the Settings diagnostic sampler consume the same Search Expression so they cannot drift.
+_Avoid_: Query builder, search SQL helper
+
 **Library Selection**:
 The user-facing choice of which Library becomes the Active Library for a User Session.
 _Avoid_: Library picker, library prompt

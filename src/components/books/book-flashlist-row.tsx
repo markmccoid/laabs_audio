@@ -203,3 +203,42 @@ export const BookFlashListRow = ({
 
   return <View>{content}</View>;
 };
+
+// Skeleton matching BookFlashListRow geometry for rows whose summary has not
+// resolved yet (windowed Search Result Set resolution).
+export const BookFlashListRowPlaceholder = () => {
+  const themeColors = useThemeColors();
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        marginVertical: 4,
+        backgroundColor: themeColors.surface,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderColor: themeColors.accent,
+      }}
+    >
+      <View
+        style={{
+          width: 100,
+          height: 100,
+          borderRadius: 15,
+          backgroundColor: themeColors.bg,
+        }}
+      />
+      <View style={{ flex: 1, gap: 8 }}>
+        <View
+          style={{ height: 16, width: "70%", borderRadius: 4, backgroundColor: themeColors.bg }}
+        />
+        <View
+          style={{ height: 14, width: "45%", borderRadius: 4, backgroundColor: themeColors.bg }}
+        />
+      </View>
+    </View>
+  );
+};

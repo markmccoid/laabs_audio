@@ -5,14 +5,11 @@ import {
   queryShadowSearchResults,
   type ShadowLibraryReadiness,
   type ShadowSearchParams,
-  type ShadowSearchResult,
+  type ShadowSearchResultSet,
 } from "../shadow-sqlite-service";
 
 export type SqliteSearchParams = ShadowSearchParams;
-export type SqliteSearchResult = Required<
-  Pick<ShadowSearchResult, "itemById" | "resultIds" | "favoriteIds" | "finishedIds">
-> &
-  Omit<ShadowSearchResult, "itemById" | "resultIds" | "favoriteIds" | "finishedIds">;
+export type SqliteSearchResultSet = ShadowSearchResultSet;
 export type SqliteLibraryReadiness = ShadowLibraryReadiness;
 
 export const sqliteSearchRepository = {

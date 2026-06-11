@@ -9,6 +9,7 @@ import {
   useSearchTags,
 } from "@/search/search-session-store";
 import { useSearchResults } from "@/search/use-search-results";
+import { BookFlashListRowPlaceholder } from "@/components/books/book-flashlist-row";
 import { FlashList } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
@@ -31,8 +32,16 @@ const LibraryContainer = () => {
   const finishedOnly = useSearchFinishedOnly();
   const selectedGenres = useSearchGenres();
   const selectedTags = useSearchTags();
-  const { itemById, resultIds, favoriteIds, finishedIds, readiness, isLoading, isPending } =
-    useSearchResults();
+  const {
+    itemById,
+    resultIds,
+    favoriteIds,
+    finishedIds,
+    onViewableItemsChanged,
+    readiness,
+    isLoading,
+    isPending,
+  } = useSearchResults();
 
   const isPreparingInitialSearch = Boolean(
     (isLoading || isPending) &&
@@ -120,9 +129,10 @@ const LibraryContainer = () => {
       keyExtractor={(item) => item}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      onViewableItemsChanged={onViewableItemsChanged}
       renderItem={({ item: libraryItemId }) => {
         const libraryItem = itemById.get(libraryItemId);
-        if (!libraryItem) return null;
+        if (!libraryItem) return <BookFlashListRowPlaceholder />;
         return (
           <LibraryItem
             libraryItem={libraryItem}

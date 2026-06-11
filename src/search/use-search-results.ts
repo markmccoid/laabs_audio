@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/auth/auth-store";
 import { sqliteRefreshCoordinator } from "@/data/sqlite/refresh-coordinator";
 import { sqliteSearchRepository } from "@/data/sqlite/search-repository";
+import { useWindowedItemSummaries } from "@/data/sqlite/use-windowed-item-summaries";
 import { queryKeys } from "@/query/query-keys";
 import {
   useSearchFavoriteFilter,
@@ -18,6 +19,7 @@ import {
 
 const EMPTY_ITEM_BY_ID = new Map();
 const EMPTY_ID_SET = new Set<string>();
+const EMPTY_RESULT_IDS: string[] = [];
 
 export const useSearchResults = () => {
   const queryClient = useQueryClient();
@@ -89,12 +91,16 @@ export const useSearchResults = () => {
     enabled: enabled && Boolean(readiness?.hasCatalogRows),
   });
 
+  const resultIds = searchQuery.data?.resultIds ?? EMPTY_RESULT_IDS;
+  const { itemById, onViewableItemsChanged } = useWindowedItemSummaries(resultIds);
+
   if (status !== "authenticated") {
     return {
       itemById: EMPTY_ITEM_BY_ID,
-      resultIds: [],
+      resultIds: EMPTY_RESULT_IDS,
       favoriteIds: EMPTY_ID_SET,
       finishedIds: EMPTY_ID_SET,
+      onViewableItemsChanged,
       readiness: null,
       isPending: false,
       isError: false,
@@ -105,10 +111,11 @@ export const useSearchResults = () => {
   }
 
   return {
-    itemById: searchQuery.data?.itemById ?? EMPTY_ITEM_BY_ID,
-    resultIds: searchQuery.data?.resultIds ?? [],
+    itemById,
+    resultIds,
     favoriteIds: searchQuery.data?.favoriteIds ?? EMPTY_ID_SET,
     finishedIds: searchQuery.data?.finishedIds ?? EMPTY_ID_SET,
+    onViewableItemsChanged,
     readiness: readiness ?? null,
     isPending: readinessQuery.isPending || searchQuery.isPending,
     isError: readinessQuery.isError || searchQuery.isError,
