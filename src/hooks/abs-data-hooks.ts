@@ -14,7 +14,7 @@ import {
 import { selectAccessMode, useAuthActions, useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
 import { invalidateSqliteOverlayProjections } from "../query/sqlite-invalidation";
-import { upsertShadowServerProgressProjection } from "../data/shadow-sqlite-service";
+import { upsertShadowServerProgressProjection } from "../data/sqlite/overlay-writes";
 import { sqliteSearchRepository } from "../data/sqlite/search-repository";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import {

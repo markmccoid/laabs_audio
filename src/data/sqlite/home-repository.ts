@@ -3,7 +3,7 @@ import {
   getShadowHomeProjection,
   type ShadowHomeProjection,
   type ShadowHomeProjectionParams,
-} from "../shadow-sqlite-service";
+} from "./home-reads";
 
 export type SqliteHomeProjectionParams = ShadowHomeProjectionParams;
 export type SqliteHomeProjection = ShadowHomeProjection;

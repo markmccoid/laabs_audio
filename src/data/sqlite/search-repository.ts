@@ -1,12 +1,14 @@
 import {
   getShadowItemSummariesByIds,
-  getShadowLibraryReadiness,
-  initializeShadowDatabase,
   queryShadowSearchResults,
-  type ShadowLibraryReadiness,
   type ShadowSearchParams,
   type ShadowSearchResultSet,
-} from "../shadow-sqlite-service";
+} from "./search-reads";
+import {
+  getShadowLibraryReadiness,
+  initializeShadowDatabase,
+  type ShadowLibraryReadiness,
+} from "./shadow-status";
 
 export type SqliteSearchParams = ShadowSearchParams;
 export type SqliteSearchResultSet = ShadowSearchResultSet;

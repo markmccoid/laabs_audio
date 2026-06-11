@@ -1,18 +1,15 @@
 import { useAuthStore } from "@/auth/auth-store";
+import { refreshShadowLibraryCatalog, type ShadowCatalogRefreshResult } from "@/data/sqlite/catalog-refresh";
+import { refreshShadowUserOverlays, type ShadowOverlayRefreshResult } from "@/data/sqlite/overlay-writes";
+import { runShadowSearchTest, type ShadowSearchResult } from "@/data/sqlite/search-reads";
 import {
   clearShadowDatabase,
   fetchShadowDetailSnapshot,
   getFirstShadowSearchResultId,
   getShadowDatabaseSummary,
   initializeShadowDatabase,
-  refreshShadowLibraryCatalog,
-  refreshShadowUserOverlays,
-  runShadowSearchTest,
-  type ShadowCatalogRefreshResult,
   type ShadowDatabaseSummary,
-  type ShadowOverlayRefreshResult,
-  type ShadowSearchResult,
-} from "@/data/shadow-sqlite-service";
+} from "@/data/sqlite/shadow-status";
 import {
   clearTimingLogs,
   getTimingLogs,

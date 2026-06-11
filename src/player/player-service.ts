@@ -4,7 +4,7 @@ import {
   type UserBookProgress,
   type UserServerState,
 } from "../api/me-api";
-import { upsertShadowServerProgressProjection } from "../data/shadow-sqlite-service";
+import { upsertShadowServerProgressProjection } from "../data/sqlite/overlay-writes";
 import { playbackApi } from "../api/playback-api";
 import { sessionsApi } from "../api/sessions-api";
 import { buildCoverUrls } from "../api/cover-urls";

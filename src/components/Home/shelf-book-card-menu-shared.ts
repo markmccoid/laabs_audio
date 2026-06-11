@@ -9,7 +9,7 @@ import { useAuthStore } from "@/auth/auth-store";
 import {
   upsertShadowPendingProgressIntent,
   upsertShadowServerProgressProjection,
-} from "@/data/shadow-sqlite-service";
+} from "@/data/sqlite/overlay-writes";
 import type { SqliteHomeProjection } from "@/data/sqlite/home-repository";
 import { useFavoriteBookAction } from "@/hooks/use-favorite-book-action";
 import {

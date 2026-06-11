@@ -5,7 +5,7 @@ import {
   type UserServerState,
 } from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
-import { setShadowFavoriteProjection } from "@/data/shadow-sqlite-service";
+import { setShadowFavoriteProjection } from "@/data/sqlite/overlay-writes";
 import { queryKeys } from "@/query/query-keys";
 import { invalidateSqliteOverlayProjections } from "@/query/sqlite-invalidation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";

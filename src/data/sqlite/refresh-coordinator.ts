@@ -1,13 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
 import { invalidateAllSqliteProjections } from "@/query/sqlite-invalidation";
-import {
-  getShadowLibraryReadiness,
-  refreshShadowLibraryCatalog,
-  refreshShadowUserOverlays,
-  type ShadowCatalogRefreshResult,
-  type ShadowLibraryReadiness,
-  type ShadowOverlayRefreshResult,
-} from "../shadow-sqlite-service";
+import { refreshShadowLibraryCatalog, type ShadowCatalogRefreshResult } from "./catalog-refresh";
+import { refreshShadowUserOverlays, type ShadowOverlayRefreshResult } from "./overlay-writes";
+import { getShadowLibraryReadiness, type ShadowLibraryReadiness } from "./shadow-status";
 import { recordTimingLog } from "./timing-logger";
 
 export const SQLITE_CATALOG_STALE_MS = 15 * 60 * 1000;
@@ -53,10 +48,15 @@ export const sqliteRefreshCoordinator = {
     scope: RefreshScope,
     options: RefreshOptions = {},
   ): Promise<RefreshResult> {
-    const key = scopeKey(scope);
-    if (!key) {
+    const userId = scope.userId;
+    const libraryId = scope.libraryId;
+    if (!userId || !libraryId) {
       throw new Error("SQLite refresh requires a User Session and Active Library.");
     }
+    const key = `${userId}:${libraryId}`;
+    // Pin the captured scope so the refresh fails loudly instead of writing
+    // under a different Active Library than the one this job was deduped for.
+    const refreshScope = { userId, libraryId };
 
     const existing = refreshCoordinatorRuntimeState.inFlightByScope.get(key);
     if (existing) return existing;
@@ -73,7 +73,7 @@ export const sqliteRefreshCoordinator = {
 
       if (shouldRefreshCatalog) {
         const catalogStart = Date.now();
-        result.catalog = await refreshShadowLibraryCatalog();
+        result.catalog = await refreshShadowLibraryCatalog({ scope: refreshScope });
         void recordTimingLog("library_switch", "sqlite_refresh_catalog", catalogStart, {
           userId: scope.userId,
           libraryId: scope.libraryId,
@@ -88,7 +88,7 @@ export const sqliteRefreshCoordinator = {
       }
       if (shouldRefreshOverlay) {
         const overlayStart = Date.now();
-        result.overlay = await refreshShadowUserOverlays();
+        result.overlay = await refreshShadowUserOverlays({ scope: refreshScope });
         void recordTimingLog("library_switch", "sqlite_refresh_overlay", overlayStart, {
           userId: scope.userId,
           libraryId: scope.libraryId,

@@ -12,7 +12,7 @@ import {
 import {
   deleteShadowPendingProgressIntent,
   upsertShadowPendingProgressIntent,
-} from "@/data/shadow-sqlite-service";
+} from "@/data/sqlite/overlay-writes";
 import { queryClient } from "@/query/query-client";
 import { invalidateSqliteOverlayProjections } from "@/query/sqlite-invalidation";
 
