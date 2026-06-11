@@ -29,6 +29,7 @@ import {
   recordProgressSyncIntent,
 } from "@/progress/progress-sync-intent-store";
 import { queryKeys } from "@/query/query-keys";
+import { invalidateSqliteOverlayProjections } from "@/query/sqlite-invalidation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Alert } from "react-native";
@@ -350,7 +351,7 @@ export const useShelfBookCardMenuActions = ({
           }),
         );
       }
-      void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+      invalidateSqliteOverlayProjections(queryClient);
       void queryClient.invalidateQueries({
         queryKey: queryKeys.booksInProgress(activeLibraryId),
       });
@@ -370,7 +371,7 @@ export const useShelfBookCardMenuActions = ({
     if (activeLibraryUserKey && offlineIntent) {
       await upsertShadowPendingProgressIntent(activeLibraryUserKey, offlineIntent);
     }
-    void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+    invalidateSqliteOverlayProjections(queryClient);
     toast.success("Marked read offline");
   };
 
@@ -436,7 +437,7 @@ export const useShelfBookCardMenuActions = ({
           }),
         );
       }
-      void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+      invalidateSqliteOverlayProjections(queryClient);
       void queryClient.invalidateQueries({
         queryKey: queryKeys.booksInProgress(activeLibraryId),
       });
@@ -456,7 +457,7 @@ export const useShelfBookCardMenuActions = ({
     if (activeLibraryUserKey && offlineIntent) {
       await upsertShadowPendingProgressIntent(activeLibraryUserKey, offlineIntent);
     }
-    void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+    invalidateSqliteOverlayProjections(queryClient);
     toast.success("Marked unread offline");
   };
 
@@ -497,7 +498,7 @@ export const useShelfBookCardMenuActions = ({
           progressId: progress.progressId,
         }),
     );
-    void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+    invalidateSqliteOverlayProjections(queryClient);
     void queryClient.invalidateQueries({
       queryKey: queryKeys.booksInProgress(activeLibraryId),
     });
@@ -554,7 +555,7 @@ export const useShelfBookCardMenuActions = ({
             setBusyAction("finished");
             void (isMarkedFinished ? syncUnfinishedProgress() : syncFinishedProgress())
               .catch(() => {
-                void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+                invalidateSqliteOverlayProjections(queryClient);
                 toast.error(
                   isMarkedFinished ? "Unable to mark as unread" : "Unable to mark as read",
                 );
@@ -575,7 +576,7 @@ export const useShelfBookCardMenuActions = ({
     try {
       await toggleContinueListeningVisibility();
     } catch {
-      void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+      invalidateSqliteOverlayProjections(queryClient);
       toast.error(`Unable to ${continueListeningVisibilityLabel.toLowerCase()}`);
     } finally {
       setBusyAction(null);

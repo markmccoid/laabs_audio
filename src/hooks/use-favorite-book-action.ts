@@ -7,6 +7,7 @@ import {
 import { useAuthStore } from "@/auth/auth-store";
 import { setShadowFavoriteProjection } from "@/data/shadow-sqlite-service";
 import { queryKeys } from "@/query/query-keys";
+import { invalidateSqliteOverlayProjections } from "@/query/sqlite-invalidation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "react-native-sonner";
 
@@ -90,7 +91,7 @@ export const useFavoriteBookAction = () => {
         nextIsFavorite,
       )
         .then(() => {
-          void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+          invalidateSqliteOverlayProjections(queryClient);
         })
         .catch((error) => {
           if (__DEV__) {
@@ -130,7 +131,7 @@ export const useFavoriteBookAction = () => {
     },
     onSuccess: (_data, variables) => {
       toast.success(variables.isFavorite ? "Removed from favorites" : "Marked as favorite");
-      void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+      invalidateSqliteOverlayProjections(queryClient);
       void queryClient.invalidateQueries({
         queryKey: queryKeys.itemDetails(activeLibraryUserKey, variables.libraryItemId),
         exact: true,
@@ -153,7 +154,7 @@ export const useFavoriteBookAction = () => {
           variables.libraryItemId,
           variables.isFavorite,
         ).finally(() => {
-          void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+          invalidateSqliteOverlayProjections(queryClient);
         });
       }
       toast.error(variables.isFavorite ? "Unable to remove favorite" : "Unable to mark favorite");

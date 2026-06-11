@@ -14,6 +14,7 @@ import {
   upsertShadowPendingProgressIntent,
 } from "@/data/shadow-sqlite-service";
 import { queryClient } from "@/query/query-client";
+import { invalidateSqliteOverlayProjections } from "@/query/sqlite-invalidation";
 
 const createProgressIntentId = () =>
   `progress_intent_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -108,7 +109,7 @@ export const recordProgressSyncIntent = (payload: {
   if (intent) {
     void upsertShadowPendingProgressIntent(userKey, intent)
       .then(() => {
-        void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+        invalidateSqliteOverlayProjections(queryClient);
       })
       .catch((error) => {
         if (__DEV__) {
@@ -137,7 +138,7 @@ export const clearSyncedProgressSyncIntent = (payload: {
     .actions.clearPendingProgressSync(payload.libraryItemId, { userKey });
   void deleteShadowPendingProgressIntent(userKey, payload.libraryItemId)
     .then(() => {
-      void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+      invalidateSqliteOverlayProjections(queryClient);
     })
     .catch((error) => {
       if (__DEV__) {

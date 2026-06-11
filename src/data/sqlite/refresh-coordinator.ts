@@ -1,4 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
+import { invalidateAllSqliteProjections } from "@/query/sqlite-invalidation";
 import {
   getShadowLibraryReadiness,
   refreshShadowLibraryCatalog,
@@ -44,7 +45,7 @@ const scopeKey = ({ userId, libraryId }: RefreshScope) =>
 
 const invalidateSqliteQueries = (queryClient: QueryClient | undefined) => {
   if (!queryClient) return;
-  void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+  invalidateAllSqliteProjections(queryClient);
 };
 
 export const sqliteRefreshCoordinator = {

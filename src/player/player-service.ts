@@ -11,6 +11,7 @@ import { buildCoverUrls } from "../api/cover-urls";
 import { authStore } from "../auth/auth-store";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
+import { invalidateSqliteOverlayProjections } from "../query/sqlite-invalidation";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import { displayedListeningPositionStore } from "../progress/displayed-listening-position";
 import { syncListeningPosition } from "../progress/listening-position-sync";
@@ -3146,7 +3147,7 @@ class PlayerService {
 
     upsertShadowServerProgressProjection(activeLibraryUserKey, nextProgress)
       .then(() => {
-        void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+        invalidateSqliteOverlayProjections(queryClient);
       })
       .catch((error) => {
         if (__DEV__) {

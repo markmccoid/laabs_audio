@@ -13,6 +13,7 @@ import {
 } from "../api/me-api";
 import { selectAccessMode, useAuthActions, useAuthStore } from "../auth/auth-store";
 import { queryKeys } from "../query/query-keys";
+import { invalidateSqliteOverlayProjections } from "../query/sqlite-invalidation";
 import { upsertShadowServerProgressProjection } from "../data/shadow-sqlite-service";
 import { sqliteSearchRepository } from "../data/sqlite/search-repository";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
@@ -159,7 +160,7 @@ export const useReconcileBookProgress = (libraryItemId?: string) => {
 
         upsertShadowServerProgressProjection(activeLibraryUserKey, nextProgress)
           .then(() => {
-            void queryClient.invalidateQueries({ queryKey: ["sqlite"] });
+            invalidateSqliteOverlayProjections(queryClient);
           })
           .catch((error) => {
             if (__DEV__) {
