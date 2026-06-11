@@ -37,6 +37,27 @@ type RunIdRow = { id: string };
 
 const yieldToNextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
+// Overlay refresh writes whole per-user row sets; multi-row VALUES chunks keep
+// that at a handful of statements instead of one bridge round-trip per row
+// (same idiom as the catalog refresh path).
+const OVERLAY_WRITE_CHUNK_SIZE = 50;
+
+const bulkUpsertRows = async (
+  db: Db,
+  sql: { prefix: string; rowPlaceholder: string; suffix?: string },
+  rows: BindValues[],
+) => {
+  for (let index = 0; index < rows.length; index += OVERLAY_WRITE_CHUNK_SIZE) {
+    if (index > 0) await yieldToNextFrame();
+    const chunk = rows.slice(index, index + OVERLAY_WRITE_CHUNK_SIZE);
+    const placeholders = chunk.map(() => sql.rowPlaceholder).join(",\n");
+    await db.runAsync(
+      `${sql.prefix} VALUES ${placeholders}${sql.suffix ?? ""}`,
+      chunk.flat(),
+    );
+  }
+};
+
 export type ShadowRefreshStatus = "running" | "completed" | "failed";
 
 export type ShadowCatalogRefreshResult = {
@@ -667,15 +688,16 @@ export const refreshShadowUserOverlays = () =>
         [observedAt, context.userId],
       );
       const progressValues = Object.values(serverState.progressByLibraryItemId);
-      for (let i = 0; i < progressValues.length; i++) {
-        if (i > 0 && i % 50 === 0) await yieldToNextFrame();
-        const progress = progressValues[i];
-        await db.runAsync(
-          `INSERT INTO user_server_progress (
+      await bulkUpsertRows(
+        db,
+        {
+          prefix: `INSERT INTO user_server_progress (
             user_id, library_item_id, progress_id, media_item_id, duration, progress_percent,
             current_time, is_finished, hide_from_continue_listening, started_at, finished_at,
             server_last_update, last_server_observed_at, not_observed_since, payload_json
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+          )`,
+          rowPlaceholder: "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+          suffix: `
           ON CONFLICT(user_id, library_item_id) DO UPDATE SET
             progress_id = excluded.progress_id,
             media_item_id = excluded.media_item_id,
@@ -690,105 +712,127 @@ export const refreshShadowUserOverlays = () =>
             last_server_observed_at = excluded.last_server_observed_at,
             not_observed_since = NULL,
             payload_json = excluded.payload_json`,
-          [
-            context.userId,
-            progress.libraryItemId,
-            progress.progressId,
-            progress.mediaItemId ?? null,
-            progress.duration,
-            progress.progressPercent,
-            progress.currentTime,
-            boolToInt(progress.isFinished),
-            boolToInt(progress.hideFromContinueListening),
-            progress.startedAt,
-            progress.finishedAt ?? null,
-            progress.lastUpdate,
-            observedAt,
-            JSON.stringify(progress),
-          ],
-        );
-      }
+        },
+        progressValues.map((progress) => [
+          context.userId,
+          progress.libraryItemId,
+          progress.progressId,
+          progress.mediaItemId ?? null,
+          progress.duration,
+          progress.progressPercent,
+          progress.currentTime,
+          boolToInt(progress.isFinished),
+          boolToInt(progress.hideFromContinueListening),
+          progress.startedAt,
+          progress.finishedAt ?? null,
+          progress.lastUpdate,
+          observedAt,
+          JSON.stringify(progress),
+        ]),
+      );
 
       await db.runAsync(`DELETE FROM pending_progress_sync_intents WHERE user_id = ?`, [
         context.userId,
       ]);
-      for (const pending of Object.values(pendingProgressByItem)) {
-        await insertPendingProgress(db, context.userId, pending);
-      }
+      await bulkUpsertRows(
+        db,
+        {
+          prefix: PENDING_PROGRESS_INSERT_PREFIX,
+          rowPlaceholder: PENDING_PROGRESS_ROW_PLACEHOLDER,
+        },
+        Object.values(pendingProgressByItem).map((pending) =>
+          pendingProgressBindValues(context.userId, pending),
+        ),
+      );
 
       await db.runAsync(`DELETE FROM user_favorites WHERE user_id = ?`, [context.userId]);
       const favoriteIds = Object.keys(serverState.favoriteByLibraryItemId ?? {});
-      for (let i = 0; i < favoriteIds.length; i++) {
-        if (i > 0 && i % 50 === 0) await yieldToNextFrame();
-        await db.runAsync(
-          `INSERT OR REPLACE INTO user_favorites (
+      await bulkUpsertRows(
+        db,
+        {
+          prefix: `INSERT OR REPLACE INTO user_favorites (
             user_id, library_item_id, source, server_observed_at
-          ) VALUES (?, ?, 'server', ?)`,
-          [context.userId, favoriteIds[i], observedAt],
-        );
-      }
+          )`,
+          rowPlaceholder: "(?, ?, 'server', ?)",
+        },
+        favoriteIds.map((libraryItemId) => [context.userId, libraryItemId, observedAt]),
+      );
 
       await db.runAsync(`DELETE FROM server_bookmark_snapshots WHERE user_id = ?`, [
         context.userId,
       ]);
       const serverBookmarks = Object.values(serverState.bookmarksByLibraryItemId ?? {}).flat();
-      for (let i = 0; i < serverBookmarks.length; i++) {
-        if (i > 0 && i % 50 === 0) await yieldToNextFrame();
-        const bookmark = serverBookmarks[i];
-        const timeSeconds = Math.max(0, Math.floor(bookmark.time ?? 0));
-        await db.runAsync(
-          `INSERT OR REPLACE INTO server_bookmark_snapshots (
+      await bulkUpsertRows(
+        db,
+        {
+          prefix: `INSERT OR REPLACE INTO server_bookmark_snapshots (
             user_id, library_item_id, time_seconds, title, notes, server_created_at,
             observed_at, payload_json
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            context.userId,
-            bookmark.libraryItemId,
-            timeSeconds,
-            bookmark.title,
-            bookmark.notes ?? null,
-            bookmark.createdAt ?? observedAt,
-            observedAt,
-            JSON.stringify(bookmark),
-          ],
-        );
-      }
+          )`,
+          rowPlaceholder: "(?, ?, ?, ?, ?, ?, ?, ?)",
+        },
+        serverBookmarks.map((bookmark) => [
+          context.userId,
+          bookmark.libraryItemId,
+          Math.max(0, Math.floor(bookmark.time ?? 0)),
+          bookmark.title,
+          bookmark.notes ?? null,
+          bookmark.createdAt ?? observedAt,
+          observedAt,
+          JSON.stringify(bookmark),
+        ]),
+      );
 
       await db.runAsync(`DELETE FROM local_bookmarks WHERE user_id = ?`, [context.userId]);
-      for (const bookmark of Object.values(localBookmarksById)) {
-        await insertLocalBookmark(db, context.userId, bookmark);
-      }
+      await bulkUpsertRows(
+        db,
+        {
+          prefix: `INSERT OR REPLACE INTO local_bookmarks (
+            user_id, local_bookmark_id, library_item_id, kind, start_time_seconds, end_time_seconds,
+            title, note, created_at, updated_at, server_link_status, server_time_seconds,
+            last_matched_at, payload_json
+          )`,
+          rowPlaceholder: "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        },
+        Object.values(localBookmarksById).map((bookmark) =>
+          localBookmarkBindValues(context.userId, bookmark),
+        ),
+      );
 
       await db.runAsync(`DELETE FROM pending_bookmark_creates WHERE user_id = ?`, [context.userId]);
-      for (const [pendingId, pending] of Object.entries(pendingBookmarkCreates)) {
-        await db.runAsync(
-          `INSERT OR REPLACE INTO pending_bookmark_creates (
+      await bulkUpsertRows(
+        db,
+        {
+          prefix: `INSERT OR REPLACE INTO pending_bookmark_creates (
             user_id, pending_id, library_item_id, local_bookmark_id, bookmark_json
-          ) VALUES (?, ?, ?, ?, ?)`,
-          [
-            context.userId,
-            pendingId,
-            pending.libraryItemId,
-            pending.localBookmarkId ?? null,
-            JSON.stringify(pending.bookmark),
-          ],
-        );
-      }
+          )`,
+          rowPlaceholder: "(?, ?, ?, ?, ?)",
+        },
+        Object.entries(pendingBookmarkCreates).map(([pendingId, pending]) => [
+          context.userId,
+          pendingId,
+          pending.libraryItemId,
+          pending.localBookmarkId ?? null,
+          JSON.stringify(pending.bookmark),
+        ]),
+      );
 
       await db.runAsync(`DELETE FROM pending_bookmark_deletes WHERE user_id = ?`, [context.userId]);
-      for (const pending of Object.values(pendingBookmarkDeletes)) {
-        await db.runAsync(
-          `INSERT OR REPLACE INTO pending_bookmark_deletes (
+      await bulkUpsertRows(
+        db,
+        {
+          prefix: `INSERT OR REPLACE INTO pending_bookmark_deletes (
             user_id, pending_id, library_item_id, time_seconds
-          ) VALUES (?, ?, ?, ?)`,
-          [
-            context.userId,
-            pendingBookmarkId(pending.libraryItemId, pending.bookmarkTime),
-            pending.libraryItemId,
-            Math.max(0, Math.floor(pending.bookmarkTime)),
-          ],
-        );
-      }
+          )`,
+          rowPlaceholder: "(?, ?, ?, ?)",
+        },
+        Object.values(pendingBookmarkDeletes).map((pending) => [
+          context.userId,
+          pendingBookmarkId(pending.libraryItemId, pending.bookmarkTime),
+          pending.libraryItemId,
+          Math.max(0, Math.floor(pending.bookmarkTime)),
+        ]),
+      );
 
       await db.runAsync(
         `UPDATE libraries
@@ -892,32 +936,37 @@ export const refreshShadowUserOverlays = () =>
     }
   });
 
+const PENDING_PROGRESS_INSERT_PREFIX = `INSERT OR REPLACE INTO pending_progress_sync_intents (
+  user_id, library_item_id, intent_id, media_item_id, duration, current_time, is_finished, intent_kind,
+  updated_at, intent_created_at, title, session_kind, trigger, server_url, username, status,
+  payload_json
+)`;
+const PENDING_PROGRESS_ROW_PLACEHOLDER = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+const pendingProgressBindValues = (userId: string, pending: PendingProgressSync): BindValues => [
+  userId,
+  pending.libraryItemId,
+  pending.intentId ?? null,
+  pending.mediaItemId ?? null,
+  Math.max(0, Math.floor(pending.duration ?? 0)),
+  pending.currentTime,
+  boolToInt(pending.isFinished),
+  pending.intentKind ?? null,
+  pending.updatedAt,
+  pending.intentCreatedAt ?? null,
+  pending.title ?? null,
+  pending.sessionKind ?? null,
+  pending.trigger ?? null,
+  pending.serverUrl ?? null,
+  pending.username ?? null,
+  pending.status ?? null,
+  JSON.stringify(pending),
+];
+
 const insertPendingProgress = async (db: Db, userId: string, pending: PendingProgressSync) => {
   await db.runAsync(
-    `INSERT OR REPLACE INTO pending_progress_sync_intents (
-      user_id, library_item_id, intent_id, media_item_id, duration, current_time, is_finished, intent_kind,
-      updated_at, intent_created_at, title, session_kind, trigger, server_url, username, status,
-      payload_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      userId,
-      pending.libraryItemId,
-      pending.intentId ?? null,
-      pending.mediaItemId ?? null,
-      Math.max(0, Math.floor(pending.duration ?? 0)),
-      pending.currentTime,
-      boolToInt(pending.isFinished),
-      pending.intentKind ?? null,
-      pending.updatedAt,
-      pending.intentCreatedAt ?? null,
-      pending.title ?? null,
-      pending.sessionKind ?? null,
-      pending.trigger ?? null,
-      pending.serverUrl ?? null,
-      pending.username ?? null,
-      pending.status ?? null,
-      JSON.stringify(pending),
-    ],
+    `${PENDING_PROGRESS_INSERT_PREFIX} VALUES ${PENDING_PROGRESS_ROW_PLACEHOLDER}`,
+    pendingProgressBindValues(userId, pending),
   );
 };
 
@@ -1005,31 +1054,22 @@ export const upsertShadowServerProgressProjection = async (
   );
 };
 
-const insertLocalBookmark = async (db: Db, userId: string, bookmark: LocalBookmarkRecord) => {
-  await db.runAsync(
-    `INSERT OR REPLACE INTO local_bookmarks (
-      user_id, local_bookmark_id, library_item_id, kind, start_time_seconds, end_time_seconds,
-      title, note, created_at, updated_at, server_link_status, server_time_seconds,
-      last_matched_at, payload_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      userId,
-      bookmark.id,
-      bookmark.libraryItemId,
-      bookmark.kind,
-      bookmark.startTimeSeconds,
-      bookmark.endTimeSeconds ?? null,
-      bookmark.title,
-      bookmark.note ?? null,
-      bookmark.createdAt,
-      bookmark.updatedAt,
-      bookmark.serverLink.status,
-      bookmark.serverLink.timeSeconds ?? null,
-      bookmark.serverLink.lastMatchedAt ?? null,
-      JSON.stringify(bookmark),
-    ],
-  );
-};
+const localBookmarkBindValues = (userId: string, bookmark: LocalBookmarkRecord): BindValues => [
+  userId,
+  bookmark.id,
+  bookmark.libraryItemId,
+  bookmark.kind,
+  bookmark.startTimeSeconds,
+  bookmark.endTimeSeconds ?? null,
+  bookmark.title,
+  bookmark.note ?? null,
+  bookmark.createdAt,
+  bookmark.updatedAt,
+  bookmark.serverLink.status,
+  bookmark.serverLink.timeSeconds ?? null,
+  bookmark.serverLink.lastMatchedAt ?? null,
+  JSON.stringify(bookmark),
+];
 
 export const fetchShadowDetailSnapshot = (libraryItemId: string) =>
   withWriteGuard(async () => {
