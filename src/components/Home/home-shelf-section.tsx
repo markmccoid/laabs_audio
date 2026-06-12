@@ -4,7 +4,7 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import type { Href } from "expo-router";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
 import Animated, { FadeInRight, LinearTransition } from "react-native-reanimated";
@@ -21,13 +21,14 @@ type HomeShelfSectionProps = {
   shelfHref: Href;
   onRefresh?: () => void;
   renderCardMenus?: boolean;
-  // Animate books that replace the shelf's current content (e.g. a Discover
-  // re-roll) with a staggered slide-in. The shelf's initial content renders
-  // without animation so Home startup stays consistent across shelves.
-  animateItemChanges?: boolean;
   scrollY: SharedValue<number>;
 };
 
+// Shelf content changes animate: books new to the shelf (a Discover re-roll, a
+// Recently Added arrival) slide in with a staggered fade, and books changing
+// position (Continue Listening reorders) settle via a layout transition. The
+// shelf's initial content renders without animation, and lazily mounted
+// off-screen cards never animate while scrolling — only genuinely new ids do.
 const ENTERING_STAGGER_MS = 50;
 const ENTERING_MAX_STAGGERED_ITEMS = 6;
 
@@ -42,20 +43,28 @@ export const HomeShelfSection = ({
   shelfHref,
   onRefresh,
   renderCardMenus = true,
-  animateItemChanges = false,
   scrollY,
 }: HomeShelfSectionProps) => {
   const themeColors = useThemeColors();
   const hasBooks = books.length > 0;
   const [enteringEnabled, setEnteringEnabled] = useState(false);
+  const seenBookIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!animateItemChanges || !hasBooks || enteringEnabled) return;
+    // Every id that has appeared on this shelf is "seen"; FlatList mounting a
+    // seen card lazily (windowing) must not replay its entering animation.
+    for (const book of books) {
+      seenBookIdsRef.current.add(book.id);
+    }
+  }, [books]);
+
+  useEffect(() => {
+    if (!hasBooks || enteringEnabled) return;
     // Arm entering animations one frame after the initial content has rendered,
-    // so only books that arrive later (refresh re-rolls) animate in.
+    // so only books that arrive later animate in.
     const frame = requestAnimationFrame(() => setEnteringEnabled(true));
     return () => cancelAnimationFrame(frame);
-  }, [animateItemChanges, enteringEnabled, hasBooks]);
+  }, [enteringEnabled, hasBooks]);
   const [sectionTop, setSectionTop] = useState(0);
   const [listTop, setListTop] = useState(0);
   const menuContentTop = sectionTop + listTop + 118;
@@ -153,34 +162,29 @@ export const HomeShelfSection = ({
             extraData={listExtraData}
             horizontal
             keyExtractor={(book) => book.id}
-            itemLayoutAnimation={
-              animateItemChanges && enteringEnabled ? LinearTransition.duration(220) : undefined
-            }
+            itemLayoutAnimation={enteringEnabled ? LinearTransition.duration(220) : undefined}
             renderItem={({ item, index }) => {
-              const card = (
-                <ShelfBookCard
-                  book={item}
-                  headerHeight={headerHeight}
-                  isFavorite={Boolean(favoriteByBookId[item.id])}
-                  isOffline={isOffline}
-                  menuContentTop={menuContentTop}
-                  progress={progressByBookId[item.id]}
-                  renderMenu={renderCardMenus}
-                  scrollY={scrollY}
-                />
-              );
-              if (!animateItemChanges) return card;
+              const isNewArrival = enteringEnabled && !seenBookIdsRef.current.has(item.id);
               return (
                 <Animated.View
                   entering={
-                    enteringEnabled
+                    isNewArrival
                       ? FadeInRight.duration(260).delay(
                           Math.min(index, ENTERING_MAX_STAGGERED_ITEMS) * ENTERING_STAGGER_MS,
                         )
                       : undefined
                   }
                 >
-                  {card}
+                  <ShelfBookCard
+                    book={item}
+                    headerHeight={headerHeight}
+                    isFavorite={Boolean(favoriteByBookId[item.id])}
+                    isOffline={isOffline}
+                    menuContentTop={menuContentTop}
+                    progress={progressByBookId[item.id]}
+                    renderMenu={renderCardMenus}
+                    scrollY={scrollY}
+                  />
                 </Animated.View>
               );
             }}
