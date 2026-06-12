@@ -348,6 +348,7 @@ const HomeShelvesScreen = () => {
               onRefresh={
                 shelf.kind === "derived" && shelf.id === "discover" ? refreshDiscover : undefined
               }
+              animateItemChanges={shelf.kind === "derived" && shelf.id === "discover"}
               renderCardMenus={shouldRenderCardMenus}
               scrollY={scrollY}
             />

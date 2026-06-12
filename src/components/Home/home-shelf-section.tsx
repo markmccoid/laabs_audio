@@ -4,9 +4,10 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import type { Href } from "expo-router";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useMemo, useState } from "react";
-import { FlatList, Pressable, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Pressable, Text, View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
+import Animated, { FadeInRight, LinearTransition } from "react-native-reanimated";
 import { ShelfBookCard } from "./shelf-book-card";
 
 type HomeShelfSectionProps = {
@@ -20,8 +21,15 @@ type HomeShelfSectionProps = {
   shelfHref: Href;
   onRefresh?: () => void;
   renderCardMenus?: boolean;
+  // Animate books that replace the shelf's current content (e.g. a Discover
+  // re-roll) with a staggered slide-in. The shelf's initial content renders
+  // without animation so Home startup stays consistent across shelves.
+  animateItemChanges?: boolean;
   scrollY: SharedValue<number>;
 };
+
+const ENTERING_STAGGER_MS = 50;
+const ENTERING_MAX_STAGGERED_ITEMS = 6;
 
 export const HomeShelfSection = ({
   title,
@@ -34,10 +42,20 @@ export const HomeShelfSection = ({
   shelfHref,
   onRefresh,
   renderCardMenus = true,
+  animateItemChanges = false,
   scrollY,
 }: HomeShelfSectionProps) => {
   const themeColors = useThemeColors();
   const hasBooks = books.length > 0;
+  const [enteringEnabled, setEnteringEnabled] = useState(false);
+
+  useEffect(() => {
+    if (!animateItemChanges || !hasBooks || enteringEnabled) return;
+    // Arm entering animations one frame after the initial content has rendered,
+    // so only books that arrive later (refresh re-rolls) animate in.
+    const frame = requestAnimationFrame(() => setEnteringEnabled(true));
+    return () => cancelAnimationFrame(frame);
+  }, [animateItemChanges, enteringEnabled, hasBooks]);
   const [sectionTop, setSectionTop] = useState(0);
   const [listTop, setListTop] = useState(0);
   const menuContentTop = sectionTop + listTop + 118;
@@ -130,23 +148,42 @@ export const HomeShelfSection = ({
             setListTop(event.nativeEvent.layout.y);
           }}
         >
-          <FlatList
+          <Animated.FlatList
             data={books}
             extraData={listExtraData}
             horizontal
             keyExtractor={(book) => book.id}
-            renderItem={({ item }) => (
-              <ShelfBookCard
-                book={item}
-                headerHeight={headerHeight}
-                isFavorite={Boolean(favoriteByBookId[item.id])}
-                isOffline={isOffline}
-                menuContentTop={menuContentTop}
-                progress={progressByBookId[item.id]}
-                renderMenu={renderCardMenus}
-                scrollY={scrollY}
-              />
-            )}
+            itemLayoutAnimation={
+              animateItemChanges && enteringEnabled ? LinearTransition.duration(220) : undefined
+            }
+            renderItem={({ item, index }) => {
+              const card = (
+                <ShelfBookCard
+                  book={item}
+                  headerHeight={headerHeight}
+                  isFavorite={Boolean(favoriteByBookId[item.id])}
+                  isOffline={isOffline}
+                  menuContentTop={menuContentTop}
+                  progress={progressByBookId[item.id]}
+                  renderMenu={renderCardMenus}
+                  scrollY={scrollY}
+                />
+              );
+              if (!animateItemChanges) return card;
+              return (
+                <Animated.View
+                  entering={
+                    enteringEnabled
+                      ? FadeInRight.duration(260).delay(
+                          Math.min(index, ENTERING_MAX_STAGGERED_ITEMS) * ENTERING_STAGGER_MS,
+                        )
+                      : undefined
+                  }
+                >
+                  {card}
+                </Animated.View>
+              );
+            }}
             contentContainerStyle={{
               paddingHorizontal: 18,
               paddingBottom: 2,
