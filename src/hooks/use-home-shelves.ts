@@ -303,12 +303,24 @@ export const useHomeShelves = () => {
       Boolean(activeLibraryId) &&
       Boolean(activeLibraryUserKey) &&
       hasReadySqliteHome,
+    // Keep the previous projection visible while params change within the same
+    // user/library (e.g. a Discover re-roll changes catalogItemIds and thus the
+    // query key) so Home doesn't flash its loading state. Match the scope by
+    // comparing against the key factory (everything but the trailing params
+    // element) instead of hard-coded positions, which silently break when the
+    // key shape changes.
     placeholderData: (previousData, previousQuery) => {
       const previousKey = previousQuery?.queryKey;
       if (!Array.isArray(previousKey)) return undefined;
-      return previousKey[2] === activeLibraryUserKey && previousKey[4] === activeLibraryId
-        ? previousData
-        : undefined;
+      const scopedKey = queryKeys.sqliteHomeProjection(
+        activeLibraryUserKey,
+        activeLibraryId,
+        null,
+      );
+      const matchesScope = scopedKey
+        .slice(0, -1)
+        .every((part, index) => previousKey[index] === part);
+      return matchesScope ? previousData : undefined;
     },
   });
   const homeProjection = homeProjectionQuery.data;
