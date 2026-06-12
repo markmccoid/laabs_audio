@@ -56,11 +56,13 @@ const filterData = await librariesApi.getFilterData(libraryId);
 **Purpose**: Library-scoped item lists and derived metadata summaries used by screens.
 
 Notes:
-- `getItems({ libraryId })` returns metadata for one Library only (title/author/cover/duration/etc.).
-- User state (progress/bookmarks/finished) is fetched separately from `meApi.getUserServerState()` and merged in hooks.
+- `getItemsPage({ libraryId, page, limit })` returns one page of metadata for one Library
+  (title/author/cover/duration/etc.). Its primary consumer is the SQLite catalog refresh
+  (`src/data/sqlite/catalog-refresh.ts`), which pages the full catalog into the shadow database.
+- User state (progress/bookmarks/finished) is fetched separately from `meApi.getUserServerState()`.
 
 **Key exports**
-- `libraryItemsApi.getItems({ libraryId, filterType, filterValue, sortBy, page, limit })`
+- `libraryItemsApi.getItemsPage({ libraryId, filterType, filterValue, sortBy, page, limit })`
 - `libraryItemsApi.getFinishedItems(libraryId)`
 - `libraryItemsApi.getFavorites(libraryId, favoriteTag?)`
 - `libraryItemsApi.getFavoritedAndFinishedItems(libraryId)`
@@ -69,10 +71,10 @@ Notes:
 ```ts
 import { libraryItemsApi } from "../api/library-items-api";
 
-const items = await libraryItemsApi.getItems({
+const page = await libraryItemsApi.getItemsPage({
   libraryId,
-  filterType: "genres",
-  filterValue: "RmFudGFzeQ==",
+  page: 0,
+  limit: 500,
   sortBy: "addedAt",
 });
 

@@ -19,7 +19,7 @@ This is the best document to read if you need to debug progress restoration, dis
 flowchart TD
   A["App starts"] --> B["React Query cache restored from MMKV"]
   B --> C["UI reads cached userServerState"]
-  B --> D["Startup warmup fetches libraryBooks + userServerState"]
+  B --> D["Startup warmup fetches userServerState; SQLite readiness refreshes the catalog"]
   D --> E["Full snapshot reconcile"]
   E --> F["React Query userServerState updated"]
   F --> G["Home / Book screens re-render"]
@@ -275,10 +275,12 @@ File:
 
 What happens:
 
-After restore, startup warmup schedules background prefetches for:
+After restore, startup warmup schedules a background prefetch for:
 
-- `libraryBooks`
 - `userServerState`
+
+The Library Catalog is not a React Query prefetch: Home/Search readiness checks trigger the
+SQLite refresh coordinator when catalog rows are missing or stale.
 
 Important behavior:
 
@@ -549,9 +551,10 @@ Files:
 
 What Home does:
 
-1. Reads `libraryBooks` and `userServerState` directly from React Query cache using `queryClient.getQueryData(...)`.
-2. Subscribes to those existing queries with `useQuery({ enabled: false, initialData: ... })`.
-3. Normalizes `userServerState.progressByLibraryItemId` into `progressByBookId`.
+1. Subscribes to the SQLite home projection (`queryKeys.sqliteHomeProjection`), which returns
+   catalog summaries plus favorite/progress flags for the shelf rows.
+2. Subscribes to `userServerState` for playlist/bookmark-adjacent state.
+3. Overlays the live Displayed Listening Position for the actively playing book.
 4. Passes `progressByBookId[item.id]` into each `ShelfBookCard`.
 
 What the Home pill uses:
@@ -816,11 +819,10 @@ File:
 
 What it does:
 
-- invalidates:
-  - `libraryBooks`
+- forces the SQLite refresh coordinator to refresh catalog + overlay rows
+- invalidates and refetches:
   - `userServerState`
   - playlists
-- then fetches all three again
 - the `userServerState` fetch uses the full snapshot reconciler
 
 ### Offline banner retry

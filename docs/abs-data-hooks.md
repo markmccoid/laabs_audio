@@ -1,21 +1,25 @@
 # ABS Data Hooks
 
-These hooks live in `/Users/markmccoid/Documents/myProgramming/ReactNative/laabs_audio/src/hooks/abs-data-hooks.ts`.
+These hooks live in `src/hooks/abs-data-hooks.ts`.
+
+Catalog browsing/search no longer flows through this file: Search Result Sets come from
+`useSearchResults` (`src/search/use-search-results.ts`) and Home shelves from
+`useHomeShelves` (`src/hooks/use-home-shelves.ts`), both reading the SQLite shadow
+database. See [data-state-architecture.md](./data-state-architecture.md).
 
 ## Import
 
 ```tsx
 import {
   useLibraries,
-  useGetBooks,
   useGetUserServerState,
+  useReconcileBookProgress,
+  useGetSeriesWithProgress,
   useGetBooksInProgress,
   useMoveBookToTopOfInProgress,
   useCachedBookSummary,
-  useReconcileBookProgress,
   useGetItemDetails,
   useGetFilterData,
-  useInvalidateQueries,
 } from "@/hooks/abs-data-hooks";
 ```
 
@@ -36,40 +40,6 @@ Notes:
 - First login setup does not use the first returned Library as a temporary Active Library when multiple Libraries exist. Library Resolution chooses between zero, one, or multiple Libraries first; multiple Libraries require explicit Library Selection before library-scoped hooks should fetch Home data.
 - In downloaded-only mode after explicit logout, cached Library data may still exist but should not be exposed as browsable Library Selection.
 
-### useGetBooks
-
-Fetches global library items and merges user server state on the fly, then applies filtering/sorting from `store-filters`.
-
-Returns:
-- `data: LibraryItemWithUserState[] | undefined` (sorted and filtered)
-- `isPending: boolean`
-- `isError: boolean`
-- `isLoading: boolean`
-- `error: unknown | null`
-- plus the rest of the React Query result fields
-
-Notes:
-- Uses `libraryItemsApi.getItems({ libraryId })` with query key `["library", libraryId, "books"]`.
-- Merges user progress/bookmarks from `useGetUserServerState()`.
-- Merges user favorites from `useGetUserServerState()` into `isFavorite` on each merged book.
-- Filters: search term, genres, tags, favorites, and "has audio".
-- Genre and tag filtering each read a persisted logical operator from `store-filters`:
-  - `genreOperator: "and" | "or"`
-  - `tagOperator: "and" | "or"`
-- Operator semantics:
-  - Genre `and` requires every selected genre on the book.
-  - Genre `or` requires at least one selected genre on the book.
-  - Tag `and` requires every selected tag on the book.
-  - Tag `or` requires at least one selected tag on the book.
-- The genre group and tag group are still combined with a top-level `AND`, so mixed cases behave like:
-  - `(Genre1 AND Genre2) AND (Tag1 OR Tag2)`
-- Favorite filtering is driven by the `favoriteFilter` store value:
-  - `"all"` keeps all books
-  - `"only"` keeps only favorite books
-  - `"exclude"` removes favorite books
-- Sorting uses the `sortedBy` and `sortDirection` filters.
-- When unauthenticated, returns a safe object with `data` undefined.
-
 ### useGetUserServerState
 
 Fetches user-owned server state from `/api/me` and normalizes it.
@@ -84,6 +54,39 @@ Notes:
   - `progressByBookId`
   - `bookmarksByBookId`
 - Marked with `meta: { persist: true }`.
+
+### useReconcileBookProgress
+
+Fetches latest server progress for a single book and merges it into the persisted user server-state cache.
+
+Parameters:
+- `libraryItemId?: string`
+
+Returns:
+- `void` (side-effect hook)
+
+Notes:
+- Uses `/api/me/progress/:libraryItemId` in the background.
+- Keeps UI optimistic by rendering cached progress first, then reconciling cache with server response.
+- Writes into `["user", activeLibraryUserKey, "serverState"]` via `queryClient.setQueryData(...)`.
+- Also upserts the SQLite server-progress projection and invalidates overlay-shaped sqlite queries so Home/Search reflect the reconciled position.
+- Skips updates when existing cached progress has a newer `lastUpdate`.
+
+### useGetSeriesWithProgress
+
+Fetches a series with per-book progress.
+
+Parameters:
+- `seriesId?: string`
+
+Returns:
+- `data: SeriesWithProgress | undefined`
+- standard React Query fields
+
+Notes:
+- Uses `seriesApi.getSeriesWithProgress(seriesId)` with query key `["series", seriesId, "progress"]`.
+- `staleTime: 30s`.
+- The series sheet resolves the returned `libraryItemIds` to display summaries through the SQLite item-summary lookup, preserving series order.
 
 ### useGetBooksInProgress
 
@@ -112,17 +115,21 @@ Notes:
 
 ### useCachedBookSummary
 
-Returns cached summary data for a single book without triggering network fetches.
+Returns the cached catalog summary for a single book without network fetches.
 
 Parameters:
 - `itemId?: string`
 
 Returns:
-- `BookSummary | null`
+- `LibraryItemSummary | null`
 
 Notes:
-- Reads from React Query `["library", activeLibraryId, "books"]` cache only.
-- Uses synchronous `initialData` from query cache so first render can immediately show cover/title metadata when available.
+- Reads `summary_json` from the SQLite shadow database via
+  `sqliteSearchRepository.getItemSummariesByIds` (query key
+  `queryKeys.sqliteItemSummaries(...)`, never persisted).
+- Overlays a downloaded local cover URI when one exists in `device-books-store`.
+- Used by `useGetItemDetails` and the book downloads sheet to render summary fields before
+  full details arrive.
 
 ### useGetItemDetails
 
@@ -144,22 +151,6 @@ Notes:
 - Merges network details with `useCachedBookSummary(itemId)` so UI can render summary fields (including cover URLs) before details fetch completes.
 - When unauthenticated, returns a safe object with `data` undefined.
 
-### useReconcileBookProgress
-
-Fetches latest server progress for a single book and merges it into the persisted user server-state cache.
-
-Parameters:
-- `libraryItemId?: string`
-
-Returns:
-- `void` (side-effect hook)
-
-Notes:
-- Uses `/api/me/progress/:libraryItemId` in the background.
-- Keeps UI optimistic by rendering cached progress first, then reconciling cache with server response.
-- Writes into `["user", activeLibraryUserKey, "serverState"]` via `queryClient.setQueryData(...)`.
-- Skips updates when existing cached progress has a newer `lastUpdate`.
-
 ### useGetFilterData
 
 Fetches filter metadata (genres, tags, authors, series) for the active library.
@@ -176,14 +167,9 @@ Notes:
 - Query key is `["library", activeLibraryId, "filterData"]`.
 - When unauthenticated, returns a safe object with `filterData` undefined.
 
-### useInvalidateQueries
+## Removed hooks
 
-Returns a helper for invalidating the main ABS query caches.
-
-Returns:
-- `(queryIdentifier: "booksInProgress" | "books") => void`
-
-Notes:
-- Uses `useQueryClient()` and the current `activeLibraryId`.
-- `"books"` maps to `["library", activeLibraryId, "books"]`.
-- `"booksInProgress"` maps to `["library", activeLibraryId, "booksInProgress"]`.
+- `useGetBooks` — the full-catalog fetch/merge/filter pipeline was replaced by SQLite
+  Search Result Set reads (ADR-0016/0017/0018).
+- `useInvalidateQueries` — superseded by `src/query/sqlite-invalidation.ts` and direct
+  key invalidation.

@@ -99,7 +99,7 @@ Retry flow:
 4. If online and app is authenticated:
    - `refreshSession({ force: true })`
    - `queryClient.fetchQuery(queryKeys.libraries, librariesApi.getAll)`
-   - If active library exists: refresh `queryKeys.libraryBooks(activeLibraryId)`
+   - If active library exists: `sqliteRefreshCoordinator.refreshActiveLibrary(...)` refreshes SQLite catalog + overlay rows
    - If active user key exists: refresh `queryKeys.userServerState(activeLibraryUserKey)`
 5. Uses `Promise.allSettled(...)` and never blocks UI on partial refresh failures.
 

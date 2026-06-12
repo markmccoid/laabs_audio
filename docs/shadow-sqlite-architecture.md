@@ -1,6 +1,6 @@
 # Shadow SQLite Module Architecture
 
-How the shadow SQLite read model (ADR-0017, ADR-0018) is organized under
+How the shadow SQLite read model (ADR-0017, ADR-0019) is organized under
 `src/data/sqlite/`. The schema itself is documented in
 [shadow-sqlite-tables.md](shadow-sqlite-tables.md).
 

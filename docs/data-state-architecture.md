@@ -1,27 +1,31 @@
 # Data State Architecture
 
-This document defines where audiobook data lives after the data restructure.
+This document defines where audiobook data lives. See
+[shadow-sqlite-architecture.md](./shadow-sqlite-architecture.md) for the SQLite module map
+and [ReactQueryPersister.md](./ReactQueryPersister.md) for persistence rules.
 
 ## State Buckets
 
-1. Global server state (React Query + MMKV persistence)
-- Owner: ABS server
-- Same for all users
-- Examples:
-  - library book metadata (title, author, description, tags/genres, duration, covers)
-- Query key:
-  - `["library", libraryId, "books"]`
+1. Library Catalog read model (SQLite shadow database)
+- Owner: ABS server, projected locally (ADR-0017/0018)
+- Holds: catalog projection columns + `summary_json`, FTS index, genre/tag facet rows,
+  server progress snapshots, favorites, bookmarks, pending progress intents
+- Read through: `sqliteSearchRepository`, `sqliteHomeRepository`
+- React Query keys (never persisted): `["sqlite", "overlay" | "catalog", ...]`
+- Refreshed by the Library Refresh Coordinator (paged catalog refresh, overlay refresh)
 
 2. User server state (React Query + MMKV persistence)
 - Owner: ABS server
-- User-specific
+- User-specific, compact
 - Examples:
   - progress / currentTime / isFinished
   - server bookmarks
   - library playlist contents and metadata
-- Query key:
+- Query keys:
   - `["user", userKey, "serverState"]`
   - `["user", userKey, "library", libraryId, "playlists"]`
+  - `["library", libraryId, "filterData"]`
+  - `["user", userKey, "libraries"]`
 
 3. Device client state (Zustand `device-books-store`)
 - Owner: device/app
@@ -36,72 +40,66 @@ This document defines where audiobook data lives after the data restructure.
   - local bookmark notes
   - per-user-book playback rate
 
+The full library catalog is **not** stored in React Query or MMKV. It lives only in the
+SQLite shadow database, so the persisted MMKV snapshot stays small regardless of Library size.
+
 ## Query Defaults
 
 - `staleTime: 5 minutes`
 - `gcTime: Infinity`
 - Persisted query cache `maxAge: Infinity`
-- Persisted queries require `meta: { persist: true }`
+- Persisted queries require `meta: { persist: true }` (sqlite-prefixed keys are never persisted)
 
 ## Data Acquisition Triggers
 
 ### App startup (authenticated)
 
-1. UI renders from restored MMKV React Query cache immediately when available.
-2. Startup warmup prefetches:
-   - `["library", libraryId, "books"]`
-   - `["user", userKey, "serverState"]`
-3. Prefetch is stale-aware and only hits server when cache is stale (5 minute staleTime).
+1. UI renders from restored MMKV React Query cache (user server state, playlists) and the
+   SQLite home projection immediately when available.
+2. Home/Search hooks check `queryKeys.sqliteLibraryReadiness`; when the catalog is empty or
+   stale, `sqliteRefreshCoordinator.refreshActiveLibrary(scope)` runs a paged catalog refresh
+   and/or overlay refresh in the background.
+3. Startup warmup prefetches `["user", userKey, "serverState"]` (stale-aware, 5 minute staleTime).
 
 ### Home pull-to-refresh
 
-Manual refresh on Home explicitly refetches:
-- library catalog (`["library", libraryId, "books"]`)
-- user progress/bookmarks (`["user", userKey, "serverState"]`)
-- library playlists (`["user", userKey, "library", libraryId, "playlists"]`)
-
-Behavior:
-- Invalidates those keys first, then fetches fresh data from server.
-- Updates React Query cache + MMKV persisted snapshot.
-- Shows a visible offline message if user is offline.
+Manual refresh on Home:
+- forces the SQLite refresh coordinator to refresh catalog + overlay rows
+- refetches `["user", userKey, "serverState"]` and playlists
+- shows a visible offline message if user is offline
 
 ### Book navigation (single-book progress reconciliation)
 
 When a book detail route opens, the UI:
 1. Uses cached progress immediately (optimistic).
 2. Fetches fresh server progress for that book in the background.
-3. Merges the result into `["user", userKey, "serverState"]` cache.
+3. Merges the result into `["user", userKey, "serverState"]` cache and upserts the SQLite
+   server-progress projection, then invalidates overlay-shaped sqlite queries.
 
-This keeps startup and route transitions fast while still reconciling to current server position.
+## Read Boundaries
 
-## Merge Boundary
+Search (`useSearchResults` → `sqliteSearchRepository.querySearchResultSet`):
+- the reader returns ordered Audiobook Identities plus `favoriteIds`/`finishedIds` sets
+- all matching (text via FTS, genre/tag operators, author/narrator, Favorite/Finished
+  filters, sort) is realized by the single Search Expression (`search-expression.ts`)
+- display summaries resolve in viewport-sized chunks via `useWindowedItemSummaries`
 
-`useGetBooks()` is the main merge boundary for UI lists:
+Home (`useHomeShelves` → `sqliteHomeRepository.getHomeProjection`):
+- Continue Listening, Recently Added, requested-id resolution, and favorite/progress flags
+  come from one SQLite home projection read
+- custom shelves, playlist shelves, Discover snapshot, shelf settings, and downloaded state
+  merge in the hook (see [bookshelves-concept-flow-code.md](./bookshelves-concept-flow-code.md))
 
-- pulls Library-scoped books from `libraryItemsApi.getItems({ libraryId })`
-- pulls user state from `useGetUserServerState()`
-- merges progress, bookmarks, and `isFavorite` into `LibraryItemWithUserState`
+Single items (`useCachedBookSummary`, series sheet, filter sheets):
+- resolve by Audiobook Identity through `getItemSummariesByIds` (chunked IN queries)
 
-UI components consume merged book objects and do not manage cross-store joins directly.
+## Invalidation
 
-Search filtering runs after that merge boundary, so favorite-only and favorite-excluded search modes operate on merged `isFavorite` state instead of raw ABS tags in the UI layer. Favorites are User Session scoped by globally unique Library Item ID; Library-scoped book lists use them as an overlay.
-
-Genre and tag filtering also run after that merge boundary. Each filter group has its own persisted logical operator in `store-filters`:
-- `genreOperator` controls whether selected genres are matched with `AND` or `OR`
-- `tagOperator` controls whether selected tags are matched with `AND` or `OR`
-
-Those two groups are still combined with a top-level `AND`, so the effective search expression is:
-- `(selected genres with genreOperator) AND (selected tags with tagOperator)`
-
-## Home Shelf Derivation
-
-`useHomeShelves()` is the merge boundary for Home shelf rendering:
-
-- derived shelves come from catalog + user progress
-- custom shelves come from `device-books-store`
-- playlist shelves come from the persisted playlists query plus device-side optimistic state
-
-Playlist shelves are scoped by `activeLibraryUserKey + activeLibraryId`, then projected into Home alongside derived and custom shelves.
+SQLite-backed query keys carry a shape segment: `"overlay"` (search result sets, home
+projection) vs `"catalog"` (item summaries). Mutations (favorite toggle, progress writes,
+playback ticks) call `invalidateSqliteOverlayProjections`; only the refresh coordinator
+calls `invalidateAllSqliteProjections`. Never invalidate a raw `["sqlite"]` prefix —
+see `src/query/sqlite-invalidation.ts`.
 
 ## Playback Write-Through
 
@@ -109,12 +107,13 @@ Playback loop behavior:
 
 1. During playback, high-frequency ticks stay in `playbackStore`.
 2. On sync points (`interval`, `pause`, `seek`), `playerService` attempts server sync.
-3. If server sync cannot be completed, latest progress is written to `pendingProgressByUser` (one entry per `libraryItemId`).
-4. `playerService` still mirrors progress into React Query using `queryClient.setQueryData(...)` for `["user", userKey, "serverState"]`.
+3. If server sync cannot be completed, latest progress is written to `pendingProgressByUser`
+   (one entry per `libraryItemId`).
+4. `playerService` mirrors progress into React Query (`["user", userKey, "serverState"]`)
+   and into the SQLite overlay projections, then invalidates overlay-shaped sqlite queries.
 5. Persisted React Query cache is updated without requiring an extra fetch.
-6. `loadBook` uses cached progress for resume immediately, and now also reconciles server progress in background.
-
-This keeps library UI and player progress aligned while minimizing duplicated state.
+6. `loadBook` uses cached progress for resume immediately, and reconciles server progress in
+   background.
 
 ## Offline Queue Lifecycle
 

@@ -30,7 +30,7 @@ Primary references:
 - `recentlyAdded`
 - `discover`
 
-Computed from React Query cache (`library books` + `user server state`) and settings.
+Computed from the SQLite home projection (`sqliteHomeRepository.getHomeProjection`: Continue Listening, Recently Added, requested ids, favorite/progress flags) and settings.
 
 #### Custom shelves (curated)
 Stored in device Zustand store as arrays of `libraryItemId` and mapped to catalog books at render time.
@@ -49,14 +49,19 @@ Missing playlist shelves must not be offered in Home, book Shelf Membership, or 
 
 ## Data Ownership
 
-### React Query cache (server-owned data)
-- Library catalog: `queryKeys.libraryBooks(activeLibraryId)`
-- User progress/server state: `queryKeys.userServerState(activeLibraryUserKey)`
+### SQLite shadow database (server-owned catalog + overlay data)
+- Home projection: `queryKeys.sqliteHomeProjection(...)` via `sqliteHomeRepository.getHomeProjection`
+  (catalog summaries, Continue Listening, Recently Added, favorite/progress flags)
+- Discover candidates: `sqliteHomeRepository.getDiscoverCandidates` (on-demand random unread query)
 
-Used read-only by `useHomeShelves()` with synchronous cache access + disabled `useQuery` subscriptions.
+`useHomeShelves()` subscribes through React Query; sqlite-prefixed keys are never persisted.
+The projection query keeps previous data while its params change within the same
+user/library scope, so Home does not flash a loading state on Discover re-rolls.
+See [shadow-sqlite-architecture.md](./shadow-sqlite-architecture.md).
 
-Implementation note: those disabled subscription queries still include `meta: { persist: true }`
-so they do not clear persistence metadata on shared query options.
+### React Query cache (compact user/server data)
+- User progress/server state: `queryKeys.userServerState(activeLibraryUserKey)` (persisted)
+- Library playlists: `queryKeys.libraryPlaylists(...)` (persisted)
 
 ### Device store (`device-books-store`) for custom shelves
 Custom shelf CRUD lives in:
@@ -104,7 +109,7 @@ Main orchestrator:
 
 Flow:
 1. Read current scoped settings + custom shelves.
-2. Read catalog and user server state from React Query cache.
+2. Read the SQLite home projection (catalog summaries + favorite/progress flags).
 3. Normalize progress map keyed by `libraryItemId`.
 4. Build derived shelves:
    - Continue Listening: unfinished + not hidden, sorted by latest update.
@@ -133,7 +138,7 @@ sequenceDiagram
   participant BDS as "BookshelfDetailScreen"
 
   HS->>UHS: mount
-  UHS->>RQ: read catalog + user state
+  UHS->>RQ: subscribe sqlite home projection + user state
   UHS->>SS: read shelf settings + discover snapshot
   UHS->>DBS: read custom shelves
   UHS->>DBS: read playlist shelves + suppressed playlist IDs
@@ -177,10 +182,11 @@ Home screen consumes `visibleShelves` only.
 - Section row + chevron/refresh: `src/components/Home/home-shelf-section.tsx`
 
 Behavior:
-- Pull-to-refresh refetches catalog + user server state and re-derives shelves.
+- Pull-to-refresh forces the SQLite refresh coordinator (catalog + overlay rows), refetches user server state and playlists, then re-derives shelves.
 - If offline, Home shows a visible refresh message instead of silently failing.
 - Chevron hidden for empty shelves.
-- Discover row shows refresh icon.
+- Discover row shows refresh icon; a re-roll resolves new candidates from SQLite and replaces the shelf in place.
+- Shelf content changes animate: books new to a shelf slide in with a staggered fade, and reordered books settle via a layout transition (`home-shelf-section.tsx`).
 - Clicking chevron routes to shelf detail: `/(tabs)/(home)/bookshelf/[shelfId]`
 - Card menu overlays are deferred until after first interactions so the first Home Shelf Display does not pay menu setup cost.
 

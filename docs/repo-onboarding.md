@@ -173,7 +173,9 @@ Use these docs for focused areas:
 - [absAPIAccess.md](./absAPIAccess.md)
   - API module map
 - [abs-data-hooks.md](./abs-data-hooks.md)
-  - shared data hooks for catalog and user state
+  - shared data hooks for user/server state and item details
+- [shadow-sqlite-architecture.md](./shadow-sqlite-architecture.md)
+  - SQLite read model module map (catalog, search, home projections)
 - [DEEP_LINKING.md](./DEEP_LINKING.md)
   - shared-book deep links and cold-start handling
 - [sleep-timer.md](./sleep-timer.md)

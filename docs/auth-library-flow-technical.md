@@ -71,8 +71,10 @@ The app must not set a temporary Active Library before user choice when multiple
 
 Library Activation requires:
 
-- `queryKeys.libraryBooks(libraryId)`
 - `queryKeys.userServerState(activeLibraryUserKey)`
+
+The Library Catalog is not part of activation: once the Active Library is committed, the
+Home/Search readiness checks trigger the SQLite refresh coordinator to populate the catalog.
 
 Remembered activation data can satisfy activation immediately. Missing required data must be fetched before the Active Library is committed.
 

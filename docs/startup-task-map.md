@@ -19,13 +19,13 @@ flowchart TD
   J --> K
   I --> L["Root view layout or next animation frame hides native splash"]
   I --> M["LibrarySelectionGate fetches/validates libraries"]
-  I --> N["Home reads cached catalog/progress without fetching"]
+  I --> N["Home reads SQLite home projection + cached progress"]
   N --> O["Home computes shelves from cache, downloads, playlists, settings"]
   O --> P["markStartupPresentation from Home content/layout"]
   P --> Q["Home card menu overlays defer until after interactions"]
   Q --> R["Delayed warmup allowed"]
   E --> R
-  R --> S["After animation frame and interactions: prefetch library books and user server state"]
+  R --> S["After animation frame and interactions: prefetch user server state; SQLite readiness drives catalog refresh"]
 ```
 
 ## Startup Tasks By Blocking Level
@@ -43,7 +43,7 @@ flowchart TD
 
 | Task | Where | What it does | Blocker risk |
 | --- | --- | --- | --- |
-| Home catalog/progress cache read | `src/hooks/use-home-shelves.ts` | Reads `libraryBooks` and `userServerState` from React Query cache without fetching. | Medium. This avoids network startup, but shelf computation cost scales with cached catalog/progress size. |
+| Home projection read | `src/hooks/use-home-shelves.ts` | Reads the SQLite home projection (Continue Listening, Recently Added, requested ids, favorite/progress flags) plus cached `userServerState`. | Low to medium. SQLite returns shelf-sized row sets, so cost no longer scales with full catalog size. |
 | Shelf derivation | `src/hooks/use-home-shelves.ts` | Builds continue listening, recently added, discover, downloaded, custom, and playlist shelves from cached inputs. Missing playlist shelves are filtered out of the assembled shelf model. | Medium. Several array maps/sorts/shuffles happen on render. Large libraries can make first Home render expensive. |
 | Home card menu overlay mount | `src/components/Home/home-shelves-screen.tsx`, `src/components/Home/shelf-book-card.tsx` | Native card menu overlays are not rendered for the first Home Shelf Display; they mount after interactions. | Low for first display. This was moved off the critical path because each visible card menu previously derived shelf membership options during first render. |
 | Library validation | `src/components/library-selection-gate.tsx` | Fetches libraries after authentication and validates active library. | Medium. It is not a splash blocker, but can push the library picker, clear invalid active library state, or trigger setup work immediately after first render. |
