@@ -140,6 +140,7 @@ local bookmark records, and identity-scoped Progress Sync Intents survives logou
 | Area | Module | Purpose |
 | --- | --- | --- |
 | Access Mode derivation | `selectAccessMode` | Converts AuthStatus and stored state into app surfaces. |
+| User Session Entry | `src/auth/enter-user-session.ts` | Establishes a signed-in session (sign-in or switch), then hands off Library Resolution as a `SessionEntryResolution`. See [absAuthFlow.md](./absAuthFlow.md). |
 | Library Resolution | `src/auth/library-resolution.ts` | Determines no-library, one-library, or needs-selection outcome. |
 | Library Activation command | `runLibraryActivationSelection` | Centralizes activation, routing, commit, and failure handling. |
 | Library Selection UI adapter | `src/app/library-picker.tsx` | Presents choices and hands selected Library to activation. |

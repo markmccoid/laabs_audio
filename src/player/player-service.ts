@@ -9,6 +9,7 @@ import { playbackApi } from "../api/playback-api";
 import { sessionsApi } from "../api/sessions-api";
 import { buildCoverUrls } from "../api/cover-urls";
 import { authStore } from "../auth/auth-store";
+import { resolveListeningOwnerKey } from "../auth/listening-owner";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { invalidateSqliteOverlayProjections } from "../query/sqlite-invalidation";
@@ -934,13 +935,7 @@ class PlayerService {
       return;
     }
 
-    const authState = authStore.getState();
-    const userKey =
-      authState.activeLibraryUserKey ??
-      authState.storedUserId ??
-      (state.libraryItemId
-        ? deviceBooksStore.getState().downloadedOwnerUserIdsById[state.libraryItemId]?.[0] ?? null
-        : null);
+    const userKey = resolveListeningOwnerKey(state.libraryItemId);
     if (!userKey || !state.libraryItemId) {
       await this.unloadAndResetPlayback();
       return;
@@ -1020,14 +1015,7 @@ class PlayerService {
   }
 
   private resolveUserKeyForLibraryItem(libraryItemId: string | null | undefined) {
-    const authState = authStore.getState();
-    return (
-      authState.activeLibraryUserKey ??
-      authState.storedUserId ??
-      (libraryItemId
-        ? deviceBooksStore.getState().downloadedOwnerUserIdsById[libraryItemId]?.[0] ?? null
-        : null)
-    );
+    return resolveListeningOwnerKey(libraryItemId);
   }
 
   private resolvePreferredRateForState(state: PlaybackStoreState) {

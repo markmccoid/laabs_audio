@@ -7,7 +7,6 @@ import { AuthError, authService } from "./auth-service";
 import {
   authStorage,
   getDefaultSessionLabel,
-  getSessionKey,
   type RememberedSessionRecord,
 } from "./auth-storage";
 import { getJwtExpiry, isTokenExpired } from "./auth-token";
@@ -55,16 +54,11 @@ export type AuthState = {
     setLoginRequired: (required: boolean, message?: string | null) => void;
     setActiveLibrary: (library: { id: string; name: string }) => void;
     clearActiveLibrary: () => void;
-    loginWithPassword: (
-      username: string,
-      password: string,
-      serverUrl: string,
-      options?: {
-        label?: string | null;
-        beforeCommit?: (target: { userId: string; sessionKey: string }) => Promise<void>;
-      },
-    ) => Promise<{ userId: string; sessionKey: string }>;
-    restoreRememberedSession: (sessionKey: string) => Promise<void>;
+    commitActiveSession: (
+      sessionKey: string,
+      secrets: { accessToken: string; refreshToken: string; hasPassword: boolean },
+    ) => void;
+    setSessionNeedsAttention: (sessionKey: string, message: string) => void;
     updateRememberedSession: (
       sessionKey: string,
       values: { label?: string | null; password?: string | null },
@@ -313,183 +307,49 @@ export const authStore = createStore<AuthState>()(
           });
         },
 
-        loginWithPassword: async (username, password, serverUrl, options) => {
-          log("login:start", { username, serverUrl });
-          const startedAt = Date.now();
-          const normalizedServerUrl = authService.normalizeServerUrl(serverUrl);
-          try {
-            const tokens = await authService.login({
-              username,
-              password,
-              serverUrl: normalizedServerUrl,
-            });
-            const nextUserKey = getUserKey(tokens.userId);
-            const sessionKey = getSessionKey(username, normalizedServerUrl);
-            await options?.beforeCommit?.({ userId: tokens.userId, sessionKey });
-            const session = authStorage.upsertSession(
-              {
-                userId: tokens.userId,
-                username,
-                serverUrl: normalizedServerUrl,
-                label: options?.label || getDefaultSessionLabel(username, normalizedServerUrl),
-                activeLibraryId: null,
-                activeLibraryName: null,
-                needsAttention: false,
-                lastError: null,
-              },
-              { makeActive: true },
-            );
-
-            await authStorage.setSessionSecrets(session.key, {
-              password,
-              accessToken: tokens.accessToken,
-              refreshToken: tokens.refreshToken,
-            });
-
-            log("login:stored", {
-              hasAccessToken: Boolean(tokens.accessToken),
-              hasRefreshToken: Boolean(tokens.refreshToken),
-            });
-
-            set((state) => ({
-              rememberedSessions: authStorage.getSessionsSnapshot().sessions,
-              activeSessionKey: session.key,
-              storedUsername: username,
-              storedUserId: tokens.userId,
-              serverUrl: normalizedServerUrl,
-              accessToken: tokens.accessToken,
-              refreshToken: tokens.refreshToken,
-              accessTokenExpiresAt: getJwtExpiry(tokens.accessToken),
-              hasStoredCredentials: true,
-              status: computeEntryStatus(true, state.hasOfflineContent),
-              lastAuthError: null,
-              loginRequired: false,
-              activeLibraryId: null,
-              activeLibraryName: null,
-              activeLibraryUserKey: nextUserKey,
-            }));
-
-            log("login:done", { status: "authenticated" });
-            void recordTimingLog("login", "login_with_password", startedAt, {
-              username,
-              serverUrl: normalizedServerUrl,
-              success: true,
-            });
-            return { userId: tokens.userId, sessionKey: session.key };
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            void recordTimingLog("login", "login_with_password", startedAt, {
-              username,
-              serverUrl: normalizedServerUrl,
-              success: false,
-              error: errorMessage,
-            });
-            throw error;
-          }
-        },
-
-        restoreRememberedSession: async (sessionKey) => {
-          const startedAt = Date.now();
+        commitActiveSession: (sessionKey, secrets) => {
           const snapshot = authStorage.getSessionsSnapshot();
           const session = snapshot.sessions.find((item) => item.key === sessionKey);
           if (!session) {
             throw new AuthError("Sign-in entry not found", "INVALID_RESPONSE");
           }
 
-          if (get().isOnline === false) {
-            throw new AuthError("Offline", "NETWORK_ERROR");
-          }
+          // The single atomic switch-over: make this session the active one and
+          // mirror its identity into in-memory state. The session's remembered Active
+          // Library (if any) is committed too, so re-entering a session that already has
+          // one stays in serverBrowsing instead of flashing the Library Selection gate;
+          // Library Resolution validates it immediately after and corrects it if stale.
+          authStorage.setActiveSessionKey(sessionKey);
+          const userKey = getUserKey(session.userId);
+          set((state) => ({
+            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+            activeSessionKey: sessionKey,
+            storedUsername: session.username,
+            storedUserId: session.userId,
+            serverUrl: session.serverUrl,
+            accessToken: secrets.accessToken,
+            refreshToken: secrets.refreshToken,
+            accessTokenExpiresAt: getJwtExpiry(secrets.accessToken),
+            hasStoredCredentials: secrets.hasPassword,
+            status: computeEntryStatus(true, state.hasOfflineContent),
+            lastAuthError: null,
+            loginRequired: false,
+            activeLibraryId: session.activeLibraryId ?? null,
+            activeLibraryName: session.activeLibraryName ?? null,
+            activeLibraryUserKey: userKey,
+          }));
+          log("commitActiveSession:done", { sessionKey });
+        },
 
-          try {
-            const secrets = await authStorage.getSessionSecrets(session.key);
-            let tokens: { accessToken: string; refreshToken: string } | null = null;
-
-            if (secrets.refreshToken) {
-              try {
-                tokens = await authService.refresh(session.serverUrl, secrets.refreshToken);
-              } catch (error) {
-                if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
-                  throw error;
-                }
-                tokens = null;
-              }
-            }
-
-            if (!tokens && secrets.password) {
-              try {
-                const loginResult = await authService.login({
-                  username: session.username,
-                  password: secrets.password,
-                  serverUrl: session.serverUrl,
-                });
-                if (loginResult.userId !== session.userId) {
-                  throw new AuthError("Sign-in returned a different Audiobookshelf user", "INVALID_RESPONSE");
-                }
-                tokens = loginResult;
-              } catch (error) {
-                if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
-                  throw error;
-                }
-                tokens = null;
-              }
-            }
-
-            if (!tokens) {
-              authStorage.updateSession(session.key, {
-                needsAttention: true,
-                lastError: "Sign in needed",
-              });
-              set({
-                rememberedSessions: authStorage.getSessionsSnapshot().sessions,
-                lastAuthError: "Sign in needed",
-              });
-              throw new AuthError("Sign in needed", "UNAUTHORIZED");
-            }
-
-            await authStorage.setSessionSecrets(session.key, {
-              accessToken: tokens.accessToken,
-              refreshToken: tokens.refreshToken,
-            });
-            authStorage.updateSession(session.key, {
-              needsAttention: false,
-              lastError: null,
-            });
-            authStorage.setActiveSessionKey(session.key);
-
-            const userKey = getUserKey(session.userId);
-            set((state) => ({
-              rememberedSessions: authStorage.getSessionsSnapshot().sessions,
-              activeSessionKey: session.key,
-              storedUsername: session.username,
-              storedUserId: session.userId,
-              serverUrl: session.serverUrl,
-              accessToken: tokens.accessToken,
-              refreshToken: tokens.refreshToken,
-              accessTokenExpiresAt: getJwtExpiry(tokens.accessToken),
-              hasStoredCredentials: Boolean(secrets.password),
-              status: computeEntryStatus(true, state.hasOfflineContent),
-              lastAuthError: null,
-              loginRequired: false,
-              activeLibraryId: session.activeLibraryId ?? null,
-              activeLibraryName: session.activeLibraryName ?? null,
-              activeLibraryUserKey: userKey,
-            }));
-
-            void recordTimingLog("login", "restore_remembered_session", startedAt, {
-              username: session.username,
-              serverUrl: session.serverUrl,
-              success: true,
-            });
-          } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            void recordTimingLog("login", "restore_remembered_session", startedAt, {
-              username: session.username,
-              serverUrl: session.serverUrl,
-              success: false,
-              error: errorMessage,
-            });
-            throw error;
-          }
+        setSessionNeedsAttention: (sessionKey, message) => {
+          authStorage.updateSession(sessionKey, {
+            needsAttention: true,
+            lastError: message,
+          });
+          set({
+            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+            lastAuthError: message,
+          });
         },
 
         updateRememberedSession: async (sessionKey, values) => {

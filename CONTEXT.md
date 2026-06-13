@@ -40,6 +40,14 @@ _Avoid_: Server name, account name
 A saved user-facing way to start Session Restoration through a particular Server Connection Endpoint and username.
 _Avoid_: User Session identity, account
 
+**User Session Entry**:
+The act of establishing the signed-in User Session from either Session Restoration or credential submission: confirming the Audiobookshelf User Identity, crossing the User Session boundary, committing the new active session, and resolving its Active Library.
+_Avoid_: Login, sign-in handler
+
+**Session Entry Resolution**:
+The outcome of User Session Entry that tells the caller what to do next: activate a resolved Active Library, present Library Selection, report no available Libraries, or report a failure with its reason.
+_Avoid_: Login result, navigation result
+
 **Library**:
 An Audiobookshelf collection of media that the user may browse and play.
 _Avoid_: Bookshelf, catalog
@@ -99,6 +107,10 @@ _Avoid_: Downloaded book
 **Downloaded Audio Asset Owner**:
 The Audiobookshelf User Identity whose local listening state should change when a Downloaded Audio Asset is used while no User Session is signed in.
 _Avoid_: download entitlement, sync server
+
+**Listening State Owner**:
+The Audiobookshelf User Identity whose local listening state (Bookmark, Progress Sync Intent, Listening Position, Playback Rate) applies to an audiobook right now: the signed-in or remembered User Session identity when present, otherwise the audiobook's Downloaded Audio Asset Owner.
+_Avoid_: current user, owner key
 
 **Legacy Downloaded Audio Asset**:
 A Downloaded Audio Asset created before LAABS Audio knew which Audiobookshelf Server owned it.
@@ -334,7 +346,17 @@ _Avoid_: Five minute window, scrubber window
 - A **Session Entry Switch** crosses a User Session boundary without clearing restoration material for the previous **Audiobookshelf User Identity**.
 - A **Session Entry Switch** must durably capture local listening changes for the previous **Audiobookshelf User Identity** before crossing the User Session boundary.
 - A **Session Entry Switch** must not block on remote sync for the previous **Audiobookshelf User Identity**.
+- A **Session Entry Switch** is a **User Session Entry** that replaces a different signed-in **User Session**.
+- **User Session Entry** confirms the **Audiobookshelf User Identity** before it crosses the **User Session** boundary.
+- **User Session Entry** crosses the **User Session** boundary only after the new **Audiobookshelf User Identity** is confirmed.
+- A failed **User Session Entry** leaves the previous **User Session** intact.
+- **User Session Entry** persists the new **Remembered User Session** before tearing down the previous **User Session**'s live state.
+- **User Session Entry** makes the new **User Session** active as a single final step.
+- Crossing the **User Session** boundary tears down only live runtime state — **Active Playback**, the session query cache, and **Library Activation** — never durable **Audiobookshelf User Identity**-scoped data.
+- **User Session Entry** produces a **Session Entry Resolution** and does not perform navigation or **Library Activation** itself.
+- The caller maps a **Session Entry Resolution** to navigation and runs **Library Activation** when the resolution selects an **Active Library**.
 - Durable user-owned app state, including **Bookmark** state, **Shelf Membership**, **Listening Position**, and **Progress Sync Intent** state, belongs to the **Audiobookshelf User Identity**.
+- The **Listening State Owner** for an audiobook is the active **User Session**'s **Audiobookshelf User Identity** when signed in or remembered, otherwise the audiobook's **Downloaded Audio Asset Owner**.
 - The **Server Connection Endpoint** is used for API calls, not for durable user-owned app state identity.
 - Multiple **Remembered User Sessions** may belong to the same Audiobookshelf Server when they use different **Audiobookshelf User Identities**.
 - Switching from one signed-in User Session to another crosses a User Session boundary.

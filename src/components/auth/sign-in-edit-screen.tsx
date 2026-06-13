@@ -1,7 +1,7 @@
 import { getDefaultSessionLabel } from "@/auth/auth-storage";
 import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
-import { prepareForSignInChange } from "@/auth/session-boundary";
-import { useCompleteSessionEntry } from "@/auth/use-complete-session-entry";
+import { enterUserSession } from "@/auth/enter-user-session";
+import { useApplySessionEntryResolution } from "@/auth/use-apply-session-entry-resolution";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -24,16 +24,14 @@ export function SignInEditScreen() {
   const sessions = useAuthStore((state) => state.rememberedSessions);
   const activeSessionKey = useAuthStore((state) => state.activeSessionKey);
   const accessMode = useAuthStore(selectAccessMode);
-  const isOnline = useAuthStore((state) => state.isOnline);
-  const { updateRememberedSession, restoreRememberedSession } = useAuthActions();
-  const completeSessionEntry = useCompleteSessionEntry();
+  const { updateRememberedSession } = useAuthActions();
+  const applyResolution = useApplySessionEntryResolution();
   const params = useLocalSearchParams<{
     sessionKey?: string | string[];
     mode?: string;
     returnToLibraryItemId?: string | string[];
   }>();
   const sessionKey = resolveParam(params.sessionKey);
-  const mode = typeof params.mode === "string" ? params.mode : "required";
   const returnToLibraryItemId = resolveParam(params.returnToLibraryItemId);
   const session = useMemo(
     () => sessions.find((item) => item.key === sessionKey),
@@ -58,15 +56,10 @@ export function SignInEditScreen() {
 
       const shouldRestore = session.needsAttention || session.key === activeSessionKey;
       if (shouldRestore) {
-        if (isOnline === false) {
-          throw new Error("You are offline. Connect to the internet to sign in.");
-        }
-        await prepareForSignInChange({ userId: session.userId, sessionKey: session.key });
-        await restoreRememberedSession(session.key);
-        await completeSessionEntry({
-          mode,
+        const resolution = await enterUserSession({ via: "restore", sessionKey: session.key });
+        await applyResolution(resolution, {
           returnToLibraryItemId,
-          activeLibraryId: session.activeLibraryId,
+          onError: setLocalError,
         });
         return;
       }

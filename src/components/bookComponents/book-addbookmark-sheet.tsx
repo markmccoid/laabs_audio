@@ -1,10 +1,6 @@
-import { useAuthStore } from "@/auth/auth-store";
+import { useResolvedListeningOwnerKey } from "@/auth/listening-owner";
 import { playerService } from "@/player";
-import {
-  selectDownloadOwnerUserId,
-  useDeviceBooksActions,
-  useDeviceBooksStore,
-} from "@/store/device-books-store";
+import { useDeviceBooksActions } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { Bookmark } from "@/types/absTypes";
 import { router, Stack } from "expo-router";
@@ -34,12 +30,7 @@ export const BookAddBookmarkSheet = () => {
   const insets = useSafeAreaInsets();
   const { addBookmark } = useDeviceBooksActions();
   const draft = useBookAddBookmarkDraft();
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const storedUserId = useAuthStore((state) => state.storedUserId);
-  const downloadOwnerUserId = useDeviceBooksStore((state) =>
-    selectDownloadOwnerUserId(state, draft.libraryItemId),
-  );
-  const resolvedUserKey = activeLibraryUserKey ?? storedUserId ?? downloadOwnerUserId;
+  const resolvedUserKey = useResolvedListeningOwnerKey(draft.libraryItemId);
   const [isSaving, setIsSaving] = useState(false);
   const trimmedBookmarkName = draft.title.trim();
   const isClipDraft = draft.kind === "clip" && draft.clipEndSeconds !== null;

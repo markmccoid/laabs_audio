@@ -1,4 +1,4 @@
-import { useAuthStore } from "@/auth/auth-store";
+import { useResolvedListeningOwnerKey } from "@/auth/listening-owner";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { playerService } from "@/player";
 import { resolveClipExportAvailability, resolveClipExportSourcePlan } from "@/sharing/clip-export";
@@ -12,7 +12,6 @@ import {
   deleteClipTranscriptExportFile,
 } from "@/sharing/clip-transcript-export";
 import {
-  selectDownloadOwnerUserId,
   useDeviceBooksActions,
   useDeviceBooksStore,
   type LocalBookmarkRecord,
@@ -83,21 +82,13 @@ export const BookBookmarkDetailSheet = () => {
   const insets = useSafeAreaInsets();
   const draft = useBookAddBookmarkDraft();
   const { addBookmark } = useDeviceBooksActions();
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const storedUserId = useAuthStore((state) => state.storedUserId);
   const { libraryItemId: libraryItemIdParam, bookmarkId: bookmarkIdParam } = useLocalSearchParams<{
     libraryItemId?: string | string[];
     bookmarkId?: string | string[];
   }>();
   const libraryItemId = resolveParam(libraryItemIdParam);
   const bookmarkId = resolveParam(bookmarkIdParam);
-  const downloadOwnerUserId = useDeviceBooksStore((state) =>
-    selectDownloadOwnerUserId(state, libraryItemId),
-  );
-  const resolvedUserKey = useMemo(
-    () => activeLibraryUserKey ?? storedUserId ?? downloadOwnerUserId,
-    [activeLibraryUserKey, downloadOwnerUserId, storedUserId],
-  );
+  const resolvedUserKey = useResolvedListeningOwnerKey(libraryItemId);
   const bookmark = useDeviceBooksStore((state) =>
     resolvedUserKey && bookmarkId
       ? state.localBookmarksByUser[resolvedUserKey]?.[bookmarkId]

@@ -1,6 +1,6 @@
-import { prepareForSignInChange } from "@/auth/session-boundary";
+import { enterUserSession } from "@/auth/enter-user-session";
 import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
-import { useCompleteSessionEntry } from "@/auth/use-complete-session-entry";
+import { useApplySessionEntryResolution } from "@/auth/use-apply-session-entry-resolution";
 import { useExplicitLogout } from "@/auth/use-explicit-logout";
 import type { RememberedSessionRecord } from "@/auth/auth-storage";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -61,13 +61,10 @@ export function SignInListScreen() {
   const insets = useSafeAreaInsets();
   const sessions = useAuthStore((state) => state.rememberedSessions);
   const activeSessionKey = useAuthStore((state) => state.activeSessionKey);
-  const storedUserId = useAuthStore((state) => state.storedUserId);
-  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const accessMode = useAuthStore(selectAccessMode);
-  const isOnline = useAuthStore((state) => state.isOnline);
-  const { restoreRememberedSession, removeRememberedSession } = useAuthActions();
+  const { removeRememberedSession } = useAuthActions();
   const explicitLogout = useExplicitLogout();
-  const completeSessionEntry = useCompleteSessionEntry();
+  const applyResolution = useApplySessionEntryResolution();
   const params = useLocalSearchParams<{
     mode?: string;
     returnToLibraryItemId?: string | string[];
@@ -110,28 +107,20 @@ export function SignInListScreen() {
 
   const restoreSession = async (session: RememberedSessionRecord) => {
     if (pendingSessionKey) return;
-    if (isOnline === false) {
-      setLocalError("You are offline. Connect to the internet to sign in.");
-      return;
-    }
 
     setLocalError(null);
     setPendingSessionKey(session.key);
     try {
-      const isSameUserSwitch = Boolean(storedUserId && storedUserId === session.userId);
-      await prepareForSignInChange({ userId: session.userId, sessionKey: session.key });
-      await restoreRememberedSession(session.key);
-      await completeSessionEntry({
-        mode,
+      const resolution = await enterUserSession({ via: "restore", sessionKey: session.key });
+      await applyResolution(resolution, {
         returnToLibraryItemId,
-        activeLibraryId: session.activeLibraryId ?? (isSameUserSwitch ? activeLibraryId : null),
+        onError: setLocalError,
+        onFailed: (failure) => {
+          if (failure.kind !== "offline") {
+            openEdit(session);
+          }
+        },
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Sign in failed";
-      setLocalError(message);
-      if (!message.toLowerCase().includes("offline")) {
-        openEdit(session);
-      }
     } finally {
       setPendingSessionKey(null);
     }
@@ -301,39 +290,24 @@ export function SignInListScreen() {
                   accessibilityLabel={`Open actions for ${session.label}`}
                   style={{
                     borderWidth: 1,
-                    borderColor: themeColors.border,
+                    borderColor: isActive ? "#16a34a" : themeColors.border,
                     borderRadius: 14,
                     borderCurve: "continuous",
                     backgroundColor: themeColors.surface,
-                    paddingLeft: 14,
-                    paddingRight: 14,
-                    paddingVertical: 12,
+                    paddingHorizontal: 16,
+                    paddingVertical: 14,
                     flexDirection: "row",
                     alignItems: "center",
                     gap: 12,
-                    overflow: "hidden",
                   }}
                 >
-                  {isActive ? (
-                    <View
-                      style={{
-                        position: "absolute",
-                        left: 0,
-                        top: 0,
-                        bottom: 0,
-                        width: 5,
-                        backgroundColor: "#166534",
-                      }}
-                    />
-                  ) : null}
-                  <View style={{ flex: 1, gap: 4 }}>
+                  <View style={{ flex: 1, gap: 5, paddingRight: isActive ? 18 : 0 }}>
                     <Text
                       selectable
                       style={{
                         color: themeColors.text,
                         fontSize: 17,
                         fontWeight: "700",
-                        flexShrink: 1,
                       }}
                     >
                       {session.label}
@@ -350,20 +324,26 @@ export function SignInListScreen() {
                       </Text>
                     ) : null}
                   </View>
-                  {isPending ? (
-                    <ActivityIndicator color={themeColors.accent} />
-                  ) : isActive ? (
+                  {isPending ? <ActivityIndicator color={themeColors.accent} /> : null}
+
+                  {isActive && !isPending ? (
                     <View
+                      pointerEvents="none"
                       style={{
+                        position: "absolute",
+                        top: -9,
+                        right: -9,
+                        width: 28,
+                        height: 28,
                         borderRadius: 999,
                         backgroundColor: "#16a34a",
-                        paddingHorizontal: 10,
-                        paddingVertical: 5,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderWidth: 2,
+                        borderColor: themeColors.bg,
                       }}
                     >
-                      <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>
-                        Active
-                      </Text>
+                      <SymbolView name="checkmark" tintColor="#fff" size={15} weight="bold" />
                     </View>
                   ) : null}
                 </View>

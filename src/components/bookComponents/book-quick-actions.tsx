@@ -1,10 +1,9 @@
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
-import { useAuthStore } from "@/auth/auth-store";
+import { useResolvedListeningOwnerKey } from "@/auth/listening-owner";
 import {
   selectIsAnotherDownloadActive,
   selectIsBookActivelyDownloading,
   selectIsBookFullyDownloaded,
-  selectDownloadOwnerUserId,
   selectLocalBookmarksForBook,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
@@ -115,13 +114,8 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   const themeColors = useThemeColors();
   const segments = useSegments();
   const downloadProgress = useDeviceBooksStore((state) => state.downloadProgress);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const storedUserId = useAuthStore((state) => state.storedUserId);
   useGetUserServerState();
-  const downloadOwnerUserId = useDeviceBooksStore((state) =>
-    selectDownloadOwnerUserId(state, libraryItemId),
-  );
-  const resolvedUserKey = activeLibraryUserKey ?? storedUserId ?? downloadOwnerUserId;
+  const resolvedUserKey = useResolvedListeningOwnerKey(libraryItemId);
   const isDownloaded = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
     return selectIsBookFullyDownloaded(state, libraryItemId);

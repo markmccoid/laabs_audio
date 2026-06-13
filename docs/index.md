@@ -26,7 +26,7 @@ Routing guide for the `docs/` folder. Domain vocabulary lives in
 
 | Doc | Read it when you need… |
 | --- | --- |
-| [absAuthFlow.md](./absAuthFlow.md) | the Audiobookshelf authentication flow and token handling |
+| [absAuthFlow.md](./absAuthFlow.md) | the auth flow: multiple sign-ins, User Session Entry & switching, storage, token handling |
 | [auth-library-flow-technical.md](./auth-library-flow-technical.md) | Library Resolution / Selection / Activation implementation details |
 | [auth-library-flow-user.md](./auth-library-flow-user.md) | the same flows described from the user's perspective |
 | [future-auth-flow-enhancements.md](./future-auth-flow-enhancements.md) | deferred auth/session ideas |
@@ -91,6 +91,7 @@ propose superseding it.
 | [0017](./adr/0017-local-sqlite-read-model-for-large-audiobookshelf-libraries.md) | Local SQLite read model for large libraries (phased cutover) |
 | [0018](./adr/0018-accumulated-skip-bursts.md) | Accumulated skip bursts |
 | [0019](./adr/0019-shadow-sqlite-concern-modules.md) | Shadow SQLite concern modules with ids-first search reads |
+| [0020](./adr/0020-single-user-session-entry-module.md) | Single User Session Entry module crosses the boundary after identity is confirmed |
 
 Note: ADRs are point-in-time records. ADR-0017's phased-cutover details are completed and
 superseded in part by ADR-0019; read 0017 for the why, 0019 plus

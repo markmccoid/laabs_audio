@@ -1,7 +1,7 @@
 import { getDefaultSessionLabel } from "@/auth/auth-storage";
 import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
-import { prepareForSignInChange } from "@/auth/session-boundary";
-import { useCompleteSessionEntry } from "@/auth/use-complete-session-entry";
+import { enterUserSession } from "@/auth/enter-user-session";
+import { useApplySessionEntryResolution } from "@/auth/use-apply-session-entry-resolution";
 import Dropdown from "@/shared/ui/organisms/dropdown";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router, Stack, useLocalSearchParams } from "expo-router";
@@ -57,10 +57,9 @@ export function SignInFormScreen() {
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const storedServerUrl = useAuthStore((state) => state.serverUrl);
   const accessMode = useAuthStore(selectAccessMode);
-  const isOnline = useAuthStore((state) => state.isOnline);
   const lastAuthError = useAuthStore((state) => state.lastAuthError);
-  const { loginWithPassword, setLoginRequired } = useAuthActions();
-  const completeSessionEntry = useCompleteSessionEntry();
+  const { setLoginRequired } = useAuthActions();
+  const applyResolution = useApplySessionEntryResolution();
   const themeColors = useThemeColors();
   const params = useLocalSearchParams<{
     mode?: string;
@@ -103,11 +102,6 @@ export function SignInFormScreen() {
   const handleLogin = async () => {
     setLocalError(null);
 
-    if (!isOnline) {
-      setLocalError("You are offline. Connect to the internet to log in.");
-      return;
-    }
-
     if (!username || !password || !serverHost) {
       setLocalError("Please enter username, password, and server URL.");
       return;
@@ -119,15 +113,17 @@ export function SignInFormScreen() {
       const trimmedUsername = username.trim();
       const finalLabel =
         sessionLabel.trim() || getDefaultSessionLabel(trimmedUsername, finalServerUrl);
-      await loginWithPassword(trimmedUsername, password, finalServerUrl, {
+      const resolution = await enterUserSession({
+        via: "credentials",
+        username: trimmedUsername,
+        password,
+        serverUrl: finalServerUrl,
         label: finalLabel,
-        beforeCommit: (target) => prepareForSignInChange(target),
       });
-
-      await completeSessionEntry({ mode, returnToLibraryItemId });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Login failed";
-      setLocalError(message);
+      await applyResolution(resolution, {
+        returnToLibraryItemId,
+        onError: setLocalError,
+      });
     } finally {
       setIsSubmitting(false);
     }

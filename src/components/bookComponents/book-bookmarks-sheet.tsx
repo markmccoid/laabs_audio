@@ -1,8 +1,7 @@
-import { useAuthStore } from "@/auth/auth-store";
+import { useResolvedListeningOwnerKey } from "@/auth/listening-owner";
 import { useGetItemDetails, useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore } from "@/player";
 import {
-  selectDownloadOwnerUserId,
   useDeviceBooksActions,
   useDeviceBooksStore,
   type LocalBookmarkRecord,
@@ -77,8 +76,6 @@ export const BookBookmarksSheet = () => {
   const insets = useSafeAreaInsets();
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const storedUserId = useAuthStore((state) => state.storedUserId);
   const { deleteBookmark } = useDeviceBooksActions();
   useGetUserServerState();
   const { libraryItemId: libraryItemIdParam } = useLocalSearchParams<{
@@ -86,19 +83,13 @@ export const BookBookmarksSheet = () => {
   }>();
   const libraryItemId = resolveParam(libraryItemIdParam);
   const { data: itemDetails } = useGetItemDetails(libraryItemId);
-  const downloadOwnerUserId = useDeviceBooksStore((state) =>
-    selectDownloadOwnerUserId(state, libraryItemId),
-  );
   const bookName = itemDetails?.title ?? itemDetails?.media?.metadata?.title ?? "";
   const [pendingBookmarkId, setPendingBookmarkId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const isBookmarkPlayPending = pendingBookmarkId !== null;
 
-  const resolvedUserKey = useMemo(
-    () => activeLibraryUserKey ?? storedUserId ?? downloadOwnerUserId,
-    [activeLibraryUserKey, downloadOwnerUserId, storedUserId],
-  );
+  const resolvedUserKey = useResolvedListeningOwnerKey(libraryItemId);
 
   const localBookmarksForUser = useDeviceBooksStore((state) =>
     resolvedUserKey ? state.localBookmarksByUser[resolvedUserKey] : undefined,

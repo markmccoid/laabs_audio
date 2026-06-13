@@ -1,9 +1,8 @@
 import { usePlaybackRateGesture } from "@/hooks/use-playback-rate-gesture";
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
-import { useAuthStore } from "@/auth/auth-store";
+import { useResolvedListeningOwnerKey } from "@/auth/listening-owner";
 import { useSleepTimerStatus } from "@/player";
 import {
-  selectDownloadOwnerUserId,
   selectLocalBookmarksForBook,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
@@ -247,12 +246,7 @@ const RateActionButton = ({ libraryItemId, onPress }: RateActionButtonProps) => 
 const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
   const themeColors = useThemeColors();
   useGetUserServerState();
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const storedUserId = useAuthStore((state) => state.storedUserId);
-  const downloadOwnerUserId = useDeviceBooksStore((state) =>
-    selectDownloadOwnerUserId(state, libraryItemId),
-  );
-  const resolvedUserKey = activeLibraryUserKey ?? storedUserId ?? downloadOwnerUserId;
+  const resolvedUserKey = useResolvedListeningOwnerKey(libraryItemId);
   const sleepTimerStatus = useSleepTimerStatus();
   const bookmarkCount = useDeviceBooksStore((state) => {
     if (!libraryItemId) return 0;

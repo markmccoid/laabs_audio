@@ -1,4 +1,5 @@
 import { authStore } from "@/auth/auth-store";
+import { resolveListeningOwnerKey } from "@/auth/listening-owner";
 import {
   deviceBooksStore,
   type PendingProgressSync,
@@ -24,13 +25,8 @@ export const resolveProgressSyncUserKey = (
   override?: string | null,
 ) => {
   if (override) return override;
-  const authState = authStore.getState();
-  if (authState.activeLibraryUserKey) return authState.activeLibraryUserKey;
-  if (authState.storedUserId) return authState.storedUserId;
-  const downloadOwnerUserId =
-    deviceBooksStore.getState().downloadedOwnerUserIdsById[libraryItemId]?.[0] ?? null;
-  if (downloadOwnerUserId) return downloadOwnerUserId;
   return (
+    resolveListeningOwnerKey(libraryItemId) ??
     deviceBooksStore.getState().progressSyncUserKeyByLibraryItemId[libraryItemId] ??
     null
   );

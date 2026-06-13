@@ -2,9 +2,9 @@ import { playerService } from "../player/player-service";
 import { playbackStore } from "../player/playback-store";
 import { queryClient } from "../query/query-client";
 import { clearSessionQueryCache } from "../query/session-query-cache";
-import { deviceBooksStore } from "../store/device-books-store";
 import { authStore } from "./auth-store";
 import { libraryActivationStore } from "./library-activation-store";
+import { resolveListeningOwnerKey } from "./listening-owner";
 
 const LOCAL_SESSION_ID = "local";
 
@@ -18,19 +18,8 @@ export const prepareForUserSessionBoundary = async () => {
   await clearSessionQueryCache(queryClient);
 };
 
-const resolveActivePlaybackOwnerUserId = () => {
-  const authState = authStore.getState();
-  if (authState.activeLibraryUserKey) return authState.activeLibraryUserKey;
-  if (authState.storedUserId) return authState.storedUserId;
-
-  const playbackState = playbackStore.getState();
-  if (!playbackState.libraryItemId) return null;
-
-  return (
-    deviceBooksStore.getState().downloadedOwnerUserIdsById[playbackState.libraryItemId]?.[0] ??
-    null
-  );
-};
+const resolveActivePlaybackOwnerUserId = () =>
+  resolveListeningOwnerKey(playbackStore.getState().libraryItemId);
 
 export const prepareForSignInChange = async (target: {
   userId: string | null | undefined;
