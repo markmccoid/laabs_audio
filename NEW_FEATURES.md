@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-13` `0a7d638` - Refine sign-in session handling and refresh the Search filter experience.
+  Tester focus: verify saved sign-ins can still be selected and switched without cross-user state leaks; verify Search filtering still works for genres, tags, favorites, finished status, sorting, and grid/list modes; verify the filter bottom sheet uses the updated glass/accent styling and remains readable in light and dark mode.
 - `2026-06-11` `pending` - Stabilize rapid skip controls during playback.
   Tester focus: while audio is playing, rapidly tap skip forward/backward and verify the slider moves to the accumulated target without jumping back, playback stays in the correct play/pause state, and pressing pause immediately after skipping actually stops audio.
 - `2026-06-09` `pending` - Enhance settings UI with new Lock Screen controls, active Sign-Ins display, and resolve Auth/API module circular dependencies.

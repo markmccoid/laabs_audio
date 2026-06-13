@@ -6,6 +6,7 @@ export type SearchSortBy = "addedAt" | "author" | "title" | "duration" | "publis
 export type SearchSortDirection = "asc" | "desc";
 export type SearchFilterOperator = "and" | "or";
 export type SearchFavoriteFilter = "all" | "only" | "exclude";
+export type SearchResultsViewMode = "list" | "grid";
 
 type SearchSessionState = {
   searchText: string;
@@ -17,6 +18,7 @@ type SearchSessionState = {
   finishedOnly: boolean;
   sortedBy: SearchSortBy;
   sortDirection: SearchSortDirection;
+  resultsViewMode: SearchResultsViewMode;
   actions: SearchSessionActions;
 };
 
@@ -32,12 +34,14 @@ type SearchSessionActions = {
   removeTag: (tag: string) => void;
   clearTags: () => void;
   setTagOperator: (operator: SearchFilterOperator) => void;
+  setFavoriteFilter: (filter: SearchFavoriteFilter) => void;
   cycleFavoriteFilter: () => void;
   clearFavoriteFilter: () => void;
   toggleFinishedOnly: () => void;
   clearFinishedOnly: () => void;
   setSortedBy: (sortBy: SearchSortBy) => void;
   setSortDirection: (sortDirection: SearchSortDirection) => void;
+  setResultsViewMode: (resultsViewMode: SearchResultsViewMode) => void;
 };
 
 const DEFAULT_SORTED_BY: SearchSortBy = "addedAt";
@@ -62,6 +66,7 @@ export const useSearchSessionStore = create<SearchSessionState>()(
       finishedOnly: false,
       sortedBy: DEFAULT_SORTED_BY,
       sortDirection: DEFAULT_SORT_DIRECTION,
+      resultsViewMode: "list",
       actions: {
         setSearchText: (searchText) => set({ searchText }),
         setGenres: (genres) => set({ genres }),
@@ -74,6 +79,7 @@ export const useSearchSessionStore = create<SearchSessionState>()(
         removeTag: (tag) => set((state) => ({ tags: removeValue(state.tags, tag) })),
         clearTags: () => set({ tags: [] }),
         setTagOperator: (tagOperator) => set({ tagOperator }),
+        setFavoriteFilter: (favoriteFilter) => set({ favoriteFilter }),
         cycleFavoriteFilter: () =>
           set((state) => {
             switch (state.favoriteFilter) {
@@ -91,6 +97,7 @@ export const useSearchSessionStore = create<SearchSessionState>()(
         clearFinishedOnly: () => set({ finishedOnly: false }),
         setSortedBy: (sortedBy) => set({ sortedBy }),
         setSortDirection: (sortDirection) => set({ sortDirection }),
+        setResultsViewMode: (resultsViewMode) => set({ resultsViewMode }),
       },
     }),
     {
@@ -101,6 +108,7 @@ export const useSearchSessionStore = create<SearchSessionState>()(
         tagOperator: state.tagOperator,
         sortedBy: state.sortedBy,
         sortDirection: state.sortDirection,
+        resultsViewMode: state.resultsViewMode,
       }),
     },
   ),
@@ -118,4 +126,6 @@ export const useSearchFinishedOnly = () => useSearchSessionStore((state) => stat
 export const useSearchSortedBy = () => useSearchSessionStore((state) => state.sortedBy);
 export const useSearchSortDirection = () =>
   useSearchSessionStore((state) => state.sortDirection);
+export const useSearchResultsViewMode = () =>
+  useSearchSessionStore((state) => state.resultsViewMode);
 export const useSearchSessionActions = () => useSearchSessionStore((state) => state.actions);

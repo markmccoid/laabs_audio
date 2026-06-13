@@ -1,7 +1,13 @@
 import type { QueryKey } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import * as Linking from "expo-linking";
-import { Stack, router, useGlobalSearchParams, useSegments } from "expo-router";
+import {
+  Stack,
+  router,
+  useGlobalSearchParams,
+  useSegments,
+  type NativeStackNavigationOptions,
+} from "expo-router";
 import { ThemeProvider } from "expo-router/react-navigation";
 import * as SplashScreen from "expo-splash-screen";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -129,6 +135,21 @@ const isActivePlaybackState = (playbackState: string) =>
   playbackState === "ready" ||
   playbackState === "playing" ||
   playbackState === "paused";
+
+// Shared presentation for the utility bottom sheets pushed over the root stack.
+// Pass overrides for per-sheet detents, headers, or content styling.
+const sheetScreenOptions = (
+  backgroundColor: string,
+  overrides: NativeStackNavigationOptions = {},
+): NativeStackNavigationOptions => ({
+  presentation: "formSheet",
+  animation: "slide_from_bottom",
+  sheetAllowedDetents: [0.45, 0.9],
+  sheetGrabberVisible: true,
+  sheetCornerRadius: 20,
+  contentStyle: { backgroundColor },
+  ...overrides,
+});
 
 export default function RootLayout() {
   useApplyAccentThemeOverrides();
@@ -591,29 +612,15 @@ export default function RootLayout() {
               />
               <Stack.Screen
                 name="library-picker"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
+                options={sheetScreenOptions(themeColors.surface, {
+                  sheetAllowedDetents: [0.5, 0.9],
+                })}
               />
               <Stack.Screen
                 name="chapter-viewer"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.5, 0.9], // 50% and 90% of screen height
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
+                options={sheetScreenOptions(themeColors.surface, {
+                  sheetAllowedDetents: [0.5, 0.9],
+                })}
               />
               <Stack.Screen
                 name="main-player"
@@ -631,100 +638,44 @@ export default function RootLayout() {
               />
               <Stack.Screen
                 name="player-rate"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  // sheetAllowedDetents: [0.65],
+                options={sheetScreenOptions(themeColors.surface, {
                   sheetAllowedDetents: [0.5, 0.9],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
+                })}
               />
               <Stack.Screen
                 name="player-bookmarks"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.9],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
+                options={sheetScreenOptions(themeColors.surface, {
                   contentStyle: {
                     backgroundColor: themeColors.surface,
                     height: "100%",
                   },
-                }}
+                })}
               />
               <Stack.Screen
                 name="player-sleep-timer"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.9],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
+                options={sheetScreenOptions(themeColors.surface)}
               />
               <Stack.Screen
                 name="player-ambient"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.9],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
+                options={sheetScreenOptions(themeColors.surface)}
               />
               <Stack.Screen
                 name="book-bookshelves"
-                options={{
+                options={sheetScreenOptions(themeColors.surface, {
                   headerTitle: "Add To Bookshelf",
                   headerShown: true,
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.9],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
+                })}
               />
               <Stack.Screen
                 name="book-downloads"
-                options={{
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
-                  sheetAllowedDetents: [0.45, 0.9],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
+                options={sheetScreenOptions(themeColors.surface)}
               />
               <Stack.Screen
                 name="book-bookmarks"
-                options={{
+                options={sheetScreenOptions(themeColors.surface, {
                   headerShown: false,
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
                   gestureEnabled: true,
-                  sheetAllowedDetents: [0.45, 0.9],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
+                })}
               />
               <Stack.Screen
                 name="book-bookmark-detail"
@@ -754,31 +705,17 @@ export default function RootLayout() {
               />
               <Stack.Screen
                 name="book-series"
-                options={{
+                options={sheetScreenOptions(themeColors.surface, {
                   headerShown: true,
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
                   sheetAllowedDetents: [0.45, 0.95],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
+                })}
               />
               <Stack.Screen
                 name="book-filter-results"
-                options={{
+                options={sheetScreenOptions(themeColors.surface, {
                   headerShown: true,
-                  presentation: "formSheet",
-                  animation: "slide_from_bottom",
                   sheetAllowedDetents: [0.95],
-                  sheetGrabberVisible: true,
-                  sheetCornerRadius: 20,
-                  contentStyle: {
-                    backgroundColor: themeColors.surface,
-                  },
-                }}
+                })}
               />
             </Stack>
           </View>

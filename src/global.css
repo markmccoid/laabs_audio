@@ -4,7 +4,9 @@
 @layer theme {
   :root {
     @variant light {
-      --color-bg: #f7f8f6;
+      /* Neutral cream base: separates white surfaces from the background and
+         pairs with any user-chosen accent color. */
+      --color-bg: #f5f0e6;
       --color-surface: #ffffff;
       --color-text: #122017;
       --color-text-muted: #5a695f;

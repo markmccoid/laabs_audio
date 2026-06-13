@@ -21,11 +21,7 @@ const EMPTY_ITEM_BY_ID = new Map();
 const EMPTY_ID_SET = new Set<string>();
 const EMPTY_RESULT_IDS: string[] = [];
 
-export const useSearchResults = () => {
-  const queryClient = useQueryClient();
-  const status = useAuthStore((state) => state.status);
-  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+const useSearchParams = () => {
   const searchText = useSearchText();
   const genres = useSearchGenres();
   const genreOperator = useSearchGenreOperator();
@@ -36,7 +32,7 @@ export const useSearchResults = () => {
   const sortedBy = useSearchSortedBy();
   const sortDirection = useSearchSortDirection();
 
-  const searchParams = useMemo(
+  return useMemo(
     () => ({
       query: searchText,
       genres,
@@ -60,6 +56,16 @@ export const useSearchResults = () => {
       tags,
     ],
   );
+};
+
+// Shared by useSearchResults and useSearchResultCount; React Query dedupes the
+// identical query keys, so the second subscriber adds no SQLite work. The
+// catalog-refresh effect intentionally lives in useSearchResults only.
+const useSearchResultSetQuery = () => {
+  const status = useAuthStore((state) => state.status);
+  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const searchParams = useSearchParams();
 
   const enabled = status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
   const readinessQuery = useQuery({
@@ -68,6 +74,42 @@ export const useSearchResults = () => {
     enabled,
   });
   const readiness = readinessQuery.data;
+
+  const searchQuery = useQuery({
+    queryKey: queryKeys.sqliteSearchResultSet(activeLibraryUserKey, activeLibraryId, searchParams),
+    queryFn: () => sqliteSearchRepository.querySearchResultSet(searchParams),
+    enabled: enabled && Boolean(readiness?.hasCatalogRows),
+  });
+
+  return {
+    status,
+    activeLibraryId,
+    activeLibraryUserKey,
+    searchParams,
+    enabled,
+    readinessQuery,
+    readiness,
+    searchQuery,
+  };
+};
+
+export const useSearchResultCount = (): number | null => {
+  const { searchQuery } = useSearchResultSetQuery();
+  return searchQuery.data?.resultIds.length ?? null;
+};
+
+export const useSearchResults = () => {
+  const queryClient = useQueryClient();
+  const {
+    status,
+    activeLibraryId,
+    activeLibraryUserKey,
+    searchParams,
+    enabled,
+    readinessQuery,
+    readiness,
+    searchQuery,
+  } = useSearchResultSetQuery();
 
   useEffect(() => {
     if (!enabled || !activeLibraryUserKey || !activeLibraryId) return;
@@ -85,12 +127,6 @@ export const useSearchResults = () => {
       });
   }, [activeLibraryId, activeLibraryUserKey, enabled, queryClient, readiness]);
 
-  const searchQuery = useQuery({
-    queryKey: queryKeys.sqliteSearchResultSet(activeLibraryUserKey, activeLibraryId, searchParams),
-    queryFn: () => sqliteSearchRepository.querySearchResultSet(searchParams),
-    enabled: enabled && Boolean(readiness?.hasCatalogRows),
-  });
-
   const resultIds = searchQuery.data?.resultIds ?? EMPTY_RESULT_IDS;
   const { itemById, onViewableItemsChanged } = useWindowedItemSummaries(resultIds);
 
@@ -107,6 +143,7 @@ export const useSearchResults = () => {
       isLoading: false,
       error: null,
       refetch: searchQuery.refetch,
+      searchParams,
     };
   }
 
@@ -122,5 +159,6 @@ export const useSearchResults = () => {
     isLoading: readinessQuery.isLoading || searchQuery.isLoading,
     error: readinessQuery.error ?? searchQuery.error,
     refetch: searchQuery.refetch,
+    searchParams,
   };
 };

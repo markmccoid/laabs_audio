@@ -1,7 +1,7 @@
-import type { ReactNode } from "react";
 import { CoverImage } from "@/components/images/cover-image";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { View, useWindowDimensions } from "react-native";
+import type { ReactNode } from "react";
+import { StyleSheet, View, useWindowDimensions } from "react-native";
 
 type Props = {
   libraryItemId?: string;
@@ -35,7 +35,14 @@ const BookImage = ({
 
   return (
     <View style={{ alignItems: "center" }}>
-      <View style={{ width: imageSize, height: imageSize, position: "relative" }}>
+      <View
+        style={{
+          width: imageSize,
+          height: imageSize,
+          position: "relative",
+          margin: -2,
+        }}
+      >
         <CoverImage
           libraryItemId={libraryItemId}
           coverUri={coverURL}
@@ -46,12 +53,16 @@ const BookImage = ({
           style={{
             width: imageSize,
             height: imageSize,
-            borderRadius: 24,
+            borderRadius: 10,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: "black",
+            // borderColor: themeColors.border,
             backgroundColor: themeColors.surface,
           }}
           contentFit="cover"
           transition={250}
         />
+
         {leftAccessory ? (
           <View
             style={{

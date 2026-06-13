@@ -1,6 +1,6 @@
+import { CoverImage } from "@/components/images/cover-image";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { playerService, usePlaybackStore, usePlayerDisplayAudiobook } from "@/player";
-import { CoverImage } from "@/components/images/cover-image";
 import {
   resolveStoredDownloadCoverUri,
   useDeviceBooksActions,
@@ -37,7 +37,6 @@ export default function TabLayout() {
       setBookPlaybackRate(libraryItemId, rate);
     }
   };
-
   const handleToggle = async () => {
     if (playbackControlIntent) return;
     if (isPlaying) {
@@ -50,7 +49,7 @@ export default function TabLayout() {
   return (
     <NativeTabs
       minimizeBehavior="onScrollDown"
-      disableTransparentOnScrollEdge={true}
+      // disableTransparentOnScrollEdge={true}
       backgroundColor={themeColors.surface}
       tintColor={themeColors.accent}
       iconColor={{ default: themeColors.textMuted, selected: themeColors.accent }}
@@ -77,7 +76,7 @@ export default function TabLayout() {
 
       {shouldShowMiniPlayer && (
         <NativeTabs.BottomAccessory>
-          <View className="gap-1 flex-row items-center justify-between h-full px-4 border-hairline border-gray-400 rounded-full bg-transparent">
+          <View className="gap-1 flex-1 flex-row items-center h-full justify-between px-4 border-hairline border-gray-400 rounded-full bg-transparent">
             <Link href="/main-player" className="flex-1 items-center flex-row  mt-[4]">
               <Link.Trigger>
                 <View className="flex-row items-center h-full flex-1 ">
@@ -102,7 +101,9 @@ export default function TabLayout() {
                       {currentBook?.title ?? "Starting audiobook"}
                     </Text>
                     <Text style={{ fontSize: 10, color: themeColors.textMuted }} numberOfLines={1}>
-                      {isMiniPlayerLoading ? "Starting playback..." : `by ${currentBook?.author ?? ""}`}
+                      {isMiniPlayerLoading
+                        ? "Starting playback..."
+                        : `by ${currentBook?.author ?? ""}`}
                     </Text>
                   </View>
                 </View>
@@ -114,19 +115,28 @@ export default function TabLayout() {
                   </Link.MenuAction>
 
                   <Link.Menu title="Speed" icon="hare.fill">
-                    <Link.MenuAction onPress={() => handleSetRate(0.75)} isOn={playbackRate === 0.75}>
+                    <Link.MenuAction
+                      onPress={() => handleSetRate(0.75)}
+                      isOn={playbackRate === 0.75}
+                    >
                       .75x
                     </Link.MenuAction>
                     <Link.MenuAction onPress={() => handleSetRate(1)} isOn={playbackRate === 1}>
                       1x
                     </Link.MenuAction>
-                    <Link.MenuAction onPress={() => handleSetRate(1.25)} isOn={playbackRate === 1.25}>
+                    <Link.MenuAction
+                      onPress={() => handleSetRate(1.25)}
+                      isOn={playbackRate === 1.25}
+                    >
                       1.25x
                     </Link.MenuAction>
                     <Link.MenuAction onPress={() => handleSetRate(1.5)} isOn={playbackRate === 1.5}>
                       1.5x
                     </Link.MenuAction>
-                    <Link.MenuAction onPress={() => handleSetRate(1.75)} isOn={playbackRate === 1.75}>
+                    <Link.MenuAction
+                      onPress={() => handleSetRate(1.75)}
+                      isOn={playbackRate === 1.75}
+                    >
                       1.75x
                     </Link.MenuAction>
                     <Link.MenuAction onPress={() => handleSetRate(2)} isOn={playbackRate === 2}>

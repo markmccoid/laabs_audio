@@ -1,9 +1,9 @@
 import { playlistsApi } from "@/api/playlists-api";
 import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
-import { sqliteRefreshCoordinator } from "@/data/sqlite/refresh-coordinator";
-import { type HomeShelf, useHomeShelves } from "@/hooks/use-home-shelves";
 import { useLibraryActivationStore } from "@/auth/library-activation-store";
+import { sqliteRefreshCoordinator } from "@/data/sqlite/refresh-coordinator";
 import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
+import { type HomeShelf, useHomeShelves } from "@/hooks/use-home-shelves";
 import { useLibrarySelection } from "@/hooks/use-library-selection";
 import { queryKeys } from "@/query/query-keys";
 import {
@@ -67,10 +67,7 @@ const HomeShelvesScreen = () => {
   const canChangeLibrary = authStatus === "authenticated";
   const scrollY = useSharedValue(0);
   const didMarkHomeShelfDisplayRef = useRef(false);
-  const renderStartedAtMs = useMemo(
-    () => markStartup("home-shelves-screen-render-start"),
-    [],
-  );
+  const renderStartedAtMs = useMemo(() => markStartup("home-shelves-screen-render-start"), []);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -169,7 +166,6 @@ const HomeShelvesScreen = () => {
       visibleBookCount,
       isOffline: isOnline === false,
     });
-
   }, [
     accessMode,
     activeLibraryId,
@@ -300,9 +296,10 @@ const HomeShelvesScreen = () => {
       ) : (
         <Animated.ScrollView
           contentInsetAdjustmentBehavior="automatic"
+          // style={{ flex: 1 }}
           onScroll={scrollHandler}
           scrollEventThrottle={16}
-          contentContainerStyle={{ paddingTop: 16, paddingBottom: 24, gap: 22 }}
+          contentContainerStyle={{ paddingTop: 16, paddingBottom: 24, gap: 10 }}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}

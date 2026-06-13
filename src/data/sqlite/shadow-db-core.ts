@@ -25,7 +25,13 @@ export const shadowSqliteRuntimeState = ((globalThis as typeof globalThis & {
 
 export const getDb = async () => {
   if (!shadowSqliteRuntimeState.dbPromise) {
-    shadowSqliteRuntimeState.dbPromise = SQLite.openDatabaseAsync(DATABASE_NAME);
+    // expo-sqlite's default close path finalizes every live statement before
+    // sqlite3_close. With an FTS5 table present, that double-finalizes FTS5's
+    // internally-owned statements during xDisconnect and crashes natively on
+    // reload/Fast Refresh (OnDestroy -> closeDatabase). See expo/expo#38168.
+    shadowSqliteRuntimeState.dbPromise = SQLite.openDatabaseAsync(DATABASE_NAME, {
+      finalizeUnusedStatementsBeforeClosing: false,
+    });
   }
   return shadowSqliteRuntimeState.dbPromise;
 };

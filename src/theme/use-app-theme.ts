@@ -8,7 +8,7 @@ import {
   resolveAccentThemeColors,
 } from "./accent-color";
 
-type ThemeColors = {
+export type ThemeColors = {
   bg: string;
   surface: string;
   text: string;
@@ -20,7 +20,7 @@ type ThemeColors = {
 };
 
 const FALLBACK_COLORS: ThemeColors = {
-  bg: "#f7f8f6",
+  bg: "#f5f0e6",
   surface: "#ffffff",
   text: "#122017",
   textMuted: "#5a695f",
@@ -34,16 +34,17 @@ const resolveColor = (value: string | number | undefined, fallback: string) =>
   typeof value === "string" ? value : fallback;
 
 export const useThemeColors = (): ThemeColors => {
-  const [bg, surface, text, textMuted, border, accent, accentForeground, absGold] = useCSSVariable([
-    "--color-bg",
-    "--color-surface",
-    "--color-text",
-    "--color-text-muted",
-    "--color-border",
-    "--color-accent",
-    "--color-accent-foreground",
-    "--color-abs-gold",
-  ]);
+  const [bg, surface, text, textMuted, border, accent, accentForeground, absGold] =
+    useCSSVariable([
+      "--color-bg",
+      "--color-surface",
+      "--color-text",
+      "--color-text-muted",
+      "--color-border",
+      "--color-accent",
+      "--color-accent-foreground",
+      "--color-abs-gold",
+    ]);
 
   return {
     bg: resolveColor(bg, FALLBACK_COLORS.bg),

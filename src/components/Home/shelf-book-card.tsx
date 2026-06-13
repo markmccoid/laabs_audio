@@ -8,9 +8,9 @@ import {
 } from "@/store/device-books-store";
 import {
   getHomePreviewCoverSize,
+  useSettingsStore,
   type BookProgressTimeDisplay,
 } from "@/store/settings-store";
-import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -148,15 +148,12 @@ export const ShelfBookCard = ({
   const isDownloaded = useDeviceBooksStore((state) =>
     selectHasPlayableBookDownload(state, book.id),
   );
-  const coverLocalUri = useDeviceBooksStore(
-    (state) => resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
+  const coverLocalUri = useDeviceBooksStore((state) =>
+    resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
   );
   const showOfflineUnavailable = isOffline && !isDownloaded;
   const persistedProgressSeconds = Math.max(0, Math.floor(progress?.currentTime ?? 0));
-  const durationSeconds = Math.max(
-    0,
-    Math.floor(progress?.duration ?? book.duration ?? 0),
-  );
+  const durationSeconds = Math.max(0, Math.floor(progress?.duration ?? book.duration ?? 0));
   const rawProgressSeconds = Math.max(0, persistedProgressSeconds);
   const progressSeconds =
     durationSeconds > 0 ? clamp(rawProgressSeconds, 0, durationSeconds) : rawProgressSeconds;
@@ -214,7 +211,7 @@ export const ShelfBookCard = ({
               style={{
                 width: coverSize,
                 height: coverSize,
-                borderRadius: 16,
+                borderRadius: 8,
                 borderWidth: StyleSheet.hairlineWidth,
                 backgroundColor: themeColors.surface,
                 opacity: showOfflineUnavailable ? 0.55 : 1,

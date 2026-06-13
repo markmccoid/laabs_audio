@@ -1,0 +1,89 @@
+diff --git a/node_modules/react-native-screens/ios/tabs/screen/RNSTabsScreenViewController.mm b/node_modules/react-native-screens/ios/tabs/screen/RNSTabsScreenViewController.mm
+index b273770..02e5050 100644
+--- a/node_modules/react-native-screens/ios/tabs/screen/RNSTabsScreenViewController.mm
++++ b/node_modules/react-native-screens/ios/tabs/screen/RNSTabsScreenViewController.mm
+@@ -4,7 +4,27 @@
+ #import "RNSTabBarController.h"
+ #import "UIScrollView+RNScreens.h"
+ 
+-@implementation RNSTabsScreenViewController
++@implementation RNSTabsScreenViewController {
++  // LOCAL PATCH (laabs_audio): last scroll view registered via setContentScrollView:forEdge:
++  UIScrollView *__weak _rnsRegisteredContentScrollView;
++}
++
++// LOCAL PATCH (laabs_audio): UIKit's automatic content-scroll-view detection cannot
++// find React Native scroll views (especially through a nested stack), and its
++// scan timing doesn't account for React mounting content after the view controller
++// appears. Explicitly register the detected scroll view on every layout pass so
++// tabBarMinimizeBehavior (iOS 26) and the bottom-accessory inline environment work.
++- (void)viewDidLayoutSubviews
++{
++  [super viewDidLayoutSubviews];
++  if (@available(iOS 15.0, *)) {
++    UIScrollView *scrollView = [self rns_findDescendantScrollViewInView:self.view];
++    if (scrollView != _rnsRegisteredContentScrollView) {
++      _rnsRegisteredContentScrollView = scrollView;
++      [self setContentScrollView:scrollView forEdge:NSDirectionalRectEdgeBottom];
++    }
++  }
++}
+ 
+ - (nullable RNSTabBarController *)findTabBarController
+ {
+@@ -36,6 +56,13 @@
+ {
+   [super viewDidAppear:animated];
+   [self.tabScreenComponentView.reactEventEmitter emitOnDidAppear];
++  // LOCAL PATCH (laabs_audio): re-register on every appearance — a registration
++  // made while this tab was off-screen is not honored by UIKit.
++  if (@available(iOS 15.0, *)) {
++    UIScrollView *scrollView = [self rns_findDescendantScrollViewInView:self.view];
++    _rnsRegisteredContentScrollView = scrollView;
++    [self setContentScrollView:scrollView forEdge:NSDirectionalRectEdgeBottom];
++  }
+ }
+ 
+ - (void)viewWillDisappear:(BOOL)animated
+@@ -93,6 +120,41 @@
+   }
+ }
+ 
++// LOCAL PATCH (laabs_audio): UIKit drives tabBarMinimizeBehavior (iOS 26) off the
++// scroll view returned by contentScrollViewForEdge:. The default UIViewController
++// implementation cannot find React Native scroll views through the nested
++// stack hierarchy, so the tab bar never minimizes and the bottom accessory never
++// enters the inline environment. BFS the subtree so the shallowest (main vertical)
++// scroll view wins over nested horizontal shelves.
++// See https://github.com/callstack/react-native-bottom-tabs/issues/496
++- (nullable UIScrollView *)rns_findDescendantScrollViewInView:(UIView *)view
++{
++  NSMutableArray<UIView *> *queue = [view.subviews mutableCopy];
++  NSUInteger index = 0;
++  while (index < queue.count) {
++    UIView *current = queue[index++];
++    if ([current isKindOfClass:UIScrollView.class]) {
++      return static_cast<UIScrollView *>(current);
++    }
++    [queue addObjectsFromArray:current.subviews];
++  }
++  return nil;
++}
++
++- (nullable UIScrollView *)contentScrollViewForEdge:(NSDirectionalRectEdge)edge
++{
++  if (@available(iOS 15.0, *)) {
++    UIScrollView *scrollView = [super contentScrollViewForEdge:edge];
++    if (scrollView != nil) {
++      return scrollView;
++    }
++  }
++  if ((edge & NSDirectionalRectEdgeBottom) != 0) {
++    return [self rns_findDescendantScrollViewInView:self.view];
++  }
++  return nil;
++}
++
+ - (bool)tabScreenSelectedRepeatedly
+ {
+   if ([self tabsSpecialEffectsDelegate] != nil) {

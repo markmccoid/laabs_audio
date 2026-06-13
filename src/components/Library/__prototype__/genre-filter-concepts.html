@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PROTOTYPE - Genre Filter Concepts</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --accent: #7c9cff;
+        --accent-2: #61d6c9;
+        --bg: #101114;
+        --sheet: rgba(124, 156, 255, 0.28);
+        --text: #f6f7fb;
+        --muted: rgba(246, 247, 251, 0.66);
+        --line: rgba(255, 255, 255, 0.2);
+        --glass: rgba(255, 255, 255, 0.11);
+        --glass-strong: rgba(255, 255, 255, 0.17);
+        font-family:
+          ui-rounded, "SF Pro Rounded", "SF Pro Display", -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 16% 0%, rgba(97, 214, 201, 0.26), transparent 28rem),
+          radial-gradient(circle at 78% 12%, rgba(124, 156, 255, 0.34), transparent 30rem),
+          linear-gradient(145deg, #111216, #17181f 44%, #0d0e12);
+      }
+
+      main {
+        width: min(1120px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 32px 0 44px;
+      }
+
+      header {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 22px;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 24px;
+        line-height: 1.1;
+      }
+
+      header p {
+        max-width: 520px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .accent-swatch {
+        width: 32px;
+        height: 32px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--accent);
+      }
+
+      input[type="color"] {
+        width: 40px;
+        height: 34px;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: transparent;
+      }
+
+      .stage {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 22px;
+      }
+
+      .concept {
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.08);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+        padding: 14px;
+      }
+
+      .phone {
+        min-height: 720px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 24px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 42%),
+          linear-gradient(145deg, var(--sheet), rgba(14, 15, 19, 0.86));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+      }
+
+      .sheet {
+        height: 100%;
+        padding: 24px 16px 18px;
+        backdrop-filter: blur(34px) saturate(1.4);
+      }
+
+      .top-row,
+      .tabs,
+      .search,
+      .operator,
+      .selected-tray,
+      .tile,
+      .token,
+      .done {
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: var(--glass);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.2),
+          0 12px 32px rgba(0, 0, 0, 0.18);
+        backdrop-filter: blur(24px) saturate(1.5);
+      }
+
+      .top-row {
+        width: fit-content;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 auto 12px;
+        padding: 3px;
+        border-radius: 14px;
+      }
+
+      .top-row button,
+      .tabs button,
+      .operator button,
+      .done {
+        appearance: none;
+        border: 0;
+        color: var(--muted);
+        background: transparent;
+        border-radius: 11px;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .top-row button {
+        padding: 7px 10px;
+      }
+
+      .top-row button.active,
+      .tabs button.active,
+      .operator button.active {
+        color: white;
+        background: color-mix(in srgb, var(--accent) 36%, transparent);
+      }
+
+      .done {
+        padding: 7px 13px;
+        color: var(--accent);
+        border-radius: 999px;
+      }
+
+      .header-line {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 3px;
+        flex: 1;
+        padding: 3px;
+        border-radius: 14px;
+      }
+
+      .tabs button {
+        min-height: 34px;
+      }
+
+      .search {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 38px;
+        padding: 0 12px;
+        border-radius: 14px;
+        color: var(--muted);
+        font-size: 13px;
+        margin-bottom: 12px;
+      }
+
+      .selected-tray {
+        min-height: 76px;
+        border-radius: 18px;
+        padding: 10px;
+        margin-bottom: 12px;
+      }
+
+      .tray-title {
+        display: flex;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+
+      .tokens {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .token {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 7px 10px;
+        color: white;
+        background: color-mix(in srgb, var(--accent) 30%, rgba(255, 255, 255, 0.08));
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .operator {
+        display: flex;
+        width: fit-content;
+        gap: 3px;
+        padding: 3px;
+        border-radius: 12px;
+        margin: 0 0 12px auto;
+      }
+
+      .operator button {
+        padding: 5px 8px;
+        font-size: 10px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 9px;
+      }
+
+      .tile {
+        position: relative;
+        min-height: 66px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 7px;
+        border-radius: 18px;
+        padding: 12px;
+        color: var(--text);
+        cursor: pointer;
+        transition:
+          transform 160ms ease,
+          background 160ms ease,
+          border-color 160ms ease;
+      }
+
+      .tile:hover {
+        transform: translateY(-1px);
+      }
+
+      .tile.selected {
+        border-color: color-mix(in srgb, var(--accent) 72%, white);
+        background: color-mix(in srgb, var(--accent) 24%, rgba(255, 255, 255, 0.12));
+        transform: translateY(-2px);
+      }
+
+      .tile-title {
+        font-size: 14px;
+        font-weight: 760;
+      }
+
+      .tile-meta {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .check {
+        position: absolute;
+        top: 9px;
+        right: 9px;
+        width: 20px;
+        height: 20px;
+        display: grid;
+        place-items: center;
+        border-radius: 999px;
+        color: white;
+        background: var(--accent);
+        font-size: 12px;
+        opacity: 0;
+        transform: scale(0.75);
+        transition:
+          opacity 160ms ease,
+          transform 160ms ease;
+      }
+
+      .tile.selected .check {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      .visual-mark {
+        width: 30px;
+        height: 8px;
+        border-radius: 999px;
+        background:
+          linear-gradient(90deg, var(--accent), var(--accent-2)),
+          rgba(255, 255, 255, 0.18);
+      }
+
+      .mood .tile {
+        min-height: 82px;
+      }
+
+      .mood .tile::before {
+        content: "";
+        position: absolute;
+        left: 11px;
+        top: 11px;
+        width: 28px;
+        height: 28px;
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        border-radius: 10px;
+        background:
+          linear-gradient(
+            135deg,
+            color-mix(in srgb, var(--accent) 62%, transparent),
+            rgba(255, 255, 255, 0.14)
+          );
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+      }
+
+      .mood .tile-title {
+        padding-left: 42px;
+      }
+
+      .mood .tile-meta {
+        padding-left: 42px;
+      }
+
+      .mood .tile:nth-child(3n + 1)::before {
+        border-radius: 999px;
+      }
+
+      .mood .tile:nth-child(3n + 2)::before {
+        transform: rotate(45deg) scale(0.78);
+      }
+
+      .mood .tile:nth-child(3n + 3)::before {
+        clip-path: polygon(50% 0, 100% 100%, 0 100%);
+      }
+
+      .note {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.35;
+        margin-top: 12px;
+      }
+
+      @media (max-width: 860px) {
+        header {
+          align-items: start;
+          flex-direction: column;
+        }
+
+        .stage {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>PROTOTYPE - Low-count genre/tag selection</h1>
+          <p>
+            Two directions tuned for users who usually pick fewer than four genres or tags.
+            Click tiles to compare how selection feels.
+          </p>
+        </div>
+        <div class="controls">
+          <span class="accent-swatch" aria-hidden="true"></span>
+          <input id="accent" type="color" value="#7c9cff" aria-label="Accent color" />
+        </div>
+      </header>
+
+      <section class="stage">
+        <article class="concept">
+          <div class="phone">
+            <div class="sheet mixer" data-concept="mixer">
+              <div class="top-row" aria-label="Favorite filters">
+                <button>All</button>
+                <button class="active">Favorites</button>
+                <button>Exclude</button>
+                <button>Finished</button>
+              </div>
+
+              <div class="header-line">
+                <div class="tabs">
+                  <button class="active">Genres <span data-count="mixer">3</span></button>
+                  <button>Tags 1</button>
+                </div>
+                <button class="done">Done</button>
+              </div>
+
+              <div class="selected-tray">
+                <div class="tray-title">
+                  <span>Genre mixer</span>
+                  <span>Match any</span>
+                </div>
+                <div class="tokens" data-tokens="mixer"></div>
+              </div>
+
+              <div class="search">⌕ Search genres</div>
+              <div class="operator">
+                <button>All</button>
+                <button class="active">Any</button>
+              </div>
+
+              <div class="grid" data-grid="mixer"></div>
+            </div>
+          </div>
+          <p class="note">
+            Option 4: selected items are promoted into a compact tray. This works well when the
+            normal selection count is small because the user can review the active filter at a
+            glance.
+          </p>
+        </article>
+
+        <article class="concept">
+          <div class="phone">
+            <div class="sheet mood" data-concept="mood">
+              <div class="top-row" aria-label="Favorite filters">
+                <button>All</button>
+                <button class="active">Favorites</button>
+                <button>Exclude</button>
+                <button>Finished</button>
+              </div>
+
+              <div class="header-line">
+                <div class="tabs">
+                  <button class="active">Genres <span data-count="mood">4</span></button>
+                  <button>Tags 1</button>
+                </div>
+                <button class="done">Done</button>
+              </div>
+
+              <div class="search">⌕ Search genres</div>
+              <div class="operator">
+                <button>All</button>
+                <button class="active">Any</button>
+              </div>
+
+              <div class="grid" data-grid="mood"></div>
+            </div>
+          </div>
+          <p class="note">
+            Option 5: every genre gets a small deterministic visual mark. It is more expressive and
+            keeps the screen compact, but selected items are less explicitly summarized.
+          </p>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const genres = [
+        ["Fantasy", "Portal, magic, quests"],
+        ["Sci-Fi", "Future tech, space"],
+        ["Mystery", "Clues and reveals"],
+        ["Thriller", "Fast tension"],
+        ["History", "People and places"],
+        ["Romance", "Relationships"],
+        ["Horror", "Dark suspense"],
+        ["Adventure", "Journeys"],
+        ["Literary", "Character-driven"],
+        ["Nonfiction", "Real world"],
+      ];
+
+      const state = {
+        mixer: new Set(["Fantasy", "Sci-Fi", "Mystery"]),
+        mood: new Set(["Fantasy", "Sci-Fi", "Mystery", "Thriller"]),
+      };
+
+      function renderConcept(name) {
+        const grid = document.querySelector(`[data-grid="${name}"]`);
+        const tokens = document.querySelector(`[data-tokens="${name}"]`);
+        const count = document.querySelector(`[data-count="${name}"]`);
+        grid.innerHTML = "";
+        if (count) count.textContent = state[name].size;
+
+        if (tokens) {
+          tokens.innerHTML = "";
+          state[name].forEach((genre) => {
+            const token = document.createElement("button");
+            token.className = "token";
+            token.type = "button";
+            token.textContent = `${genre} ×`;
+            token.addEventListener("click", () => {
+              state[name].delete(genre);
+              renderConcept(name);
+            });
+            tokens.append(token);
+          });
+        }
+
+        genres.forEach(([genre, meta]) => {
+          const tile = document.createElement("button");
+          tile.className = `tile${state[name].has(genre) ? " selected" : ""}`;
+          tile.type = "button";
+          tile.innerHTML = `
+            <span class="check">✓</span>
+            ${name === "mixer" ? '<span class="visual-mark"></span>' : ""}
+            <span class="tile-title">${genre}</span>
+            <span class="tile-meta">${meta}</span>
+          `;
+          tile.addEventListener("click", () => {
+            if (state[name].has(genre)) {
+              state[name].delete(genre);
+            } else {
+              state[name].add(genre);
+            }
+            renderConcept(name);
+          });
+          grid.append(tile);
+        });
+      }
+
+      document.querySelector("#accent").addEventListener("input", (event) => {
+        document.documentElement.style.setProperty("--accent", event.target.value);
+      });
+
+      renderConcept("mixer");
+      renderConcept("mood");
+    </script>
+  </body>
+</html>
