@@ -152,7 +152,7 @@ export const SettingsHomeScreen = () => {
             <SettingsRow
               href="/(tabs)/settings/playback"
               title="Playback"
-              subtitle="Defaults for progress display and player behavior"
+              subtitle="Skip intervals, lock screen controls, and progress display"
               icon="play.circle"
             />
             <SettingsRow

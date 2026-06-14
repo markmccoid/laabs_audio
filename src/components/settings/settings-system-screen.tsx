@@ -1,6 +1,4 @@
 import {
-  DEFAULT_REMOTE_COMMAND_MODE,
-  type RemoteCommandMode,
   useSettingsActions,
   useSettingsStore,
 } from "@/store/settings-store";
@@ -17,7 +15,6 @@ import {
   HStack,
   Host,
   List,
-  Picker,
   Section,
   Spacer,
   Text as SwiftText,
@@ -30,12 +27,10 @@ import {
   buttonStyle,
   foregroundStyle,
   padding,
-  pickerStyle,
   shapes,
-  tag,
 } from "@expo/ui/swift-ui/modifiers";
 import { useState } from "react";
-import { Platform, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { Platform, ScrollView, Switch, Text, View } from "react-native";
 
 type AccentThemeCardProps = {
   label: string;
@@ -129,40 +124,14 @@ const AccentThemeEditor = ({
   </VStack>
 );
 
-const REMOTE_COMMAND_MODE_OPTIONS: {
-  value: RemoteCommandMode;
-  label: string;
-  description: string;
-}[] = [
-  {
-    value: DEFAULT_REMOTE_COMMAND_MODE,
-    label: "Skip by Seconds",
-    description: "Show skip forward and backward controls.",
-  },
-  {
-    value: "next-prev",
-    label: "Skip by Chapters",
-    description: "Show next and previous controls for chapter navigation.",
-  },
-  {
-    value: "none",
-    label: "None",
-    description: "Hide secondary playback controls.",
-  },
-];
-
 const SystemSettingsFallback = () => {
   const themeColors = useThemeColors();
   const useTokenWithCoverImages = useSettingsStore((state) => state.useTokenWithCoverImages);
-  const disableLockScreenSeek = useSettingsStore((state) => state.disableLockScreenSeek);
-  const remoteCommandMode = useSettingsStore((state) => state.remoteCommandMode);
   const showFavoriteBadgeOnCovers = useSettingsStore((state) => state.showFavoriteBadgeOnCovers);
   const showFinishedBadgeOnCovers = useSettingsStore((state) => state.showFinishedBadgeOnCovers);
   const lightAccentColorOverride = useSettingsStore((state) => state.lightAccentColorOverride);
   const darkAccentColorOverride = useSettingsStore((state) => state.darkAccentColorOverride);
   const {
-    setDisableLockScreenSeek,
-    setRemoteCommandMode,
     setShowFavoriteBadgeOnCovers,
     setShowFinishedBadgeOnCovers,
     setUseTokenWithCoverImages,
@@ -266,109 +235,6 @@ const SystemSettingsFallback = () => {
             borderRadius: 16,
             borderCurve: "continuous",
             padding: 14,
-            gap: 10,
-            backgroundColor: themeColors.surface,
-          }}
-        >
-          <Text selectable style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}>
-            Lock Screen Controls
-          </Text>
-          <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-            Controls how system playback surfaces behave outside the app.
-          </Text>
-
-          <View
-            style={{
-              marginTop: 6,
-              borderRadius: 12,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: themeColors.border,
-              backgroundColor: themeColors.bg,
-              paddingHorizontal: 12,
-              paddingVertical: 10,
-              gap: 10,
-            }}
-          >
-            <View style={{ gap: 8 }}>
-              <Text selectable style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
-                Options
-              </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {REMOTE_COMMAND_MODE_OPTIONS.map((option) => {
-                  const isSelected = remoteCommandMode === option.value;
-                  return (
-                    <Pressable
-                      key={option.value}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: isSelected }}
-                      onPress={() => setRemoteCommandMode(option.value)}
-                      style={({ pressed }) => ({
-                        minHeight: 38,
-                        borderRadius: 10,
-                        borderCurve: "continuous",
-                        borderWidth: 1,
-                        borderColor: isSelected ? themeColors.accent : themeColors.border,
-                        backgroundColor: isSelected ? themeColors.accent : themeColors.surface,
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        opacity: pressed ? 0.8 : 1,
-                      })}
-                    >
-                      <Text
-                        selectable
-                        style={{
-                          color: isSelected
-                            ? themeColors.accentForeground
-                            : themeColors.text,
-                          fontSize: 13,
-                          fontWeight: "700",
-                        }}
-                      >
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
-                {
-                  REMOTE_COMMAND_MODE_OPTIONS.find(
-                    (option) => option.value === remoteCommandMode,
-                  )?.description
-                }
-              </Text>
-            </View>
-            <View style={{ height: 1, backgroundColor: themeColors.border }} />
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text
-                  selectable
-                  style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
-                >
-                  Disable lock screen seek
-                </Text>
-                <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
-                  Prevents scrubbing from Lock Screen and Now Playing controls.
-                </Text>
-              </View>
-              <Switch
-                value={disableLockScreenSeek}
-                onValueChange={setDisableLockScreenSeek}
-                trackColor={{ false: themeColors.border, true: themeColors.accent }}
-                thumbColor={disableLockScreenSeek ? themeColors.accentForeground : "#f4f4f5"}
-              />
-            </View>
-          </View>
-        </View>
-
-        <View
-          style={{
-            borderWidth: 1,
-            borderColor: themeColors.border,
-            borderRadius: 16,
-            borderCurve: "continuous",
-            padding: 14,
             gap: 12,
             backgroundColor: themeColors.surface,
           }}
@@ -398,8 +264,6 @@ const SystemSettingsFallback = () => {
 
 export const SettingsSystemScreen = () => {
   const useTokenWithCoverImages = useSettingsStore((state) => state.useTokenWithCoverImages);
-  const disableLockScreenSeek = useSettingsStore((state) => state.disableLockScreenSeek);
-  const remoteCommandMode = useSettingsStore((state) => state.remoteCommandMode);
   const showFavoriteBadgeOnCovers = useSettingsStore((state) => state.showFavoriteBadgeOnCovers);
   const showFinishedBadgeOnCovers = useSettingsStore((state) => state.showFinishedBadgeOnCovers);
   const autoCreateDarkAccent = useSettingsStore((state) => state.autoCreateDarkAccent);
@@ -407,8 +271,6 @@ export const SettingsSystemScreen = () => {
   const darkAccentColorOverride = useSettingsStore((state) => state.darkAccentColorOverride);
   const {
     setAutoCreateDarkAccent,
-    setDisableLockScreenSeek,
-    setRemoteCommandMode,
     resetDarkAccentColorOverride,
     resetLightAccentColorOverride,
     setDarkAccentColorOverride,
@@ -513,24 +375,6 @@ export const SettingsSystemScreen = () => {
           </DisclosureGroup>
         </Section>
 
-        <Section title="Lock Screen Controls">
-          <Picker
-            label="Options"
-            selection={remoteCommandMode}
-            onSelectionChange={setRemoteCommandMode as any}
-            modifiers={[pickerStyle("menu")]}
-          >
-            {REMOTE_COMMAND_MODE_OPTIONS.map((option) => (
-              <SwiftText key={option.value} modifiers={[tag(option.value)]}>
-                {option.label}
-              </SwiftText>
-            ))}
-          </Picker>
-          <Toggle isOn={disableLockScreenSeek} onIsOnChange={setDisableLockScreenSeek}>
-            <SwiftText>Disable lock screen seek</SwiftText>
-            <SwiftText>Prevent scrubbing from Lock Screen and Now Playing controls.</SwiftText>
-          </Toggle>
-        </Section>
       </List>
     </Host>
   );
