@@ -217,7 +217,7 @@ const ChapterViewerRoute = () => {
           </Text>
           <Pressable
             accessibilityRole="button"
-            onPress={() => refetch()}
+            onPress={() => refetch?.()}
             style={({ pressed }) => ({
               borderRadius: 999,
               borderCurve: "continuous",
