@@ -9,8 +9,8 @@ and update your row when done.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001 | Delete dead code & scope tsc off `example/` | P1 | S | — | TODO |
-| 002 | Fix Downloaded-Only `refetch()` crash (bug) | P1 | S | — (do after 001 for readable tsc) | TODO |
+| 001 | Delete dead code & scope tsc off `example/` | P1 | S | — | DONE (commit `4c0b91a` in worktree `advisor/001-remove-dead-code`) |
+| 002 | Fix Downloaded-Only `refetch()` crash (bug) | P1 | S | — (do after 001 for readable tsc) | DONE (commit `8234f52` in worktree `advisor/002-refetch-crash`) |
 | 003 | Clear remaining real `tsc` errors in `src/` | P1 | S–M | 001, 002 | TODO |
 | 004 | Establish verify gate (typecheck+lint+test, lefthook) | P1 | S | 001, 002, 003 | TODO |
 | 005 | Clear 61 ESLint errors; make lint a hard gate | P2 | S–M | 004 | TODO |

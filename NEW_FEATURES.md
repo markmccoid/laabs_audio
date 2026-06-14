@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-14` `pending` - Update typecheck remediation plan status and remaining scope.
+  Tester focus: no app behavior change expected; verify the planning docs identify completed prerequisite work and the remaining TypeScript cleanup targets.
 - `2026-06-13` `4b86b67` - Refine sign-in session handling and refresh the Search filter experience.
   Tester focus: verify saved sign-ins can still be selected and switched without cross-user state leaks; verify Search filtering still works for genres, tags, favorites, finished status, sorting, and grid/list modes; verify the filter bottom sheet uses the updated glass/accent styling and remains readable in light and dark mode.
 - `2026-06-11` `pending` - Stabilize rapid skip controls during playback.

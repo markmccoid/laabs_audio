@@ -32,7 +32,24 @@ on.
 ## Current state
 
 Run `npx tsc --noEmit -p tsconfig.json 2>&1 | grep 'error TS'` to see the live
-list. As of commit `48350c6` (after 001 + 002), the errors are:
+list. As of commit `48350c6` (after 001 + 002), the errors are (plan 001 exposed
+two additional pre-existing errors now included here):
+
+0. **`src/app/_layout.tsx:26`** — `TS2882: Cannot find module or type
+   declarations for side-effect import of '../global.css'`. Current:
+   ```ts
+   import "../global.css";
+   ```
+   This is a Tailwind CSS global import via `tailwindcss`/`uniwind`. The package
+   is present in `package.json`. Fix: add a `.d.ts` module declaration so TS
+   accepts `.css` side-effect imports. Create (or add to) `expo-env.d.ts` (it
+   already exists at the repo root):
+   ```ts
+   declare module "*.css";
+   ```
+   Alternatively, check if `expo/tsconfig.base` already handles `.css` and
+   something went wrong — `grep -r "css" node_modules/expo/tsconfig.base.json`.
+   Do the minimal fix that makes the error go away without `@ts-ignore`.
 
 1. **`src/app/chapter-viewer.tsx:42`** — `FlashList` (a value) used as a type:
    ```ts
@@ -104,7 +121,20 @@ list. As of commit `48350c6` (after 001 + 002), the errors are:
    if that proves too invasive, cast `child.props` to `object`:
    `{ ...(child.props as object), index }`.
 
-6. **`src/shared/ui/organisms/segmented-control/index.tsx`** — multiple:
+6. **`src/components/bookComponents/book-quick-actions.tsx:136`** — `TS2493:
+   Tuple type '[string]' of length '1' has no element at index '1'`. Current:
+   ```ts
+   const sourceBookRoute: BookDetailRouteSource = segments[1] === "search" ? "search" : "home";
+   ```
+   `segments` from `useSegments()` is typed as a tuple with fewer elements than
+   expected. Fix: check what `useSegments()` returns at this call site (the tabs
+   layout means `segments[0]` is `(tabs)`, `segments[1]` is the tab name). Either
+   widen the `segments` type with an index signature, or use optional chaining:
+   `segments[1] === "search"` → `(segments as string[])[1] === "search"` (boundary
+   cast, not `@ts-ignore`). Match how other files handle `useSegments` in this repo:
+   `grep -rn "useSegments" src | head`.
+
+7. **`src/shared/ui/organisms/segmented-control/index.tsx`** — multiple:
    - line 19: `Animated.createAnimatedComponent<Partial<BlurViewProps>>(BlurView)`
      — the generic argument is wrong for this overload. Fix: drop the explicit
      generic and let it infer — `Animated.createAnimatedComponent(BlurView)` —
@@ -129,10 +159,13 @@ list. As of commit `48350c6` (after 001 + 002), the errors are:
 ## Scope
 
 **In scope** (only these files):
+- `src/app/_layout.tsx` (only the `global.css` import — item #0)
+- `expo-env.d.ts` (may add a `.css` module declaration — item #0)
 - `src/app/chapter-viewer.tsx` (only the line-42 FlashList type — line-44
   `refetch` is plan 002's)
 - `src/components/bookComponents/active-download-toast-coordinator.tsx`
 - `src/components/bookComponents/book-filter-results-sheet.tsx`
+- `src/components/bookComponents/book-quick-actions.tsx` (item #6)
 - `src/components/main-player/main-player-sheet-stub.tsx`
 - `src/shared/ui/organisms/dropdown/index.tsx`
 - `src/shared/ui/organisms/segmented-control/index.tsx`
