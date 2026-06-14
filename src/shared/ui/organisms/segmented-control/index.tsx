@@ -16,7 +16,7 @@ import { scheduleOnRN } from "react-native-worklets";
 import { SegmentedControlPresets, SHADOW } from "./presets";
 import type { ISegmentedControl } from "./types";
 
-const AnimatedBlurView = Animated.createAnimatedComponent<Partial<BlurViewProps>>(BlurView);
+const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
 const widthDefault = Dimensions.get("screen").width - 32;
 
@@ -160,7 +160,7 @@ const SegmentedControl: React.FC<ISegmentedControl> &
         <Animated.View
           style={[
             {
-              ...StyleSheet.absoluteFillObject,
+              ...StyleSheet.absoluteFill,
               position: "absolute",
               width: (width - 4) / tabsCount,
               top: 0,
@@ -204,7 +204,7 @@ const SegmentedControl: React.FC<ISegmentedControl> &
             {
               overflow: "hidden",
               borderRadius,
-              ...StyleSheet.absoluteFillObject,
+              ...StyleSheet.absoluteFill,
             },
           ]}
           animatedProps={animatedBlurViewProps}

@@ -1,6 +1,6 @@
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
-import { SymbolView } from "expo-symbols";
+import { SymbolView, type SFSymbol } from "expo-symbols";
 import { Pressable, Text, View } from "react-native";
 import { ScrollView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 type Props = {
   title: string;
   description: string;
-  icon: string;
+  icon: SFSymbol;
 };
 
 const MainPlayerSheetStub = ({ title, description, icon }: Props) => {
