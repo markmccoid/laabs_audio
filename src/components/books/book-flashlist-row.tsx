@@ -45,6 +45,8 @@ export const BookFlashListRow = ({
   const showOfflineUnavailable = isOffline && !isDownloaded;
   const resolvedSeriesName = (book.seriesName ?? book.series ?? "").trim();
   const hasSeries = showSeries && resolvedSeriesName.length > 0;
+  const narratorName = book.narratedBy?.trim();
+  const hasNarrator = Boolean(narratorName);
   const content = (
     <Pressable
       onPress={onPress}
@@ -145,14 +147,34 @@ export const BookFlashListRow = ({
               </View>
             ) : null}
           </View>
-          <Text
-            selectable
-            numberOfLines={1}
-            lineBreakMode="tail"
-            style={{ color: themeColors.textMuted, fontSize: 15 }}
+          <View
+            style={{ marginTop: 2, flexDirection: "row", alignItems: "center", gap: 4 }}
           >
-            by {book.author || "Unknown author"}
-          </Text>
+            <SymbolView name="person.fill" tintColor={themeColors.textMuted} size={14} />
+            <Text
+              selectable
+              numberOfLines={1}
+              lineBreakMode="tail"
+              style={{ flex: 1, color: themeColors.textMuted, fontSize: 15 }}
+            >
+              {book.author || "Unknown author"}
+            </Text>
+          </View>
+          {hasNarrator ? (
+            <View
+              style={{ marginTop: 1, flexDirection: "row", alignItems: "center", gap: 4 }}
+            >
+              <SymbolView name="person.wave.2.fill" tintColor={themeColors.textMuted} size={14} />
+              <Text
+                selectable
+                numberOfLines={1}
+                lineBreakMode="tail"
+                style={{ flex: 1, color: themeColors.textMuted, fontSize: 13 }}
+              >
+                {narratorName}
+              </Text>
+            </View>
+          ) : null}
           {hasSeries ? (
             <Text
               selectable
@@ -165,10 +187,10 @@ export const BookFlashListRow = ({
           ) : null}
           <View
             style={{
-              marginTop: hasSeries ? 2 : 4,
+              marginTop: hasSeries || hasNarrator ? 2 : 4,
               width: "100%",
               flexDirection: "row",
-              justifyContent: "space-between",
+              gap: 16,
             }}
           >
             <View style={{ flexDirection: "row", gap: 4, alignItems: "center" }}>
