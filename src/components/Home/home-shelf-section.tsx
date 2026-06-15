@@ -1,16 +1,21 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { useRecyclingState } from "@shopify/flash-list";
 import type { Href } from "expo-router";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
-import Animated, { FadeInRight, LinearTransition } from "react-native-reanimated";
+import Animated, {
+  FadeInRight,
+  LinearTransition,
+} from "react-native-reanimated";
 import { ShelfBookCard } from "./shelf-book-card";
 
 type HomeShelfSectionProps = {
+  shelfId: string;
   title: string;
   books: LibraryItemSummary[];
   favoriteByBookId: Record<string, true>;
@@ -33,6 +38,7 @@ const ENTERING_STAGGER_MS = 50;
 const ENTERING_MAX_STAGGERED_ITEMS = 6;
 
 export const HomeShelfSection = ({
+  shelfId,
   title,
   books,
   favoriteByBookId,
@@ -47,8 +53,16 @@ export const HomeShelfSection = ({
 }: HomeShelfSectionProps) => {
   const themeColors = useThemeColors();
   const hasBooks = books.length > 0;
-  const [enteringEnabled, setEnteringEnabled] = useState(false);
   const seenBookIdsRef = useRef<Set<string>>(new Set());
+  const [enteringEnabled, setEnteringEnabled] = useRecyclingState(
+    false,
+    [shelfId],
+    () => {
+      seenBookIdsRef.current = new Set();
+    },
+  );
+  const [sectionTop, setSectionTop] = useRecyclingState(0, [shelfId]);
+  const [listTop, setListTop] = useRecyclingState(0, [shelfId]);
 
   useEffect(() => {
     // Every id that has appeared on this shelf is "seen"; FlatList mounting a
@@ -64,9 +78,8 @@ export const HomeShelfSection = ({
     // so only books that arrive later animate in.
     const frame = requestAnimationFrame(() => setEnteringEnabled(true));
     return () => cancelAnimationFrame(frame);
-  }, [enteringEnabled, hasBooks]);
-  const [sectionTop, setSectionTop] = useState(0);
-  const [listTop, setListTop] = useState(0);
+  }, [enteringEnabled, hasBooks, setEnteringEnabled]);
+
   const menuContentTop = sectionTop + listTop + 118;
   const listExtraData = useMemo(
     () => ({
@@ -76,7 +89,13 @@ export const HomeShelfSection = ({
       progressByBookId,
       renderCardMenus,
     }),
-    [favoriteByBookId, isOffline, menuContentTop, progressByBookId, renderCardMenus],
+    [
+      favoriteByBookId,
+      isOffline,
+      menuContentTop,
+      progressByBookId,
+      renderCardMenus,
+    ],
   );
 
   return (
@@ -97,7 +116,12 @@ export const HomeShelfSection = ({
           /> */}
           <Text
             numberOfLines={1}
-            style={{ color: themeColors.text, fontSize: 20, fontWeight: "700", flex: 1 }}
+            style={{
+              color: themeColors.text,
+              fontSize: 20,
+              fontWeight: "700",
+              flex: 1,
+            }}
           >
             {title}
           </Text>
@@ -119,7 +143,11 @@ export const HomeShelfSection = ({
                 justifyContent: "center",
               }}
             >
-              <SymbolView name="arrow.clockwise" tintColor={themeColors.textMuted} size={16} />
+              <SymbolView
+                name="arrow.clockwise"
+                tintColor={themeColors.textMuted}
+                size={16}
+              />
             </Pressable>
           ) : null}
           {hasBooks ? (
@@ -138,7 +166,11 @@ export const HomeShelfSection = ({
                   justifyContent: "center",
                 }}
               >
-                <SymbolView name="chevron.right" tintColor={themeColors.textMuted} size={14} />
+                <SymbolView
+                  name="chevron.right"
+                  tintColor={themeColors.textMuted}
+                  size={14}
+                />
               </Pressable>
             </Link>
           ) : null}
@@ -147,7 +179,11 @@ export const HomeShelfSection = ({
       {!hasBooks ? (
         <Text
           selectable
-          style={{ color: themeColors.textMuted, fontSize: 13, paddingHorizontal: 18 }}
+          style={{
+            color: themeColors.textMuted,
+            fontSize: 13,
+            paddingHorizontal: 18,
+          }}
         >
           {emptyMessage}
         </Text>
@@ -162,15 +198,19 @@ export const HomeShelfSection = ({
             extraData={listExtraData}
             horizontal
             keyExtractor={(book) => book.id}
-            itemLayoutAnimation={enteringEnabled ? LinearTransition.duration(220) : undefined}
+            itemLayoutAnimation={
+              enteringEnabled ? LinearTransition.duration(220) : undefined
+            }
             renderItem={({ item, index }) => {
-              const isNewArrival = enteringEnabled && !seenBookIdsRef.current.has(item.id);
+              const isNewArrival =
+                enteringEnabled && !seenBookIdsRef.current.has(item.id);
               return (
                 <Animated.View
                   entering={
                     isNewArrival
                       ? FadeInRight.duration(260).delay(
-                          Math.min(index, ENTERING_MAX_STAGGERED_ITEMS) * ENTERING_STAGGER_MS,
+                          Math.min(index, ENTERING_MAX_STAGGERED_ITEMS) *
+                            ENTERING_STAGGER_MS,
                         )
                       : undefined
                   }

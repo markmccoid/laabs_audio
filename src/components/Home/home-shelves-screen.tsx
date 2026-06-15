@@ -20,25 +20,51 @@ import {
   recordHomeShelfDisplay,
 } from "@/utils/dev-startup-tracing";
 import { markStartupPresentation } from "@/utils/startup-presentation";
+import { FlashList, type FlashListProps } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
+import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, InteractionManager, RefreshControl, Text, View } from "react-native";
-import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
+import {
+  ActivityIndicator,
+  InteractionManager,
+  RefreshControl,
+  Text,
+  View,
+} from "react-native";
+import Animated, {
+  useAnimatedScrollHandler,
+  useSharedValue,
+} from "react-native-reanimated";
 import { HomeShelfSection } from "./home-shelf-section";
+
+type HomeShelvesListItem =
+  | { type: "refresh-message"; id: "refresh-message"; message: string }
+  | { type: "shelf"; id: string; shelf: HomeShelf }
+  | { type: "footer"; id: "footer" };
+
+const AnimatedFlashList = Animated.createAnimatedComponent(
+  FlashList,
+) as unknown as <TItem>(props: FlashListProps<TItem>) => ReactElement;
+
+const HomeShelvesItemSeparator = () => <View style={{ height: 10 }} />;
 
 const HomeShelvesScreen = () => {
   const headerHeight = useHeaderHeight();
   const themeColors = useThemeColors();
   const queryClient = useQueryClient();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
   const authStatus = useAuthStore((state) => state.status);
   const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
   const homePreviewSize = useSettingsStore((state) => state.homePreviewSize);
-  const setHomePreviewSize = useSettingsStore((state) => state.actions.setHomePreviewSize);
+  const setHomePreviewSize = useSettingsStore(
+    (state) => state.actions.setHomePreviewSize,
+  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const [shouldRenderCardMenus, setShouldRenderCardMenus] = useState(false);
@@ -56,7 +82,9 @@ const HomeShelvesScreen = () => {
     progressByBookId,
     refreshDiscover,
   } = useHomeShelves();
-  const activationProgress = useLibraryActivationStore((state) => state.progress);
+  const activationProgress = useLibraryActivationStore(
+    (state) => state.progress,
+  );
   const activateLibrarySelection = useActivateLibrarySelection();
   const {
     libraries,
@@ -67,7 +95,31 @@ const HomeShelvesScreen = () => {
   const canChangeLibrary = authStatus === "authenticated";
   const scrollY = useSharedValue(0);
   const didMarkHomeShelfDisplayRef = useRef(false);
-  const renderStartedAtMs = useMemo(() => markStartup("home-shelves-screen-render-start"), []);
+  const renderStartedAtMs = useMemo(
+    () => markStartup("home-shelves-screen-render-start"),
+    [],
+  );
+  const homeListData = useMemo<HomeShelvesListItem[]>(() => {
+    const shelfItems = visibleShelves.map((shelf) => ({
+      type: "shelf" as const,
+      id: `${activeLibraryId ?? "no-library"}:${shelf.id}`,
+      shelf,
+    }));
+
+    return [
+      ...(refreshMessage
+        ? [
+            {
+              type: "refresh-message" as const,
+              id: "refresh-message" as const,
+              message: refreshMessage,
+            },
+          ]
+        : []),
+      ...shelfItems,
+      { type: "footer", id: "footer" },
+    ];
+  }, [activeLibraryId, refreshMessage, visibleShelves]);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -78,11 +130,15 @@ const HomeShelvesScreen = () => {
   const handleRefresh = useCallback(async () => {
     if (isRefreshing) return;
     if (isOnline === false) {
-      setRefreshMessage("You are offline. Connect to refresh books and progress.");
+      setRefreshMessage(
+        "You are offline. Connect to refresh books and progress.",
+      );
       return;
     }
     if (!activeLibraryId || !activeLibraryUserKey) {
-      setRefreshMessage("Library context is not ready yet. Try again in a moment.");
+      setRefreshMessage(
+        "Library context is not ready yet. Try again in a moment.",
+      );
       return;
     }
 
@@ -96,13 +152,19 @@ const HomeShelvesScreen = () => {
           { forceCatalog: true, forceOverlay: true, queryClient },
         ),
         queryClient.invalidateQueries({
-          queryKey: queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId),
+          queryKey: queryKeys.libraryPlaylists(
+            activeLibraryUserKey,
+            activeLibraryId,
+          ),
           exact: true,
         }),
       ]);
 
       await queryClient.fetchQuery({
-        queryKey: queryKeys.libraryPlaylists(activeLibraryUserKey, activeLibraryId),
+        queryKey: queryKeys.libraryPlaylists(
+          activeLibraryUserKey,
+          activeLibraryId,
+        ),
         queryFn: () => playlistsApi.getLibraryPlaylists(activeLibraryId),
         meta: { persist: true },
       });
@@ -111,7 +173,13 @@ const HomeShelvesScreen = () => {
     } finally {
       setIsRefreshing(false);
     }
-  }, [activeLibraryId, activeLibraryUserKey, isOnline, isRefreshing, queryClient]);
+  }, [
+    activeLibraryId,
+    activeLibraryUserKey,
+    isOnline,
+    isRefreshing,
+    queryClient,
+  ]);
 
   const handleLibraryChange = useCallback(
     (library: Library) => {
@@ -179,24 +247,114 @@ const HomeShelvesScreen = () => {
     visibleShelves.length,
   ]);
 
+  const renderHomeListItem = useCallback(
+    ({ item }: { item: HomeShelvesListItem }) => {
+      if (item.type === "refresh-message") {
+        return (
+          <View
+            style={{
+              marginHorizontal: 18,
+              paddingHorizontal: 12,
+              paddingVertical: 10,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: themeColors.border,
+              backgroundColor: themeColors.surface,
+            }}
+          >
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 13 }}
+            >
+              {item.message}
+            </Text>
+          </View>
+        );
+      }
+
+      if (item.type === "footer") {
+        return (
+          <Text
+            selectable
+            style={{
+              color: themeColors.textMuted,
+              fontSize: 13,
+              paddingHorizontal: 18,
+            }}
+          >
+            Shelf creation and book assignment are managed in Settings.
+          </Text>
+        );
+      }
+
+      const { shelf } = item;
+      return (
+        <HomeShelfSection
+          shelfId={item.id}
+          title={shelf.title}
+          books={shelf.books}
+          favoriteByBookId={favoriteByBookId}
+          progressByBookId={progressByBookId}
+          isOffline={isOnline === false}
+          emptyMessage={shelf.emptyMessage}
+          headerHeight={headerHeight}
+          shelfHref={{
+            pathname: "/(tabs)/(home)/bookshelf/[shelfId]",
+            params: { shelfId: shelf.id },
+          }}
+          onRefresh={
+            shelf.kind === "derived" && shelf.id === "discover"
+              ? refreshDiscover
+              : undefined
+          }
+          renderCardMenus={shouldRenderCardMenus}
+          scrollY={scrollY}
+        />
+      );
+    },
+    [
+      favoriteByBookId,
+      headerHeight,
+      isOnline,
+      progressByBookId,
+      refreshDiscover,
+      scrollY,
+      shouldRenderCardMenus,
+      themeColors.border,
+      themeColors.surface,
+      themeColors.textMuted,
+    ],
+  );
+
   return (
-    <View style={{ flex: 1, backgroundColor: themeColors.bg }} onLayout={handleHomeLayout}>
+    <View
+      style={{ flex: 1, backgroundColor: themeColors.bg }}
+      onLayout={handleHomeLayout}
+    >
       <Stack.Toolbar placement="right">
         {/* <Stack.Toolbar.Button icon="ellipsis" /> */}
         <Stack.Toolbar.Menu icon="ellipsis">
           {canChangeLibrary ? (
-            <Stack.Toolbar.Menu icon="books.vertical.fill" title="Change Library">
+            <Stack.Toolbar.Menu
+              icon="books.vertical.fill"
+              title="Change Library"
+            >
               {isLibrariesLoading && libraries.length === 0 ? (
                 <Stack.Toolbar.MenuAction disabled icon="ellipsis">
                   Loading libraries...
                 </Stack.Toolbar.MenuAction>
               ) : null}
               {isLibrariesError && libraries.length === 0 ? (
-                <Stack.Toolbar.MenuAction icon="arrow.clockwise" onPress={() => refetchLibraries()}>
+                <Stack.Toolbar.MenuAction
+                  icon="arrow.clockwise"
+                  onPress={() => refetchLibraries()}
+                >
                   Retry loading libraries
                 </Stack.Toolbar.MenuAction>
               ) : null}
-              {!isLibrariesLoading && !isLibrariesError && libraries.length === 0 ? (
+              {!isLibrariesLoading &&
+              !isLibrariesError &&
+              libraries.length === 0 ? (
                 <Stack.Toolbar.MenuAction disabled icon="books.vertical">
                   No libraries available
                 </Stack.Toolbar.MenuAction>
@@ -262,7 +420,14 @@ const HomeShelvesScreen = () => {
           </Text>
 
           {activationProgress && activationProgress.totalExpected > 0 ? (
-            <View style={{ width: "100%", maxWidth: 320, marginTop: 24, alignItems: "center" }}>
+            <View
+              style={{
+                width: "100%",
+                maxWidth: 320,
+                marginTop: 24,
+                alignItems: "center",
+              }}
+            >
               <Text
                 style={{
                   color: themeColors.textMuted,
@@ -271,7 +436,8 @@ const HomeShelvesScreen = () => {
                   marginBottom: 8,
                 }}
               >
-                Loading books {activationProgress.totalSeen} of {activationProgress.totalExpected}
+                Loading books {activationProgress.totalSeen} of{" "}
+                {activationProgress.totalExpected}
               </Text>
               <View
                 style={{
@@ -294,12 +460,16 @@ const HomeShelvesScreen = () => {
           ) : null}
         </View>
       ) : (
-        <Animated.ScrollView
+        <AnimatedFlashList
           contentInsetAdjustmentBehavior="automatic"
-          // style={{ flex: 1 }}
+          data={homeListData}
+          keyExtractor={(item) => item.id}
+          getItemType={(item) => item.type}
+          renderItem={renderHomeListItem}
           onScroll={scrollHandler}
           scrollEventThrottle={16}
-          contentContainerStyle={{ paddingTop: 16, paddingBottom: 24, gap: 10 }}
+          contentContainerStyle={{ paddingTop: 16, paddingBottom: 24 }}
+          ItemSeparatorComponent={HomeShelvesItemSeparator}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -309,54 +479,7 @@ const HomeShelvesScreen = () => {
               tintColor={themeColors.accent}
             />
           }
-        >
-          {refreshMessage ? (
-            <View
-              style={{
-                marginHorizontal: 18,
-                paddingHorizontal: 12,
-                paddingVertical: 10,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor: themeColors.border,
-                backgroundColor: themeColors.surface,
-              }}
-            >
-              <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-                {refreshMessage}
-              </Text>
-            </View>
-          ) : null}
-
-          {visibleShelves.map((shelf: HomeShelf) => (
-            <HomeShelfSection
-              key={`${activeLibraryId ?? "no-library"}:${shelf.id}`}
-              title={shelf.title}
-              books={shelf.books}
-              favoriteByBookId={favoriteByBookId}
-              progressByBookId={progressByBookId}
-              isOffline={isOnline === false}
-              emptyMessage={shelf.emptyMessage}
-              headerHeight={headerHeight}
-              shelfHref={{
-                pathname: "/(tabs)/(home)/bookshelf/[shelfId]",
-                params: { shelfId: shelf.id },
-              }}
-              onRefresh={
-                shelf.kind === "derived" && shelf.id === "discover" ? refreshDiscover : undefined
-              }
-              renderCardMenus={shouldRenderCardMenus}
-              scrollY={scrollY}
-            />
-          ))}
-
-          <Text
-            selectable
-            style={{ color: themeColors.textMuted, fontSize: 13, paddingHorizontal: 18 }}
-          >
-            Shelf creation and book assignment are managed in Settings.
-          </Text>
-        </Animated.ScrollView>
+        />
       )}
     </View>
   );
