@@ -11,6 +11,7 @@ import {
   type SearchSortDirection,
 } from "@/search/search-session-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { useUniwind } from "uniwind";
 import {
   Button,
   GlassEffectContainer,
@@ -25,6 +26,7 @@ import {
   background,
   cornerRadius,
   glassEffect,
+  labelStyle,
   padding,
   tag,
   tint,
@@ -65,6 +67,8 @@ const withAlpha = (hexColor: string, alpha: number) => {
 
 export const SearchFilterRail = () => {
   const themeColors = useThemeColors();
+  const { theme } = useUniwind();
+  const isDark = theme === "dark";
   const insets = useSafeAreaInsets();
   const keyboard = useAnimatedKeyboard();
   const searchActions = useSearchSessionActions();
@@ -85,6 +89,10 @@ export const SearchFilterRail = () => {
   // Active capsules get a translucent accent wash so the icon/label color
   // still reads on top of it; a full-strength tint turns the glass opaque.
   const activeTint = withAlpha(themeColors.accent, 0.3);
+  // Inactive capsules get a neutral translucent backdrop so the icons stay
+  // legible over light pages: a dark wash in light mode, a light wash in dark
+  // mode. Kept low-alpha so the glass material still reads through.
+  const neutralTint = isDark ? "rgba(255, 255, 255, 0.22)" : "rgba(0, 0, 0, 0.20)";
   const capsule = (isActive = false): BuiltInModifier[] =>
     isLiquidGlassAvailable()
       ? [
@@ -93,14 +101,14 @@ export const SearchFilterRail = () => {
             glass: {
               variant: "regular",
               interactive: true,
-              ...(isActive ? { tint: activeTint } : null),
+              tint: isActive ? activeTint : neutralTint,
             },
             shape: "capsule",
           }),
         ]
       : [
           padding({ horizontal: 14, vertical: 10 }),
-          background(isActive ? activeTint : themeColors.surface),
+          background(isActive ? activeTint : neutralTint),
           cornerRadius(20),
         ];
 
@@ -131,9 +139,9 @@ export const SearchFilterRail = () => {
         <GlassEffectContainer spacing={6}>
           <HStack spacing={8}>
             <Menu
-              label=""
+              label="Sort"
               systemImage={sortDirection === "asc" ? "arrow.up" : "arrow.down"}
-              modifiers={[...capsule(), tint(themeColors.text)]}
+              modifiers={[...capsule(), labelStyle("iconOnly"), tint(themeColors.text)]}
             >
               <Picker
                 label="Sort by"
