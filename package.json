@@ -10,12 +10,18 @@
     "web": "expo start --web",
     "postinstall": "patch-package",
     "lint": "expo lint",
-    "test": "jest"
+    "test": "jest",
+    "eas-build-post-install": "patch-package"
   },
   "jest": {
     "preset": "jest-expo",
-    "roots": ["<rootDir>/src"],
-    "testMatch": ["**/__tests__/**/*.test.ts", "**/*.test.ts"]
+    "roots": [
+      "<rootDir>/src"
+    ],
+    "testMatch": [
+      "**/__tests__/**/*.test.ts",
+      "**/*.test.ts"
+    ]
   },
   "dependencies": {
     "@expo/ui": "~56.0.17",
