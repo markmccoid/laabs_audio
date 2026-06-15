@@ -1,5 +1,5 @@
-import { useAuthStore } from "@/auth/auth-store";
 import { buildCoverUrls } from "@/api/cover-urls";
+import { useAuthStore } from "@/auth/auth-store";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -18,6 +18,7 @@ export type CoverImageProps = Omit<ImageProps, "source"> & {
   variant?: CoverImageVariant;
   showFavoriteIndicator?: boolean;
   showFinishedIndicator?: boolean;
+  showDownloadedIndicator?: boolean;
 };
 
 const isLocalUri = (value?: string | null) =>
@@ -46,7 +47,8 @@ export const resolveCoverImageCandidates = ({
   serverUrl?: string | null;
   variant?: CoverImageVariant;
 }) => {
-  const localUri = localCoverUri?.trim() || (isLocalUri(coverUri) ? coverUri?.trim() : null) || null;
+  const localUri =
+    localCoverUri?.trim() || (isLocalUri(coverUri) ? coverUri?.trim() : null) || null;
 
   if (localUri) {
     return {
@@ -107,12 +109,12 @@ export const useCoverImageSource = ({
 
   useEffect(() => {
     const nextMode = (() => {
-    if (candidates.localUri) {
+      if (candidates.localUri) {
         return "local";
-    }
-    if (!candidates.tokenlessRemoteUri) {
+      }
+      if (!candidates.tokenlessRemoteUri) {
         return "default";
-    }
+      }
       return getPreferredMode(useTokenWithCoverImages, hasTokenedRemote);
     })();
 
@@ -133,7 +135,9 @@ export const useCoverImageSource = ({
       case "local":
         return candidates.localUri ? { uri: candidates.localUri } : DEFAULT_BOOK_COVER;
       case "remote-tokened":
-        return candidates.tokenedRemoteUri ? { uri: candidates.tokenedRemoteUri } : DEFAULT_BOOK_COVER;
+        return candidates.tokenedRemoteUri
+          ? { uri: candidates.tokenedRemoteUri }
+          : DEFAULT_BOOK_COVER;
       case "remote-tokenless":
         return candidates.tokenlessRemoteUri
           ? { uri: candidates.tokenlessRemoteUri }
@@ -170,6 +174,7 @@ export const CoverImage = ({
   variant = "full",
   showFavoriteIndicator = false,
   showFinishedIndicator = false,
+  showDownloadedIndicator = false,
   onError,
   style,
   ...props
@@ -185,18 +190,23 @@ export const CoverImage = ({
   });
   const shouldShowFavoriteIndicator = showFavoriteIndicator && showFavoriteBadgeOnCovers;
   const shouldShowFinishedIndicator = showFinishedIndicator && showFinishedBadgeOnCovers;
+  const shouldShowDownloadedIndicator = showDownloadedIndicator;
 
   const handleError: NonNullable<ImageProps["onError"]> = (event) => {
     resolved.onError(event);
     onError?.(event);
   };
 
-  if (!shouldShowFinishedIndicator && !shouldShowFavoriteIndicator) {
+  if (
+    !shouldShowFinishedIndicator &&
+    !shouldShowFavoriteIndicator &&
+    !shouldShowDownloadedIndicator
+  ) {
     return <Image {...props} style={style} source={resolved.source} onError={handleError} />;
   }
 
   const flattenedStyle = StyleSheet.flatten(style);
-  const indicatorSize = variant === "thumb" ? 24 : 32;
+  const indicatorSize = variant === "thumb" ? 20 : 28;
   const indicatorInset = variant === "thumb" ? 6 : 10;
 
   return (
@@ -226,6 +236,9 @@ export const CoverImage = ({
             borderCurve: "continuous",
             backgroundColor: "rgba(255,255,255,0.82)",
             boxShadow: "0 4px 10px rgba(15, 23, 42, 0.22)",
+            paddingHorizontal: 4,
+            paddingBottom: 2,
+            paddingTop: 4,
           }}
         >
           <SymbolView name="heart.fill" size={indicatorSize} tintColor="#d24d57" />
@@ -242,13 +255,31 @@ export const CoverImage = ({
             borderCurve: "continuous",
             backgroundColor: "rgba(255,255,255,0.82)",
             boxShadow: "0 4px 10px rgba(15, 23, 42, 0.22)",
+            paddingHorizontal: 4,
+            paddingBottom: 4,
+            paddingTop: 3,
           }}
         >
-          <SymbolView
-            name="checkmark.circle.fill"
-            size={indicatorSize}
-            tintColor={themeColors.accent}
-          />
+          <SymbolView name="checkmark.circle.fill" size={indicatorSize} tintColor="#008000" />
+        </View>
+      ) : null}
+      {shouldShowDownloadedIndicator ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            bottom: indicatorInset,
+            left: indicatorInset,
+            borderRadius: 999,
+            borderCurve: "continuous",
+            backgroundColor: "rgba(255,255,255,0.82)",
+            boxShadow: "0 4px 10px rgba(15, 23, 42, 0.22)",
+            paddingHorizontal: 4,
+            paddingBottom: 4,
+            paddingTop: 3,
+          }}
+        >
+          <SymbolView name="icloud.fill" size={indicatorSize} tintColor={themeColors.accent} />
         </View>
       ) : null}
     </View>

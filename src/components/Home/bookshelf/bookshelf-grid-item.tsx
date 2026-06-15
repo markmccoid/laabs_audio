@@ -4,6 +4,7 @@ import { CoverImage } from "@/components/images/cover-image";
 import {
   resolveStoredDownloadCoverUri,
   selectHasPlayableBookDownload,
+  selectIsBookFullyDownloaded,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -28,6 +29,9 @@ export const BookshelfGridItem = ({
 }: BookshelfGridItemProps) => {
   const themeColors = useThemeColors();
   const isDownloaded = useDeviceBooksStore((state) => selectHasPlayableBookDownload(state, book.id));
+  const isFullyDownloaded = useDeviceBooksStore((state) =>
+    selectIsBookFullyDownloaded(state, book.id),
+  );
   const localCoverUri = useDeviceBooksStore(
     (state) => resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
   );
@@ -51,6 +55,7 @@ export const BookshelfGridItem = ({
             variant="thumb"
             showFavoriteIndicator={isFavorite}
             showFinishedIndicator={showFinishedIndicator}
+            showDownloadedIndicator={isFullyDownloaded}
             style={{
               width: "100%",
               aspectRatio: 1,

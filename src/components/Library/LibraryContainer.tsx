@@ -12,7 +12,7 @@ import {
 import { useSearchResults } from "@/search/use-search-results";
 import { FlashList, FlashListRef } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LibraryFiltersHeader } from "./library-filters-header";
@@ -24,6 +24,12 @@ type LibraryContainerProps = {
   // insetting the list, so the content needs to clear the status bar itself.
   padForStatusBar?: boolean;
 };
+
+const FILTER_HEADER_ITEM_ID = "__library_filters_header__";
+
+type LibraryListItem =
+  | { type: "filters-header"; id: typeof FILTER_HEADER_ITEM_ID }
+  | { type: "book"; id: string };
 
 const LibraryContainer = ({ padForStatusBar = false }: LibraryContainerProps) => {
   const insets = useSafeAreaInsets();
@@ -49,10 +55,29 @@ const LibraryContainer = ({ padForStatusBar = false }: LibraryContainerProps) =>
     searchParams,
   } = useSearchResults();
 
-  const listRef = useRef<FlashListRef<string>>(null);
+  const listRef = useRef<FlashListRef<LibraryListItem>>(null);
   const hasCriteriaChangedRef = useRef(false);
   const pendingScrollResetRef = useRef(false);
   const wasPaddedRef = useRef(padForStatusBar);
+  const listData = useMemo<LibraryListItem[]>(
+    () => [
+      { type: "filters-header", id: FILTER_HEADER_ITEM_ID },
+      ...resultIds.map((id) => ({ type: "book" as const, id })),
+    ],
+    [resultIds],
+  );
+  const handleViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: { index: number | null }[] }) => {
+      onViewableItemsChanged({
+        viewableItems: viewableItems
+          .map((item) => ({
+            index: typeof item.index === "number" ? item.index - 1 : null,
+          }))
+          .filter((item) => item.index !== null && item.index >= 0),
+      });
+    },
+    [onViewableItemsChanged],
+  );
 
   // After the bottom search deactivates, the scroll view's automatic top inset
   // is not restored (stays 0), leaving content stranded behind the reappearing
@@ -87,7 +112,7 @@ const LibraryContainer = ({ padForStatusBar = false }: LibraryContainerProps) =>
 
     const frame = requestAnimationFrame(() => {
       setTimeout(() => {
-        listRef.current?.scrollToTop({ animated: false });
+        void listRef.current?.scrollToIndex({ index: 0, animated: false });
       }, 100);
     });
     return () => cancelAnimationFrame(frame);
@@ -155,25 +180,34 @@ const LibraryContainer = ({ padForStatusBar = false }: LibraryContainerProps) =>
       ref={listRef}
       numColumns={viewMode === "grid" ? 3 : 1}
       contentInsetAdjustmentBehavior="automatic"
-      ListHeaderComponent={
-        <LibraryFiltersHeader
-          favoriteFilter={favoriteFilter}
-          finishedOnly={finishedOnly}
-          selectedGenres={selectedGenres}
-          selectedTags={selectedTags}
-          resultCount={resultIds.length}
-          onClearFavoriteFilter={() => searchActions.clearFavoriteFilter()}
-          onClearFinishedOnly={() => searchActions.clearFinishedOnly()}
-          onRemoveGenre={(genre) => searchActions.removeGenre(genre)}
-          onRemoveTag={(tag) => searchActions.removeTag(tag)}
-        />
-      }
-      data={resultIds}
-      keyExtractor={(item) => item}
+      data={listData}
+      keyExtractor={(item) => item.id}
       onRefresh={onRefresh}
       refreshing={refreshing}
-      onViewableItemsChanged={onViewableItemsChanged}
-      renderItem={({ item: libraryItemId }) => {
+      onViewableItemsChanged={handleViewableItemsChanged}
+      overrideItemLayout={(layout, item, _index, _maxColumns) => {
+        if (item.type === "filters-header") {
+          layout.span = viewMode === "grid" ? 3 : 1;
+        }
+      }}
+      renderItem={({ item }) => {
+        if (item.type === "filters-header") {
+          return (
+            <LibraryFiltersHeader
+              favoriteFilter={favoriteFilter}
+              finishedOnly={finishedOnly}
+              selectedGenres={selectedGenres}
+              selectedTags={selectedTags}
+              resultCount={resultIds.length}
+              onClearFavoriteFilter={() => searchActions.clearFavoriteFilter()}
+              onClearFinishedOnly={() => searchActions.clearFinishedOnly()}
+              onRemoveGenre={(genre) => searchActions.removeGenre(genre)}
+              onRemoveTag={(tag) => searchActions.removeTag(tag)}
+            />
+          );
+        }
+
+        const libraryItemId = item.id;
         const libraryItem = itemById.get(libraryItemId);
         if (!libraryItem) {
           return viewMode === "grid" ? (

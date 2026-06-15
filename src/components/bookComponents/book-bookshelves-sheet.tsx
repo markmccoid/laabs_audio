@@ -35,17 +35,17 @@ export const BookBookshelvesSheet = () => {
     removeBooksFromPlaylistShelfOptimistic,
   } = useDeviceBooksActions();
   const canMutate = Boolean(libraryItemId && activeLibraryId && activeLibraryUserKey);
-  const shelves = useMemo(() => (libraryItemId ? shelfMembershipOptions : []), [
-    libraryItemId,
-    shelfMembershipOptions,
-  ]);
+  const shelves = useMemo(
+    () => (libraryItemId ? shelfMembershipOptions : []),
+    [libraryItemId, shelfMembershipOptions],
+  );
   const optimisticSelectionByShelfId =
     optimisticSelectionState.libraryItemId === libraryItemId
       ? optimisticSelectionState.byShelfId
       : {};
 
   const openBookshelfSettings = () => {
-    router.push("/(tabs)/settings/bookshelves");
+    router.dismissTo("/(tabs)/settings/bookshelves");
   };
 
   const clearOptimisticSelection = (shelfId: string, expectedSelected: boolean) => {
@@ -149,7 +149,10 @@ export const BookBookshelvesSheet = () => {
                 paddingVertical: 2,
               }}
             >
-              <Text selectable style={{ color: typePill.textColor, fontSize: 10, fontWeight: "700" }}>
+              <Text
+                selectable
+                style={{ color: typePill.textColor, fontSize: 10, fontWeight: "700" }}
+              >
                 {typePill.label}
               </Text>
             </View>

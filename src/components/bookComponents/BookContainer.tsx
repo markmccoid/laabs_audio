@@ -14,6 +14,7 @@ import { shareBook } from "@/sharing/book-share";
 import {
   resolveStoredDownloadCoverUri,
   selectHasPlayableBookDownload,
+  selectIsBookFullyDownloaded,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
@@ -80,6 +81,10 @@ const BookContainer = ({ libraryItemId }: Props) => {
   const hasPlayableLocalDownload = useDeviceBooksStore((state) => {
     if (!libraryItemId) return false;
     return selectHasPlayableBookDownload(state, libraryItemId);
+  });
+  const isFullyDownloaded = useDeviceBooksStore((state) => {
+    if (!libraryItemId) return false;
+    return selectIsBookFullyDownloaded(state, libraryItemId);
   });
   const localCoverUri = useDeviceBooksStore((state) =>
     libraryItemId ? resolveStoredDownloadCoverUri(state.downloadedBookData[libraryItemId]) : null,
@@ -522,6 +527,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
                 leftAccessory={<BookRateSetter libraryItemId={libraryItemId} />}
                 showFavoriteIndicator={isFavorite}
                 showFinishedIndicator={isFinished}
+                showDownloadedIndicator={isFullyDownloaded}
                 showProgressLine={progressSeconds > 0 || isFinished}
                 progressPercent={visualProgressPercent}
                 maxSize={coverMaxSize}

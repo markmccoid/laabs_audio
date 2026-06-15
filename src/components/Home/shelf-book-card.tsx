@@ -4,6 +4,7 @@ import { CoverImage } from "@/components/images/cover-image";
 import {
   resolveStoredDownloadCoverUri,
   selectHasPlayableBookDownload,
+  selectIsBookFullyDownloaded,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import {
@@ -148,6 +149,9 @@ export const ShelfBookCard = ({
   const isDownloaded = useDeviceBooksStore((state) =>
     selectHasPlayableBookDownload(state, book.id),
   );
+  const isFullyDownloaded = useDeviceBooksStore((state) =>
+    selectIsBookFullyDownloaded(state, book.id),
+  );
   const coverLocalUri = useDeviceBooksStore((state) =>
     resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
   );
@@ -208,6 +212,7 @@ export const ShelfBookCard = ({
               variant="thumb"
               showFavoriteIndicator={isFavorite}
               showFinishedIndicator={showFinishedIndicator}
+              showDownloadedIndicator={isFullyDownloaded}
               style={{
                 width: coverSize,
                 height: coverSize,

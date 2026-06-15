@@ -13,6 +13,7 @@ type Props = {
   showFavoriteIndicator?: boolean;
   showProgressLine?: boolean;
   showFinishedIndicator?: boolean;
+  showDownloadedIndicator?: boolean;
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
@@ -27,6 +28,7 @@ const BookImage = ({
   showFavoriteIndicator = false,
   showProgressLine = false,
   showFinishedIndicator = false,
+  showDownloadedIndicator = false,
 }: Props) => {
   const themeColors = useThemeColors();
   const { width } = useWindowDimensions();
@@ -50,6 +52,7 @@ const BookImage = ({
           variant="full"
           showFavoriteIndicator={showFavoriteIndicator}
           showFinishedIndicator={showFinishedIndicator}
+          showDownloadedIndicator={showDownloadedIndicator}
           style={{
             width: imageSize,
             height: imageSize,

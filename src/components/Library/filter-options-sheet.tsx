@@ -3,24 +3,18 @@ import type {
   SearchFilterOperator,
 } from "@/search/search-session-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { BlurView } from "expo-blur";
-import { GlassContainer, GlassView, isGlassEffectAPIAvailable } from "expo-glass-effect";
-import { LinearGradient } from "expo-linear-gradient";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import React, { useMemo, useState } from "react";
 import {
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
   type StyleProp,
   type ViewProps,
   type ViewStyle,
-  useColorScheme,
 } from "react-native";
-import { useUniwind } from "uniwind";
 
 export type FilterSheetType = "genres" | "tags";
 
@@ -35,51 +29,24 @@ const FAVORITE_OPTIONS: { value: SearchFavoriteFilter; icon: SFSymbol; label: st
   { value: "exclude", icon: "heart.slash", label: "Exclude" },
 ];
 
-const withAlpha = (hexColor: string, alpha: number) => {
-  const normalized = hexColor.trim().replace("#", "");
-  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
-    return null;
-  }
+const INACTIVE_CONTROL_BACKGROUND = "#FFFFFF";
 
-  const red = Number.parseInt(normalized.slice(0, 2), 16);
-  const green = Number.parseInt(normalized.slice(2, 4), 16);
-  const blue = Number.parseInt(normalized.slice(4, 6), 16);
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-};
-
-const GlassButtonSurface = ({
+const ControlSurface = ({
   children,
   isSelected = false,
   borderColor,
-  fallbackFill,
-  glassTint,
+  backgroundColor,
   radius = 12,
   style,
 }: {
   children: React.ReactNode;
   isSelected?: boolean;
   borderColor?: string;
-  fallbackFill?: string;
-  glassTint?: string;
+  backgroundColor?: string;
   radius?: number;
   style?: StyleProp<ViewStyle>;
 }) => {
   const themeColors = useThemeColors();
-  const colorScheme = useColorScheme();
-  const { theme } = useUniwind();
-  const isDarkTheme = theme === "dark" || (theme !== "light" && colorScheme === "dark");
-  const resolvedBorderColor =
-    borderColor ??
-    withAlpha(isSelected ? themeColors.accent : themeColors.border, isSelected ? 0.64 : 0.38) ??
-    themeColors.border;
-  const resolvedFallbackFill =
-    fallbackFill ??
-    withAlpha(isSelected ? themeColors.accent : themeColors.surface, isSelected ? 0.18 : 0.1) ??
-    themeColors.surface;
-  const resolvedGlassTint =
-    glassTint ??
-    withAlpha(isSelected ? themeColors.accent : themeColors.surface, isSelected ? 0.24 : 0.14) ??
-    themeColors.surface;
 
   return (
     <View
@@ -88,56 +55,13 @@ const GlassButtonSurface = ({
           borderRadius: radius,
           borderCurve: "continuous",
           borderWidth: 1,
-          borderColor: resolvedBorderColor,
-          backgroundColor: resolvedFallbackFill,
-          overflow: "hidden",
+          borderColor: borderColor ?? (isSelected ? themeColors.accent : themeColors.border),
+          backgroundColor:
+            backgroundColor ?? (isSelected ? themeColors.accent : INACTIVE_CONTROL_BACKGROUND),
         },
         style,
       ]}
     >
-      {isGlassEffectAPIAvailable() ? (
-        <GlassView
-          pointerEvents="none"
-          glassEffectStyle="regular"
-          tintColor={resolvedGlassTint}
-          isInteractive
-          colorScheme={isDarkTheme ? "dark" : "light"}
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              borderRadius: radius,
-              borderCurve: "continuous",
-            },
-          ]}
-        />
-      ) : (
-        <BlurView
-          pointerEvents="none"
-          tint={isDarkTheme ? "dark" : "light"}
-          intensity={isSelected ? 36 : 24}
-          experimentalBlurMethod="dimezisBlurView"
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              borderRadius: radius,
-              borderCurve: "continuous",
-            },
-          ]}
-        />
-      )}
-      <View
-        pointerEvents="none"
-        style={[
-          StyleSheet.absoluteFill,
-          {
-            borderRadius: radius,
-            borderCurve: "continuous",
-            backgroundColor:
-              withAlpha(isSelected ? themeColors.accent : themeColors.bg, isSelected ? 0.14 : 0.05) ??
-              "rgba(255, 255, 255, 0.05)",
-          },
-        ]}
-      />
       {children}
     </View>
   );
@@ -153,15 +77,6 @@ const FilterPill = ({
   onPress: () => void;
 }) => {
   const themeColors = useThemeColors();
-  const glassTint =
-    withAlpha(isSelected ? themeColors.accent : themeColors.surface, isSelected ? 0.28 : 0.16) ??
-    (isSelected ? "rgba(255, 255, 255, 0.24)" : "rgba(255, 255, 255, 0.16)");
-  const borderColor =
-    withAlpha(isSelected ? themeColors.accent : themeColors.border, isSelected ? 0.68 : 0.4) ??
-    themeColors.border;
-  const fallbackFill =
-    withAlpha(isSelected ? themeColors.accent : themeColors.surface, isSelected ? 0.18 : 0.1) ??
-    "rgba(255, 255, 255, 0.16)";
 
   return (
     <Pressable
@@ -174,41 +89,31 @@ const FilterPill = ({
         borderRadius: 16,
         borderCurve: "continuous",
         borderWidth: 1,
-        borderColor,
-        backgroundColor: fallbackFill,
-        overflow: "hidden",
+        borderColor: isSelected ? themeColors.accent : themeColors.border,
+        backgroundColor: isSelected ? themeColors.accent : INACTIVE_CONTROL_BACKGROUND,
         justifyContent: "center",
         opacity: pressed ? 0.7 : 1,
       })}
     >
-      <GlassButtonSurface
-        isSelected={isSelected}
-        borderColor={borderColor}
-        fallbackFill={fallbackFill}
-        glassTint={glassTint}
-        radius={16}
-        style={{ flex: 1, justifyContent: "center" }}
+      <Text
+        numberOfLines={2}
+        style={{
+          color: isSelected ? themeColors.accentForeground : themeColors.text,
+          fontSize: 13,
+          fontWeight: isSelected ? "700" : "600",
+          lineHeight: 17,
+          paddingHorizontal: 12,
+          paddingVertical: 7,
+          textAlign: "center",
+        }}
       >
-        <Text
-          numberOfLines={2}
-          style={{
-            color: isSelected ? themeColors.accentForeground : themeColors.text,
-            fontSize: 13,
-            fontWeight: isSelected ? "700" : "600",
-            lineHeight: 17,
-            paddingHorizontal: 12,
-            paddingVertical: 7,
-            textAlign: "center",
-          }}
-        >
-          {label}
-        </Text>
-      </GlassButtonSurface>
+        {label}
+      </Text>
     </Pressable>
   );
 };
 
-const GlassPanel = ({
+const ControlPanel = ({
   children,
   style,
   ...viewProps
@@ -217,9 +122,6 @@ const GlassPanel = ({
   style?: StyleProp<ViewStyle>;
 } & ViewProps) => {
   const themeColors = useThemeColors();
-  const colorScheme = useColorScheme();
-  const { theme } = useUniwind();
-  const isDarkTheme = theme === "dark" || (theme !== "light" && colorScheme === "dark");
 
   return (
     <View
@@ -229,30 +131,12 @@ const GlassPanel = ({
           borderRadius: 12,
           borderCurve: "continuous",
           borderWidth: 1,
-          borderColor: withAlpha(themeColors.border, 0.56) ?? themeColors.border,
-          backgroundColor: withAlpha(themeColors.surface, 0.18) ?? themeColors.surface,
-          overflow: "hidden",
+          borderColor: themeColors.border,
+          backgroundColor: themeColors.surface,
         },
         style,
       ]}
     >
-      {isGlassEffectAPIAvailable() ? (
-        <GlassView
-          pointerEvents="none"
-          glassEffectStyle="regular"
-          tintColor={withAlpha(themeColors.surface, 0.22) ?? themeColors.surface}
-          colorScheme={isDarkTheme ? "dark" : "light"}
-          style={StyleSheet.absoluteFill}
-        />
-      ) : (
-        <BlurView
-          pointerEvents="none"
-          tint={isDarkTheme ? "dark" : "light"}
-          intensity={20}
-          experimentalBlurMethod="dimezisBlurView"
-          style={StyleSheet.absoluteFill}
-        />
-      )}
       {children}
     </View>
   );
@@ -290,7 +174,7 @@ const MiniOperatorToggle = ({
             onPress={() => onChange(option.value)}
             style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}
           >
-            <GlassButtonSurface
+            <ControlSurface
               isSelected={isSelected}
               radius={5}
               style={{ paddingHorizontal: 8, paddingVertical: 2 }}
@@ -304,7 +188,7 @@ const MiniOperatorToggle = ({
               >
                 {option.label}
               </Text>
-            </GlassButtonSurface>
+            </ControlSurface>
           </Pressable>
         );
       })}
@@ -339,7 +223,7 @@ const SegmentTab = ({
         opacity: pressed ? 0.72 : 1,
       })}
     >
-      <GlassButtonSurface
+      <ControlSurface
         isSelected={isActive}
         radius={7}
         style={{
@@ -378,7 +262,7 @@ const SegmentTab = ({
             </Text>
           </View>
         ) : null}
-      </GlassButtonSurface>
+      </ControlSurface>
     </Pressable>
   );
 };
@@ -423,25 +307,12 @@ export const FilterOptionsSheet = ({
   onClose,
 }: FilterOptionsSheetProps) => {
   const themeColors = useThemeColors();
-  const colorScheme = useColorScheme();
-  const { theme } = useUniwind();
   const [activeTab, setActiveTab] = useState<FilterSheetType>("genres");
   const [searchByTab, setSearchByTab] = useState<Record<FilterSheetType, string>>({
     genres: "",
     tags: "",
   });
-  const finishedTintColor = finishedOnly ? themeColors.accent : themeColors.textMuted;
-  const selectedWash = withAlpha(themeColors.accent, 0.14) ?? themeColors.surface;
-  const isDarkTheme = theme === "dark" || (theme !== "light" && colorScheme === "dark");
-  const gradientColors = useMemo<[string, string, string]>(
-    () =>
-      isDarkTheme
-        ? ["rgba(6, 10, 11, 0.24)", "rgba(6, 10, 11, 0.52)", "rgba(6, 10, 11, 0.82)"]
-        : ["rgba(248, 250, 252, 0.18)", "rgba(248, 250, 252, 0.6)", "rgba(248, 250, 252, 0.88)"],
-    [isDarkTheme],
-  );
-  const accentBackdropColor =
-    withAlpha(themeColors.accent, isDarkTheme ? 0.32 : 0.22) ?? themeColors.accent;
+  const finishedTintColor = finishedOnly ? themeColors.accentForeground : themeColors.textMuted;
   const isGenres = activeTab === "genres";
   const facetLabel = isGenres ? "genres" : "tags";
   const options = isGenres ? genreOptions : tagOptions;
@@ -463,18 +334,6 @@ export const FilterOptionsSheet = ({
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg, minHeight: 0 }}>
-      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        <View
-          style={[StyleSheet.absoluteFill, { backgroundColor: accentBackdropColor }]}
-        />
-        <LinearGradient
-          colors={gradientColors}
-          locations={[0, 0.5, 1]}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
-      </View>
       <View style={{ paddingHorizontal: 16, paddingTop: 24, paddingBottom: 12, gap: 12 }}>
         <View
           style={{
@@ -484,7 +343,7 @@ export const FilterOptionsSheet = ({
             gap: 8,
           }}
         >
-          <GlassPanel
+          <ControlPanel
             accessibilityRole="radiogroup"
             style={{
               flexDirection: "row",
@@ -503,7 +362,7 @@ export const FilterOptionsSheet = ({
                   onPress={() => onFavoriteFilterChange(option.value)}
                   style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}
                 >
-                  <GlassButtonSurface
+                  <ControlSurface
                     isSelected={isSelected}
                     radius={7}
                     style={{
@@ -518,27 +377,25 @@ export const FilterOptionsSheet = ({
                       name={option.icon}
                       tintColor={
                         isSelected
-                          ? option.value === "only"
-                            ? "#d24d57"
-                            : themeColors.accent
+                          ? themeColors.accentForeground
                           : themeColors.textMuted
                       }
                       size={12}
                     />
                     <Text
                       style={{
-                        color: isSelected ? themeColors.text : themeColors.textMuted,
+                        color: isSelected ? themeColors.accentForeground : themeColors.textMuted,
                         fontSize: 12,
                         fontWeight: isSelected ? "700" : "500",
                       }}
                     >
                       {option.label}
                     </Text>
-                  </GlassButtonSurface>
+                  </ControlSurface>
                 </Pressable>
               );
             })}
-          </GlassPanel>
+          </ControlPanel>
 
           <Pressable
             accessibilityRole="switch"
@@ -546,17 +403,8 @@ export const FilterOptionsSheet = ({
             onPress={onToggleFinishedOnly}
             style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}
           >
-            <GlassButtonSurface
+            <ControlSurface
               isSelected={finishedOnly}
-              borderColor={
-                withAlpha(finishedOnly ? themeColors.accent : themeColors.border, 0.62) ??
-                themeColors.border
-              }
-              fallbackFill={
-                finishedOnly
-                  ? selectedWash
-                  : (withAlpha(themeColors.surface, 0.12) ?? themeColors.surface)
-              }
               radius={9}
               style={{
                 flexDirection: "row",
@@ -573,19 +421,19 @@ export const FilterOptionsSheet = ({
               />
               <Text
                 style={{
-                  color: finishedOnly ? themeColors.text : themeColors.textMuted,
+                  color: finishedOnly ? themeColors.accentForeground : themeColors.textMuted,
                   fontSize: 12,
                   fontWeight: finishedOnly ? "700" : "500",
                 }}
               >
                 Finished
               </Text>
-            </GlassButtonSurface>
+            </ControlSurface>
           </Pressable>
         </View>
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <GlassPanel
+          <ControlPanel
             accessibilityRole="tablist"
             style={{
               flex: 1,
@@ -606,21 +454,21 @@ export const FilterOptionsSheet = ({
               isActive={!isGenres}
               onPress={() => setActiveTab("tags")}
             />
-          </GlassPanel>
+          </ControlPanel>
           <Pressable onPress={onClose} hitSlop={10} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>
-            <GlassButtonSurface
+            <ControlSurface
               isSelected
               radius={999}
               style={{ paddingHorizontal: 12, paddingVertical: 6 }}
             >
-              <Text style={{ color: themeColors.accent, fontWeight: "600", fontSize: 15 }}>
+              <Text style={{ color: themeColors.accentForeground, fontWeight: "600", fontSize: 15 }}>
                 Done
               </Text>
-            </GlassButtonSurface>
+            </ControlSurface>
           </Pressable>
         </View>
 
-        <GlassPanel
+        <ControlPanel
           style={{
             flexDirection: "row",
             alignItems: "center",
@@ -647,7 +495,7 @@ export const FilterOptionsSheet = ({
               />
             </Pressable>
           ) : null}
-        </GlassPanel>
+        </ControlPanel>
 
         {selectedValues.length > 0 ? (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -659,15 +507,15 @@ export const FilterOptionsSheet = ({
               <MiniOperatorToggle operator={operator} onChange={onOperatorChange} />
             ) : null}
             <Pressable onPress={onClear} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>
-              <GlassButtonSurface
+              <ControlSurface
                 isSelected
                 radius={999}
                 style={{ paddingHorizontal: 10, paddingVertical: 4 }}
               >
-                <Text style={{ color: themeColors.accent, fontSize: 12, fontWeight: "600" }}>
+                <Text style={{ color: themeColors.accentForeground, fontSize: 12, fontWeight: "600" }}>
                   Clear
                 </Text>
-              </GlassButtonSurface>
+              </ControlSurface>
             </Pressable>
           </View>
         ) : null}
@@ -684,8 +532,7 @@ export const FilterOptionsSheet = ({
         }}
       >
         {visibleOptions.length ? (
-          <GlassContainer
-            spacing={8}
+          <View
             style={{
               flexDirection: "row",
               flexWrap: "wrap",
@@ -701,7 +548,7 @@ export const FilterOptionsSheet = ({
                 onPress={() => onToggle(option)}
               />
             ))}
-          </GlassContainer>
+          </View>
         ) : (
           <Text style={{ color: themeColors.textMuted, fontSize: 13 }}>
             No matching {facetLabel}.

@@ -9,6 +9,7 @@ import {
   type HomeDerivedShelfId,
 } from "@/store/device-books-store";
 import {
+  clampHomeShelfItemCount,
   DEFAULT_HOME_SHELF_ITEM_COUNT,
   MAX_HOME_SHELF_ITEM_COUNT,
   MIN_HOME_SHELF_ITEM_COUNT,
@@ -64,6 +65,11 @@ type EditorPlaylistShelf = {
 };
 
 type EditorShelf = EditorDerivedShelf | EditorCustomShelf | EditorPlaylistShelf;
+
+type OptimisticHomeItemCount = {
+  shelfId: string;
+  value: number;
+};
 
 const DERIVED_SHELF_TITLES: Record<HomeDerivedShelfId, string> = {
   continueListening: "Continue Listening",
@@ -250,7 +256,56 @@ export const BookshelfEditorSheet = () => {
   };
   const [draftIsVisible, setDraftIsVisible] = useState(false);
   const [draftHomeItemCount, setDraftHomeItemCount] = useState(DEFAULT_HOME_SHELF_ITEM_COUNT);
+  const [optimisticHomeItemCount, setOptimisticHomeItemCount] =
+    useState<OptimisticHomeItemCount | null>(null);
+  const displayedHomeItemCountRef = useRef(DEFAULT_HOME_SHELF_ITEM_COUNT);
   const committedRef = useRef(false);
+
+  const displayedHomeItemCount = shelf
+    ? optimisticHomeItemCount?.shelfId === shelf.id
+      ? optimisticHomeItemCount.value
+      : shelf.homeItemCount
+    : draftHomeItemCount;
+
+  useEffect(() => {
+    displayedHomeItemCountRef.current = displayedHomeItemCount;
+  }, [displayedHomeItemCount]);
+
+  useEffect(() => {
+    let shouldClearOptimisticCount = false;
+
+    if (!shelf) {
+      shouldClearOptimisticCount = Boolean(optimisticHomeItemCount);
+    } else if (optimisticHomeItemCount?.shelfId !== shelf.id) {
+      shouldClearOptimisticCount = Boolean(optimisticHomeItemCount);
+    } else if (shelf.homeItemCount === optimisticHomeItemCount.value) {
+      shouldClearOptimisticCount = true;
+    }
+
+    if (!shouldClearOptimisticCount) return;
+
+    const timer = setTimeout(() => {
+      setOptimisticHomeItemCount(null);
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [optimisticHomeItemCount, shelf]);
+
+  const updateHomeItemCount = (delta: -1 | 1) => {
+    if (!shelf) {
+      if (isPlaylistCreateDraft) {
+        setDraftHomeItemCount((current) => clampHomeShelfItemCount(current + delta));
+      }
+      return;
+    }
+
+    const nextCount = clampHomeShelfItemCount(displayedHomeItemCountRef.current + delta);
+    if (nextCount === displayedHomeItemCountRef.current) return;
+
+    displayedHomeItemCountRef.current = nextCount;
+    setOptimisticHomeItemCount({ shelfId: shelf.id, value: nextCount });
+    setHomeShelfItemCount(homeScopeKey, shelf.id, nextCount);
+  };
 
   useEffect(() => {
     const nextName = nameDraft.trim();
@@ -564,31 +619,11 @@ export const BookshelfEditorSheet = () => {
               isLast
               value={
                 <CountStepper
-                  value={shelf ? shelf.homeItemCount : draftHomeItemCount}
+                  value={displayedHomeItemCount}
                   min={MIN_HOME_SHELF_ITEM_COUNT}
                   max={MAX_HOME_SHELF_ITEM_COUNT}
-                  onDecrement={() => {
-                    if (!shelf) {
-                      if (isPlaylistCreateDraft) {
-                        setDraftHomeItemCount((current) =>
-                          Math.max(MIN_HOME_SHELF_ITEM_COUNT, current - 1),
-                        );
-                      }
-                      return;
-                    }
-                    setHomeShelfItemCount(homeScopeKey, shelf.id, shelf.homeItemCount - 1);
-                  }}
-                  onIncrement={() => {
-                    if (!shelf) {
-                      if (isPlaylistCreateDraft) {
-                        setDraftHomeItemCount((current) =>
-                          Math.min(MAX_HOME_SHELF_ITEM_COUNT, current + 1),
-                        );
-                      }
-                      return;
-                    }
-                    setHomeShelfItemCount(homeScopeKey, shelf.id, shelf.homeItemCount + 1);
-                  }}
+                  onDecrement={() => updateHomeItemCount(-1)}
+                  onIncrement={() => updateHomeItemCount(1)}
                 />
               }
             />

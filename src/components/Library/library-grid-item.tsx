@@ -1,6 +1,10 @@
 import { LibraryItemSummary } from "@/api/library-items-api";
 import { CoverImage } from "@/components/images/cover-image";
-import { resolveStoredDownloadCoverUri, useDeviceBooksStore } from "@/store/device-books-store";
+import {
+  resolveStoredDownloadCoverUri,
+  selectIsBookFullyDownloaded,
+  useDeviceBooksStore,
+} from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -15,6 +19,9 @@ export const LibraryGridItem = ({ libraryItem, isFavorite = false, isFinished = 
   const themeColors = useThemeColors();
   const localCoverUri = useDeviceBooksStore((state) =>
     resolveStoredDownloadCoverUri(state.downloadedBookData[libraryItem.id]),
+  );
+  const isDownloaded = useDeviceBooksStore((state) =>
+    selectIsBookFullyDownloaded(state, libraryItem.id),
   );
 
   return (
@@ -36,6 +43,7 @@ export const LibraryGridItem = ({ libraryItem, isFavorite = false, isFinished = 
           variant="thumb"
           showFavoriteIndicator={isFavorite}
           showFinishedIndicator={isFinished}
+          showDownloadedIndicator={isDownloaded}
           style={{
             width: "100%",
             aspectRatio: 1,
