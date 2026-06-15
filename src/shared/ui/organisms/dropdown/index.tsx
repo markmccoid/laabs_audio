@@ -271,8 +271,8 @@ const Content = ({
   if (!visible || !triggerLayout) return null;
 
   const childrenWithIndex = Children.map(children, (child, index) =>
-    React.isValidElement(child)
-      ? React.cloneElement(child, { ...child.props, index } as any)
+    React.isValidElement<Record<string, unknown>>(child)
+      ? React.cloneElement(child, { ...child.props, index })
       : child,
   );
 

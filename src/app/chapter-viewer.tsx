@@ -3,7 +3,7 @@ import { useGetItemDetails, useGetUserServerState } from "@/hooks/abs-data-hooks
 import { playbackStore, playerService, usePlaybackStore } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { formatSeconds } from "@/utils/formatUtils";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
@@ -39,7 +39,7 @@ const ChapterViewerRoute = () => {
     : params.libraryItemId;
   const [pendingChapterId, setPendingChapterId] = useState<number | null>(null);
   const hasAutoScrolled = useRef(false);
-  const listRef = useRef<FlashList<ChapterListItem>>(null);
+  const listRef = useRef<FlashListRef<ChapterListItem>>(null);
 
   const { data: bookData, isLoading, isError, refetch } = useGetItemDetails(routeLibraryItemId);
   const { data: userServerState } = useGetUserServerState();

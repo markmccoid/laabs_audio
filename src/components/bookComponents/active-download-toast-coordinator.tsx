@@ -213,7 +213,6 @@ export const ActiveDownloadToastCoordinator = () => {
       toast.update(toastId, {
         type: "loading",
         title,
-        description,
         ...options,
       });
       return;

@@ -12,7 +12,7 @@ import { queryKeys } from "@/query/query-keys";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
 import { useQuery } from "@tanstack/react-query";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack, useLocalSearchParams, type Href } from "expo-router";
 import { useDeferredValue, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -136,7 +136,7 @@ export const BookFilterResultsSheet = () => {
 
     router.back();
     setTimeout(() => {
-      router.push(destination);
+      router.push(destination as Href);
     }, 0);
   };
 
