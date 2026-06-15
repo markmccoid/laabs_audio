@@ -18,6 +18,8 @@
     "expo-env.d.ts"
   ],
   "exclude": [
+    "node_modules",
+    "example",
     "**/*.test.ts",
     "**/*.test.tsx"
   ]
