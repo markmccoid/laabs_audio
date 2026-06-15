@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Theming — LAABS Audio Handbook</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script>try{var m=localStorage.getItem('laabs-docs-theme');if(m)document.documentElement.setAttribute('data-theme',m);}catch(e){}</script>
+</head>
+<body data-page="theming.html">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <div class="content">
+      <article>
+        <div class="topbar">
+          <button class="menu-toggle" aria-label="Toggle navigation">☰ Menu</button>
+          <span class="crumbs"><a href="index.html">Handbook</a> › Features › Theming</span>
+          <span class="spacer"></span>
+          <button class="theme-toggle">☾ Dark</button>
+        </div>
+
+        <h1>Theming</h1>
+        <p class="lede">
+          A deliberately small token set, applied consistently. Built on Uniwind, with light and dark
+          resolved from the system theme.
+        </p>
+
+        <div class="callout note">
+          <span class="ic">🎨</span>
+          <div>
+            <span class="callout-title">Principle</span>
+            <p>Use the six canonical tokens everywhere; reserve the accent for genuinely interactive emphasis. Don't hardcode neutral colors.</p>
+          </div>
+        </div>
+
+        <h2>The canonical tokens</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Token</th><th>Used for</th></tr></thead>
+            <tbody>
+              <tr><td><code>--color-bg</code></td><td>App / page background</td></tr>
+              <tr><td><code>--color-surface</code></td><td>Cards, sheets, panels</td></tr>
+              <tr><td><code>--color-text</code></td><td>Primary text and icon color</td></tr>
+              <tr><td><code>--color-text-muted</code></td><td>Secondary / supporting text (metadata only)</td></tr>
+              <tr><td><code>--color-border</code></td><td>Borders, dividers, disabled tracks</td></tr>
+              <tr><td><code>--color-accent</code></td><td>Primary interactive emphasis — tabs, slider thumb, primary buttons</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Tokens live in <code>src/global.css</code> under <code>@layer theme</code>, with light/dark
+          defined via Uniwind variants inside <code>:root</code> (<code>@variant light { … }</code> /
+          <code>@variant dark { … }</code>).
+        </p>
+
+        <h2>Three ways to read a token</h2>
+        <ol>
+          <li><strong>Utility classes (preferred):</strong> <code>bg-bg</code>, <code>bg-surface</code>, <code>text-text</code>, <code>text-text-muted</code>, <code>border-border</code>, <code>bg-accent</code> / <code>text-accent</code> / <code>border-accent</code>.</li>
+          <li><strong>JS style props / third-party props:</strong> <code>useThemeColors()</code> from <code>src/theme/use-app-theme.ts</code> — for <code>ActivityIndicator</code>, <code>Slider</code>, <code>SymbolView</code>, inline <code>style</code>.</li>
+          <li><strong>Navigation theme sync:</strong> <code>useNavigationTheme()</code> from the same module, wrapped via <code>ThemeProvider</code> in <code>src/app/_layout.tsx</code>.</li>
+        </ol>
+
+        <h2>Accent rules</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Use accent for</th><th>Avoid accent for</th></tr></thead>
+            <tbody>
+              <tr><td>selected tab icon/label</td><td>large text blocks</td></tr>
+              <tr><td>slider active track + thumb</td><td>whole-page backgrounds</td></tr>
+              <tr><td>primary call-to-action buttons</td><td>non-actionable surfaces</td></tr>
+              <tr><td>active selection states</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Component checklist</h2>
+        <ol>
+          <li>Replace hardcoded neutral colors with tokens.</li>
+          <li>Keep one dominant surface and one border tone.</li>
+          <li>Use muted text for metadata only.</li>
+          <li>Use accent only on actionable / high-emphasis elements.</li>
+          <li>Verify both light and dark by switching the system theme.</li>
+        </ol>
+
+        <div class="callout tip">
+          <span class="ic">🟥</span>
+          <div>
+            <span class="callout-title">Semantic exception</span>
+            <p>Error / warning / success messaging may use dedicated semantic colors — keep those isolated to feedback components, not general layout.</p>
+          </div>
+        </div>
+
+        <div class="page-foot">
+          Distilled from <code>docs/theming-style-guide.md</code> and <code>theming-implementation-plan.md</code>.
+          See <a href="https://docs.uniwind.dev/theming/basics" target="_blank" rel="noopener">Uniwind theming docs</a>.
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="assets/site.js"></script>
+</body>
+</html>

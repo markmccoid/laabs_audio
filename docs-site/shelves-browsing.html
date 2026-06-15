@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Home &amp; Shelves — LAABS Audio Handbook</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script>try{var m=localStorage.getItem('laabs-docs-theme');if(m)document.documentElement.setAttribute('data-theme',m);}catch(e){}</script>
+</head>
+<body data-page="shelves-browsing.html">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <div class="content">
+      <article>
+        <div class="topbar">
+          <button class="menu-toggle" aria-label="Toggle navigation">☰ Menu</button>
+          <span class="crumbs"><a href="index.html">Handbook</a> › Features › Home &amp; Shelves</span>
+          <span class="spacer"></span>
+          <button class="theme-toggle">☾ Dark</button>
+        </div>
+
+        <h1>Home &amp; Shelves</h1>
+        <p class="lede">
+          The Home screen is a stack of shelves assembled entirely from local state, so it renders
+          instantly and works offline. Three different kinds of shelf — derived, custom, and
+          playlist-backed — are merged by one hook.
+        </p>
+
+        <div class="callout note">
+          <span class="ic">🗝️</span>
+          <div>
+            <span class="callout-title">Everything is scoped</span>
+            <p>
+              All bookshelf state is keyed by <code>activeLibraryUserKey + activeLibraryId</code> (via
+              <code>toHomeShelfScopeKey</code>). This is what stops one user's or library's shelves from
+              leaking into another's on a shared device.
+            </p>
+          </div>
+        </div>
+
+        <h2>Three classes of shelf</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Class</th><th>Source</th><th>Examples</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Derived</strong> (computed)</td><td>SQLite home projection + settings</td><td>Continue Listening, Recently Added, Discover</td></tr>
+              <tr><td><strong>Custom</strong> (curated)</td><td>Zustand device store — arrays of <code>libraryItemId</code></td><td>user-made shelves</td></tr>
+              <tr><td><strong>Playlist</strong> (server-backed)</td><td>device store projection of ABS playlists</td><td>shelves mirroring Audiobookshelf playlists</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>How a Home render is assembled</h2>
+        <p>
+          <code>useHomeShelves()</code> is the orchestrator. It reads scoped settings and custom shelves,
+          pulls one SQLite home projection, derives the computed shelves, merges in custom and playlist
+          shelves, applies ordering, and exposes both full and Home-trimmed arrays.
+        </p>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 640 380" role="img" aria-label="Shelf derivation in useHomeShelves">
+            <defs>
+              <marker id="sh" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" class="arrowfill"></path>
+              </marker>
+            </defs>
+
+            <!-- inputs -->
+            <rect class="node" x="20" y="20" width="180" height="44" rx="9"></rect>
+            <text class="nlabel" x="110" y="42" text-anchor="middle">SQLite home projection</text>
+            <text class="nsub" x="110" y="57" text-anchor="middle">summaries + flags</text>
+
+            <rect class="node" x="20" y="100" width="180" height="44" rx="9"></rect>
+            <text class="nlabel" x="110" y="122" text-anchor="middle">settings store</text>
+            <text class="nsub" x="110" y="137" text-anchor="middle">visibility · order · Discover seed</text>
+
+            <rect class="node" x="20" y="180" width="180" height="44" rx="9"></rect>
+            <text class="nlabel" x="110" y="202" text-anchor="middle">device store</text>
+            <text class="nsub" x="110" y="217" text-anchor="middle">custom + playlist shelves</text>
+
+            <rect class="node" x="20" y="260" width="180" height="44" rx="9"></rect>
+            <text class="nlabel" x="110" y="282" text-anchor="middle">React Query</text>
+            <text class="nsub" x="110" y="297" text-anchor="middle">progress · playlists</text>
+
+            <!-- hook -->
+            <rect class="node accent" x="270" y="130" width="160" height="86" rx="10"></rect>
+            <text class="nlabel" x="350" y="166" text-anchor="middle">useHomeShelves()</text>
+            <text class="nsub" x="350" y="186" text-anchor="middle">derive · merge · order</text>
+
+            <line class="edge" x1="200" y1="42" x2="268" y2="150" marker-end="url(#sh)"></line>
+            <line class="edge" x1="200" y1="122" x2="268" y2="160" marker-end="url(#sh)"></line>
+            <line class="edge" x1="200" y1="202" x2="268" y2="186" marker-end="url(#sh)"></line>
+            <line class="edge" x1="200" y1="282" x2="268" y2="196" marker-end="url(#sh)"></line>
+
+            <!-- outputs -->
+            <rect class="node" x="490" y="40" width="130" height="40" rx="9"></rect>
+            <text class="nlabel" x="555" y="64" text-anchor="middle">Continue Listening</text>
+            <rect class="node" x="490" y="92" width="130" height="40" rx="9"></rect>
+            <text class="nlabel" x="555" y="116" text-anchor="middle">Recently Added</text>
+            <rect class="node" x="490" y="144" width="130" height="40" rx="9"></rect>
+            <text class="nlabel" x="555" y="168" text-anchor="middle">Discover</text>
+            <rect class="node" x="490" y="196" width="130" height="40" rx="9"></rect>
+            <text class="nlabel" x="555" y="220" text-anchor="middle">Custom shelves</text>
+            <rect class="node" x="490" y="248" width="130" height="40" rx="9"></rect>
+            <text class="nlabel" x="555" y="272" text-anchor="middle">Playlist shelves</text>
+
+            <line class="edge" x1="430" y1="150" x2="488" y2="62" marker-end="url(#sh)"></line>
+            <line class="edge" x1="430" y1="158" x2="488" y2="112" marker-end="url(#sh)"></line>
+            <line class="edge" x1="430" y1="173" x2="488" y2="164" marker-end="url(#sh)"></line>
+            <line class="edge" x1="430" y1="188" x2="488" y2="216" marker-end="url(#sh)"></line>
+            <line class="edge" x1="430" y1="200" x2="488" y2="268" marker-end="url(#sh)"></line>
+
+            <text class="elabel" x="350" y="250" text-anchor="middle">→ shelves + visibleShelves</text>
+            <text class="elabel" x="350" y="330" text-anchor="middle">missing playlist shelves filtered out</text>
+          </svg>
+          <figcaption>One hook turns four local sources into the ordered shelf model. Continue Listening sorts unfinished books by latest update; Recently Added sorts by <code>addedAt</code>; Discover shuffles unread books by a deterministic daily seed.</figcaption>
+        </figure>
+
+        <h2>Playlist shelves have sync state</h2>
+        <p>
+          Playlist shelves are optimistic local projections of server playlists — the device store holds
+          them so the app can render and mutate immediately, but the server is the source of truth for
+          whether the playlist still exists. Each carries a <code>syncState</code>:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>syncState</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td><code>synced</code></td><td>Backed by a playlist currently known on the server.</td></tr>
+              <tr><td><code>pending</code></td><td>Optimistic create/update awaiting server confirmation.</td></tr>
+              <tr><td><code>unsynced</code></td><td>A local operation still needs to sync.</td></tr>
+              <tr><td><code>missing</code></td><td>The server no longer returns the backing playlist.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn">
+          <span class="ic">🚫</span>
+          <div>
+            <span class="callout-title">Missing shelves are filtered, not repaired</span>
+            <p>
+              A <code>missing</code> playlist shelf must not appear in Home, in book Shelf Membership menus,
+              or in Settings. <code>useHomeShelves</code> and <code>useShelfMembershipOptions</code> filter
+              them out rather than showing a repair state. (Future cleanup removes the records once server
+              absence is confirmed.)
+            </p>
+          </div>
+        </div>
+
+        <h2>Where each piece lives</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Concern</th><th>File</th></tr></thead>
+            <tbody>
+              <tr><td>Shelf orchestration</td><td><code>src/hooks/use-home-shelves.ts</code></td></tr>
+              <tr><td>Custom + playlist shelf CRUD</td><td><code>src/store/device-books-store.ts</code></td></tr>
+              <tr><td>Visibility, order, Discover snapshot</td><td><code>src/store/settings-store.ts</code></td></tr>
+              <tr><td>Home projection + Discover candidates</td><td><code>src/data/sqlite/home-reads.ts</code></td></tr>
+              <tr><td>Home screen + card</td><td><code>src/components/Home/home-shelves-screen.tsx</code> · <code>shelf-book-card.tsx</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted">
+          See <a href="data-sqlite.html">Data &amp; SQLite</a> for the projection read, and
+          <a href="architecture.html">Architecture</a> for why the catalog never enters the persisted cache.
+        </p>
+
+        <div class="page-foot">
+          Distilled from <code>docs/bookshelves-concept-flow-code.md</code> and <code>home-book-card-menu.md</code>.
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="assets/site.js"></script>
+</body>
+</html>

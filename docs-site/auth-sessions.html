@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Auth, Sessions &amp; Libraries — LAABS Audio Handbook</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script>try{var m=localStorage.getItem('laabs-docs-theme');if(m)document.documentElement.setAttribute('data-theme',m);}catch(e){}</script>
+</head>
+<body data-page="auth-sessions.html">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <div class="content">
+      <article>
+        <div class="topbar">
+          <button class="menu-toggle" aria-label="Toggle navigation">☰ Menu</button>
+          <span class="crumbs"><a href="index.html">Handbook</a> › Core systems › Auth, Sessions &amp; Libraries</span>
+          <span class="spacer"></span>
+          <button class="theme-toggle">☾ Dark</button>
+        </div>
+
+        <h1>Auth, Sessions &amp; Libraries</h1>
+        <p class="lede">
+          The app remembers multiple sign-ins and switches between them safely. The trick is separating
+          <em>who owns your listening state</em> (a durable identity) from <em>how you reconnect</em>
+          (a saved server + username) — and never tearing down durable data on a failed switch.
+        </p>
+
+        <div class="callout note">
+          <span class="ic">🪪</span>
+          <div>
+            <span class="callout-title">Two ideas you must not conflate</span>
+            <p>
+              <strong>Remembered User Session</strong> is keyed by the Audiobookshelf <em>User Identity</em>
+              (the server's user UUID) and owns all durable local state — bookmarks, progress, rate,
+              position. <strong>Session Entry Option</strong> is just a <em>way to restore</em> a session
+              (<code>serverUrl + username</code>). Several Entry Options (LAN URL, public URL) can restore
+              the <em>same</em> identity. The server endpoint is for API calls only — never for local-state
+              identity. (<a href="decisions.html">ADR-0015 / 0020</a>)
+            </p>
+          </div>
+        </div>
+
+        <h2>One entry path for sign-in and switching</h2>
+        <p>
+          There is no <code>loginWithPassword</code> or <code>restoreSession</code> action. Everything —
+          first sign-in, switching users, re-entering after an error — goes through one navigation-free
+          function, <code>enterUserSession(request)</code>, which runs five phases in a fixed order so a
+          failed or interrupted entry <strong>never leaves you worse off than before you tried</strong>.
+        </p>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 640 360" role="img" aria-label="enterUserSession phases">
+            <defs>
+              <marker id="ae" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" class="arrowfill"></path>
+              </marker>
+            </defs>
+
+            <rect class="node" x="200" y="14" width="240" height="42" rx="9"></rect>
+            <text class="nlabel" x="320" y="32" text-anchor="middle">enterUserSession(request)</text>
+            <text class="nsub" x="320" y="47" text-anchor="middle">via: restore | credentials</text>
+
+            <rect class="node" x="220" y="74" width="200" height="40" rx="9"></rect>
+            <text class="nlabel" x="320" y="92" text-anchor="middle">1 · Authenticate</text>
+            <text class="nsub" x="320" y="107" text-anchor="middle">token → password fallback</text>
+            <line class="edge" x1="320" y1="56" x2="320" y2="72" marker-end="url(#ae)"></line>
+
+            <rect class="node" x="220" y="130" width="200" height="40" rx="9"></rect>
+            <text class="nlabel" x="320" y="148" text-anchor="middle">2 · Persist (inactive)</text>
+            <text class="nsub" x="320" y="163" text-anchor="middle">save record + secrets</text>
+            <line class="edge" x1="320" y1="114" x2="320" y2="128" marker-end="url(#ae)"></line>
+
+            <rect class="node" x="220" y="186" width="200" height="40" rx="9"></rect>
+            <text class="nlabel" x="320" y="204" text-anchor="middle">3 · Cross the boundary</text>
+            <text class="nsub" x="320" y="219" text-anchor="middle">tear down live state only</text>
+            <line class="edge" x1="320" y1="170" x2="320" y2="184" marker-end="url(#ae)"></line>
+
+            <rect class="node accent" x="220" y="242" width="200" height="40" rx="9"></rect>
+            <text class="nlabel" x="320" y="260" text-anchor="middle">4 · Commit (atomic)</text>
+            <text class="nsub" x="320" y="275" text-anchor="middle">flip activeSessionKey</text>
+            <line class="edge" x1="320" y1="226" x2="320" y2="240" marker-end="url(#ae)"></line>
+
+            <rect class="node" x="220" y="298" width="200" height="40" rx="9"></rect>
+            <text class="nlabel" x="320" y="316" text-anchor="middle">5 · Resolve library</text>
+            <text class="nsub" x="320" y="331" text-anchor="middle">→ SessionEntryResolution</text>
+            <line class="edge" x1="320" y1="282" x2="320" y2="296" marker-end="url(#ae)"></line>
+
+            <!-- failure short-circuit -->
+            <path class="edge dashed" d="M220,94 L80,94 L80,330 L218,330" marker-end="url(#ae)"></path>
+            <text class="elabel" x="80" y="210" text-anchor="middle">auth fails →</text>
+            <text class="elabel" x="80" y="224" text-anchor="middle">no teardown,</text>
+            <text class="elabel" x="80" y="238" text-anchor="middle">previous session</text>
+            <text class="elabel" x="80" y="252" text-anchor="middle">intact</text>
+          </svg>
+          <figcaption>Authenticate → persist inactive → cross boundary → commit → resolve. The active session only changes at step 4; a failure before that leaves the previous session fully usable.</figcaption>
+        </figure>
+
+        <p>
+          The result is a <code>SessionEntryResolution</code> — <code>activate</code>,
+          <code>needsLibrarySelection</code>, <code>noLibraries</code>, or <code>failed</code>. Because
+          <code>enterUserSession</code> is navigation-free, screens call
+          <code>useApplySessionEntryResolution()</code> to turn that outcome into routing. Screens never
+          hand-sequence authenticate/commit/resolve themselves.
+        </p>
+
+        <div class="callout tip">
+          <span class="ic">🛟</span>
+          <div>
+            <span class="callout-title">Crossing the boundary only sheds <em>live</em> state</span>
+            <p>
+              Same identity (switching endpoints) → tear down only streaming playback. Different identity →
+              end playback (after capturing a Progress Sync Intent), clear Library Activation, and clear the
+              session-scoped query cache. It <strong>never</strong> touches durable, identity-scoped data:
+              bookmarks, progress intents, and downloads always survive.
+            </p>
+          </div>
+        </div>
+
+        <h2>Access Mode is the only thing routing branches on</h2>
+        <p>
+          Raw <code>AuthStatus</code> (<code>hydrating</code> / <code>anonymous</code> /
+          <code>authenticated</code> / <code>offlineOnly</code>) plus stored state is collapsed by
+          <code>selectAccessMode</code> into a single <strong>Access Mode</strong>. Root routing reads
+          that, not <code>status</code>.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Access Mode</th><th>Condition</th><th>Surfaces</th></tr></thead>
+            <tbody>
+              <tr><td><code>hydrating</code></td><td>restoring from storage</td><td>loading only</td></tr>
+              <tr><td><code>firstRunSignInRequired</code></td><td>no usable/remembered session</td><td>forced sign-in (downloads not exposed)</td></tr>
+              <tr><td><code>downloadedSessionOnly</code></td><td>server blocked, remembered identity + downloads exist</td><td>session-scoped downloads + recovery</td></tr>
+              <tr><td><code>serverSetup</code></td><td>authenticated, no Active Library</td><td>Library Resolution / Selection</td></tr>
+              <tr><td><code>serverBrowsing</code></td><td>authenticated + Active Library</td><td>Home, Search, streaming, sync, shelves</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Resolution → Selection → Activation</h2>
+        <p>After entry (or whenever an authenticated session has no Active Library), libraries resolve in three steps:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Step</th><th>What it is</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Resolution</strong></td><td>Zero / one / many libraries? Zero → browsing unavailable. One → may auto-activate. Many → user must select. (<a href="decisions.html">ADR-0004</a>)</td></tr>
+              <tr><td><strong>Selection</strong></td><td>The user's choice of which library becomes active (Home menu, or the <code>/library-picker</code> sheet).</td></tr>
+              <tr><td><strong>Activation</strong></td><td>Prepare the chosen library <em>before</em> committing it as active. Needs <code>userServerState</code>; catalog is <em>not</em> part of activation. (<a href="decisions.html">ADR-0009</a>)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn">
+          <span class="ic">⚠️</span>
+          <div>
+            <span class="callout-title">Activation invariants</span>
+            <p>
+              Never commit a new Active Library before activation succeeds; never let a half-loaded Home
+              become interactive; never let playlist loading block activation; never let the picker sheet
+              own the commit (it only captures intent and hands off to the one shared activation command).
+            </p>
+          </div>
+        </div>
+
+        <h2>Listening State Owner</h2>
+        <p>
+          Many surfaces need "which identity owns this book's local state right now." That's the
+          <strong>Listening State Owner</strong>: the signed-in/remembered identity if present, otherwise
+          the book's Downloaded Asset Owner. Resolve it in one place —
+          <code>useResolvedListeningOwnerKey()</code> (components) or
+          <code>resolveListeningOwnerKey()</code> (services). Don't re-spell
+          <code>activeLibraryUserKey ?? storedUserId ?? downloadOwner</code> inline.
+        </p>
+
+        <h2>Storage, tokens, and logout</h2>
+        <ul>
+          <li><strong>SecureStore</strong> holds per-session secrets, keyed <code>abs.session.&lt;key&gt;.&lt;password|accessToken|refreshToken&gt;</code>. No global credential slot.</li>
+          <li><strong>MMKV</strong> holds the remembered-sessions snapshot (<code>abs.sessions</code>) and the small Zustand auth slice (active library + stored user id).</li>
+          <li><strong>Token refresh</strong> (<code>refreshSession</code>): valid token returns as-is; else <code>POST /auth/refresh</code>, then stored-password re-login; if both fail, clear tokens, flag <code>needsAttention</code>, drop to anonymous/offlineOnly.</li>
+          <li><strong>API calls</strong> go through <code>absClient → authFetch</code>, which injects <code>Bearer</code>, refreshes when needed, and retries once on <code>401</code>.</li>
+          <li><strong>Logout</strong> snapshots progress, ends playback, clears caches + tokens + credentials for every Entry Option of that identity, and routes to Login — but <strong>downloads, local bookmarks, and progress intents stay on disk</strong>. (<a href="decisions.html">ADR-0010/0011</a>)</li>
+        </ul>
+
+        <h2>Where it lives</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>File</th><th>Responsibility</th></tr></thead>
+            <tbody>
+              <tr><td><code>src/auth/auth-store.ts</code></td><td>Central auth state + <code>commitActiveSession</code>, refresh, hydration, logout.</td></tr>
+              <tr><td><code>src/auth/enter-user-session.ts</code></td><td>The single User Session Entry path (sign-in + switching).</td></tr>
+              <tr><td><code>src/auth/session-boundary.ts</code></td><td>Capture + teardown when the active identity changes.</td></tr>
+              <tr><td><code>src/auth/library-resolution.ts</code></td><td>Zero / one / many library outcome.</td></tr>
+              <tr><td><code>src/auth/listening-owner.ts</code></td><td>Resolves the Listening State Owner.</td></tr>
+              <tr><td><code>src/api/abs-client.ts</code> · <code>auth-fetch.ts</code></td><td>Auth-aware fetch + error normalization.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="page-foot">
+          Distilled from <code>docs/absAuthFlow.md</code> and <code>auth-library-flow-technical.md</code>. <code>enterUserSession</code> is covered by jest tests asserting the phase ordering and switching rules.
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="assets/site.js"></script>
+</body>
+</html>

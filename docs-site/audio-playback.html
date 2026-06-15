@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Audio &amp; Playback — LAABS Audio Handbook</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script>try{var m=localStorage.getItem('laabs-docs-theme');if(m)document.documentElement.setAttribute('data-theme',m);}catch(e){}</script>
+</head>
+<body data-page="audio-playback.html">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <div class="content">
+      <article>
+        <div class="topbar">
+          <button class="menu-toggle" aria-label="Toggle navigation">☰ Menu</button>
+          <span class="crumbs"><a href="index.html">Handbook</a> › Core systems › Audio &amp; Playback</span>
+          <span class="spacer"></span>
+          <button class="theme-toggle">☾ Dark</button>
+        </div>
+
+        <h1>Audio &amp; Playback</h1>
+        <p class="lede">
+          How a tap on <em>Play</em> becomes sound — from the UI, through the orchestration layer,
+          across the engine adapter, to the native player and back as progress events.
+        </p>
+
+        <div class="callout note">
+          <span class="ic">🧭</span>
+          <div>
+            <span class="callout-title">The one rule</span>
+            <p>
+              UI never talks to the audio library directly. <strong>All actions go through
+              <code>playerService</code></strong>, and <strong>all state comes from
+              <code>usePlaybackStore</code></strong>. Everything below is in service of keeping that
+              boundary clean.
+            </p>
+          </div>
+        </div>
+
+        <h2>The request path</h2>
+        <p>
+          There are four layers between a button and the speaker. The top three are ours; the bottom
+          one is the swappable native library (<code>react-native-audio-pro</code>). Commands flow
+          <em>down</em>; progress and state events flow back <em>up</em> and land in a Zustand store
+          that the UI subscribes to.
+        </p>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 620 380" role="img" aria-label="Playback request path">
+            <defs>
+              <marker id="ar1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" class="arrowfill"></path>
+              </marker>
+            </defs>
+
+            <!-- main column -->
+            <rect class="node" x="90" y="24" width="220" height="52" rx="9"></rect>
+            <text class="nlabel" x="200" y="46" text-anchor="middle">Player / Home UI</text>
+            <text class="nsub" x="200" y="63" text-anchor="middle">components + usePlaybackStore</text>
+
+            <rect class="node accent" x="90" y="116" width="220" height="52" rx="9"></rect>
+            <text class="nlabel" x="200" y="138" text-anchor="middle">playerService</text>
+            <text class="nsub" x="200" y="155" text-anchor="middle">orchestration + sync</text>
+
+            <rect class="node" x="90" y="208" width="220" height="52" rx="9"></rect>
+            <text class="nlabel" x="200" y="230" text-anchor="middle">audio-engine</text>
+            <text class="nsub" x="200" y="247" text-anchor="middle">adapter boundary</text>
+
+            <rect class="node" x="90" y="300" width="220" height="52" rx="9"></rect>
+            <text class="nlabel" x="200" y="322" text-anchor="middle">react-native-audio-pro</text>
+            <text class="nsub" x="200" y="339" text-anchor="middle">native player</text>
+
+            <!-- store -->
+            <rect class="node" x="392" y="116" width="190" height="52" rx="9"></rect>
+            <text class="nlabel" x="487" y="138" text-anchor="middle">playbackStore</text>
+            <text class="nsub" x="487" y="155" text-anchor="middle">Zustand · live state</text>
+
+            <!-- command (down) arrows -->
+            <line class="edge" x1="200" y1="76" x2="200" y2="114" marker-end="url(#ar1)"></line>
+            <text class="elabel" x="82" y="100" text-anchor="end">load · play · seek · skip</text>
+
+            <line class="edge" x1="185" y1="168" x2="185" y2="206" marker-end="url(#ar1)"></line>
+            <text class="elabel" x="82" y="192" text-anchor="end">load(track) · play()</text>
+            <line class="edge" x1="215" y1="206" x2="215" y2="168" marker-end="url(#ar1)"></line>
+            <text class="elabel" x="320" y="192" text-anchor="start">status</text>
+
+            <line class="edge" x1="185" y1="260" x2="185" y2="298" marker-end="url(#ar1)"></line>
+            <text class="elabel" x="82" y="284" text-anchor="end">AudioPro.play / resume / seek</text>
+            <line class="edge" x1="215" y1="298" x2="215" y2="260" marker-end="url(#ar1)"></line>
+            <text class="elabel" x="320" y="278" text-anchor="start">PROGRESS (1×/s)</text>
+            <text class="elabel" x="320" y="292" text-anchor="start">STATE_CHANGED</text>
+
+            <!-- store wiring -->
+            <line class="edge" x1="310" y1="142" x2="390" y2="142" marker-end="url(#ar1)"></line>
+            <text class="elabel" x="350" y="134" text-anchor="middle">update</text>
+            <path class="edge" d="M487,116 L487,50 L312,50" marker-end="url(#ar1)"></path>
+            <text class="elabel" x="487" y="98" text-anchor="middle">subscribe · re-render</text>
+          </svg>
+          <figcaption>Commands flow down through three of our layers into the native player; events flow back up into the store, which re-renders the UI.</figcaption>
+        </figure>
+
+        <h2>A mental model first</h2>
+        <p>Two ideas unlock the rest of the system:</p>
+        <ul>
+          <li><strong>Book position vs. track position.</strong> A book is a <em>queue</em> of audio files. <strong>Book position</strong> is absolute time across the whole audiobook; <strong>track position</strong> is time within the current file. The app thinks in book time and converts down to tracks only at the engine edge.</li>
+          <li><strong>Source is just a URI.</strong> Every track resolves to a <code>source.uri</code> that is either remote (<code>https://</code>) or local (<code>file://</code>). The native player only accepts those two schemes — everything else in the app exists to produce the right URI and seek to the right book position.</li>
+        </ul>
+
+        <h2>Three ways a book loads</h2>
+        <p>
+          <code>playerService.loadBook(libraryItemId)</code> is the single entry point, but it resolves
+          its source in a deliberate order. <strong>Downloaded files always win.</strong>
+        </p>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 640 470" role="img" aria-label="Downloaded-first source resolution">
+            <defs>
+              <marker id="ar2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" class="arrowfill"></path>
+              </marker>
+            </defs>
+
+            <rect class="node accent" x="220" y="20" width="200" height="48" rx="9"></rect>
+            <text class="nlabel" x="320" y="42" text-anchor="middle">loadBook(libraryItemId)</text>
+            <text class="nsub" x="320" y="59" text-anchor="middle">+ Resume Resolution</text>
+
+            <!-- decision diamond -->
+            <polygon class="node" points="320,96 432,160 320,224 208,160"></polygon>
+            <text class="nlabel" x="320" y="150" text-anchor="middle">Downloaded &amp;</text>
+            <text class="nlabel" x="320" y="168" text-anchor="middle">playable?</text>
+            <text class="nsub" x="320" y="186" text-anchor="middle">deviceBooksStore</text>
+            <line class="edge" x1="320" y1="68" x2="320" y2="94" marker-end="url(#ar2)"></line>
+
+            <!-- yes branch (left) -->
+            <text class="elabel" x="150" y="152" text-anchor="middle">yes</text>
+            <line class="edge" x1="208" y1="160" x2="130" y2="160" marker-end="url(#ar2)"></line>
+            <rect class="node" x="20" y="200" width="220" height="78" rx="9"></rect>
+            <text class="nlabel" x="130" y="226" text-anchor="middle">Local queue</text>
+            <text class="nsub" x="130" y="244" text-anchor="middle">source.uri = file://</text>
+            <text class="nsub" x="130" y="259" text-anchor="middle">sessionId = "local"</text>
+            <text class="nsub" x="130" y="274" text-anchor="middle">chapters from saved metadata</text>
+            <line class="edge" x1="130" y1="160" x2="130" y2="198" marker-end="url(#ar2)"></line>
+
+            <!-- no branch (right) -->
+            <text class="elabel" x="492" y="152" text-anchor="middle">no</text>
+            <line class="edge" x1="432" y1="160" x2="510" y2="160" marker-end="url(#ar2)"></line>
+            <rect class="node" x="400" y="200" width="220" height="78" rx="9"></rect>
+            <text class="nlabel" x="510" y="226" text-anchor="middle">Streamed queue</text>
+            <text class="nsub" x="510" y="244" text-anchor="middle">getPlayInfo() → session</text>
+            <text class="nsub" x="510" y="259" text-anchor="middle">buildQueue + chapterIndex</text>
+            <text class="nsub" x="510" y="274" text-anchor="middle">source-resolver: urls + headers</text>
+            <line class="edge" x1="510" y1="160" x2="510" y2="198" marker-end="url(#ar2)"></line>
+
+            <!-- converge -->
+            <rect class="node accent" x="220" y="330" width="200" height="48" rx="9"></rect>
+            <text class="nlabel" x="320" y="352" text-anchor="middle">engine.load → seek → play</text>
+            <text class="nsub" x="320" y="369" text-anchor="middle">same API for both paths</text>
+            <path class="edge" d="M130,278 L130,354 L218,354" marker-end="url(#ar2)"></path>
+            <path class="edge" d="M510,278 L510,354 L422,354" marker-end="url(#ar2)"></path>
+
+            <!-- fallback -->
+            <line class="edge dashed" x1="220" y1="366" x2="510" y2="366" marker-end="url(#ar2)"></line>
+            <text class="elabel" x="365" y="358" text-anchor="middle">local start fails → fall back to streamed (if online)</text>
+
+            <rect class="node" x="220" y="418" width="200" height="40" rx="9"></rect>
+            <text class="nlabel" x="320" y="443" text-anchor="middle">PLAYING</text>
+            <line class="edge" x1="320" y1="378" x2="320" y2="416" marker-end="url(#ar2)"></line>
+          </svg>
+          <figcaption>Downloaded-first resolution. Both paths converge on the same load → seek → play, so the UI needs no separate offline branch. A failed local start silently falls back to streaming when online.</figcaption>
+        </figure>
+
+        <p>The practical outcomes the UI relies on:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Situation</th><th>Behavior</th></tr></thead>
+            <tbody>
+              <tr><td>Offline + downloaded</td><td>Plays from local <code>file://</code> files.</td></tr>
+              <tr><td>Offline + not downloaded</td><td>Play is disabled in book controls.</td></tr>
+              <tr><td>Online + downloaded</td><td>Still prefers the downloaded files as the source.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted">
+          (There is also a <code>loadLocalFile()</code> demo path used by the Home screen — a one-item
+          local queue — useful for verifying the engine in isolation.)
+        </p>
+
+        <h2>Why the adapter exists</h2>
+        <p>
+          <code>audio-engine.ts</code> is a deliberately small interface so the native library can be
+          swapped without touching the rest of the app. If <code>react-native-audio-pro</code> is ever
+          replaced, <strong>only this file changes.</strong>
+        </p>
+        <pre><code><span class="tok-comment">// the entire surface the app depends on</span>
+<span class="tok-key">interface</span> AudioEngine {
+  load, play, pause, seek, setRate,
+  getPositionMs, getDurationMs, unload,
+  setEvents <span class="tok-comment">// progress + state callbacks</span>
+}</code></pre>
+        <div class="callout tip">
+          <span class="ic">🔌</span>
+          <div>
+            <span class="callout-title">Engine-swap safety</span>
+            <p>
+              The bigger migration risk isn't this interface — it's <strong>ambient audio</strong>, which
+              currently calls <code>AudioPro</code> directly in <code>ambient-service.ts</code> and is
+              <em>not</em> behind the adapter. A new engine needs its own plan for that channel.
+            </p>
+          </div>
+        </div>
+
+        <h2>Seeking across a multi-file book</h2>
+        <p>
+          <code>seekTo(positionMs)</code> and <code>skipBy(seconds)</code> operate on
+          <strong>book position</strong>, not track position. When a seek crosses a file boundary, the
+          service finds the correct track and loads it automatically. Chapter positions are likewise
+          stored as absolute book time, so <code>nextChapter()</code> / <code>previousChapter()</code>
+          just resolve to a book position and call <code>seekTo</code> — track switching is handled for
+          you. This is the only safe way to move around multi-track audiobooks.
+        </p>
+
+        <h2>The Book Controls state machine</h2>
+        <p>
+          Each book <em>view</em> tracks its own UI state, independent of whatever book is globally
+          active in the player. That's what lets a detail screen show a spinner the instant you press
+          play, before any metadata or queue exists.
+        </p>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 680 300" role="img" aria-label="Book controls state machine">
+            <defs>
+              <marker id="ar3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" class="arrowfill"></path>
+              </marker>
+            </defs>
+
+            <rect class="node" x="24" y="40" width="130" height="54" rx="9"></rect>
+            <text class="nlabel" x="89" y="64" text-anchor="middle">not-loaded</text>
+            <text class="nsub" x="89" y="81" text-anchor="middle">static play icon</text>
+
+            <rect class="node" x="214" y="40" width="120" height="54" rx="9"></rect>
+            <text class="nlabel" x="274" y="64" text-anchor="middle">loading</text>
+            <text class="nsub" x="274" y="81" text-anchor="middle">spinner</text>
+
+            <rect class="node" x="394" y="40" width="150" height="54" rx="9"></rect>
+            <text class="nlabel" x="469" y="64" text-anchor="middle">loaded-active</text>
+            <text class="nsub" x="469" y="81" text-anchor="middle">queue ready, idle</text>
+
+            <rect class="node accent" x="394" y="200" width="150" height="54" rx="9"></rect>
+            <text class="nlabel" x="469" y="224" text-anchor="middle">playing</text>
+            <text class="nsub" x="469" y="241" text-anchor="middle">pause icon</text>
+
+            <rect class="node" x="566" y="200" width="100" height="54" rx="9"></rect>
+            <text class="nlabel" x="616" y="224" text-anchor="middle">paused</text>
+            <text class="nsub" x="616" y="241" text-anchor="middle">play icon</text>
+
+            <!-- transitions -->
+            <line class="edge" x1="154" y1="67" x2="212" y2="67" marker-end="url(#ar3)"></line>
+            <text class="elabel" x="183" y="58" text-anchor="middle">press play</text>
+
+            <line class="edge" x1="334" y1="67" x2="392" y2="67" marker-end="url(#ar3)"></line>
+            <text class="elabel" x="363" y="58" text-anchor="middle">queue ready</text>
+
+            <line class="edge" x1="469" y1="94" x2="469" y2="198" marker-end="url(#ar3)"></line>
+            <text class="elabel" x="479" y="150" text-anchor="start">play() →</text>
+            <text class="elabel" x="479" y="164" text-anchor="start">PLAYING confirmed</text>
+
+            <line class="edge" x1="544" y1="220" x2="564" y2="220" marker-end="url(#ar3)"></line>
+            <text class="elabel" x="554" y="212" text-anchor="middle">pause</text>
+            <line class="edge" x1="564" y1="238" x2="544" y2="238" marker-end="url(#ar3)"></line>
+            <text class="elabel" x="554" y="262" text-anchor="middle">resume</text>
+
+            <!-- failure path -->
+            <path class="edge dashed" d="M240,94 L240,150 L89,150 L89,96" marker-end="url(#ar3)"></path>
+            <text class="elabel" x="200" y="166" text-anchor="middle">loadBook fails / poor connection → error</text>
+          </svg>
+          <figcaption>The control is never left stuck: any load failure returns it to an actionable state with an error, rather than a disabled spinner.</figcaption>
+        </figure>
+
+        <p>Two guardrails worth knowing:</p>
+        <ul>
+          <li><strong>Confirmed PLAYING.</strong> The store only flips to <code>playing</code> after the native engine reports <code>PLAYING</code> for the <em>target</em> track — not optimistically on the play call.</li>
+          <li><strong>Provisional streamed sessions.</strong> On streamed autoplay, the session stays provisional until playback actually starts within a startup budget. If it doesn't, the service unloads, closes the session best-effort, shows a poor-connection toast, and returns to <code>not-loaded</code>.</li>
+        </ul>
+
+        <h2>Who owns playback rate</h2>
+        <p>Rate lives in two places, on purpose:</p>
+        <ul>
+          <li><strong>Active rate</strong> → <code>playbackStore.rate</code> (the live value driving the engine).</li>
+          <li><strong>Per-book rate</strong> → <code>deviceBooksStore</code>, scoped by <code>userKey + libraryItemId</code> (defaults to <code>1.0</code>).</li>
+        </ul>
+        <p>
+          <code>setRate()</code> is the only write path and updates both. On the next load of that book
+          the stored rate is restored, and <code>play()</code> re-applies it <em>after</em> native
+          playback starts — because some native replay paths momentarily reset speed to <code>1.0×</code>.
+        </p>
+
+        <h2>Progress &amp; sync, in brief</h2>
+        <p>
+          The engine emits progress once per second. <code>playerService</code> writes through to the
+          local cache immediately and syncs to the server on a schedule — every 5 minutes during
+          playback, on pause, on explicit seek, and on the background/termination path. Anything that
+          can't sync (offline, unauthenticated, or a thrown call) is queued per book and flushed on
+          reconnect.
+        </p>
+        <div class="callout note">
+          <span class="ic">➡️</span>
+          <div>
+            <span class="callout-title">Full detail elsewhere</span>
+            <p>The caches, reconcile rules, and the offline intent queue have their own page — see <strong>Progress &amp; Sync</strong> (coming soon). This page stops at "the player asks for a sync."</p>
+          </div>
+        </div>
+
+        <h2>Common pitfalls</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Symptom</th><th>Cause / fix</th></tr></thead>
+            <tbody>
+              <tr><td>No audio on iOS</td><td>The native player only accepts <code>file://</code> or <code>https://</code> URLs. Check <code>track.url</code>.</td></tr>
+              <tr><td>Missing artwork</td><td>Artwork is validated; the app supplies a default icon when a URL is rejected.</td></tr>
+              <tr><td>Queue missing after reload</td><td>Persistence is partial (only <code>libraryItemId</code>, <code>currentTrackIndex</code>, <code>positionMs</code>, <code>rate</code>). Always call <code>loadBook</code> / <code>loadLocalFile</code> to rebuild.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Where it lives</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>File</th><th>Responsibility</th></tr></thead>
+            <tbody>
+              <tr><td><code>src/app/_layout.tsx</code></td><td>Calls <code>playerService.init()</code> once at startup.</td></tr>
+              <tr><td><code>src/player/player-service.ts</code></td><td>Orchestrates loading, playback control, seeking, rate, and sync.</td></tr>
+              <tr><td><code>src/player/audio-engine.ts</code></td><td>The adapter around <code>react-native-audio-pro</code>.</td></tr>
+              <tr><td><code>src/player/playback-store.ts</code></td><td>Zustand store — single source of truth for playback state.</td></tr>
+              <tr><td><code>src/player/queue.ts · chapters.ts · source-resolver.ts</code></td><td>Build the queue, map chapters to tracks, resolve URLs + auth headers.</td></tr>
+              <tr><td><code>src/components/bookComponents/book-controls.tsx</code></td><td>The view-scoped control state machine.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="page-foot">
+          Distilled from <code>docs/audioPlayerFlow.md</code>. When code and this page disagree, trust
+          <code>src/player/*</code> and update the markdown, then this page.
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="assets/site.js"></script>
+</body>
+</html>

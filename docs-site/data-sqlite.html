@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Data &amp; SQLite — LAABS Audio Handbook</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script>try{var m=localStorage.getItem('laabs-docs-theme');if(m)document.documentElement.setAttribute('data-theme',m);}catch(e){}</script>
+</head>
+<body data-page="data-sqlite.html">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <div class="content">
+      <article>
+        <div class="topbar">
+          <button class="menu-toggle" aria-label="Toggle navigation">☰ Menu</button>
+          <span class="crumbs"><a href="index.html">Handbook</a> › Core systems › Data &amp; SQLite</span>
+          <span class="spacer"></span>
+          <button class="theme-toggle">☾ Dark</button>
+        </div>
+
+        <h1>Data &amp; SQLite</h1>
+        <p class="lede">
+          A local SQLite "shadow" read model projects the Audiobookshelf catalog onto the device so
+          search and Home stay fast even on very large libraries — the cost of a read scales with the
+          <em>viewport</em>, not the library.
+        </p>
+
+        <div class="callout note">
+          <span class="ic">🎯</span>
+          <div>
+            <span class="callout-title">Why this exists</span>
+            <p>
+              (<a href="decisions.html">ADR-0017 / 0019</a>) Holding a full catalog in React Query/MMKV
+              made startup parse a huge JSON blob and made every search walk the whole library in JS.
+              The shadow DB moves catalog data into queryable SQLite, keeps the persisted snapshot tiny,
+              and pushes matching/sorting into SQL.
+            </p>
+          </div>
+        </div>
+
+        <h2>The read path</h2>
+        <p>
+          Search and Home read through repositories, never the database directly. Production reads are
+          <strong>ids-first</strong>: a single scan returns ordered Audiobook Identities (plus the user's
+          favorite/finished id sets), and display summaries are resolved in viewport-sized chunks as rows
+          approach the screen.
+        </p>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 640 420" role="img" aria-label="SQLite read path">
+            <defs>
+              <marker id="dr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" class="arrowfill"></path>
+              </marker>
+            </defs>
+
+            <rect class="node" x="20" y="20" width="240" height="44" rx="9"></rect>
+            <text class="nlabel" x="140" y="42" text-anchor="middle">Search screen / filter sheet</text>
+            <text class="nsub" x="140" y="57" text-anchor="middle">useSearchResults</text>
+
+            <rect class="node" x="380" y="20" width="240" height="44" rx="9"></rect>
+            <text class="nlabel" x="500" y="42" text-anchor="middle">Home</text>
+            <text class="nsub" x="500" y="57" text-anchor="middle">useHomeShelves</text>
+
+            <rect class="node" x="20" y="96" width="240" height="44" rx="9"></rect>
+            <text class="nlabel" x="140" y="118" text-anchor="middle">searchRepository</text>
+            <text class="nsub" x="140" y="133" text-anchor="middle">querySearchResultSet</text>
+            <line class="edge" x1="140" y1="64" x2="140" y2="94" marker-end="url(#dr)"></line>
+
+            <rect class="node" x="380" y="96" width="240" height="44" rx="9"></rect>
+            <text class="nlabel" x="500" y="118" text-anchor="middle">homeRepository</text>
+            <text class="nsub" x="500" y="133" text-anchor="middle">getHomeProjection</text>
+            <line class="edge" x1="500" y1="64" x2="500" y2="94" marker-end="url(#dr)"></line>
+
+            <rect class="node accent" x="20" y="172" width="240" height="58" rx="9"></rect>
+            <text class="nlabel" x="140" y="196" text-anchor="middle">search-expression.ts</text>
+            <text class="nsub" x="140" y="214" text-anchor="middle">pure buildSearchExpression()</text>
+            <text class="nsub" x="140" y="228" text-anchor="middle">→ SQL fragments + bindings</text>
+            <line class="edge" x1="140" y1="140" x2="140" y2="170" marker-end="url(#dr)"></line>
+
+            <rect class="node" x="380" y="172" width="240" height="58" rx="9"></rect>
+            <text class="nlabel" x="500" y="196" text-anchor="middle">home-reads.ts</text>
+            <text class="nsub" x="500" y="214" text-anchor="middle">Continue Listening · Recently Added</text>
+            <text class="nsub" x="500" y="228" text-anchor="middle">requested ids · flags · Discover</text>
+            <line class="edge" x1="500" y1="140" x2="500" y2="170" marker-end="url(#dr)"></line>
+
+            <rect class="node" x="200" y="276" width="240" height="50" rx="9"></rect>
+            <text class="nlabel" x="320" y="298" text-anchor="middle">one id scan</text>
+            <text class="nsub" x="320" y="315" text-anchor="middle">ordered ids + favoriteIds + finishedIds</text>
+            <line class="edge" x1="140" y1="230" x2="280" y2="274" marker-end="url(#dr)"></line>
+            <line class="edge" x1="500" y1="230" x2="380" y2="274" marker-end="url(#dr)"></line>
+
+            <rect class="node" x="200" y="356" width="240" height="50" rx="9"></rect>
+            <text class="nlabel" x="320" y="378" text-anchor="middle">useWindowedItemSummaries</text>
+            <text class="nsub" x="320" y="395" text-anchor="middle">getItemSummariesByIds · viewport chunks</text>
+            <line class="edge" x1="320" y1="326" x2="320" y2="354" marker-end="url(#dr)"></line>
+            <text class="elabel" x="446" y="344" text-anchor="start">as rows near viewport</text>
+          </svg>
+          <figcaption>Ids-first reads. The result-set query returns only ids; summaries are parsed lazily per viewport chunk, so a 10,000-item library costs the same to scroll as a 100-item one.</figcaption>
+        </figure>
+
+        <h2>Module map</h2>
+        <p>Everything lives under <code>src/data/sqlite/</code>, grouped by responsibility:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Module</th><th>Responsibility</th></tr></thead>
+            <tbody>
+              <tr><td><code>shadow-db-core.ts</code></td><td>Connection singleton, transactions, write guard, schema DDL.</td></tr>
+              <tr><td><code>shadow-scope.ts</code></td><td>The <em>one</em> auth-store binding: <code>requireActiveLibraryContext(expectedScope?)</code>.</td></tr>
+              <tr><td><code>search-expression.ts</code></td><td>Pure <code>buildSearchExpression(scope, params)</code> → SQL + bindings. No DB handle, no auth store.</td></tr>
+              <tr><td><code>text-normalization.ts</code></td><td><code>normalizeText</code> — used by both catalog writes and query matching (must stay identical).</td></tr>
+              <tr><td><code>catalog-refresh.ts</code></td><td>Paged catalog refresh: projection + FTS + facet rows per page; soft-delete of not-seen rows.</td></tr>
+              <tr><td><code>overlay-writes.ts</code></td><td>Overlay refresh (progress, favorites, bookmarks, intents) + single-row mutation projections.</td></tr>
+              <tr><td><code>search-reads.ts</code> · <code>home-reads.ts</code></td><td>The ids-first readers + chunked summary resolution.</td></tr>
+              <tr><td><code>refresh-coordinator.ts</code></td><td>Staleness-driven refresh with per-scope in-flight dedup.</td></tr>
+              <tr><td><code>*-repository.ts</code></td><td>Consumer-facing read interfaces (where a future Server Search adapter plugs in — <a href="decisions.html">ADR-0016</a>).</td></tr>
+              <tr><td><code>shadow-status.ts</code></td><td>Readiness, staleness checks, run history, table counts, <code>clearShadowDatabase</code>.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Four conventions that keep it fast and correct</h2>
+        <ul>
+          <li><strong>Scope is read in exactly one place.</strong> Global auth state is only touched inside <code>requireActiveLibraryContext</code>. Long operations capture their scope and pass it back in; the binder throws on mismatch, so an Active Library switch mid-refresh fails loudly instead of writing rows under the wrong library.</li>
+          <li><strong>All matching lives in <code>search-expression.ts</code>.</strong> Text (FTS), genre/tag operators, author/narrator, Favorite/Finished filters, and sort are realized by one pure builder. Adding a filter is a one-place change that the production reader, the diagnostic sampler, and the filter sheet all inherit.</li>
+          <li><strong>Ids first, summaries lazy.</strong> Don't add summary parsing back into the result-set query — cost must scale with the viewport, not the library.</li>
+          <li><strong>Bulk writes are chunked.</strong> 50-row multi-row <code>VALUES</code> statements with a frame yield between chunks (<code>bulkUpsertRows</code>); large <code>IN (...)</code> id lists chunk at 400. No per-row awaited <code>INSERT</code> loops.</li>
+        </ul>
+
+        <div class="callout warn">
+          <span class="ic">⚠️</span>
+          <div>
+            <span class="callout-title">Invalidate only through the helper</span>
+            <p>
+              Keys carry a shape segment — <code>"overlay"</code> (refetch after favorite/progress
+              mutations) vs <code>"catalog"</code> (survive overlay mutations). Mutation sites call
+              <code>invalidateSqliteOverlayProjections</code>; only the refresh coordinator calls
+              <code>invalidateAllSqliteProjections</code>. Never invalidate a raw <code>["sqlite"]</code> prefix.
+            </p>
+          </div>
+        </div>
+
+        <h2>Schema at a glance</h2>
+        <p>The shadow DB groups into catalog data, user overlay data, offline intent queues, and bookkeeping. Full DDL is in <code>docs/shadow-sqlite-tables.md</code>.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Group</th><th>Tables</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Catalog</strong></td><td><code>library_catalog_items</code>, <code>library_catalog_fts</code> (fts5), <code>catalog_item_genres</code>, <code>catalog_item_tags</code>, <code>item_detail_snapshots</code></td></tr>
+              <tr><td><strong>User overlay</strong></td><td><code>user_server_progress</code>, <code>user_favorites</code>, <code>server_bookmark_snapshots</code>, <code>local_bookmarks</code></td></tr>
+              <tr><td><strong>Offline intents</strong></td><td><code>pending_progress_sync_intents</code>, <code>pending_bookmark_creates</code>, <code>pending_bookmark_deletes</code></td></tr>
+              <tr><td><strong>Derived</strong></td><td><code>effective_progress</code> (view: pending intent wins over server snapshot)</td></tr>
+              <tr><td><strong>Bookkeeping</strong></td><td><code>app_metadata</code>, <code>libraries</code>, <code>library_refresh_runs</code>, <code>overlay_refresh_runs</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted">
+          The <code>library_refresh_runs</code> table is what makes paged refresh safe: a run is only
+          allowed to soft-delete "not seen" rows after it <em>completes</em>, so a partial/failed
+          refresh can never wipe the catalog.
+        </p>
+
+        <h2>How the catalog gets filled</h2>
+        <p>
+          Refresh data comes from the ABS API layer (<a href="auth-sessions.html">see the API map</a>).
+          The catalog refresh pages metadata via <code>libraryItemsApi.getItemsPage()</code>; the overlay
+          refresh pulls user state via <code>meApi.getUserServerState()</code>. The two are separate on
+          purpose — catalog metadata is large and shared, user state is small and per-session.
+        </p>
+
+        <h2>Relationship to React Query + MMKV</h2>
+        <p>
+          The shadow DB and the persisted React Query cache are complementary, not redundant:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th></th><th>SQLite shadow DB</th><th>React Query + MMKV</th></tr></thead>
+            <tbody>
+              <tr><td>Holds</td><td>full catalog, FTS, facets, overlay rows</td><td>compact user server state, playlists, filter data</td></tr>
+              <tr><td>Key prefix</td><td><code>["sqlite", shape, …]</code></td><td><code>["user", …]</code>, <code>["library", …]</code></td></tr>
+              <tr><td>Persisted?</td><td>lives in the DB file; never dehydrated</td><td>only with <code>meta:{persist:true}</code></td></tr>
+              <tr><td>Refreshed by</td><td>refresh coordinator (readiness-driven)</td><td>stale-aware prefetch + pull-to-refresh</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout tip">
+          <span class="ic">🔑</span>
+          <div>
+            <span class="callout-title">The persist invariant</span>
+            <p>
+              React Query options are shared per key. If <em>any</em> observer of a persisted key omits
+              <code>meta:{persist:true}</code> — even a disabled subscription hook — it can knock that
+              query out of the next save cycle and cause a startup cache miss. All observers of a
+              persisted key must carry the same opt-in.
+            </p>
+          </div>
+        </div>
+
+        <div class="page-foot">
+          Distilled from <code>docs/shadow-sqlite-architecture.md</code>, <code>shadow-sqlite-tables.md</code>, <code>data-state-architecture.md</code>, and <code>ReactQueryPersister.md</code>.
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Architecture — LAABS Audio Handbook</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script>try{var m=localStorage.getItem('laabs-docs-theme');if(m)document.documentElement.setAttribute('data-theme',m);}catch(e){}</script>
+</head>
+<body data-page="architecture.html">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <div class="content">
+      <article>
+        <div class="topbar">
+          <button class="menu-toggle" aria-label="Toggle navigation">☰ Menu</button>
+          <span class="crumbs"><a href="index.html">Handbook</a> › Start here › Architecture</span>
+          <span class="spacer"></span>
+          <button class="theme-toggle">☾ Dark</button>
+        </div>
+
+        <h1>Architecture</h1>
+        <p class="lede">
+          The big picture: where every piece of data lives, who owns it, and how the app boots from a
+          cold start to a usable Home screen.
+        </p>
+
+        <div class="callout note">
+          <span class="ic">🧱</span>
+          <div>
+            <span class="callout-title">The core idea</span>
+            <p>
+              State is split into <strong>three buckets by ownership</strong>, not by feature. Knowing
+              which bucket a piece of data belongs to tells you where to read it, how it's persisted,
+              and what's allowed to invalidate it.
+            </p>
+          </div>
+        </div>
+
+        <h2>Where data lives</h2>
+        <p>
+          The app talks to a self-hosted Audiobookshelf (ABS) server, but it never depends on the
+          network for a responsive UI. Server data is <em>projected</em> locally into two very
+          different stores, and the device keeps a third store of things the server never knows about.
+        </p>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 660 440" role="img" aria-label="The three state buckets">
+            <defs>
+              <marker id="ab" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" class="arrowfill"></path>
+              </marker>
+            </defs>
+
+            <!-- ABS server -->
+            <rect class="node" x="240" y="16" width="180" height="44" rx="9"></rect>
+            <text class="nlabel" x="330" y="38" text-anchor="middle">Audiobookshelf server</text>
+            <text class="nsub" x="330" y="53" text-anchor="middle">source of truth</text>
+
+            <!-- three buckets -->
+            <rect class="node accent" x="20" y="120" width="200" height="150" rx="10"></rect>
+            <text class="nlabel" x="120" y="144" text-anchor="middle">① SQLite read model</text>
+            <text class="nsub" x="120" y="166" text-anchor="middle">Library Catalog projection</text>
+            <text class="nsub" x="120" y="184" text-anchor="middle">FTS · facets · summaries</text>
+            <text class="nsub" x="120" y="202" text-anchor="middle">progress · favorites · bookmarks</text>
+            <text class="nsub" x="120" y="220" text-anchor="middle">pending intents</text>
+            <text class="nsub" x="120" y="246" text-anchor="middle">never persisted to MMKV</text>
+
+            <rect class="node" x="232" y="120" width="196" height="150" rx="10"></rect>
+            <text class="nlabel" x="330" y="144" text-anchor="middle">② React Query + MMKV</text>
+            <text class="nsub" x="330" y="166" text-anchor="middle">user server state</text>
+            <text class="nsub" x="330" y="184" text-anchor="middle">progress · currentTime</text>
+            <text class="nsub" x="330" y="202" text-anchor="middle">server bookmarks · playlists</text>
+            <text class="nsub" x="330" y="220" text-anchor="middle">compact &amp; persisted</text>
+            <text class="nsub" x="330" y="246" text-anchor="middle">meta:{persist:true}</text>
+
+            <rect class="node" x="440" y="120" width="200" height="150" rx="10"></rect>
+            <text class="nlabel" x="540" y="144" text-anchor="middle">③ Zustand stores</text>
+            <text class="nsub" x="540" y="166" text-anchor="middle">device client state</text>
+            <text class="nsub" x="540" y="184" text-anchor="middle">downloads · offline queues</text>
+            <text class="nsub" x="540" y="202" text-anchor="middle">custom shelves · rates</text>
+            <text class="nsub" x="540" y="220" text-anchor="middle">live playback state</text>
+            <text class="nsub" x="540" y="246" text-anchor="middle">server never sees this</text>
+
+            <!-- server feeds 1 and 2 -->
+            <path class="edge" d="M300,60 L120,118" marker-end="url(#ab)"></path>
+            <text class="elabel" x="180" y="92" text-anchor="middle">paged refresh</text>
+            <line class="edge" x1="330" y1="60" x2="330" y2="118" marker-end="url(#ab)"></line>
+            <text class="elabel" x="392" y="92" text-anchor="middle">prefetch / sync</text>
+
+            <!-- UI -->
+            <rect class="node" x="220" y="330" width="220" height="48" rx="10"></rect>
+            <text class="nlabel" x="330" y="352" text-anchor="middle">UI (Home, Search, Player)</text>
+            <text class="nsub" x="330" y="369" text-anchor="middle">reads from all three</text>
+
+            <path class="edge" d="M120,270 L120,354 L218,354" marker-end="url(#ab)"></path>
+            <line class="edge" x1="330" y1="270" x2="330" y2="328" marker-end="url(#ab)"></line>
+            <path class="edge" d="M540,270 L540,354 L442,354" marker-end="url(#ab)"></path>
+
+            <!-- write-back from UI to device store -->
+            <path class="edge dashed" d="M440,366 L600,366 L600,272" marker-end="url(#ab)"></path>
+            <text class="elabel" x="556" y="404" text-anchor="middle">playback ticks · downloads · offline writes</text>
+          </svg>
+          <figcaption>Three buckets by ownership. The full catalog lives only in SQLite, so the persisted MMKV snapshot stays small no matter how big the library is.</figcaption>
+        </figure>
+
+        <h2>The three buckets in detail</h2>
+
+        <h3>① SQLite shadow database — the Library Catalog read model</h3>
+        <p>
+          Owned by the server, projected locally (<a href="decisions.html">ADR-0017/0019</a>). It holds
+          the catalog projection columns plus a JSON summary, a full-text search index, genre/tag facet
+          rows, server progress snapshots, favorites, bookmarks, and pending progress intents. It's read
+          through <code>sqliteSearchRepository</code> and <code>sqliteHomeRepository</code>, and refreshed
+          in the background by the Library Refresh Coordinator. Crucially, <strong>the full catalog never
+          enters React Query or MMKV</strong> — that's what keeps startup cheap. See
+          <a href="data-sqlite.html">Data &amp; SQLite</a> for the module map and schema.
+        </p>
+
+        <h3>② React Query + MMKV — user server state</h3>
+        <p>
+          Also owned by the server, but small and user-specific: progress / currentTime / isFinished,
+          server bookmarks, and playlist contents. These queries persist to MMKV across launches, but
+          only if they opt in with <code>meta: { persist: true }</code> — and SQLite-prefixed keys are
+          <em>never</em> persisted. Defaults: <code>staleTime</code> 5 min, <code>gcTime</code> Infinity.
+        </p>
+
+        <h3>③ Zustand — device client state</h3>
+        <p>
+          Things the server doesn't know about and shouldn't: downloaded file URIs and download progress,
+          custom local covers, the offline progress/bookmark/playlist queues, playlist shelf projections,
+          per-user-book playback rate, and the live high-frequency playback state. Split across
+          <code>device-books-store</code> (durable device data) and <code>playback-store</code> (live
+          player state).
+        </p>
+
+        <h2>Reads, writes, and invalidation</h2>
+        <p>
+          SQLite-backed query keys carry a <strong>shape segment</strong> so invalidation stays surgical:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Shape</th><th>Covers</th><th>Invalidated by</th></tr></thead>
+            <tbody>
+              <tr><td><code>"overlay"</code></td><td>Search result sets, Home projection</td><td>favorite/progress mutations → <code>invalidateSqliteOverlayProjections</code></td></tr>
+              <tr><td><code>"catalog"</code></td><td>Item summaries</td><td>only the refresh coordinator → <code>invalidateAllSqliteProjections</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn">
+          <span class="ic">⚠️</span>
+          <div>
+            <span class="callout-title">Never invalidate a raw <code>["sqlite"]</code> prefix</span>
+            <p>Go through <code>src/query/sqlite-invalidation.ts</code>. A blanket prefix invalidation throws away expensive catalog summaries along with the cheap overlay rows.</p>
+          </div>
+        </div>
+
+        <h3>Playback write-through</h3>
+        <p>
+          During playback, high-frequency ticks stay in <code>playbackStore</code>. At sync points the
+          service tries a server sync; whether or not that succeeds, it mirrors the latest progress into
+          the React Query user cache <em>and</em> the SQLite overlay projection, then invalidates
+          overlay-shaped keys — so the persisted cache is updated without an extra fetch, and
+          <code>loadBook</code> can resume instantly from cache. (Full rules on
+          <a href="progress-sync.html">Progress &amp; Sync</a>.)
+        </p>
+
+        <h2>Cold start to first Home</h2>
+        <p>
+          Startup is gated on as little as possible. The strict gate is auth hydration; everything
+          expensive (catalog refresh, warmups, sync flushes) is pushed behind first content and user
+          interactions.
+        </p>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 640 360" role="img" aria-label="Startup critical path">
+            <defs>
+              <marker id="as" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" class="arrowfill"></path>
+              </marker>
+            </defs>
+
+            <rect class="node" x="200" y="14" width="240" height="42" rx="9"></rect>
+            <text class="nlabel" x="320" y="40" text-anchor="middle">JS bundle evaluates · prevent splash auto-hide</text>
+
+            <rect class="node accent" x="200" y="80" width="240" height="46" rx="9"></rect>
+            <text class="nlabel" x="320" y="102" text-anchor="middle">Auth hydration (SecureStore)</text>
+            <text class="nsub" x="320" y="118" text-anchor="middle">strict gate · status ≠ "hydrating"</text>
+            <line class="edge" x1="320" y1="56" x2="320" y2="78" marker-end="url(#as)"></line>
+
+            <rect class="node" x="40" y="160" width="250" height="46" rx="9"></rect>
+            <text class="nlabel" x="165" y="182" text-anchor="middle">MMKV restore (parallel)</text>
+            <text class="nsub" x="165" y="198" text-anchor="middle">React Query cache + auth slice</text>
+
+            <rect class="node" x="350" y="160" width="250" height="46" rx="9"></rect>
+            <text class="nlabel" x="475" y="182" text-anchor="middle">Route gate</text>
+            <text class="nsub" x="475" y="198" text-anchor="middle">login · Home · picker · deep link</text>
+            <line class="edge" x1="280" y1="126" x2="180" y2="158" marker-end="url(#as)"></line>
+            <line class="edge" x1="360" y1="126" x2="460" y2="158" marker-end="url(#as)"></line>
+
+            <rect class="node" x="200" y="240" width="240" height="46" rx="9"></rect>
+            <text class="nlabel" x="320" y="262" text-anchor="middle">Home: SQLite projection + cache</text>
+            <text class="nsub" x="320" y="278" text-anchor="middle">derive shelves · no network fetch</text>
+            <line class="edge" x1="475" y1="206" x2="360" y2="238" marker-end="url(#as)"></line>
+            <line class="edge" x1="165" y1="206" x2="280" y2="238" marker-end="url(#as)"></line>
+
+            <rect class="node" x="200" y="306" width="240" height="42" rx="9"></rect>
+            <text class="nlabel" x="320" y="332" text-anchor="middle">Deferred warmup + sync flush</text>
+            <line class="edge" x1="320" y1="286" x2="320" y2="304" marker-end="url(#as)"></line>
+          </svg>
+          <figcaption>Native splash hides shortly after auth hydration — not after Home data is fully ready. Catalog refresh, server prefetch, and offline-queue flushes all run after first content and interactions.</figcaption>
+        </figure>
+
+        <div class="callout tip">
+          <span class="ic">⏱️</span>
+          <div>
+            <span class="callout-title">Measuring it</span>
+            <p>
+              <code>src/utils/dev-startup-tracing.ts</code> prints one compact line per run, e.g.
+              <code>[startup] Home Shelf Display in 1509ms | auth 53ms | secureStore 50/51ms | queryRestore 49ms | homeHook 334ms | renderLayout 548ms</code>.
+              The usual suspects are SecureStore reads (the hydration gate) and the synchronous
+              <code>JSON.parse</code> of the persisted cache.
+            </p>
+          </div>
+        </div>
+
+        <h2>Where it lives</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Concern</th><th>Entry point</th></tr></thead>
+            <tbody>
+              <tr><td>App bootstrap + gates</td><td><code>src/app/_layout.tsx</code></td></tr>
+              <tr><td>Auth hydration + sync flush</td><td><code>src/auth/auth-store.ts</code> · <code>use-auth-bootstrap.ts</code></td></tr>
+              <tr><td>SQLite read model</td><td><code>src/data/sqlite/*</code></td></tr>
+              <tr><td>Query persistence</td><td><code>src/store/mmkv-query-persister.ts</code> · <code>src/query/*</code></td></tr>
+              <tr><td>Device state</td><td><code>src/store/device-books-store.ts</code></td></tr>
+              <tr><td>Startup tracing</td><td><code>src/utils/dev-startup-tracing.ts</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="page-foot">
+          Distilled from <code>docs/data-state-architecture.md</code>, <code>shadow-sqlite-architecture.md</code>, and <code>startup-task-map.md</code>.
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="assets/site.js"></script>
+</body>
+</html>

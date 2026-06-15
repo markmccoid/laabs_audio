@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deep Linking — LAABS Audio Handbook</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script>try{var m=localStorage.getItem('laabs-docs-theme');if(m)document.documentElement.setAttribute('data-theme',m);}catch(e){}</script>
+</head>
+<body data-page="deep-linking.html">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <div class="content">
+      <article>
+        <div class="topbar">
+          <button class="menu-toggle" aria-label="Toggle navigation">☰ Menu</button>
+          <span class="crumbs"><a href="index.html">Handbook</a> › Features › Deep Linking</span>
+          <span class="spacer"></span>
+          <button class="theme-toggle">☾ Dark</button>
+        </div>
+
+        <h1>Deep Linking</h1>
+        <p class="lede">
+          Shared-book links open straight to a book's detail screen, even from a cold start. All
+          route-path knowledge is kept in one tiny utility so assumptions don't leak across files.
+        </p>
+
+        <h2>The link format</h2>
+        <p>The app's custom scheme is <code>laabsaudio</code>, and a shared book is just the item id:</p>
+        <pre><code>laabsaudio:///{libraryItemId}</code></pre>
+        <p>
+          The public URL deliberately omits <code>(tabs)</code> and <code>(home)</code> even though the
+          internal Expo Router route is <code>/(tabs)/(home)/[libraryItemId]</code> — those are route
+          groups, not URL segments. The link is built with
+          <code>Linking.createURL(`/${libraryItemId}`)</code>.
+        </p>
+
+        <h2>One utility owns book links</h2>
+        <p>
+          <code>src/navigation/book-links.ts</code> is the single place that knows how book URLs work,
+          so the route shape isn't re-spelled across the app:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Function</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><code>getBookDetailHref(libraryItemId)</code></td><td>Internal Expo Router href for in-app navigation (also preserves Home/Search source + the one-time download-sheet token).</td></tr>
+              <tr><td><code>createSharedBookLink(libraryItemId)</code></td><td>The public <code>laabsaudio:///…</code> link shared outside the app.</td></tr>
+              <tr><td><code>extractBookDetailIdFromUrl(url)</code></td><td>Parses an incoming deep link back into a <code>libraryItemId</code>.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Sharing a book</h2>
+        <p>
+          The share action comes from the <code>Link.MenuAction</code> in <code>BookContainer.tsx</code>,
+          with logic in <code>src/sharing/book-share.ts</code>. One detail is intentional and easy to get
+          wrong:
+        </p>
+        <pre><code>await Share.share({
+  message: `${title} -> Open in LAAB -> ${deepLink}`,
+  url: remoteCoverUri, <span class="tok-comment">// the cover image, NOT the deep link</span>
+});</code></pre>
+        <div class="callout note">
+          <span class="ic">🔗</span>
+          <div>
+            <span class="callout-title">Link in <code>message</code>, cover in <code>url</code></span>
+            <p>
+              The deep link goes in <code>message</code>; the <code>url</code> field is the remote book
+              cover (derived from <code>libraryItemId</code>, tokened when
+              <code>useTokenWithCoverImages</code> is on). They're separated on purpose so the share sheet
+              previews the cover while still carrying the openable route link.
+            </p>
+          </div>
+        </div>
+
+        <h2>Cold start needs a guard</h2>
+        <p>
+          <strong>Warm-start</strong> links just work — Expo Router is already running and navigates
+          immediately. <strong>Cold-start</strong> links needed one extra guard in
+          <code>src/app/_layout.tsx</code>: the root layout's fallback logic would redirect an
+          authenticated user toward Home before the initial deep link was processed, stealing the
+          navigation. Startup now waits on the resolved initial URL (<code>initialDeepLinkBookId</code>)
+          before applying route redirects, so the link wins.
+        </p>
+        <div class="callout tip">
+          <span class="ic">⏱️</span>
+          <div>
+            <span class="callout-title">Why it ties into startup</span>
+            <p>
+              This is the <code>initialDeepLinkBookId !== undefined</code> gate on the
+              <a href="architecture.html">startup path</a> — route redirects wait for
+              <code>Linking.getInitialURL</code> to resolve so a cold-start deep link isn't overwritten by
+              the default authenticated route.
+            </p>
+          </div>
+        </div>
+
+        <div class="page-foot">
+          Distilled from <code>docs/DEEP_LINKING.md</code>.
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="assets/site.js"></script>
+</body>
+</html>

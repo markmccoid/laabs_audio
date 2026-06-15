@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LAABS Audio — Developer Handbook</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script>try{var m=localStorage.getItem('laabs-docs-theme');if(m)document.documentElement.setAttribute('data-theme',m);}catch(e){}</script>
+</head>
+<body data-page="index.html">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <div class="content">
+      <article>
+        <div class="topbar">
+          <button class="menu-toggle" aria-label="Toggle navigation">☰ Menu</button>
+          <span class="crumbs">Developer Handbook</span>
+          <span class="spacer"></span>
+          <button class="theme-toggle">☾ Dark</button>
+        </div>
+
+        <h1>LAABS Audio</h1>
+        <p class="lede">
+          An Expo / React Native audiobook player for self-hosted
+          <a href="https://www.audiobookshelf.org/" target="_blank" rel="noopener">Audiobookshelf</a>
+          servers — built for real offline listening, with downloads, durable progress sync,
+          and a SQLite read model that keeps very large libraries fast.
+        </p>
+
+        <div class="callout note">
+          <span class="ic">📓</span>
+          <div>
+            <span class="callout-title">What this handbook is</span>
+            <p class="muted">
+              A curated, distilled tour of the app's architecture for developers. It summarizes the
+              working notes in <code>docs/*.md</code> into accessible pages with diagrams. The markdown
+              files remain the detailed source of truth; this site is the front door.
+            </p>
+          </div>
+        </div>
+
+        <h2>What the app does</h2>
+        <ul>
+          <li><strong>Streamed &amp; downloaded playback</strong> — stream from an Audiobookshelf server, or play fully offline from downloaded files (downloaded-first resolution).</li>
+          <li><strong>Durable progress sync</strong> — listening position is reconciled across caches and queued offline, then flushed on reconnect; nothing is lost when you lose signal.</li>
+          <li><strong>Home shelves</strong> — derived shelves, user custom shelves, and Audiobookshelf playlist shelves on one Home tab.</li>
+          <li><strong>Bookmarks, sleep timer, ambient audio</strong> — listening quality-of-life features layered around the player.</li>
+          <li><strong>Multiple sign-ins &amp; libraries</strong> — remembered user sessions with sign-in switching and explicit library activation.</li>
+        </ul>
+
+        <h2>Tech stack</h2>
+        <div class="stack-pills">
+          <span class="pill"><b>Expo</b> SDK 56</span>
+          <span class="pill"><b>React Native</b> 0.85</span>
+          <span class="pill"><b>React</b> 19.2</span>
+          <span class="pill"><b>Expo Router</b></span>
+          <span class="pill"><b>react-native-audio-pro</b> (local module)</span>
+          <span class="pill"><b>TanStack Query</b> v5</span>
+          <span class="pill"><b>Zustand</b> v5</span>
+          <span class="pill"><b>expo-sqlite</b></span>
+          <span class="pill"><b>react-native-mmkv</b> v4</span>
+          <span class="pill"><b>Uniwind</b></span>
+          <span class="pill"><b>FlashList</b> v2</span>
+          <span class="pill"><b>Reanimated</b> v4</span>
+        </div>
+        <p class="muted" style="font-size:0.9rem">
+          State is split deliberately: <strong>SQLite</strong> is the read model for large library data,
+          <strong>TanStack Query + MMKV</strong> holds server/user state and persisted caches, and
+          <strong>Zustand</strong> holds live UI/playback state. See
+          <span class="muted">Architecture</span> for how these fit together.
+        </p>
+
+        <h2>Explore the systems</h2>
+        <div class="card-grid">
+          <a class="card" href="architecture.html">
+            <div class="emoji">🧱</div>
+            <h3>Architecture</h3>
+            <p>The three state buckets, where data lives, and the cold-start path.</p>
+          </a>
+          <a class="card" href="audio-playback.html">
+            <div class="emoji">🎧</div>
+            <h3>Audio &amp; Playback</h3>
+            <p>The player service, the audio-engine adapter boundary, and the playback lifecycle.</p>
+          </a>
+          <a class="card" href="progress-sync.html">
+            <div class="emoji">🔄</div>
+            <h3>Progress &amp; Sync</h3>
+            <p>Progress caches, reconcile rules, and the offline sync intent queue.</p>
+          </a>
+          <a class="card" href="auth-sessions.html">
+            <div class="emoji">🔐</div>
+            <h3>Auth, Sessions &amp; Libraries</h3>
+            <p>Multiple sign-ins, session switching, and library resolution → activation.</p>
+          </a>
+          <a class="card" href="data-sqlite.html">
+            <div class="emoji">🗄️</div>
+            <h3>Data &amp; SQLite</h3>
+            <p>The shadow SQLite read model, schema, and ids-first search reads.</p>
+          </a>
+          <a class="card" href="shelves-browsing.html">
+            <div class="emoji">📚</div>
+            <h3>Home &amp; Shelves</h3>
+            <p>Derived, custom, and playlist shelves; the Home card menu.</p>
+          </a>
+          <a class="card" href="downloads-offline.html">
+            <div class="emoji">⬇️</div>
+            <h3>Downloads &amp; Offline</h3>
+            <p>The download store, offline gating, and retry behavior.</p>
+          </a>
+          <a class="card" href="deep-linking.html">
+            <div class="emoji">🔗</div>
+            <h3>Deep Linking</h3>
+            <p>Shared-book links and cold-start routing.</p>
+          </a>
+          <a class="card" href="theming.html">
+            <div class="emoji">🎨</div>
+            <h3>Theming</h3>
+            <p>Theme tokens and how to style components.</p>
+          </a>
+          <a class="card" href="build-ops.html">
+            <div class="emoji">🛠️</div>
+            <h3>Build &amp; Ops</h3>
+            <p>EAS / CNG build behavior, the patch-package gotcha, and the startup task map.</p>
+          </a>
+          <a class="card" href="decisions.html">
+            <div class="emoji">🧭</div>
+            <h3>Decisions (ADRs)</h3>
+            <p>The architecture decision records, condensed and scannable.</p>
+          </a>
+        </div>
+
+        <div class="page-foot">
+          Generated handbook · source notes live in <code>docs/</code> · open any page directly from <code>docs-site/</code>.
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="assets/site.js"></script>
+</body>
+</html>

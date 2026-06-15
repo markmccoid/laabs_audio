@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Decisions (ADRs) — LAABS Audio Handbook</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script>try{var m=localStorage.getItem('laabs-docs-theme');if(m)document.documentElement.setAttribute('data-theme',m);}catch(e){}</script>
+</head>
+<body data-page="decisions.html">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <div class="content">
+      <article>
+        <div class="topbar">
+          <button class="menu-toggle" aria-label="Toggle navigation">☰ Menu</button>
+          <span class="crumbs"><a href="index.html">Handbook</a> › Reference › Decisions (ADRs)</span>
+          <span class="spacer"></span>
+          <button class="theme-toggle">☾ Dark</button>
+        </div>
+
+        <h1>Decisions (ADRs)</h1>
+        <p class="lede">
+          The architecture decisions behind the systems in this handbook, condensed. ADRs are
+          point-in-time records — don't re-litigate them; if one blocks you, propose superseding it.
+        </p>
+
+        <div class="callout note">
+          <span class="ic">🧭</span>
+          <div>
+            <span class="callout-title">How to read these</span>
+            <p>
+              Each links to its full record in <code>docs/adr/</code>. Several early decisions are
+              <em>superseded</em> by later ones as the session/identity model matured — read the superseding
+              ADR for current behavior and the original for the "why" that led there.
+            </p>
+          </div>
+        </div>
+
+        <h2>Auth, sessions &amp; libraries</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ADR</th><th>Decision</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td><strong>0004</strong></td><td>Library Resolution happens as part of session entry, <em>before</em> a session is browsable; a single-library session may auto-activate.</td><td><span class="pill">Active</span></td></tr>
+              <tr><td><strong>0009</strong></td><td>Library Activation completes before an Active Library change is committed — never commit a half-loaded library.</td><td><span class="pill">Active</span></td></tr>
+              <tr><td><strong>0015</strong></td><td>The Audiobookshelf user UUID is the durable identity that owns local listening state; server URL is just an API endpoint.</td><td><span class="pill"><b>Active</b></span></td></tr>
+              <tr><td><strong>0020</strong></td><td>A single User Session Entry module crosses the session boundary only after identity is confirmed.</td><td><span class="pill">Active</span></td></tr>
+              <tr><td><strong>0014</strong></td><td>Remembered User Sessions for sign-in switching.</td><td><span class="pill">→ 0015</span></td></tr>
+              <tr><td><strong>0006</strong></td><td>Identity-scoped downloaded progress survives logout.</td><td><span class="pill">→ 0011</span></td></tr>
+              <tr><td><strong>0008</strong></td><td>Separate session state from download access mode.</td><td><span class="pill">→ 0011</span></td></tr>
+              <tr><td><strong>0010</strong></td><td>Explicit logout clears session snapshots.</td><td><span class="pill">→ 0011</span></td></tr>
+              <tr><td><strong>0011</strong></td><td>Explicit logout requires sign-in before playback.</td><td><span class="pill">→ 0015</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Playback &amp; progress</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ADR</th><th>Decision</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td><strong>0005</strong></td><td>A durable Progress Sync Intent is written <em>before</em> attempting remote sync, for every meaningful moment (pause, seek, stop, switch, finish, background, interruption).</td><td><span class="pill">Active</span></td></tr>
+              <tr><td><strong>0007</strong></td><td>Streamed playback start attempts stay provisional until the first track actually becomes playable, so bad connectivity can't leave a misleading "ready" state.</td><td><span class="pill">Active</span></td></tr>
+              <tr><td><strong>0012</strong></td><td>Play/pause/start are modeled as one Playback Control Intent that settles on the audible state — no transient <code>starting</code>/<code>pausing</code> states.</td><td><span class="pill">Active</span></td></tr>
+              <tr><td><strong>0013</strong></td><td>Resume Resolution is observable and seeds the Displayed Listening Position while a book opens.</td><td><span class="pill">Active</span></td></tr>
+              <tr><td><strong>0018</strong></td><td>Repeated skip commands accumulate into one Skip Burst — instant display update, one bounded position change applied.</td><td><span class="pill">Active</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Data &amp; search</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ADR</th><th>Decision</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td><strong>0017</strong></td><td>Introduce a local SQLite read model (shadow DB) for large, queryable libraries before replacing MMKV/React Query paths.</td><td><span class="pill">Active</span></td></tr>
+              <tr><td><strong>0019</strong></td><td>Organize the shadow model as small concern modules with ids-first search reads.</td><td><span class="pill"><b>Active</b></span></td></tr>
+              <tr><td><strong>0016</strong></td><td>Derive Search Result Sets from cached Active Library summaries first, rather than defaulting to server search.</td><td><span class="pill">Active</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout tip">
+          <span class="ic">📎</span>
+          <div>
+            <span class="callout-title">0017 → 0019</span>
+            <p>ADR-0017's phased-cutover details are complete and partly superseded by 0019. Read 0017 for the <em>why</em>, and 0019 + <a href="data-sqlite.html">Data &amp; SQLite</a> for the current shape.</p>
+          </div>
+        </div>
+
+        <h2>Bookmarks &amp; clips</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ADR</th><th>Decision</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td><strong>0001</strong></td><td>Every shown bookmark is a durable local record; ABS bookmarks are reconciled inputs. Enables clips, local notes, stable identity, and queued recreation.</td><td><span class="pill">Active</span></td></tr>
+              <tr><td><strong>0002</strong></td><td>Clip exports start from downloaded media; streamed-only books prompt to download first.</td><td><span class="pill">Active</span></td></tr>
+              <tr><td><strong>0003</strong></td><td>Clip transcription is iOS-first via a native Apple Speech module.</td><td><span class="pill">Active</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="muted">Full records: <code>docs/adr/0001</code> … <code>docs/adr/0020</code>.</p>
+
+        <div class="page-foot">
+          Condensed from <code>docs/adr/*.md</code>. The handbook pages link to the relevant ADRs inline.
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="assets/site.js"></script>
+</body>
+</html>

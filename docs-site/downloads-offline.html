@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Downloads &amp; Offline — LAABS Audio Handbook</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script>try{var m=localStorage.getItem('laabs-docs-theme');if(m)document.documentElement.setAttribute('data-theme',m);}catch(e){}</script>
+</head>
+<body data-page="downloads-offline.html">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <div class="content">
+      <article>
+        <div class="topbar">
+          <button class="menu-toggle" aria-label="Toggle navigation">☰ Menu</button>
+          <span class="crumbs"><a href="index.html">Handbook</a> › Features › Downloads &amp; Offline</span>
+          <span class="spacer"></span>
+          <button class="theme-toggle">☾ Dark</button>
+        </div>
+
+        <h1>Downloads &amp; Offline</h1>
+        <p class="lede">
+          Downloading a book makes it playable with no network at all. The two halves of this page —
+          getting files onto the device, and behaving correctly once the network is gone — are what make
+          offline listening feel seamless.
+        </p>
+
+        <h2>Downloading a book</h2>
+        <p>
+          Exactly <strong>one book download is active at a time</strong>, owned by
+          <code>device-books-store</code>. The visible progress bar represents the <em>whole book</em>,
+          not the current file — it should travel <code>0 → 100</code> once.
+        </p>
+        <ul>
+          <li><strong>Book-level progress.</strong> Prefer aggregate byte progress across all audio files; fall back to file-weighted progress when sizes are unavailable. Show the current file's name and size while downloading.</li>
+          <li><strong>A real finalizing stage.</strong> Cover download and local-store finalization are a <code>finalizing</code> stage — don't show <code>100%</code> before the completion toast. The cover is part of the offline payload but isn't surfaced as a user-facing file.</li>
+          <li><strong>Route memory.</strong> <code>sourceBookRoute</code> records whether the download started from <code>home</code> or <code>search</code>, so re-entry returns to the right place.</li>
+        </ul>
+
+        <div class="callout note">
+          <span class="ic">⬇️</span>
+          <div>
+            <span class="callout-title">The download request</span>
+            <p>
+              Files come from <code>downloads-api.ts</code> via the active session's <code>serverUrl</code>,
+              using <code>/api/items/{itemId}/file/{ino}/download?token=…</code>. Two headers matter:
+              keep <code>Authorization</code> for clients that honor it, and send
+              <code>Accept-Encoding: identity</code> so a reverse proxy doesn't gzip large media.
+            </p>
+          </div>
+        </div>
+
+        <p>
+          The download sheet is the detailed status surface, but it can be dismissed while the download
+          continues. The active toast's <strong>Open</strong> action pushes the source book route (with
+          a one-time sheet-open token via <code>getBookDetailHref()</code>) so the book screen still has a
+          working back button.
+        </p>
+
+        <h2>How the app knows it's offline</h2>
+        <p>
+          <code>authStore.isOnline</code> is the canonical flag, updated by a <code>NetInfo</code>
+          subscription in <code>useAuthBootstrap</code>. Two pieces lean on it: the request gate and the UI.
+        </p>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 640 300" role="img" aria-label="Offline request gate">
+            <defs>
+              <marker id="of" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" class="arrowfill"></path>
+              </marker>
+            </defs>
+
+            <rect class="node" x="40" y="20" width="180" height="44" rx="9"></rect>
+            <text class="nlabel" x="130" y="42" text-anchor="middle">NetInfo listener</text>
+            <text class="nsub" x="130" y="57" text-anchor="middle">useAuthBootstrap</text>
+
+            <rect class="node accent" x="40" y="120" width="180" height="44" rx="9"></rect>
+            <text class="nlabel" x="130" y="142" text-anchor="middle">authStore.isOnline</text>
+            <text class="nsub" x="130" y="157" text-anchor="middle">canonical flag</text>
+            <line class="edge" x1="130" y1="64" x2="130" y2="118" marker-end="url(#of)"></line>
+
+            <rect class="node" x="330" y="40" width="280" height="44" rx="9"></rect>
+            <text class="nlabel" x="470" y="62" text-anchor="middle">authFetch gate</text>
+            <text class="nsub" x="470" y="77" text-anchor="middle">offline → throws AuthUnavailableError</text>
+            <line class="edge" x1="220" y1="135" x2="328" y2="70" marker-end="url(#of)"></line>
+
+            <rect class="node" x="330" y="118" width="280" height="44" rx="9"></rect>
+            <text class="nlabel" x="470" y="140" text-anchor="middle">absClient</text>
+            <text class="nsub" x="470" y="155" text-anchor="middle">maps to AbsOfflineError</text>
+            <line class="edge" x1="610" y1="84" x2="610" y2="116" marker-end="url(#of)"></line>
+
+            <rect class="node" x="330" y="196" width="280" height="44" rx="9"></rect>
+            <text class="nlabel" x="470" y="218" text-anchor="middle">OfflineConnectionBanner</text>
+            <text class="nsub" x="470" y="233" text-anchor="middle">shown when offline · user-driven retry</text>
+            <line class="edge" x1="220" y1="150" x2="328" y2="214" marker-end="url(#of)"></line>
+
+            <rect class="node" x="40" y="220" width="180" height="44" rx="9"></rect>
+            <text class="nlabel" x="130" y="242" text-anchor="middle">on reconnect</text>
+            <text class="nsub" x="130" y="257" text-anchor="middle">refresh + flush queues</text>
+            <line class="edge" x1="130" y1="164" x2="130" y2="218" marker-end="url(#of)"></line>
+          </svg>
+          <figcaption>One flag drives everything: it short-circuits network requests (so streamed actions fail fast and cleanly), shows the retry banner, and triggers session refresh + queue flush when connectivity returns.</figcaption>
+        </figure>
+
+        <p>
+          A book is playable offline only when downloaded audio tracks exist
+          (<code>selectHasPlayableBookDownload</code>). Offline UI prefers cached data and avoids
+          aggressive background retries — the banner offers a <em>user-driven</em> retry instead of polling.
+        </p>
+
+        <h2>Two states that look similar but aren't</h2>
+        <div class="callout warn">
+          <span class="ic">🔀</span>
+          <div>
+            <span class="callout-title">Downloaded-only mode ≠ an offline session</span>
+            <p>
+              <strong>Downloaded-only mode</strong> is entered after <em>explicit logout</em> when downloads
+              remain: Home shows only downloaded books, server browsing is hidden, and cached library data
+              must not be exposed as browsable until sign-in. An <strong>offline User Session</strong> is
+              different — you're still signed in, connectivity is just temporarily gone, and the remembered
+              Active Library stays visible with offline indicators. Keeping these distinct is why a dropped
+              connection never looks like a logout. (See <a href="auth-sessions.html">Auth &amp; Sessions</a>.)
+            </p>
+          </div>
+        </div>
+
+        <h2>Offline write durability</h2>
+        <p>
+          Anything that can't reach the server while offline is queued and flushed on reconnect, in order:
+          <strong>progress → bookmark creates → bookmark deletes</strong>. The progress queue keeps only
+          the latest entry per book, user-scoped. Full rules live on
+          <a href="progress-sync.html">Progress &amp; Sync</a>.
+        </p>
+
+        <h2>Where it lives</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Concern</th><th>File</th></tr></thead>
+            <tbody>
+              <tr><td>Active download state + playability</td><td><code>src/store/device-books-store.ts</code></td></tr>
+              <tr><td>Download requests</td><td><code>src/api/downloads-api.ts</code></td></tr>
+              <tr><td>Connectivity + reconnect flush</td><td><code>src/auth/use-auth-bootstrap.ts</code></td></tr>
+              <tr><td>Request gate</td><td><code>src/api/auth-fetch.ts</code> · <code>abs-client.ts</code></td></tr>
+              <tr><td>Offline banner</td><td><code>src/components/offline-connection-banner.tsx</code></td></tr>
+              <tr><td>Book-detail sheet re-entry</td><td><code>src/navigation/book-links.ts</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="page-foot">
+          Distilled from <code>docs/download-ux.md</code> and <code>offline-handling.md</code>.
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="assets/site.js"></script>
+</body>
+</html>

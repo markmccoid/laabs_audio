@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Build &amp; Ops — LAABS Audio Handbook</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <script>try{var m=localStorage.getItem('laabs-docs-theme');if(m)document.documentElement.setAttribute('data-theme',m);}catch(e){}</script>
+</head>
+<body data-page="build-ops.html">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <div class="content">
+      <article>
+        <div class="topbar">
+          <button class="menu-toggle" aria-label="Toggle navigation">☰ Menu</button>
+          <span class="crumbs"><a href="index.html">Handbook</a> › Reference › Build &amp; Ops</span>
+          <span class="spacer"></span>
+          <button class="theme-toggle">☾ Dark</button>
+        </div>
+
+        <h1>Build &amp; Ops</h1>
+        <p class="lede">
+          How EAS turns this repo into an installable app — and the one CNG gotcha that can silently drop
+          a native patch from the build that runs on a device.
+        </p>
+
+        <h2>This is a CNG (managed) build</h2>
+        <p>
+          The native <code>ios/</code> folder is <strong>gitignored</strong>. It exists on your machine
+          (from a local <code>expo prebuild</code> / <code>expo run:ios</code>) but never reaches EAS. So
+          EAS regenerates the native project from <code>app.json</code> + config plugins on every build.
+          That single fact governs how anything native — patches, <code>Podfile</code> edits, native
+          config — has to reach a build.
+        </p>
+        <pre><code><span class="tok-comment"># which mode am I in?</span>
+git check-ignore ios/Podfile && echo "CNG (ios gitignored)" || echo "bare (ios committed)"</code></pre>
+
+        <h2>The EAS build sequence</h2>
+        <figure class="diagram">
+          <svg viewBox="0 0 640 250" role="img" aria-label="EAS managed build sequence">
+            <defs>
+              <marker id="bo" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+                <path d="M0,0 L7,3 L0,6 Z" class="arrowfill"></path>
+              </marker>
+            </defs>
+
+            <rect class="node" x="20" y="40" width="130" height="80" rx="9"></rect>
+            <text class="nlabel" x="85" y="74" text-anchor="middle">1 · Checkout</text>
+            <text class="nsub" x="85" y="92" text-anchor="middle">no ios/</text>
+            <text class="nsub" x="85" y="107" text-anchor="middle">patches/ present</text>
+
+            <rect class="node accent" x="175" y="40" width="140" height="80" rx="9"></rect>
+            <text class="nlabel" x="245" y="70" text-anchor="middle">2 · Install</text>
+            <text class="nsub" x="245" y="88" text-anchor="middle">npm install</text>
+            <text class="nsub" x="245" y="103" text-anchor="middle">+ patch-package</text>
+
+            <rect class="node" x="340" y="40" width="140" height="80" rx="9"></rect>
+            <text class="nlabel" x="410" y="70" text-anchor="middle">3 · Prebuild</text>
+            <text class="nsub" x="410" y="88" text-anchor="middle">expo prebuild</text>
+            <text class="nsub" x="410" y="103" text-anchor="middle">pod install</text>
+
+            <rect class="node" x="505" y="40" width="115" height="80" rx="9"></rect>
+            <text class="nlabel" x="562" y="74" text-anchor="middle">4 · Compile</text>
+            <text class="nsub" x="562" y="92" text-anchor="middle">xcodebuild</text>
+            <text class="nsub" x="562" y="107" text-anchor="middle">→ .ipa</text>
+
+            <line class="edge" x1="150" y1="80" x2="173" y2="80" marker-end="url(#bo)"></line>
+            <line class="edge" x1="315" y1="80" x2="338" y2="80" marker-end="url(#bo)"></line>
+            <line class="edge" x1="480" y1="80" x2="503" y2="80" marker-end="url(#bo)"></line>
+
+            <text class="elabel" x="245" y="150" text-anchor="middle">patches must land here…</text>
+            <text class="elabel" x="562" y="150" text-anchor="middle">…to be in here</text>
+            <path class="edge dashed" d="M245,158 L245,200 L562,200 L562,124" marker-end="url(#bo)"></path>
+          </svg>
+          <figcaption>The patched <code>node_modules</code> source must be in place when CocoaPods compiles in step 4. On managed builds, <code>postinstall</code> patch-package is <em>not</em> reliably honored relative to prebuild.</figcaption>
+        </figure>
+
+        <h2>The patch-package gotcha</h2>
+        <p>
+          A <code>react-native-screens</code> patch worked perfectly in the local simulator but had no
+          effect on a physical device installed from EAS. The cause: the shipped
+          <code>RNScreens.framework</code> was compiled from <strong>unpatched</strong> source — the
+          patch never made it into the binary, because <code>postinstall</code> patch-package didn't
+          survive the CNG prebuild sequence.
+        </p>
+
+        <div class="callout warn">
+          <span class="ic">🩹</span>
+          <div>
+            <span class="callout-title">Fix: use the EAS hook, not just postinstall</span>
+            <p>Add the dedicated build-server hook so the patch lands at the right time:</p>
+          </div>
+        </div>
+        <pre><code><span class="tok-comment">// package.json → scripts</span>
+"postinstall": "patch-package",            <span class="tok-comment">// local installs</span>
+"eas-build-post-install": "patch-package"  <span class="tok-comment">// EAS build server</span></code></pre>
+
+        <h2>Verify a native patch deterministically</h2>
+        <p>
+          Objective-C selector names survive into the compiled binary as plain strings, so you can prove
+          whether a native patch is present without reading (encrypted) build logs. Pick a unique symbol
+          the patch introduces and grep the shipped framework:
+        </p>
+        <pre><code><span class="tok-comment"># download the IPA, unzip, then:</span>
+strings -a "RNScreens.framework/RNScreens" \
+  | grep -c "rns_findDescendantScrollViewInView"
+<span class="tok-comment"># 0 = patch MISSING · >0 = patch present</span></code></pre>
+        <p class="muted">
+          Get the IPA URL from <code>eas build:view &lt;id&gt; --json</code> →
+          <code>artifacts.buildUrl</code>. (EAS build logs are encrypted at rest, so inspecting the IPA
+          is the practical CLI check.)
+        </p>
+
+        <div class="callout tip">
+          <span class="ic">📌</span>
+          <div>
+            <span class="callout-title">Takeaways</span>
+            <p>
+              Gitignored <code>ios/</code> ⇒ managed build ⇒ EAS regenerates native. "Works in the
+              simulator" ≠ "works in the EAS build" — the simulator uses your local native project; EAS
+              regenerates its own. For anything that must exist at native-compile time, use
+              <code>eas-build-post-install</code>.
+            </p>
+          </div>
+        </div>
+
+        <h2>Startup &amp; performance</h2>
+        <p>
+          For where time goes from process start to first Home, the gates, and the compact startup trace,
+          see <a href="architecture.html">Architecture → Cold start to first Home</a>. The usual suspects
+          are SecureStore reads (the hydration gate) and the synchronous <code>JSON.parse</code> of the
+          persisted React Query cache.
+        </p>
+
+        <div class="page-foot">
+          Distilled from <code>docs/eas-patch-package-cng-builds.md</code> and <code>startup-task-map.md</code>.
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="assets/site.js"></script>
+</body>
+</html>
