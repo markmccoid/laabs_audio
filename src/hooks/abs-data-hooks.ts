@@ -292,6 +292,51 @@ export type ItemDetailsWithSummary = LibraryItemSummary &
     coverUri?: string;
   };
 
+/**
+ * Pure helper that shapes the return value of useGetItemDetails.
+ * Extracted for unit-testability (no hook-testing library needed).
+ *
+ * The most important contract: `rest.refetch` is always forwarded so
+ * callers can invoke it in every auth state — fixing the crash in
+ * Downloaded-Only Mode.
+ */
+export function selectItemDetailsResult(args: {
+  status: string;
+  accessMode: string;
+  downloadedFallback: ItemDetailsWithSummary | undefined;
+  /** Remainder of useQuery result (includes refetch, fetchStatus, etc.) */
+  rest: { refetch: () => unknown } & Record<string, unknown>;
+  /** Only used in the authenticated path */
+  resolvedData: ItemDetailsWithSummary | undefined;
+  isPending: boolean;
+  isError: boolean;
+  isLoading: boolean;
+  error: Error | null;
+}) {
+  const { status, accessMode, downloadedFallback, rest } = args;
+  if (status !== "authenticated") {
+    return {
+      data:
+        accessMode === "downloadedOnly" || accessMode === "downloadedSessionOnly"
+          ? downloadedFallback
+          : undefined,
+      isPending: false,
+      isError: false,
+      isLoading: false,
+      error: null,
+      ...rest,
+    };
+  }
+  return {
+    data: args.resolvedData,
+    isPending: args.isPending,
+    isError: args.isError,
+    isLoading: args.isLoading,
+    error: args.error,
+    ...rest,
+  };
+}
+
 export const useCachedBookSummary = (itemId?: string) => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
@@ -441,31 +486,25 @@ export const useGetItemDetails = (itemId?: string) => {
     };
   }, [downloadedCoverLocalUri, downloadedDetails]);
 
-  // Return appropriate data based on authentication state
-  if (status !== "authenticated") {
-    return {
-      data:
-        accessMode === "downloadedOnly" || accessMode === "downloadedSessionOnly"
-          ? downloadedFallback
-          : undefined,
-      isPending: false,
-      isError: false,
-      isLoading: false,
-      error: null,
-    };
-  }
   const shouldUseDownloadedFallback = Boolean(downloadedFallback && !details);
   const resolvedData = shouldUseDownloadedFallback ? downloadedFallback : data;
   // console.log("useGetItemDetails coveruri", data?.coverUri);
   // console.log("useGetItemDetails FULL", data?.coverFull);
-  return {
-    data: resolvedData,
+
+  // Return appropriate data based on authentication state — delegates to the
+  // pure selectItemDetailsResult helper so it can be unit-tested without a
+  // hook-testing library.
+  return selectItemDetailsResult({
+    status,
+    accessMode,
+    downloadedFallback,
+    rest,
+    resolvedData,
     isPending: shouldUseDownloadedFallback ? false : isPending,
     isError: shouldUseDownloadedFallback ? false : isError,
     isLoading: shouldUseDownloadedFallback ? false : isLoading,
     error: shouldUseDownloadedFallback ? null : error,
-    ...rest,
-  };
+  });
 };
 
 //# ----------------------------------------------
