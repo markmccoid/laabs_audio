@@ -51,22 +51,33 @@ const srgbChannelToLinear = (channel: number) => {
     : Math.pow((normalized + 0.055) / 1.055, 2.4);
 };
 
+/** WCAG relative luminance (0–1) of a hex color. Returns 0 for invalid input. */
+export const getRelativeLuminance = (color: string) => {
+  const normalized = normalizeAccentHex(color);
+  if (!normalized) {
+    return 0;
+  }
+
+  const red = Number.parseInt(normalized.slice(1, 3), 16);
+  const green = Number.parseInt(normalized.slice(3, 5), 16);
+  const blue = Number.parseInt(normalized.slice(5, 7), 16);
+
+  return (
+    0.2126 * srgbChannelToLinear(red) +
+    0.7152 * srgbChannelToLinear(green) +
+    0.0722 * srgbChannelToLinear(blue)
+  );
+};
+
 export const getAccentForegroundColor = (accentColor: string) => {
   const normalizedAccent = normalizeAccentHex(accentColor);
   if (!normalizedAccent) {
     return "#FFFFFF";
   }
 
-  const red = Number.parseInt(normalizedAccent.slice(1, 3), 16);
-  const green = Number.parseInt(normalizedAccent.slice(3, 5), 16);
-  const blue = Number.parseInt(normalizedAccent.slice(5, 7), 16);
-
-  const luminance =
-    0.2126 * srgbChannelToLinear(red) +
-    0.7152 * srgbChannelToLinear(green) +
-    0.0722 * srgbChannelToLinear(blue);
-
-  return luminance > ACCENT_FOREGROUND_LUMINANCE_THRESHOLD ? "#000000" : "#FFFFFF";
+  return getRelativeLuminance(normalizedAccent) > ACCENT_FOREGROUND_LUMINANCE_THRESHOLD
+    ? "#000000"
+    : "#FFFFFF";
 };
 
 const lightenChannel = (channel: number, amount: number) =>

@@ -1,11 +1,20 @@
 import { getDefaultSessionLabel } from "@/auth/auth-storage";
 import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
 import { enterUserSession } from "@/auth/enter-user-session";
+import {
+  getDefaultSessionColor,
+  resolveColorForScheme,
+  resolveSessionColor,
+  SESSION_COLOR_PALETTE,
+} from "@/auth/session-color";
 import { useApplySessionEntryResolution } from "@/auth/use-apply-session-entry-resolution";
+import { getAccentForegroundColor, normalizeAccentHex } from "@/theme/accent-color";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { ColorPicker, Host } from "@expo/ui/swift-ui";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
+import { useUniwind } from "uniwind";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -21,6 +30,8 @@ const resolveParam = (value?: string | string[]) => (Array.isArray(value) ? valu
 
 export function SignInEditScreen() {
   const themeColors = useThemeColors();
+  const { theme } = useUniwind();
+  const scheme = theme === "dark" ? "dark" : "light";
   const sessions = useAuthStore((state) => state.rememberedSessions);
   const activeSessionKey = useAuthStore((state) => state.activeSessionKey);
   const accessMode = useAuthStore(selectAccessMode);
@@ -38,6 +49,7 @@ export function SignInEditScreen() {
     [sessionKey, sessions],
   );
   const [label, setLabel] = useState(() => session?.label ?? "");
+  const [color, setColor] = useState<string | null>(() => session?.color ?? null);
   const [password, setPassword] = useState("");
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -52,6 +64,7 @@ export function SignInEditScreen() {
       await updateRememberedSession(session.key, {
         label: label.trim() || getDefaultSessionLabel(session.username, session.serverUrl),
         password: password.trim() || undefined,
+        color,
       });
 
       const shouldRestore = session.needsAttention || session.key === activeSessionKey;
@@ -277,6 +290,105 @@ export function SignInEditScreen() {
                 />
               </Pressable>
             </View>
+          </View>
+
+          <View>
+            <Text
+              style={{
+                color: themeColors.textMuted,
+                fontSize: 14,
+                fontWeight: "600",
+                marginBottom: 8,
+              }}
+            >
+              Color
+            </Text>
+            {Platform.OS === "ios" ? (
+              <View>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                  <View
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                      borderCurve: "continuous",
+                      backgroundColor: resolveSessionColor(
+                        { key: session.key, color },
+                        scheme,
+                        themeColors.bg,
+                      ),
+                      borderWidth: 1,
+                      borderColor: themeColors.border,
+                    }}
+                  />
+                  <Text style={{ color: themeColors.text, fontSize: 16, flex: 1 }}>
+                    {color ?? "Automatic"}
+                  </Text>
+                  <Host matchContents>
+                    <ColorPicker
+                      label=""
+                      supportsOpacity={false}
+                      selection={color ?? getDefaultSessionColor(session.key)}
+                      onSelectionChange={(value) => setColor(normalizeAccentHex(value) ?? value)}
+                    />
+                  </Host>
+                </View>
+                {color ? (
+                  <Pressable onPress={() => setColor(null)} hitSlop={6} style={{ marginTop: 12 }}>
+                    <Text style={{ color: themeColors.accent, fontSize: 15, fontWeight: "600" }}>
+                      Use automatic color
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+                {[null, ...SESSION_COLOR_PALETTE].map((value) => {
+                  const base = value ?? getDefaultSessionColor(session.key);
+                  const resolved = resolveColorForScheme(base, scheme);
+                  const isSelected = color === value;
+                  const isAuto = value === null;
+                  return (
+                    <Pressable
+                      key={value ?? "auto"}
+                      accessibilityRole="button"
+                      accessibilityLabel={isAuto ? "Automatic color" : `Color ${base}`}
+                      onPress={() => setColor(value)}
+                      hitSlop={6}
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 20,
+                        borderCurve: "continuous",
+                        backgroundColor: resolved,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderWidth: isSelected ? 3 : 1,
+                        borderColor: isSelected ? themeColors.text : themeColors.border,
+                      }}
+                    >
+                      {isSelected ? (
+                        <SymbolView
+                          name="checkmark"
+                          tintColor={getAccentForegroundColor(resolved)}
+                          size={16}
+                          weight="bold"
+                        />
+                      ) : isAuto ? (
+                        <SymbolView
+                          name="sparkles"
+                          tintColor={getAccentForegroundColor(resolved)}
+                          size={16}
+                        />
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+            <Text selectable style={{ color: themeColors.textMuted, fontSize: 13, marginTop: 8 }}>
+              Tints this sign-in on the Home screen. Automatic picks a color for you.
+            </Text>
           </View>
         </View>
 

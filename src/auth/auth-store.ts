@@ -61,7 +61,7 @@ export type AuthState = {
     setSessionNeedsAttention: (sessionKey: string, message: string) => void;
     updateRememberedSession: (
       sessionKey: string,
-      values: { label?: string | null; password?: string | null },
+      values: { label?: string | null; password?: string | null; color?: string | null },
     ) => Promise<void>;
     removeRememberedSession: (sessionKey: string) => Promise<void>;
     refreshSession: (options?: { force?: boolean }) => Promise<string | null>;
@@ -367,6 +367,7 @@ export const authStore = createStore<AuthState>()(
 
           authStorage.updateSession(sessionKey, {
             label: values.label?.trim() || getDefaultSessionLabel(session.username, session.serverUrl),
+            ...(values.color !== undefined ? { color: values.color } : {}),
             needsAttention: false,
             lastError: null,
           });

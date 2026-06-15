@@ -1,5 +1,6 @@
 import * as SecureStore from "expo-secure-store";
 import { mmkvStorage } from "../store/mmkv-storage";
+import { normalizeAccentHex } from "../theme/accent-color";
 
 export type RememberedSessionRecord = {
   key: string;
@@ -7,6 +8,8 @@ export type RememberedSessionRecord = {
   username: string;
   serverUrl: string;
   label: string;
+  /** User-chosen light-mode base color (hex), or null to use the auto-assigned default. */
+  color: string | null;
   activeLibraryId: string | null;
   activeLibraryName: string | null;
   needsAttention: boolean;
@@ -71,6 +74,24 @@ export const getSessionKey = (username: string, serverUrl: string) =>
 export const getDefaultSessionLabel = (username: string, serverUrl: string) =>
   `${username} @ ${serverUrl}`;
 
+/**
+ * Whether a session's label was customized by the user. We don't store an explicit flag,
+ * but the label is only ever the deterministic default (`username @ serverUrl`) unless the
+ * user typed something else, so a mismatch is a reliable "user-modified" signal.
+ */
+export const isSessionLabelCustom = (session: {
+  username: string;
+  serverUrl: string;
+  label: string;
+}) => session.label.trim() !== getDefaultSessionLabel(session.username, session.serverUrl);
+
+/** Short name for compact surfaces: the custom label when set, otherwise the username. */
+export const getSessionDisplayName = (session: {
+  username: string;
+  serverUrl: string;
+  label: string;
+}) => (isSessionLabelCustom(session) ? session.label.trim() : session.username);
+
 const getSecretKey = (
   sessionKey: string,
   kind: "password" | "accessToken" | "refreshToken",
@@ -107,6 +128,7 @@ const normalizeSnapshot = (value: unknown): AuthSessionsSnapshot => {
       username: session.username,
       serverUrl: session.serverUrl,
       label: session.label || getDefaultSessionLabel(session.username, session.serverUrl),
+      color: normalizeAccentHex(session.color),
       activeLibraryId: session.activeLibraryId ?? null,
       activeLibraryName: session.activeLibraryName ?? null,
       needsAttention: Boolean(session.needsAttention),
@@ -187,6 +209,7 @@ export const authStorage = {
       serverUrl: string;
       userId: string;
       label?: string | null;
+      color?: string | null;
       activeLibraryId?: string | null;
       activeLibraryName?: string | null;
       needsAttention?: boolean;
@@ -207,6 +230,10 @@ export const authStorage = {
         values.label?.trim() ||
         existing?.label ||
         getDefaultSessionLabel(values.username, values.serverUrl),
+      color:
+        values.color !== undefined
+          ? normalizeAccentHex(values.color)
+          : (existing?.color ?? null),
       activeLibraryId: values.activeLibraryId ?? existing?.activeLibraryId ?? null,
       activeLibraryName: values.activeLibraryName ?? existing?.activeLibraryName ?? null,
       needsAttention: values.needsAttention ?? existing?.needsAttention ?? false,

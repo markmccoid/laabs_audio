@@ -38,6 +38,7 @@ import Animated, {
   useSharedValue,
 } from "react-native-reanimated";
 import { HomeShelfSection } from "./home-shelf-section";
+import { useHomeSignInSwitcher } from "./home-sign-in-switcher";
 
 type HomeShelvesListItem =
   | { type: "refresh-message"; id: "refresh-message"; message: string }
@@ -93,6 +94,16 @@ const HomeShelvesScreen = () => {
     refetch: refetchLibraries,
   } = useLibrarySelection();
   const canChangeLibrary = authStatus === "authenticated";
+  const {
+    storedUsername,
+    buttonLabel,
+    activeSession,
+    activeColor,
+    otherSessions,
+    switchTo,
+    openAdd,
+    openManage,
+  } = useHomeSignInSwitcher();
   const scrollY = useSharedValue(0);
   const didMarkHomeShelfDisplayRef = useRef(false);
   const renderStartedAtMs = useMemo(
@@ -331,6 +342,35 @@ const HomeShelvesScreen = () => {
       style={{ flex: 1, backgroundColor: themeColors.bg }}
       onLayout={handleHomeLayout}
     >
+      {storedUsername ? (
+        <Stack.Toolbar placement="left">
+          <Stack.Toolbar.Menu tintColor={activeColor}>
+            <Stack.Toolbar.Label>{buttonLabel}</Stack.Toolbar.Label>
+            {activeSession ? (
+              <Stack.Toolbar.MenuAction isOn onPress={() => {}}>
+                {activeSession.label}
+              </Stack.Toolbar.MenuAction>
+            ) : null}
+            {otherSessions.map((session) => (
+              <Stack.Toolbar.MenuAction
+                key={session.key}
+                icon={session.needsAttention ? "exclamationmark.triangle" : undefined}
+                onPress={() => void switchTo(session)}
+              >
+                {session.label}
+              </Stack.Toolbar.MenuAction>
+            ))}
+            <Stack.Toolbar.Menu inline>
+              <Stack.Toolbar.MenuAction icon="plus" onPress={openAdd}>
+                Add Sign-In
+              </Stack.Toolbar.MenuAction>
+              <Stack.Toolbar.MenuAction icon="gearshape" onPress={openManage}>
+                Manage Sign-Ins
+              </Stack.Toolbar.MenuAction>
+            </Stack.Toolbar.Menu>
+          </Stack.Toolbar.Menu>
+        </Stack.Toolbar>
+      ) : null}
       <Stack.Toolbar placement="right">
         {/* <Stack.Toolbar.Button icon="ellipsis" /> */}
         <Stack.Toolbar.Menu icon="ellipsis">
