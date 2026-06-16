@@ -1,5 +1,6 @@
 import { useAuthStore } from "@/auth/auth-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import Constants from "expo-constants";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import React, { type ComponentProps } from "react";
@@ -128,7 +129,7 @@ export const SettingsHomeScreen = () => {
           selectable
           style={{ color: themeColors.textMuted, fontSize: 13, paddingHorizontal: 4 }}
         >
-          Configure account access and how bookshelves appear on Home.
+          Version {Constants.expoConfig?.version ?? "—"}
         </Text>
 
         <SettingsGroup title="Account">
