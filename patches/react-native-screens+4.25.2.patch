@@ -1,3 +1,101 @@
+diff --git a/node_modules/react-native-screens/ios/tabs/bottom-accessory/RNSTabsBottomAccessoryComponentView.mm b/node_modules/react-native-screens/ios/tabs/bottom-accessory/RNSTabsBottomAccessoryComponentView.mm
+index 47706c4..42ff99f 100644
+--- a/node_modules/react-native-screens/ios/tabs/bottom-accessory/RNSTabsBottomAccessoryComponentView.mm
++++ b/node_modules/react-native-screens/ios/tabs/bottom-accessory/RNSTabsBottomAccessoryComponentView.mm
+@@ -72,7 +72,46 @@ namespace react = facebook::react;
+ - (void)didMoveToWindow
+ {
+   if (self.window != nil) {
++    // LOCAL PATCH (laabs_audio): pushing a full-screen route over the tab host
++    // (e.g. the /main-player `card`) removes this accessory from the window, which
++    // runs -invalidate and nils _helper / _shadowStateProxy. On return upstream only
++    // re-messages the (now nil) _helper, so the environment-trait observer AND the
++    // frame-size observer are never re-established and the accessory freezes in its
++    // last environment/size (the stuck inline pill). Recreate the invalidated objects
++    // and re-assert the current environment so regular/inline tracking resumes.
++    if (@available(iOS 26.0, *)) {
++      if (_helper == nil) {
++        _helper = [[RNSTabsBottomAccessoryHelper alloc] initWithBottomAccessoryView:self];
++      }
++      if (_shadowStateProxy == nil) {
++        _shadowStateProxy = [[RNSTabsBottomAccessoryShadowStateProxy alloc] initWithBottomAccessoryView:self];
++      }
++    }
+     [_helper registerForAccessoryFrameChanges];
++    if (@available(iOS 26.0, *)) {
++      // The trait-change observer only fires on *changes*, so after re-entering the
++      // window we emit the current environment once to correct stale JS state.
++      [_reactEventEmitter emitOnEnvironmentChangeIfNeeded:self.traitCollection.tabAccessoryEnvironment];
++
++      // Deferred re-assert: on a physical device the tabAccessoryEnvironment trait may
++      // not be settled yet at didMoveToWindow time, so the synchronous emit above can
++      // carry a stale value. Re-register the frame observer and re-emit on the next
++      // main-runloop turn, once UIKit has propagated the trait/layout to the
++      // re-inserted view. emitOnEnvironmentChangeIfNeeded: dedupes, so when the
++      // synchronous read was already correct this is a harmless no-op.
++      __weak __typeof(self) weakSelf = self;
++      dispatch_async(dispatch_get_main_queue(), ^{
++        __typeof(self) strongSelf = weakSelf;
++        if (strongSelf == nil || strongSelf.window == nil) {
++          return;
++        }
++        if (@available(iOS 26.0, *)) {
++          [strongSelf->_helper registerForAccessoryFrameChanges];
++          [strongSelf->_reactEventEmitter
++              emitOnEnvironmentChangeIfNeeded:strongSelf.traitCollection.tabAccessoryEnvironment];
++        }
++      });
++    }
+   } else {
+     [self invalidate];
+   }
+@@ -158,7 +197,15 @@ namespace react = facebook::react;
+ #endif // RNS_TABS_BOTTOM_ACCESSORY_AVAILABLE
+ 
+ #if RCT_NEW_ARCH_ENABLED
+-  _state.reset();
++  // LOCAL PATCH (laabs_audio): do NOT reset _state here. invalidate runs every time a
++  // full-screen route (e.g. the /main-player card) covers the tab host and removes
++  // this accessory from the window. Fabric does not re-deliver state when it returns,
++  // so a reset leaves _bottomAccessoryView.state == nullptr forever after — and
++  // RNSTabsBottomAccessoryShadowStateProxy.updateShadowStateWithFrame: silently no-ops
++  // when state is null. That dead frame path is what left the accessory stuck at the
++  // inline width after a card dismiss. These views are never recycled (shouldBeRecycled
++  // == NO) and the shared_ptr releases on dealloc, so keeping the reference is safe.
++  // _state.reset();
+ #endif // RCT_NEW_ARCH_ENABLED
+ }
+ 
+diff --git a/node_modules/react-native-screens/ios/tabs/bottom-accessory/RNSTabsBottomAccessoryHelper.mm b/node_modules/react-native-screens/ios/tabs/bottom-accessory/RNSTabsBottomAccessoryHelper.mm
+index d532ba1..d6157ce 100644
+--- a/node_modules/react-native-screens/ios/tabs/bottom-accessory/RNSTabsBottomAccessoryHelper.mm
++++ b/node_modules/react-native-screens/ios/tabs/bottom-accessory/RNSTabsBottomAccessoryHelper.mm
+@@ -109,6 +109,25 @@ static void *RNSTabsBottomAccessoryNativeWrapperViewContext = &RNSTabsBottomAcce
+ #if REACT_NATIVE_VERSION_MINOR >= 82
+                     [self handleContentViewVisibilityForEnvironmentIfNeeded];
+ #endif // REACT_NATIVE_VERSION_MINOR >= 82
++                    // LOCAL PATCH (laabs_audio): an environment change also changes the
++                    // accessory's size, but the frame observer watches the wrapper's `center`
++                    // — which is invariant across regular<->inline (only the width/origin
++                    // change, the center stays put), so a width-only resize never fires the
++                    // KVO. After a card present/dismiss the observer can also be attached to a
++                    // stale wrapper. Either way the new size is never pushed to the RN shadow
++                    // tree and the content stays frozen at the previous width. Force a
++                    // re-registration on the now-current wrapper (the explicit unregister is
++                    // required — register early-returns when the wrapper pointer is unchanged),
++                    // deferred one runloop turn so UIKit has laid out the new environment first.
++                    __weak __typeof(self) weakSelf = self;
++                    dispatch_async(dispatch_get_main_queue(), ^{
++                      __typeof(self) strongSelf = weakSelf;
++                      if (strongSelf == nil || strongSelf->_bottomAccessoryView.window == nil) {
++                        return;
++                      }
++                      [strongSelf unregisterForAccessoryFrameChanges];
++                      [strongSelf registerForAccessoryFrameChanges];
++                    });
+                   }];
+ }
+ 
 diff --git a/node_modules/react-native-screens/ios/tabs/screen/RNSTabsScreenViewController.mm b/node_modules/react-native-screens/ios/tabs/screen/RNSTabsScreenViewController.mm
 index b273770..02e5050 100644
 --- a/node_modules/react-native-screens/ios/tabs/screen/RNSTabsScreenViewController.mm
@@ -87,3 +185,113 @@ index b273770..02e5050 100644
  - (bool)tabScreenSelectedRepeatedly
  {
    if ([self tabsSpecialEffectsDelegate] != nil) {
+diff --git a/node_modules/react-native-screens/lib/commonjs/components/tabs/host/TabsHost.ios.js b/node_modules/react-native-screens/lib/commonjs/components/tabs/host/TabsHost.ios.js
+index 38d479f..3ba060d 100644
+--- a/node_modules/react-native-screens/lib/commonjs/components/tabs/host/TabsHost.ios.js
++++ b/node_modules/react-native-screens/lib/commonjs/components/tabs/host/TabsHost.ios.js
+@@ -61,15 +61,11 @@ function TabsHost(props) {
+     tabBarMinimizeBehavior: ios?.tabBarMinimizeBehavior,
+     tabBarTintColor: ios?.tabBarTintColor,
+     onMoreTabSelected: ios?.onMoreTabSelected
+-  }), children, ios?.bottomAccessory && _PlatformUtils.isIOS26OrHigher && (_reactNative.Platform.constants.reactNativeVersion.minor >= 82 ? /*#__PURE__*/_react.default.createElement(_TabsBottomAccessory.default, null, /*#__PURE__*/_react.default.createElement(_TabsBottomAccessoryContent.default, {
+-    environment: "regular"
+-  }, ios.bottomAccessory('regular')), /*#__PURE__*/_react.default.createElement(_TabsBottomAccessoryContent.default, {
+-    environment: "inline"
+-  }, ios.bottomAccessory('inline'))) : /*#__PURE__*/_react.default.createElement(_TabsBottomAccessory.default, {
++  }), children, ios?.bottomAccessory && _PlatformUtils.isIOS26OrHigher && /*#__PURE__*/_react.default.createElement(_TabsBottomAccessory.default, {
+     onEnvironmentChange: event => {
+       setBottomAccessoryEnvironment(event.nativeEvent.environment);
+     }
+-  }, ios.bottomAccessory(bottomAccessoryEnvironment))));
++  }, ios.bottomAccessory(bottomAccessoryEnvironment)));
+ }
+ var _default = exports.default = TabsHost;
+ const styles = _reactNative.StyleSheet.create({
+diff --git a/node_modules/react-native-screens/lib/module/components/tabs/host/TabsHost.ios.js b/node_modules/react-native-screens/lib/module/components/tabs/host/TabsHost.ios.js
+index 4a3ecf5..852051d 100644
+--- a/node_modules/react-native-screens/lib/module/components/tabs/host/TabsHost.ios.js
++++ b/node_modules/react-native-screens/lib/module/components/tabs/host/TabsHost.ios.js
+@@ -54,15 +54,11 @@ function TabsHost(props) {
+     tabBarMinimizeBehavior: ios?.tabBarMinimizeBehavior,
+     tabBarTintColor: ios?.tabBarTintColor,
+     onMoreTabSelected: ios?.onMoreTabSelected
+-  }), children, ios?.bottomAccessory && isIOS26OrHigher && (Platform.constants.reactNativeVersion.minor >= 82 ? /*#__PURE__*/React.createElement(TabsBottomAccessory, null, /*#__PURE__*/React.createElement(TabsBottomAccessoryContent, {
+-    environment: "regular"
+-  }, ios.bottomAccessory('regular')), /*#__PURE__*/React.createElement(TabsBottomAccessoryContent, {
+-    environment: "inline"
+-  }, ios.bottomAccessory('inline'))) : /*#__PURE__*/React.createElement(TabsBottomAccessory, {
++  }), children, ios?.bottomAccessory && isIOS26OrHigher && /*#__PURE__*/React.createElement(TabsBottomAccessory, {
+     onEnvironmentChange: event => {
+       setBottomAccessoryEnvironment(event.nativeEvent.environment);
+     }
+-  }, ios.bottomAccessory(bottomAccessoryEnvironment))));
++  }, ios.bottomAccessory(bottomAccessoryEnvironment)));
+ }
+ export default TabsHost;
+ const styles = StyleSheet.create({
+diff --git a/node_modules/react-native-screens/src/components/tabs/host/TabsHost.ios.tsx b/node_modules/react-native-screens/src/components/tabs/host/TabsHost.ios.tsx
+index 248d242..0171253 100644
+--- a/node_modules/react-native-screens/src/components/tabs/host/TabsHost.ios.tsx
++++ b/node_modules/react-native-screens/src/components/tabs/host/TabsHost.ios.tsx
+@@ -1,7 +1,7 @@
+ 'use client';
+ 
+ import React, { useState } from 'react';
+-import { Platform, StyleSheet } from 'react-native';
++import { StyleSheet } from 'react-native';
+ import TabsHostIOSNativeComponent, {
+   type NativeProps as TabsHostIOSNativeComponentProps,
+ } from '../../../fabric/tabs/TabsHostIOSNativeComponent';
+@@ -9,7 +9,6 @@ import type { TabsHostProps } from './TabsHost.types';
+ import { RNSLog } from '../../../private';
+ import TabsBottomAccessory from '../bottom-accessory/TabsBottomAccessory';
+ import { TabsBottomAccessoryEnvironment } from '../bottom-accessory/TabsBottomAccessory.types';
+-import TabsBottomAccessoryContent from '../bottom-accessory/TabsBottomAccessoryContent';
+ import { isIOS26OrHigher } from '../../helpers/PlatformUtils';
+ import { useTabsHost } from './useTabsHost';
+ 
+@@ -60,25 +59,25 @@ function TabsHost(props: TabsHostProps) {
+       tabBarTintColor={ios?.tabBarTintColor}
+       onMoreTabSelected={ios?.onMoreTabSelected}>
+       {children}
+-      {ios?.bottomAccessory &&
+-        isIOS26OrHigher &&
+-        (Platform.constants.reactNativeVersion.minor >= 82 ? (
+-          <TabsBottomAccessory>
+-            <TabsBottomAccessoryContent environment="regular">
+-              {ios.bottomAccessory('regular')}
+-            </TabsBottomAccessoryContent>
+-            <TabsBottomAccessoryContent environment="inline">
+-              {ios.bottomAccessory('inline')}
+-            </TabsBottomAccessoryContent>
+-          </TabsBottomAccessory>
+-        ) : (
+-          <TabsBottomAccessory
+-            onEnvironmentChange={event => {
+-              setBottomAccessoryEnvironment(event.nativeEvent.environment);
+-            }}>
+-            {ios.bottomAccessory(bottomAccessoryEnvironment)}
+-          </TabsBottomAccessory>
+-        ))}
++      {/* LOCAL PATCH (laabs_audio): force the single-content bottom-accessory path
++          on all RN versions. The RN>=0.82 dual-content path mounts BOTH the
++          "regular" and "inline" TabsBottomAccessoryContent views and hides the
++          inactive one via layer.opacity in RNSTabsBottomAccessoryHelper. That
++          opacity is reset to 1.0 by invalidateLayer (finalizeUpdates / trait
++          changes) without a guaranteed re-apply, so presenting+dismissing a card
++          (e.g. /main-player) leaves both content views visible = duplicated
++          mini-player. The single-content path never sets two content views, so
++          isContentViewSwitchingWorkaroundActive stays false and the bug cannot
++          occur. Trade-off: content swaps reactively on minimize instead of the
++          native cross-fade. */}
++      {ios?.bottomAccessory && isIOS26OrHigher && (
++        <TabsBottomAccessory
++          onEnvironmentChange={event => {
++            setBottomAccessoryEnvironment(event.nativeEvent.environment);
++          }}>
++          {ios.bottomAccessory(bottomAccessoryEnvironment)}
++        </TabsBottomAccessory>
++      )}
+     </TabsHostIOSNativeComponent>
+   );
+ }

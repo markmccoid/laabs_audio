@@ -1,5 +1,10 @@
 # Change log: NativeTabs BottomAccessory inline-mode fix
 
+> **Scope note:** this file documents only the *original* scroll-view hunk (Patch A).
+> `patches/react-native-screens+4.25.2.patch` has since grown two more fixes
+> (anti-duplication, anti stuck-inline). The full catalog is in
+> [`docs/react-native-screens-patches.md`](./docs/react-native-screens-patches.md).
+
 Goal: make the tab bar minimize on scroll (`minimizeBehavior="onScrollDown"`) so the
 `NativeTabs.BottomAccessory` mini player enters inline mode. Investigation showed the
 minimize never triggered on ANY tab, because on iOS 26 UIKit drives minimization off
