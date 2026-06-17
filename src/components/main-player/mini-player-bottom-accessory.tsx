@@ -1,11 +1,14 @@
 import { CoverImage } from "@/components/images/cover-image";
+import { playerService, usePlaybackStore } from "@/player";
 import type { PlaybackControlIntent } from "@/player/playback-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { MenuView, type MenuAction, type NativeActionEvent } from "@expo/ui/community/menu";
 import { router } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
-import { type ReactNode } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+
+const RATE_OPTIONS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 
 type MiniPlayerBottomAccessoryProps = {
   author?: string | null;
@@ -34,30 +37,82 @@ export function MiniPlayerBottomAccessory({
 }: MiniPlayerBottomAccessoryProps) {
   const placement = NativeTabs.BottomAccessory.usePlacement();
   const isInline = placement === "inline";
+  const playbackRate = usePlaybackStore((state) => state.rate);
+
   const handleOpenMainPlayer = () => {
     router.push("/main-player");
+  };
+
+  // Tapping the cover opens a native menu (long-press was dropped because it raced
+  // the tap-to-open). Restores the old Close Book + Speed actions on a reliable tap.
+  const menuActions: MenuAction[] = [
+    {
+      id: "speed",
+      title: `Speed (${playbackRate}×)`,
+      image: "speedometer",
+      subactions: RATE_OPTIONS.map((rate): MenuAction => ({
+        id: `rate-${rate}`,
+        title: `${rate}×`,
+        state: Math.abs(playbackRate - rate) < 0.001 ? "on" : "off",
+      })),
+    },
+    {
+      id: "close-book",
+      title: "Close Book",
+      image: "book.closed.fill",
+      attributes: { destructive: true },
+    },
+  ];
+
+  const handleMenuAction = ({ nativeEvent }: NativeActionEvent) => {
+    const actionId = nativeEvent.event;
+    if (actionId === "close-book") {
+      void playerService.stop();
+    } else if (actionId.startsWith("rate-")) {
+      void playerService.setRate(Number(actionId.slice("rate-".length)));
+    }
   };
 
   return (
     <View
       className="flex-row items-center h-full justify-between border-hairline border-gray-400 rounded-full bg-transparent"
-      style={[
-        styles.accessory,
-        isInline ? styles.inlineAccessory : styles.regularAccessory,
-        // { backgroundColor: themeColors.surface },
-      ]}
+      style={[styles.accessory, isInline ? styles.inlineAccessory : styles.regularAccessory]}
     >
-      <MiniPlayerOpenButton onPress={handleOpenMainPlayer}>
-        <MiniPlayerBookSummary
-          author={author}
+      <MenuView
+        title={title ?? undefined}
+        actions={menuActions}
+        onPressAction={handleMenuAction}
+        style={styles.coverMenu}
+      >
+        <CoverImage
+          libraryItemId={libraryItemId ?? undefined}
           coverUri={coverUri}
-          isLoading={isLoading}
-          libraryItemId={libraryItemId}
           localCoverUri={localCoverUri}
-          themeColors={themeColors}
-          title={title}
+          variant="thumb"
+          style={{
+            width: 35,
+            height: 35,
+            borderRadius: 8,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: themeColors.border,
+          }}
         />
-      </MiniPlayerOpenButton>
+      </MenuView>
+
+      <Pressable
+        onPress={handleOpenMainPlayer}
+        className="flex-1 flex-row items-center h-full min-w-0"
+      >
+        <View className="flex-col justify-center flex-1 items-start h-full">
+          <Text style={{ fontSize: 12, color: themeColors.text }} numberOfLines={1}>
+            {title ?? "Starting audiobook"}
+          </Text>
+          <Text style={{ fontSize: 10, color: themeColors.textMuted }} numberOfLines={1}>
+            {isLoading ? "Starting playback..." : `by ${author ?? ""}`}
+          </Text>
+        </View>
+      </Pressable>
+
       <PlayPauseButton
         isLoading={isLoading}
         isPlaying={isPlaying}
@@ -65,68 +120,6 @@ export function MiniPlayerBottomAccessory({
         themeColors={themeColors}
         onToggle={onToggle}
       />
-    </View>
-  );
-}
-
-type MiniPlayerOpenButtonProps = {
-  children: ReactNode;
-  onPress: () => void;
-};
-
-function MiniPlayerOpenButton({ children, onPress }: MiniPlayerOpenButtonProps) {
-  return (
-    <Pressable onPress={onPress} className="flex-1 items-center flex-row min-w-0">
-      {children}
-    </Pressable>
-  );
-}
-
-type MiniPlayerBookSummaryProps = {
-  author?: string | null;
-  coverUri?: string | null;
-  isLoading: boolean;
-  libraryItemId?: string | null;
-  localCoverUri?: string | null;
-  themeColors: ReturnType<typeof useThemeColors>;
-  title?: string | null;
-};
-
-function MiniPlayerBookSummary({
-  author,
-  coverUri,
-  isLoading,
-  libraryItemId,
-  localCoverUri,
-  themeColors,
-  title,
-}: MiniPlayerBookSummaryProps) {
-  return (
-    <View className="flex-row items-center h-full flex-1 min-w-0">
-      <CoverImage
-        libraryItemId={libraryItemId ?? undefined}
-        coverUri={coverUri}
-        localCoverUri={localCoverUri}
-        variant="thumb"
-        style={{
-          width: 35,
-          height: 35,
-          marginRight: 8,
-          borderRadius: 8,
-
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: themeColors.border,
-        }}
-      />
-
-      <View className="flex-col justify-center flex-1 items-start h-full">
-        <Text style={{ fontSize: 12, color: themeColors.text }} numberOfLines={1}>
-          {title ?? "Starting audiobook"}
-        </Text>
-        <Text style={{ fontSize: 10, color: themeColors.textMuted }} numberOfLines={1}>
-          {isLoading ? "Starting playback..." : `by ${author ?? ""}`}
-        </Text>
-      </View>
     </View>
   );
 }
@@ -169,6 +162,10 @@ const styles = StyleSheet.create({
   accessory: {
     gap: 8,
     overflow: "hidden",
+  },
+  coverMenu: {
+    height: 35,
+    width: 35,
   },
   regularAccessory: {
     alignSelf: "stretch",
