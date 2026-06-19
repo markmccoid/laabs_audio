@@ -1,7 +1,4 @@
-import type {
-  SearchFavoriteFilter,
-  SearchFilterOperator,
-} from "@/search/search-session-store";
+import type { SearchFavoriteFilter, SearchFilterOperator } from "@/search/search-session-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import React, { useMemo, useState } from "react";
@@ -255,9 +252,7 @@ const SegmentTab = ({
               paddingHorizontal: 4,
             }}
           >
-            <Text
-              style={{ color: themeColors.accentForeground, fontSize: 10, fontWeight: "800" }}
-            >
+            <Text style={{ color: themeColors.accentForeground, fontSize: 10, fontWeight: "800" }}>
               {count}
             </Text>
           </View>
@@ -375,11 +370,7 @@ export const FilterOptionsSheet = ({
                   >
                     <SymbolView
                       name={option.icon}
-                      tintColor={
-                        isSelected
-                          ? themeColors.accentForeground
-                          : themeColors.textMuted
-                      }
+                      tintColor={isSelected ? themeColors.accentForeground : themeColors.textMuted}
                       size={12}
                     />
                     <Text
@@ -455,13 +446,19 @@ export const FilterOptionsSheet = ({
               onPress={() => setActiveTab("tags")}
             />
           </ControlPanel>
-          <Pressable onPress={onClose} hitSlop={10} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>
+          <Pressable
+            onPress={onClose}
+            hitSlop={10}
+            style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}
+          >
             <ControlSurface
               isSelected
               radius={999}
               style={{ paddingHorizontal: 12, paddingVertical: 6 }}
             >
-              <Text style={{ color: themeColors.accentForeground, fontWeight: "600", fontSize: 15 }}>
+              <Text
+                style={{ color: themeColors.accentForeground, fontWeight: "600", fontSize: 15 }}
+              >
                 Done
               </Text>
             </ControlSurface>
@@ -484,15 +481,17 @@ export const FilterOptionsSheet = ({
             placeholder={`Search ${facetLabel}`}
             placeholderTextColor={themeColors.textMuted}
             autoCorrect={false}
-            style={{ flex: 1, color: themeColors.text, fontSize: 14, paddingVertical: 0 }}
+            style={{
+              flex: 1,
+              color: themeColors.text,
+              fontSize: 14,
+              paddingVertical: 0,
+              alignItems: "center",
+            }}
           />
           {searchValue ? (
             <Pressable onPress={() => setSearchValue("")} hitSlop={8}>
-              <SymbolView
-                name="xmark.circle.fill"
-                tintColor={themeColors.textMuted}
-                size={14}
-              />
+              <SymbolView name="xmark.circle.fill" tintColor={themeColors.textMuted} size={14} />
             </Pressable>
           ) : null}
         </ControlPanel>
@@ -506,13 +505,19 @@ export const FilterOptionsSheet = ({
             {selectedValues.length > 1 ? (
               <MiniOperatorToggle operator={operator} onChange={onOperatorChange} />
             ) : null}
-            <Pressable onPress={onClear} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>
+            <Pressable
+              onPress={onClear}
+              hitSlop={8}
+              style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}
+            >
               <ControlSurface
                 isSelected
                 radius={999}
                 style={{ paddingHorizontal: 10, paddingVertical: 4 }}
               >
-                <Text style={{ color: themeColors.accentForeground, fontSize: 12, fontWeight: "600" }}>
+                <Text
+                  style={{ color: themeColors.accentForeground, fontSize: 12, fontWeight: "600" }}
+                >
                   Clear
                 </Text>
               </ControlSurface>

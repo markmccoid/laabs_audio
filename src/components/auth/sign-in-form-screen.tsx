@@ -1,9 +1,12 @@
-import { getDefaultSessionLabel } from "@/auth/auth-storage";
+import { getDefaultSessionLabel, getSessionKey } from "@/auth/auth-storage";
 import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
 import { enterUserSession } from "@/auth/enter-user-session";
+import { getDefaultSessionColor, resolveSessionColor } from "@/auth/session-color";
 import { useApplySessionEntryResolution } from "@/auth/use-apply-session-entry-resolution";
 import Dropdown from "@/shared/ui/organisms/dropdown";
+import { normalizeAccentHex } from "@/theme/accent-color";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { ColorPicker, Host } from "@expo/ui/swift-ui";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
@@ -17,6 +20,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useUniwind } from "uniwind";
 
 const SERVER_PROTOCOLS = ["https://", "http://"] as const;
 type ServerProtocol = (typeof SERVER_PROTOCOLS)[number];
@@ -61,6 +65,8 @@ export function SignInFormScreen() {
   const { setLoginRequired } = useAuthActions();
   const applyResolution = useApplySessionEntryResolution();
   const themeColors = useThemeColors();
+  const { theme } = useUniwind();
+  const scheme = theme === "dark" ? "dark" : "light";
   const params = useLocalSearchParams<{
     mode?: string;
     returnToLibraryItemId?: string | string[];
@@ -86,8 +92,17 @@ export function SignInFormScreen() {
     () => splitServerUrl(storedServerUrl).protocol,
   );
   const [serverHost, setServerHost] = useState(() => splitServerUrl(storedServerUrl).host);
+  const [color, setColor] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // No session exists yet, so derive the deterministic key the session will get on
+  // submit. It drives the "Automatic" color preview/default and updates as the user
+  // types their username/server.
+  const previewKey = useMemo(
+    () => getSessionKey(username.trim(), buildServerUrl(serverProtocol, serverHost)),
+    [username, serverProtocol, serverHost],
+  );
 
   const handleClose = () => {
     setLoginRequired(false);
@@ -119,6 +134,7 @@ export function SignInFormScreen() {
         password,
         serverUrl: finalServerUrl,
         label: finalLabel,
+        color,
       });
       await applyResolution(resolution, {
         returnToLibraryItemId,
@@ -170,8 +186,8 @@ export function SignInFormScreen() {
             }
             placeholderTextColor={themeColors.textMuted}
             selectionColor={themeColors.accent}
-            className="rounded-xl border border-border bg-surface px-4 py-3 text-base text-text"
-            style={{ color: themeColors.text }}
+            className="rounded-xl border border-border bg-surface px-4 text-text"
+            style={{ color: themeColors.text, paddingVertical: 15, fontSize: 16 }}
           />
         </View>
 
@@ -200,14 +216,15 @@ export function SignInFormScreen() {
 
               <TextInput
                 autoCapitalize="none"
+                keyboardType="url"
                 autoCorrect={false}
                 value={serverHost}
                 onChangeText={setServerHost}
                 placeholder="your-server.example.com"
                 placeholderTextColor={themeColors.textMuted}
                 selectionColor={themeColors.accent}
-                className="flex-1 px-4 py-3 text-base text-text"
-                style={{ color: themeColors.text }}
+                className="flex-1 px-4 text-text items-center flex-row"
+                style={{ color: themeColors.text, fontSize: 16 }}
               />
             </View>
 
@@ -246,14 +263,17 @@ export function SignInFormScreen() {
             placeholder="username"
             placeholderTextColor={themeColors.textMuted}
             selectionColor={themeColors.accent}
-            className="rounded-xl border border-border bg-surface px-4 py-3 text-base text-text"
-            style={{ color: themeColors.text }}
+            className="rounded-xl border border-border bg-surface px-4 text-text"
+            style={{ color: themeColors.text, paddingVertical: 15, fontSize: 16 }}
           />
         </View>
 
         <View>
           <Text className="mb-2 text-sm font-medium text-text-muted">Password</Text>
-          <View className="flex-row items-center rounded-xl border border-border bg-surface px-4">
+          <View
+            className="flex-row items-center rounded-xl border border-border bg-surface px-4"
+            style={{ minHeight: 50 }}
+          >
             <TextInput
               secureTextEntry={!isPasswordVisible}
               value={password}
@@ -261,8 +281,8 @@ export function SignInFormScreen() {
               placeholder="password"
               placeholderTextColor={themeColors.textMuted}
               selectionColor={themeColors.accent}
-              className="flex-1 py-3 text-base text-text"
-              style={{ color: themeColors.text }}
+              className="flex-1 text-text"
+              style={{ color: themeColors.text, paddingVertical: 15, fontSize: 16 }}
             />
             <Pressable
               accessibilityRole="button"
@@ -279,6 +299,53 @@ export function SignInFormScreen() {
             </Pressable>
           </View>
         </View>
+
+        {Platform.OS === "ios" ? (
+          <View>
+            <Text className="mb-2 text-sm font-medium text-text-muted">Color</Text>
+            <View className="flex-row items-center" style={{ gap: 12 }}>
+              <View
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  borderCurve: "continuous",
+                  backgroundColor: resolveSessionColor(
+                    { key: previewKey, color },
+                    scheme,
+                    themeColors.bg,
+                  ),
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                }}
+              />
+              <Text className="flex-1 text-base text-text" style={{ color: themeColors.text }}>
+                {color ?? "Automatic"}
+              </Text>
+              <Host matchContents>
+                <ColorPicker
+                  label=""
+                  supportsOpacity={false}
+                  selection={color ?? getDefaultSessionColor(previewKey)}
+                  onSelectionChange={(value) => setColor(normalizeAccentHex(value) ?? value)}
+                />
+              </Host>
+            </View>
+            {color ? (
+              <Pressable onPress={() => setColor(null)} hitSlop={6} className="mt-3">
+                <Text
+                  className="text-sm font-semibold text-accent"
+                  style={{ color: themeColors.accent }}
+                >
+                  Use automatic color
+                </Text>
+              </Pressable>
+            ) : null}
+            <Text className="mt-2 text-xs text-text-muted">
+              Tints this sign-in on the Home screen. Automatic picks a color for you.
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       {localError ? <Text className="mt-4 text-sm text-red-600">{localError}</Text> : null}

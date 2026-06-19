@@ -45,9 +45,10 @@ const SettingsRow = ({ href, title, subtitle, icon, isLast = false }: SettingsRo
           style={{
             width: 30,
             height: 30,
-            borderRadius: 8,
+            borderRadius: 30,
             borderCurve: "continuous",
-            backgroundColor: themeColors.bg,
+            // borderWidth: 1,
+            // backgroundColor: themeColors.bg,
             alignItems: "center",
             justifyContent: "center",
           }}

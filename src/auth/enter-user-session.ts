@@ -35,6 +35,7 @@ export type UserSessionEntryRequest =
       password: string;
       serverUrl: string;
       label?: string | null;
+      color?: string | null;
     };
 
 export type SessionEntryFailureKind = "offline" | "needsAttention" | "unexpected";
@@ -182,6 +183,7 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
           username: req.username,
           serverUrl: normalizedServerUrl,
           label: req.label?.trim() || getDefaultSessionLabel(req.username, normalizedServerUrl),
+          color: req.color ?? null,
           needsAttention: false,
           lastError: null,
         },

@@ -14,7 +14,6 @@ import { ColorPicker, Host } from "@expo/ui/swift-ui";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
-import { useUniwind } from "uniwind";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -25,6 +24,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useUniwind } from "uniwind";
 
 const resolveParam = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value);
 
@@ -202,7 +202,7 @@ export function SignInEditScreen() {
                 color: themeColors.text,
                 fontSize: 16,
                 paddingHorizontal: 14,
-                paddingVertical: 12,
+                paddingVertical: 15,
               }}
             />
           </View>
@@ -258,6 +258,7 @@ export function SignInEditScreen() {
                 borderCurve: "continuous",
                 backgroundColor: themeColors.surface,
                 paddingHorizontal: 14,
+                minHeight: 50,
                 flexDirection: "row",
                 alignItems: "center",
               }}
@@ -273,7 +274,7 @@ export function SignInEditScreen() {
                   flex: 1,
                   color: themeColors.text,
                   fontSize: 16,
-                  paddingVertical: 12,
+                  paddingVertical: 15,
                 }}
               />
               <Pressable
