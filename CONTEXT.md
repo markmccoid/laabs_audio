@@ -156,6 +156,10 @@ _Avoid_: Current audiobook, selected playback, global player book
 The audiobook whose title, author, and cover should be shown by player surfaces while playback is idle, loading, playing, paused, or failed. During a Playback Start Attempt, this is the attempted audiobook; otherwise it is Active Playback when one exists.
 _Avoid_: Now playing, current player book, selected playback book
 
+**Startup Active Playback Restore**:
+The reopen-time attempt to bring the user's most recent Active Playback back as a loaded, paused Active Playback so the user can resume where they left off. It is governed by a user preference and never starts audio on its own.
+_Avoid_: Auto-resume, resume on launch, reload last book
+
 **Playback Rate**:
 The listening speed preference for an audiobook, scoped to a User Session when the user is signed in.
 _Avoid_: Global speed, book speed
@@ -395,6 +399,11 @@ _Avoid_: Five minute window, scrubber window
 - A **Playback Start Attempt** may become **Active Playback** only after playable audio is confirmed.
 - A **Playback Start Attempt** for one audiobook may replace existing **Active Playback** for another audiobook before playable audio is confirmed.
 - A failed **Playback Start Attempt** may leave no **Active Playback**.
+- **Startup Active Playback Restore** brings back the most recent **Active Playback** as a loaded, paused Active Playback and never auto-plays.
+- **Startup Active Playback Restore** is governed by a user preference and does nothing when the preference is disabled.
+- **Startup Active Playback Restore** uses **Resume Resolution** to choose the restored **Listening Position**.
+- **Startup Active Playback Restore** relies on **User Session** boundary teardown to clear the previous Active Playback, so it is not separately scoped to an **Audiobookshelf User Identity**.
+- **Startup Active Playback Restore** is best-effort: a failed restore leaves the player idle rather than in an error state and preserves the saved last audiobook for a later attempt.
 - Only one **Playback Control Intent** may be active at a time.
 - Play and pause controls should follow **Audible Playback State**, not completion of follow-up progress or cache work.
 - A **Skip Burst** is not a **Playback Control Intent** because it changes **Listening Position**, not **Audible Playback State**.

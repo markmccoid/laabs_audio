@@ -123,6 +123,7 @@ export type SettingsState = {
   remoteCommandMode: RemoteCommandMode;
   showFavoriteBadgeOnCovers: boolean;
   showFinishedBadgeOnCovers: boolean;
+  restoreLastBookOnStartup: boolean;
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>;
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
   actions: {
@@ -144,6 +145,7 @@ export type SettingsState = {
     setRemoteCommandMode: (mode: RemoteCommandMode) => void;
     setShowFavoriteBadgeOnCovers: (enabled: boolean) => void;
     setShowFinishedBadgeOnCovers: (enabled: boolean) => void;
+    setRestoreLastBookOnStartup: (enabled: boolean) => void;
     setHomeShelfVisibility: (scopeKey: string | null, shelfId: string, isVisible: boolean) => void;
     setHomeShelfItemCount: (scopeKey: string | null, shelfId: string, homeItemCount: number) => void;
     setHomeShelfOrder: (scopeKey: string | null, orderedShelfIds: string[]) => void;
@@ -179,6 +181,7 @@ export const settingsStore = createStore<SettingsState>()(
       remoteCommandMode: DEFAULT_REMOTE_COMMAND_MODE,
       showFavoriteBadgeOnCovers: true,
       showFinishedBadgeOnCovers: true,
+      restoreLastBookOnStartup: true,
       homeShelvesByScope: {},
       discoverShelfByScope: {},
       actions: {
@@ -227,6 +230,8 @@ export const settingsStore = createStore<SettingsState>()(
           set({ showFavoriteBadgeOnCovers }),
         setShowFinishedBadgeOnCovers: (showFinishedBadgeOnCovers) =>
           set({ showFinishedBadgeOnCovers }),
+        setRestoreLastBookOnStartup: (restoreLastBookOnStartup) =>
+          set({ restoreLastBookOnStartup }),
         setHomeShelfVisibility: (scopeKey, shelfId, isVisible) => {
           const normalizedScopeKey = normalizeScopeKey(scopeKey);
           const normalizedShelfId = normalizeShelfId(shelfId);
@@ -408,10 +413,11 @@ export const settingsStore = createStore<SettingsState>()(
         useTokenWithCoverImages: state.useTokenWithCoverImages,
         disableLockScreenSeek: state.disableLockScreenSeek,
         remoteCommandMode: state.remoteCommandMode,
+        restoreLastBookOnStartup: state.restoreLastBookOnStartup,
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 13,
+      version: 14,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -430,6 +436,7 @@ export const settingsStore = createStore<SettingsState>()(
             useTokenWithCoverImages: false,
             disableLockScreenSeek: true,
             remoteCommandMode: DEFAULT_REMOTE_COMMAND_MODE,
+            restoreLastBookOnStartup: true,
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
           };
@@ -490,6 +497,10 @@ export const settingsStore = createStore<SettingsState>()(
             version >= 13
               ? state.remoteCommandMode ?? DEFAULT_REMOTE_COMMAND_MODE
               : DEFAULT_REMOTE_COMMAND_MODE,
+          restoreLastBookOnStartup:
+            version >= 14
+              ? state.restoreLastBookOnStartup ?? true
+              : true,
           homeShelvesByScope:
             version >= 11
               ? state.homeShelvesByScope ?? EMPTY_HOME_SHELVES_BY_SCOPE

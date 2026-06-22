@@ -423,9 +423,10 @@ class PlayerService {
 
   async loadBook(
     libraryItemId: string,
-    options?: { autoPlay?: boolean },
+    options?: { autoPlay?: boolean; suppressErrorState?: boolean },
     internalOptions?: { preferDownloaded?: boolean },
   ) {
+    const suppressErrorState = options?.suppressErrorState ?? false;
     const existingState = playbackStore.getState();
     if (
       existingState.libraryItemId &&
@@ -596,14 +597,22 @@ class PlayerService {
         }
         const playbackState = playbackStore.getState();
         if (playbackState.playbackState === "loading") {
-          playbackState.actions.resetAfterFailedStart({
-            libraryItemId,
-            bookTitle: null,
-            positionMs: 0,
-            rate: DEFAULT_BOOK_PLAYBACK_RATE,
-            error: error instanceof Error ? error.message : "Unable to start streamed playback",
-          });
+          if (suppressErrorState) {
+            // Best-effort restore: leave the player idle and keep the saved last
+            // audiobook intact instead of surfacing a failed-start error.
+            playbackState.actions.setPlaybackState("idle");
+            playbackState.actions.setError(null);
+          } else {
+            playbackState.actions.resetAfterFailedStart({
+              libraryItemId,
+              bookTitle: null,
+              positionMs: 0,
+              rate: DEFAULT_BOOK_PLAYBACK_RATE,
+              error: error instanceof Error ? error.message : "Unable to start streamed playback",
+            });
+          }
         }
+        if (suppressErrorState) return;
         throw error;
       }
       if (__DEV__) {
@@ -611,6 +620,12 @@ class PlayerService {
       }
       const message = error instanceof Error ? error.message : "Unable to load book";
       const hasQueue = playbackStore.getState().queue.length > 0;
+      if (suppressErrorState) {
+        // Best-effort restore: idle (or keep a usable loaded queue) without an error banner.
+        playbackStore.getState().actions.setPlaybackState(hasQueue ? "ready" : "idle");
+        playbackStore.getState().actions.setError(null);
+        return;
+      }
       playbackStore.getState().actions.setPlaybackState(hasQueue ? "ready" : "error");
       playbackStore.getState().actions.setError(message);
       throw error;

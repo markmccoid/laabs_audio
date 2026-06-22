@@ -142,12 +142,14 @@ const PlaybackSettingsFallback = () => {
   );
   const disableLockScreenSeek = useSettingsStore((state) => state.disableLockScreenSeek);
   const remoteCommandMode = useSettingsStore((state) => state.remoteCommandMode);
+  const restoreLastBookOnStartup = useSettingsStore((state) => state.restoreLastBookOnStartup);
   const [backwardSkipDraft, setBackwardSkipDraft] = useState<string | null>(null);
   const [forwardSkipDraft, setForwardSkipDraft] = useState<string | null>(null);
   const {
     setDefaultBookProgressTimeDisplay,
     setDisableLockScreenSeek,
     setRemoteCommandMode,
+    setRestoreLastBookOnStartup,
     setSeekBackwardSeconds,
     setSeekForwardSeconds,
   } = useSettingsActions();
@@ -187,6 +189,39 @@ const PlaybackSettingsFallback = () => {
           gap: 14,
         }}
       >
+        <View
+          style={{
+            borderWidth: 1,
+            borderColor: themeColors.border,
+            borderRadius: 16,
+            borderCurve: "continuous",
+            padding: 14,
+            gap: 10,
+            backgroundColor: themeColors.surface,
+          }}
+        >
+          <Text selectable style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}>
+            Startup
+          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text selectable style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
+                Restore last book on startup
+              </Text>
+              <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
+                Reopen the app with your last book loaded and paused where you left off. It never
+                starts playing on its own.
+              </Text>
+            </View>
+            <Switch
+              value={restoreLastBookOnStartup}
+              onValueChange={setRestoreLastBookOnStartup}
+              trackColor={{ false: themeColors.border, true: themeColors.accent }}
+              thumbColor={restoreLastBookOnStartup ? themeColors.accentForeground : "#f4f4f5"}
+            />
+          </View>
+        </View>
+
         <View
           style={{
             borderWidth: 1,
@@ -470,10 +505,12 @@ export const SettingsPlaybackScreen = () => {
   );
   const disableLockScreenSeek = useSettingsStore((state) => state.disableLockScreenSeek);
   const remoteCommandMode = useSettingsStore((state) => state.remoteCommandMode);
+  const restoreLastBookOnStartup = useSettingsStore((state) => state.restoreLastBookOnStartup);
   const {
     setDefaultBookProgressTimeDisplay,
     setDisableLockScreenSeek,
     setRemoteCommandMode,
+    setRestoreLastBookOnStartup,
     setSeekBackwardSeconds,
     setSeekForwardSeconds,
   } = useSettingsActions();
@@ -487,6 +524,20 @@ export const SettingsPlaybackScreen = () => {
   return (
     <Host style={{ flex: 1 }}>
       <List>
+        <Section
+          title="Startup"
+          footer={
+            <SwiftText>
+              When you reopen the app, your last book is loaded and ready, paused where you left
+              off. It never starts playing on its own.
+            </SwiftText>
+          }
+        >
+          <Toggle isOn={restoreLastBookOnStartup} onIsOnChange={setRestoreLastBookOnStartup}>
+            <SwiftText>Restore last book on startup</SwiftText>
+          </Toggle>
+        </Section>
+
         <Section
           title="Skip Intervals"
           footer={

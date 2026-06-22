@@ -26,7 +26,8 @@ import { OfflineConnectionBanner } from "../components/offline-connection-banner
 import "../global.css";
 import { extractBookDetailIdFromUrl } from "../navigation/book-links";
 import { playerService } from "../player/player-service";
-import { usePlaybackStore } from "../player/playback-store";
+import { playbackStore, usePlaybackStore } from "../player/playback-store";
+import { settingsStore } from "../store/settings-store";
 import { SleepTimerCoordinator } from "../player/sleep-timer-coordinator";
 import { FIVE_MINUTES_MS, queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
@@ -136,6 +137,11 @@ const isActivePlaybackState = (playbackState: string) =>
   playbackState === "playing" ||
   playbackState === "paused";
 
+// A cold launch hydrates the playback store to a non-active state; only then is it
+// safe to restore the last book without clobbering live playback.
+const isRestorableIdlePlaybackState = (playbackState: string) =>
+  playbackState === "idle" || playbackState === "ended";
+
 // Shared presentation for the utility bottom sheets pushed over the root stack.
 // Pass overrides for per-sheet detents, headers, or content styling.
 const sheetScreenOptions = (
@@ -169,6 +175,7 @@ export default function RootLayout() {
   const segments = useSegments();
   const globalParams = useGlobalSearchParams<{ libraryItemId?: string | string[] }>();
   const previousStatus = useRef<typeof status | null>(null);
+  const didDecideStartupRestoreRef = useRef(false);
   const [queryRestoreStartedAtMs] = useState(() => markStartup("query-restore-start"));
   const initialUrlStartedAtMsRef = useRef<number | null>(null);
   const splashHiddenRef = useRef(false);
@@ -491,6 +498,39 @@ export default function RootLayout() {
     playerService.init();
     return () => playerService.destroy();
   }, []);
+
+  // Startup Active Playback Restore: once startup has settled (auth resolved, query cache
+  // restored, first content presented), bring the most recent book back as a loaded, paused
+  // Active Playback. Decide exactly once per launch and never auto-play. Best-effort: a
+  // failed load (offline / Session Needs Sign-In / streamed session failure) leaves the
+  // player idle and preserves the saved book for a later launch.
+  useEffect(() => {
+    if (didDecideStartupRestoreRef.current) return;
+    if (!warmupEligible) return;
+    didDecideStartupRestoreRef.current = true;
+
+    // No usable session to load a book into yet.
+    if (accessMode === "firstRunSignInRequired") return;
+    // A deep link / return-to-book flow owns startup playback; don't compete with it.
+    if (startupBookLinkId) return;
+    if (!settingsStore.getState().restoreLastBookOnStartup) return;
+
+    const state = playbackStore.getState();
+    if (!state.libraryItemId) return;
+    if (state.queue.length > 0 || state.playbackControlIntent) return;
+    if (!isRestorableIdlePlaybackState(state.playbackState)) return;
+
+    const restoreLibraryItemId = state.libraryItemId;
+    logStartupEvent("startup restore begin", { libraryItemId: restoreLibraryItemId });
+    const interactionTask = InteractionManager.runAfterInteractions(() => {
+      void playerService
+        .loadBook(restoreLibraryItemId, { autoPlay: false, suppressErrorState: true })
+        .then(() => logStartupEvent("startup restore complete"))
+        .catch(() => logStartupEvent("startup restore failed"));
+    });
+
+    return () => interactionTask.cancel?.();
+  }, [accessMode, startupBookLinkId, warmupEligible]);
 
   useEffect(() => {
     if (status !== "authenticated") return;

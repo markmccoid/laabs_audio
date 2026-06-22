@@ -72,6 +72,16 @@ class AudioPro: RCTEventEmitter {
 	private var lastEmittedState: String = ""
 	private var wasPlayingBeforeInterruption: Bool = false
 	private var pendingStartTimeMs: Double? = nil
+
+	// When an audio-session interruption (e.g. an incoming text/call) pauses playback,
+	// the JS layer's progress save is async and can be lost if iOS suspends/terminates the
+	// app while it is backgrounded and no longer playing audio. To guarantee a durable save
+	// point, we persist the paused position synchronously to UserDefaults the instant the
+	// interruption begins. On the next play() for the same track (e.g. after a relaunch) we
+	// use it as a resume floor so playback never resumes behind where the interruption paused.
+	private let interruptionResumeDefaultsKey = "AudioProInterruptionResumeRecord"
+	// Safety bound so a very old record can never reposition an unrelated future session.
+	private let interruptionResumeMaxAgeSeconds: TimeInterval = 6 * 60 * 60
 	private var settingSkipForwardIntervalMs: Double = 30000.0
 	private var settingSkipBackwardIntervalMs: Double = 30000.0
 
@@ -141,6 +151,48 @@ class AudioPro: RCTEventEmitter {
 		)
 	}
 
+	/// Synchronously persist the current playback position so it survives an app
+	/// suspension/termination that can happen while audio is paused in the background.
+	private func persistInterruptionResumePosition() {
+		guard let trackId = currentTrack?["id"] as? String else { return }
+		let positionMs = getPlaybackInfo().position
+		guard positionMs > 0 else { return }
+
+		let record: [String: Any] = [
+			"trackId": trackId,
+			"positionMs": positionMs,
+			"timestamp": Date().timeIntervalSince1970,
+		]
+		UserDefaults.standard.set(record, forKey: interruptionResumeDefaultsKey)
+		log("Persisted interruption resume position", positionMs, "for", trackId)
+	}
+
+	private func clearInterruptionResumePosition() {
+		UserDefaults.standard.removeObject(forKey: interruptionResumeDefaultsKey)
+	}
+
+	/// Read and clear a persisted interruption position if it belongs to `trackId` and is
+	/// still fresh. Returns the position in ms, or nil when there is nothing to apply.
+	private func consumeInterruptionResumePosition(for trackId: String) -> Double? {
+		guard let record = UserDefaults.standard.dictionary(forKey: interruptionResumeDefaultsKey),
+			  let storedTrackId = record["trackId"] as? String,
+			  storedTrackId == trackId,
+			  let positionMs = record["positionMs"] as? Int,
+			  let timestamp = record["timestamp"] as? TimeInterval else {
+			return nil
+		}
+
+		// Matched this track: consume it regardless of freshness so it can't be reused.
+		clearInterruptionResumePosition()
+
+		guard Date().timeIntervalSince1970 - timestamp <= interruptionResumeMaxAgeSeconds else {
+			log("Discarding stale interruption resume position for", trackId)
+			return nil
+		}
+
+		return Double(positionMs)
+	}
+
 	@objc private func handleAudioSessionInterruption(_ notification: Notification) {
 		guard let userInfo = notification.userInfo,
 			  let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
@@ -161,6 +213,10 @@ class AudioPro: RCTEventEmitter {
 				// Pause playback without changing shouldBePlaying flag
 				player?.pause()
 				stopTimer()
+
+				// Durably save the paused position before iOS can suspend/terminate the app.
+				// The JS-side progress save is async and may not commit in time.
+				persistInterruptionResumePosition()
 
 				// Emit PAUSED state to ensure UI is in sync
 				sendPausedStateEvent()
@@ -184,9 +240,24 @@ class AudioPro: RCTEventEmitter {
 			if wasPlayingBeforeInterruption && options.contains(.shouldResume) {
 				log("Interruption ended with resume option, resuming playback")
 
+				// Read (and clear) the position we saved when the interruption began so we can
+				// guard against the player having lost its place across the interruption.
+				let savedResumeMs = (currentTrack?["id"] as? String)
+					.flatMap { consumeInterruptionResumePosition(for: $0) }
+
 				// Try to reactivate the audio session
 				do {
 					try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+
+					// If the player drifted behind where the interruption paused, restore it
+					// before resuming so we never play back from an earlier position.
+					if let savedResumeMs = savedResumeMs, let player = player {
+						let currentMs = player.currentTime().seconds * 1000
+						if currentMs.isFinite && currentMs < savedResumeMs - 1000 {
+							log("Player drifted behind interruption point, seeking back to", savedResumeMs)
+							performSeek(to: savedResumeMs, isAbsolute: true)
+						}
+					}
 
 					// Resume playback
 					player?.play()
@@ -201,6 +272,10 @@ class AudioPro: RCTEventEmitter {
 					log("Failed to reactivate audio session: \(error.localizedDescription)")
 					emitPlaybackError("Failed to resume after interruption: \(error.localizedDescription)")
 				}
+			} else {
+				// Not resuming in-process (e.g. no shouldResume). Leave the saved position in
+				// place so the next play()/relaunch can use it as a resume floor.
+				log("Interruption ended without in-process resume; keeping saved resume position")
 			}
 
 			// Reset the flag
@@ -323,6 +398,18 @@ class AudioPro: RCTEventEmitter {
 		let volume = Float(getDouble(options["volume"]) ?? 1.0)
 		let autoPlay = getBool(options["autoPlay"]) ?? true
 		pendingStartTimeMs = getDouble(options["startTimeMs"])
+
+		// If an interruption (e.g. an incoming text) paused this same track and the app was
+		// suspended/terminated before its progress durably synced, the requested start time
+		// can be an earlier (stale) save point. Use the position we saved at interruption time
+		// as a floor so playback never resumes behind where it was actually paused.
+		if let trackId = track["id"] as? String,
+		   let savedResumeMs = consumeInterruptionResumePosition(for: trackId),
+		   savedResumeMs > (pendingStartTimeMs ?? 0) {
+			log("Applying interruption resume floor", savedResumeMs, "over requested start", pendingStartTimeMs ?? 0)
+			pendingStartTimeMs = savedResumeMs
+		}
+
 		applyConfigurationSettings(options)
 
 		if let progressIntervalMs = getDouble(options["progressIntervalMs"]) {

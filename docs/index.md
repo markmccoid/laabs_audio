@@ -97,6 +97,14 @@ Note: ADRs are point-in-time records. ADR-0017's phased-cutover details are comp
 superseded in part by ADR-0019; read 0017 for the why, 0019 plus
 [shadow-sqlite-architecture.md](./shadow-sqlite-architecture.md) for the current shape.
 
+## Native modules & patches
+
+| Doc | Read it when you need… |
+| --- | --- |
+| [react-native-audio-pro-changes.md](./react-native-audio-pro-changes.md) | the catalog of local changes to the vendored `react-native-audio-pro` module |
+| [react-native-screens-patches.md](./react-native-screens-patches.md) | what's in the `react-native-screens` patch (iOS 26 mini-player fixes) |
+| [eas-patch-package-cng-builds.md](./eas-patch-package-cng-builds.md) | how `patch-package` native edits survive EAS/CNG builds |
+
 ## Agents & tooling
 
 | Doc | Read it when you need… |
