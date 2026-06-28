@@ -26,8 +26,6 @@ const FAVORITE_OPTIONS: { value: SearchFavoriteFilter; icon: SFSymbol; label: st
   { value: "exclude", icon: "heart.slash", label: "Exclude" },
 ];
 
-const INACTIVE_CONTROL_BACKGROUND = "#FFFFFF";
-
 const ControlSurface = ({
   children,
   isSelected = false,
@@ -54,7 +52,7 @@ const ControlSurface = ({
           borderWidth: 1,
           borderColor: borderColor ?? (isSelected ? themeColors.accent : themeColors.border),
           backgroundColor:
-            backgroundColor ?? (isSelected ? themeColors.accent : INACTIVE_CONTROL_BACKGROUND),
+            backgroundColor ?? (isSelected ? themeColors.accent : themeColors.surface),
         },
         style,
       ]}
@@ -87,7 +85,7 @@ const FilterPill = ({
         borderCurve: "continuous",
         borderWidth: 1,
         borderColor: isSelected ? themeColors.accent : themeColors.border,
-        backgroundColor: isSelected ? themeColors.accent : INACTIVE_CONTROL_BACKGROUND,
+        backgroundColor: isSelected ? themeColors.accent : themeColors.surface,
         justifyContent: "center",
         opacity: pressed ? 0.7 : 1,
       })}
