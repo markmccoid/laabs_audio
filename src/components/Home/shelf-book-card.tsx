@@ -15,7 +15,7 @@ import {
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, {
   Extrapolation,
@@ -23,11 +23,31 @@ import Animated, {
   runOnJS,
   useAnimatedReaction,
   useAnimatedStyle,
+  useSharedValue,
   type SharedValue,
 } from "react-native-reanimated";
 import { ShelfBookCardMenu } from "./shelf-book-card-menu";
 
-const MENU_FADE_DISTANCE = 36;
+// ============================================================
+// FADE TUNING — tweak these while testing, then we lock it in.
+// ------------------------------------------------------------
+// `headerHeight` comes from useHeaderHeight() (home-shelves-screen.tsx) and is
+// the screen Y of the header's BOTTOM edge (~116pt on iPhone 17 Pro).
+//
+// The ellipsis pill is anchored to the BOTTOM of the cover, so the fade tracks
+// the cover's bottom edge as it travels up toward the header. Both values are
+// in screen points.
+//
+//   FADE_END_OFFSET : the pill is FULLY faded once its screen Y reaches
+//                     (headerHeight + FADE_END_OFFSET).
+//                       0   → fully gone right at the header's bottom edge
+//                       +N  → gone N pts BELOW the header  (fades sooner)
+//                       -N  → allowed to slide N pts INTO the header (fades later)
+//   FADE_DISTANCE   : how many points of travel the fade spans
+//                     (larger = more gradual, starts earlier).
+// ============================================================
+const FADE_END_OFFSET = 0;
+const FADE_DISTANCE = 40;
 const STACKED_BADGE_TOP_OFFSET = 34;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
@@ -56,7 +76,6 @@ type ShelfBookCardProps = {
   isFavorite?: boolean;
   progress?: UserBookProgress;
   isOffline: boolean;
-  menuContentTop: number;
   renderMenu?: boolean;
   scrollY: SharedValue<number>;
 };
@@ -66,7 +85,9 @@ type CardMenuOverlayProps = {
   headerHeight: number;
   isFavorite: boolean;
   progress?: UserBookProgress;
-  menuContentTop: number;
+  // Card's Y position in scroll-container space (screenY + scrollY at measure time).
+  // -1 means not yet measured; pill stays fully visible until first measurement.
+  cardScrollOffset: SharedValue<number>;
   scrollY: SharedValue<number>;
 };
 
@@ -75,38 +96,44 @@ const CardMenuOverlay = ({
   headerHeight,
   isFavorite,
   progress,
-  menuContentTop,
+  cardScrollOffset,
   scrollY,
 }: CardMenuOverlayProps) => {
   const [isMenuHiddenNearHeader, setIsMenuHiddenNearHeader] = useState(false);
+
   const menuAnimatedStyle = useAnimatedStyle(() => {
-    const menuScreenTop = menuContentTop - scrollY.value;
+    if (cardScrollOffset.value < 0) {
+      return { opacity: 1, transform: [{ scale: 1 }] };
+    }
+    // Live screen Y of the cover's BOTTOM edge (where the pill sits). Large (low
+    // on screen) → fully visible; small (nearing the header) → faded out.
+    const pillScreenY = cardScrollOffset.value - scrollY.value;
+    const fadeEnd = headerHeight + FADE_END_OFFSET;
     const opacity = interpolate(
-      menuScreenTop,
-      [headerHeight, headerHeight + MENU_FADE_DISTANCE],
+      pillScreenY,
+      [fadeEnd, fadeEnd + FADE_DISTANCE],
       [0, 1],
       Extrapolation.CLAMP,
     );
     const scale = interpolate(
-      menuScreenTop,
-      [headerHeight, headerHeight + MENU_FADE_DISTANCE],
+      pillScreenY,
+      [fadeEnd, fadeEnd + FADE_DISTANCE],
       [0.82, 1],
       Extrapolation.CLAMP,
     );
-
-    return {
-      opacity,
-      transform: [{ scale }],
-    };
-  }, [headerHeight, menuContentTop, scrollY]);
+    return { opacity, transform: [{ scale }] };
+  });
 
   useAnimatedReaction(
-    () => menuContentTop - scrollY.value <= headerHeight + 2,
+    () => {
+      if (cardScrollOffset.value < 0) return false;
+      const pillScreenY = cardScrollOffset.value - scrollY.value;
+      return pillScreenY <= headerHeight + FADE_END_OFFSET + 2;
+    },
     (shouldHide, previousValue) => {
       if (shouldHide === previousValue) return;
       runOnJS(setIsMenuHiddenNearHeader)(shouldHide);
     },
-    [headerHeight, menuContentTop, scrollY],
   );
 
   return (
@@ -117,6 +144,7 @@ const CardMenuOverlay = ({
           position: "absolute",
           right: 8,
           bottom: 8,
+          transformOrigin: "right bottom",
         },
         menuAnimatedStyle,
       ]}
@@ -132,11 +160,12 @@ export const ShelfBookCard = ({
   isFavorite = false,
   progress,
   isOffline,
-  menuContentTop,
   renderMenu = true,
   scrollY,
 }: ShelfBookCardProps) => {
   const themeColors = useThemeColors();
+  const coverRef = useRef<View>(null);
+  const cardScrollOffset = useSharedValue(-1);
   const defaultProgressTimeDisplay = useSettingsStore(
     (state) => state.defaultBookProgressTimeDisplay,
   );
@@ -183,6 +212,21 @@ export const ShelfBookCard = ({
   const coverSize = getHomePreviewCoverSize(homePreviewSize);
   const showFinishedIndicator = Boolean(progress?.isFinished);
 
+  const measureCover = useCallback(() => {
+    coverRef.current?.measureInWindow((_x, y, _w, height) => {
+      // Store the cover's BOTTOM edge (where the pill sits) in scroll-container
+      // space, so during scroll: pillScreenY = cardScrollOffset - scrollY.value
+      cardScrollOffset.value = y + height + scrollY.value;
+    });
+  }, [cardScrollOffset, scrollY]);
+
+  // Re-measure one frame after mount so the nav bar has committed its layout,
+  // correcting any stale position from the initial onLayout fire.
+  useEffect(() => {
+    const id = requestAnimationFrame(measureCover);
+    return () => cancelAnimationFrame(id);
+  }, [measureCover]);
+
   return (
     <View
       style={{
@@ -190,7 +234,7 @@ export const ShelfBookCard = ({
         gap: 7,
       }}
     >
-      <View style={{ width: coverSize, height: coverSize }}>
+      <View ref={coverRef} onLayout={measureCover} style={{ width: coverSize, height: coverSize }}>
         <Link
           href={{
             pathname: "/(tabs)/(home)/[libraryItemId]",
@@ -249,7 +293,7 @@ export const ShelfBookCard = ({
             book={book}
             headerHeight={headerHeight}
             isFavorite={isFavorite}
-            menuContentTop={menuContentTop}
+            cardScrollOffset={cardScrollOffset}
             progress={progress}
             scrollY={scrollY}
           />

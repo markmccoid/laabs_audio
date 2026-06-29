@@ -61,9 +61,6 @@ export const HomeShelfSection = ({
       seenBookIdsRef.current = new Set();
     },
   );
-  const [sectionTop, setSectionTop] = useRecyclingState(0, [shelfId]);
-  const [listTop, setListTop] = useRecyclingState(0, [shelfId]);
-
   useEffect(() => {
     // Every id that has appeared on this shelf is "seen"; FlatList mounting a
     // seen card lazily (windowing) must not replay its entering animation.
@@ -80,31 +77,18 @@ export const HomeShelfSection = ({
     return () => cancelAnimationFrame(frame);
   }, [enteringEnabled, hasBooks, setEnteringEnabled]);
 
-  const menuContentTop = sectionTop + listTop + 118;
   const listExtraData = useMemo(
     () => ({
       favoriteByBookId,
       isOffline,
-      menuContentTop,
       progressByBookId,
       renderCardMenus,
     }),
-    [
-      favoriteByBookId,
-      isOffline,
-      menuContentTop,
-      progressByBookId,
-      renderCardMenus,
-    ],
+    [favoriteByBookId, isOffline, progressByBookId, renderCardMenus],
   );
 
   return (
-    <View
-      style={{ gap: 12 }}
-      onLayout={(event) => {
-        setSectionTop(event.nativeEvent.layout.y);
-      }}
-    >
+    <View style={{ gap: 12 }}>
       <View className="flex-row items-center justify-between px-[18] py-[1]">
         <View className="pl-4 pr-10 rounded-xl overflow-hidden border-hairline border-accent border-t-0 border-l-0 border-r-0">
           {/* <LinearGradient
@@ -188,11 +172,7 @@ export const HomeShelfSection = ({
           {emptyMessage}
         </Text>
       ) : (
-        <View
-          onLayout={(event) => {
-            setListTop(event.nativeEvent.layout.y);
-          }}
-        >
+        <View>
           <Animated.FlatList
             data={books}
             extraData={listExtraData}
@@ -220,7 +200,6 @@ export const HomeShelfSection = ({
                     headerHeight={headerHeight}
                     isFavorite={Boolean(favoriteByBookId[item.id])}
                     isOffline={isOffline}
-                    menuContentTop={menuContentTop}
                     progress={progressByBookId[item.id]}
                     renderMenu={renderCardMenus}
                     scrollY={scrollY}
