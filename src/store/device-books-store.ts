@@ -355,6 +355,10 @@ export type PendingProgressSync = {
   status?: "pending" | "unmatched";
 };
 
+export type ListeningInterruptionRecord = {
+  startedAtMs: number;
+};
+
 export type HomeDerivedShelfId = "continueListening" | "recentlyAdded" | "discover" | "downloaded";
 
 export type HomeShelfVisibility = Record<HomeDerivedShelfId, boolean>;
@@ -432,6 +436,7 @@ type DeviceBooksPersistedState = {
   pendingBookmarkCreatesByUser: Record<string, Record<string, PendingBookmarkCreate>>;
   pendingBookmarkDeletesByUser: Record<string, Record<string, PendingBookmarkDelete>>;
   pendingProgressByUser: Record<string, Record<string, PendingProgressSync>>;
+  listeningInterruptionsByUserBook: Record<string, ListeningInterruptionRecord>;
   progressSyncUserKeyByLibraryItemId: Record<string, string>;
   customShelvesByScope: Record<string, HomeCustomShelf[]>;
   playlistShelvesByScope: Record<string, HomePlaylistShelf[]>;
@@ -506,6 +511,20 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
       libraryItemId: string,
       options?: { userKey?: string | null },
     ) => void;
+    recordListeningInterruption: (
+      libraryItemId: string,
+      startedAtMs: number,
+      options?: { userKey?: string | null },
+    ) => void;
+    consumeListeningInterruption: (
+      libraryItemId: string,
+      options?: { userKey?: string | null },
+    ) => ListeningInterruptionRecord | null;
+    clearListeningInterruption: (
+      libraryItemId: string,
+      options?: { userKey?: string | null },
+    ) => void;
+    clearAllListeningInterruptions: () => void;
     hasPendingProgressSync: (options?: { userKey?: string | null }) => boolean;
     syncPendingProgress: (options?: { userKey?: string | null }) => Promise<void>;
     syncPendingBookmarks: (options?: { userKey?: string | null }) => Promise<void>;
@@ -620,6 +639,7 @@ const createDefaultPersistedState = (): DeviceBooksPersistedState => ({
   pendingBookmarkCreatesByUser: {},
   pendingBookmarkDeletesByUser: {},
   pendingProgressByUser: {},
+  listeningInterruptionsByUserBook: {},
   progressSyncUserKeyByLibraryItemId: {},
   customShelvesByScope: {},
   playlistShelvesByScope: {},
@@ -1053,6 +1073,8 @@ const mergePersistedDeviceBooksState = (
     pendingBookmarkDeletesByUser:
       typedState.pendingBookmarkDeletesByUser ?? base.pendingBookmarkDeletesByUser,
     pendingProgressByUser: typedState.pendingProgressByUser ?? base.pendingProgressByUser,
+    listeningInterruptionsByUserBook:
+      typedState.listeningInterruptionsByUserBook ?? base.listeningInterruptionsByUserBook,
     progressSyncUserKeyByLibraryItemId:
       typedState.progressSyncUserKeyByLibraryItemId ?? base.progressSyncUserKeyByLibraryItemId,
     customShelvesByScope: typedState.customShelvesByScope ?? base.customShelvesByScope,
@@ -1729,6 +1751,64 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 ...state.pendingProgressByUser,
                 [userKey]: remaining,
               },
+            };
+          });
+        },
+
+        recordListeningInterruption: (libraryItemId, startedAtMs, options) => {
+          const userKey = resolveUserKey(options?.userKey);
+          if (!userKey || !libraryItemId) return;
+          const key = toUserBookKey(userKey, libraryItemId);
+          const normalizedStartedAtMs = Math.max(0, Math.floor(startedAtMs));
+          if (normalizedStartedAtMs <= 0) return;
+
+          set((state) => ({
+            ...state,
+            listeningInterruptionsByUserBook: {
+              ...state.listeningInterruptionsByUserBook,
+              [key]: { startedAtMs: normalizedStartedAtMs },
+            },
+          }));
+        },
+
+        consumeListeningInterruption: (libraryItemId, options) => {
+          const userKey = resolveUserKey(options?.userKey);
+          if (!userKey || !libraryItemId) return null;
+          const key = toUserBookKey(userKey, libraryItemId);
+          const record = get().listeningInterruptionsByUserBook[key] ?? null;
+          if (!record) return null;
+
+          set((state) => {
+            const { [key]: _removed, ...remaining } = state.listeningInterruptionsByUserBook;
+            return {
+              ...state,
+              listeningInterruptionsByUserBook: remaining,
+            };
+          });
+          return record;
+        },
+
+        clearListeningInterruption: (libraryItemId, options) => {
+          const userKey = resolveUserKey(options?.userKey);
+          if (!userKey || !libraryItemId) return;
+          const key = toUserBookKey(userKey, libraryItemId);
+
+          set((state) => {
+            if (!state.listeningInterruptionsByUserBook[key]) return state;
+            const { [key]: _removed, ...remaining } = state.listeningInterruptionsByUserBook;
+            return {
+              ...state,
+              listeningInterruptionsByUserBook: remaining,
+            };
+          });
+        },
+
+        clearAllListeningInterruptions: () => {
+          set((state) => {
+            if (Object.keys(state.listeningInterruptionsByUserBook).length === 0) return state;
+            return {
+              ...state,
+              listeningInterruptionsByUserBook: {},
             };
           });
         },
@@ -3739,6 +3819,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         pendingBookmarkCreatesByUser: state.pendingBookmarkCreatesByUser,
         pendingBookmarkDeletesByUser: state.pendingBookmarkDeletesByUser,
         pendingProgressByUser: state.pendingProgressByUser,
+        listeningInterruptionsByUserBook: state.listeningInterruptionsByUserBook,
         progressSyncUserKeyByLibraryItemId: state.progressSyncUserKeyByLibraryItemId,
         customShelvesByScope: state.customShelvesByScope,
         playlistShelvesByScope: state.playlistShelvesByScope,
@@ -3746,7 +3827,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         pendingPlaylistOpsByUser: state.pendingPlaylistOpsByUser,
         homeShelfVisibilityByScope: state.homeShelfVisibilityByScope,
       }),
-      version: 10,
+      version: 11,
       merge: (persistedState, currentState) =>
         mergePersistedDeviceBooksState(persistedState, currentState),
       migrate: (persistedState, version) => {
@@ -3785,6 +3866,8 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
             progressSyncUserKeyByLibraryItemId:
               typedState.progressSyncUserKeyByLibraryItemId ?? {},
+            listeningInterruptionsByUserBook:
+              typedState.listeningInterruptionsByUserBook ?? {},
           };
         }
 
@@ -3801,6 +3884,8 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             pendingProgressByUser: typedState.pendingProgressByUser ?? {},
             progressSyncUserKeyByLibraryItemId:
               typedState.progressSyncUserKeyByLibraryItemId ?? {},
+            listeningInterruptionsByUserBook:
+              typedState.listeningInterruptionsByUserBook ?? {},
           };
         }
 
@@ -3817,6 +3902,8 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             pendingProgressByUser: typedState.pendingProgressByUser ?? {},
             progressSyncUserKeyByLibraryItemId:
               typedState.progressSyncUserKeyByLibraryItemId ?? {},
+            listeningInterruptionsByUserBook:
+              typedState.listeningInterruptionsByUserBook ?? {},
           };
         }
 
@@ -3833,6 +3920,8 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             pendingProgressByUser: typedState.pendingProgressByUser ?? {},
             progressSyncUserKeyByLibraryItemId:
               typedState.progressSyncUserKeyByLibraryItemId ?? {},
+            listeningInterruptionsByUserBook:
+              typedState.listeningInterruptionsByUserBook ?? {},
           };
         }
 
@@ -3847,6 +3936,8 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           homeShelfVisibilityByScope: typedState.homeShelfVisibilityByScope ?? {},
           downloadedShelfOrderByScope: typedState.downloadedShelfOrderByScope ?? {},
           pendingProgressByUser: typedState.pendingProgressByUser ?? {},
+          listeningInterruptionsByUserBook:
+            typedState.listeningInterruptionsByUserBook ?? {},
           progressSyncUserKeyByLibraryItemId:
             typedState.progressSyncUserKeyByLibraryItemId ?? {},
         };

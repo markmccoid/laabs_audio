@@ -8,6 +8,7 @@ import {
 } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import {
+  Button,
   DisclosureGroup,
   HStack,
   Host,
@@ -20,6 +21,8 @@ import {
   Toggle,
 } from "@expo/ui/swift-ui";
 import {
+  buttonStyle,
+  disabled,
   foregroundStyle,
   frame,
   labelsHidden,
@@ -29,7 +32,24 @@ import {
 import { SymbolView } from "expo-symbols";
 import type { SFSymbol } from "sf-symbols-typescript";
 import { useState } from "react";
-import { Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
+import {
+  LayoutAnimation,
+  Platform,
+  Pressable,
+  ScrollView,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import {
+  MAX_AUTO_REWIND_RULES,
+  MAX_AUTO_REWIND_SECONDS,
+  MAX_AUTO_REWIND_THRESHOLD_MINUTES,
+  MIN_AUTO_REWIND_SECONDS,
+  type AutoRewindRule,
+} from "@/player/auto-rewind";
+import { deviceBooksStore } from "@/store/device-books-store";
 
 const BOOK_PROGRESS_OPTIONS: { value: BookProgressTimeDisplay; label: string }[] = [
   { value: "elapsed", label: "Time Read" },
@@ -41,6 +61,18 @@ const MINUTE_OPTIONS = Array.from(
   (_, minute) => minute,
 );
 const SECOND_OPTIONS = Array.from({ length: 60 }, (_, second) => second);
+const AUTO_REWIND_THRESHOLD_OPTIONS = Array.from(
+  { length: MAX_AUTO_REWIND_THRESHOLD_MINUTES + 1 },
+  (_, minute) => minute,
+);
+const AUTO_REWIND_SECOND_OPTIONS = Array.from(
+  { length: MAX_AUTO_REWIND_SECONDS - MIN_AUTO_REWIND_SECONDS + 1 },
+  (_, index) => MIN_AUTO_REWIND_SECONDS + index,
+);
+
+const animateAutoRewindRuleSort = () => {
+  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+};
 
 const REMOTE_COMMAND_MODE_OPTIONS: {
   value: RemoteCommandMode;
@@ -133,6 +165,247 @@ const SkipDurationRow = ({
   );
 };
 
+const getAvailableAutoRewindThresholds = (rules: AutoRewindRule[], index: number) => {
+  const currentThreshold = rules[index]?.thresholdMinutes;
+  const usedByOtherRules = new Set(
+    rules
+      .filter((_, ruleIndex) => ruleIndex !== index)
+      .map((rule) => rule.thresholdMinutes),
+  );
+  return AUTO_REWIND_THRESHOLD_OPTIONS.filter(
+    (threshold) => threshold === currentThreshold || !usedByOtherRules.has(threshold),
+  );
+};
+
+type AutoRewindRulePickerRowProps = {
+  rule: AutoRewindRule;
+  index: number;
+  rules: AutoRewindRule[];
+  isExpanded: boolean;
+  onIsExpandedChange: (isExpanded: boolean) => void;
+  onChange: (index: number, rule: AutoRewindRule) => void;
+  onRemove: (index: number) => void;
+};
+
+const AutoRewindRulePickerRow = ({
+  rule,
+  index,
+  rules,
+  isExpanded,
+  onIsExpandedChange,
+  onChange,
+  onRemove,
+}: AutoRewindRulePickerRowProps) => {
+  const thresholdOptions = isExpanded ? getAvailableAutoRewindThresholds(rules, index) : [];
+
+  return (
+    <DisclosureGroup isExpanded={isExpanded} onIsExpandedChange={onIsExpandedChange}>
+      <DisclosureGroup.Label>
+        <HStack spacing={10} alignment="center">
+          <Image systemName="gobackward" />
+          <SwiftText>{`After ${rule.thresholdMinutes} min`}</SwiftText>
+          <Spacer />
+          <SwiftText modifiers={[foregroundStyle({ type: "hierarchical", style: "secondary" })]}>
+            {`${rule.rewindSeconds} sec`}
+          </SwiftText>
+        </HStack>
+      </DisclosureGroup.Label>
+
+      {isExpanded ? (
+        <>
+          <HStack spacing={0} alignment="center">
+            <Picker
+              label="After"
+              selection={rule.thresholdMinutes}
+              onSelectionChange={(thresholdMinutes) =>
+                onChange(index, { ...rule, thresholdMinutes })
+              }
+              modifiers={[
+                pickerStyle("wheel"),
+                labelsHidden(),
+                frame({ maxWidth: 160, height: 140 }),
+              ]}
+            >
+              {thresholdOptions.map((minute) => (
+                <SwiftText key={minute} modifiers={[tag(minute)]}>
+                  {`${minute} min`}
+                </SwiftText>
+              ))}
+            </Picker>
+            <Picker
+              label="Rewind"
+              selection={rule.rewindSeconds}
+              onSelectionChange={(rewindSeconds) => onChange(index, { ...rule, rewindSeconds })}
+              modifiers={[
+                pickerStyle("wheel"),
+                labelsHidden(),
+                frame({ maxWidth: 150, height: 140 }),
+              ]}
+            >
+              {AUTO_REWIND_SECOND_OPTIONS.map((second) => (
+                <SwiftText key={second} modifiers={[tag(second)]}>
+                  {`${second} sec`}
+                </SwiftText>
+              ))}
+            </Picker>
+          </HStack>
+          <Button
+            label="Delete Rule"
+            onPress={() => onRemove(index)}
+            modifiers={[buttonStyle("borderless")]}
+          />
+        </>
+      ) : null}
+    </DisclosureGroup>
+  );
+};
+
+type AutoRewindFallbackRuleRowProps = {
+  rule: AutoRewindRule;
+  index: number;
+  rules: AutoRewindRule[];
+  onChange: (index: number, rule: AutoRewindRule) => void;
+  onSortRules: () => void;
+  onRemove: (index: number) => void;
+  textColor: string;
+  mutedColor: string;
+  borderColor: string;
+  bgColor: string;
+  surfaceColor: string;
+};
+
+const AutoRewindFallbackRuleRow = ({
+  rule,
+  index,
+  rules,
+  onChange,
+  onSortRules,
+  onRemove,
+  textColor,
+  mutedColor,
+  borderColor,
+  bgColor,
+  surfaceColor,
+}: AutoRewindFallbackRuleRowProps) => {
+  const commitThreshold = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return;
+    const thresholdMinutes = Math.max(
+      0,
+      Math.min(MAX_AUTO_REWIND_THRESHOLD_MINUTES, Math.round(parsed)),
+    );
+    const duplicate = rules.some(
+      (candidate, ruleIndex) =>
+        ruleIndex !== index && candidate.thresholdMinutes === thresholdMinutes,
+    );
+    if (duplicate) return;
+    onChange(index, { ...rule, thresholdMinutes });
+    animateAutoRewindRuleSort();
+    onSortRules();
+  };
+
+  const commitSeconds = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return;
+    const rewindSeconds = Math.max(
+      MIN_AUTO_REWIND_SECONDS,
+      Math.min(MAX_AUTO_REWIND_SECONDS, Math.round(parsed)),
+    );
+    onChange(index, { ...rule, rewindSeconds });
+  };
+
+  return (
+    <View
+      style={{
+        borderRadius: 12,
+        borderCurve: "continuous",
+        borderWidth: 1,
+        borderColor,
+        backgroundColor: bgColor,
+        padding: 10,
+        gap: 8,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Text selectable style={{ color: textColor, fontSize: 14, fontWeight: "700", flex: 1 }}>
+          {`After ${rule.thresholdMinutes} min -> ${rule.rewindSeconds} sec`}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => onRemove(index)}
+          style={({ pressed }) => ({
+            borderRadius: 9,
+            borderCurve: "continuous",
+            backgroundColor: surfaceColor,
+            borderWidth: 1,
+            borderColor,
+            paddingHorizontal: 10,
+            paddingVertical: 7,
+            opacity: pressed ? 0.78 : 1,
+          })}
+        >
+          <Text selectable style={{ color: textColor, fontSize: 12, fontWeight: "700" }}>
+            Delete
+          </Text>
+        </Pressable>
+      </View>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text selectable style={{ color: mutedColor, fontSize: 12 }}>
+            After minutes
+          </Text>
+          <TextInput
+            defaultValue={String(rule.thresholdMinutes)}
+            onEndEditing={(event) => commitThreshold(event.nativeEvent.text)}
+            keyboardType="number-pad"
+            inputMode="numeric"
+            maxLength={4}
+            style={{
+              minHeight: 38,
+              borderRadius: 10,
+              borderCurve: "continuous",
+              borderWidth: 1,
+              borderColor,
+              backgroundColor: surfaceColor,
+              color: textColor,
+              fontSize: 15,
+              paddingHorizontal: 10,
+              paddingVertical: 8,
+            }}
+          />
+        </View>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text selectable style={{ color: mutedColor, fontSize: 12 }}>
+            Rewind seconds
+          </Text>
+          <TextInput
+            defaultValue={String(rule.rewindSeconds)}
+            onEndEditing={(event) => commitSeconds(event.nativeEvent.text)}
+            keyboardType="number-pad"
+            inputMode="numeric"
+            maxLength={3}
+            style={{
+              minHeight: 38,
+              borderRadius: 10,
+              borderCurve: "continuous",
+              borderWidth: 1,
+              borderColor,
+              backgroundColor: surfaceColor,
+              color: textColor,
+              fontSize: 15,
+              paddingHorizontal: 10,
+              paddingVertical: 8,
+            }}
+          />
+        </View>
+      </View>
+      <Text selectable style={{ color: mutedColor, fontSize: 11 }}>
+        Each minute threshold can only be used once.
+      </Text>
+    </View>
+  );
+};
+
 const PlaybackSettingsFallback = () => {
   const themeColors = useThemeColors();
   const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
@@ -143,15 +416,26 @@ const PlaybackSettingsFallback = () => {
   const disableLockScreenSeek = useSettingsStore((state) => state.disableLockScreenSeek);
   const remoteCommandMode = useSettingsStore((state) => state.remoteCommandMode);
   const restoreLastBookOnStartup = useSettingsStore((state) => state.restoreLastBookOnStartup);
+  const autoRewindEnabled = useSettingsStore((state) => state.autoRewindEnabled);
+  const autoRewindRules = useSettingsStore((state) => state.autoRewindRules);
+  const autoRewindLimitToChapter = useSettingsStore(
+    (state) => state.autoRewindLimitToChapter,
+  );
   const [backwardSkipDraft, setBackwardSkipDraft] = useState<string | null>(null);
   const [forwardSkipDraft, setForwardSkipDraft] = useState<string | null>(null);
   const {
+    addAutoRewindRule,
+    removeAutoRewindRule,
+    setAutoRewindEnabled,
+    setAutoRewindLimitToChapter,
     setDefaultBookProgressTimeDisplay,
     setDisableLockScreenSeek,
     setRemoteCommandMode,
     setRestoreLastBookOnStartup,
     setSeekBackwardSeconds,
     setSeekForwardSeconds,
+    sortAutoRewindRules,
+    updateAutoRewindRule,
   } = useSettingsActions();
   const backwardSkipValue = backwardSkipDraft ?? String(seekBackwardSeconds);
   const forwardSkipValue = forwardSkipDraft ?? String(seekForwardSeconds);
@@ -174,6 +458,20 @@ const PlaybackSettingsFallback = () => {
     }
     setSeekForwardSeconds(parsedSeconds);
     setForwardSkipDraft(null);
+  };
+
+  const handleAutoRewindEnabledChange = (enabled: boolean) => {
+    if (!enabled) {
+      deviceBooksStore.getState().actions.clearAllListeningInterruptions();
+    }
+    setAutoRewindEnabled(enabled);
+  };
+
+  const handleRemoveAutoRewindRule = (index: number) => {
+    if (autoRewindRules.length <= 1) {
+      deviceBooksStore.getState().actions.clearAllListeningInterruptions();
+    }
+    removeAutoRewindRule(index);
   };
 
   return (
@@ -430,6 +728,111 @@ const PlaybackSettingsFallback = () => {
           }}
         >
           <Text selectable style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}>
+            Auto Rewind
+          </Text>
+          <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+            Automatically skip back when you return to a book after being away.
+          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text selectable style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
+                Rewind on resume
+              </Text>
+              <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
+                Uses the largest matching rule when playback resumes.
+              </Text>
+            </View>
+            <Switch
+              value={autoRewindEnabled}
+              onValueChange={handleAutoRewindEnabledChange}
+              trackColor={{ false: themeColors.border, true: themeColors.accent }}
+              thumbColor={autoRewindEnabled ? themeColors.accentForeground : "#f4f4f5"}
+            />
+          </View>
+
+          {autoRewindEnabled ? (
+            <>
+              <View style={{ gap: 8 }}>
+                {autoRewindRules.map((rule, index) => (
+                  <AutoRewindFallbackRuleRow
+                    key={`auto-rewind-${rule.thresholdMinutes}`}
+                    rule={rule}
+                    index={index}
+                    rules={autoRewindRules}
+                    onChange={updateAutoRewindRule}
+                    onSortRules={sortAutoRewindRules}
+                    onRemove={handleRemoveAutoRewindRule}
+                    textColor={themeColors.text}
+                    mutedColor={themeColors.textMuted}
+                    borderColor={themeColors.border}
+                    bgColor={themeColors.bg}
+                    surfaceColor={themeColors.surface}
+                  />
+                ))}
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: autoRewindRules.length >= MAX_AUTO_REWIND_RULES }}
+                disabled={autoRewindRules.length >= MAX_AUTO_REWIND_RULES}
+                onPress={() => addAutoRewindRule()}
+                style={({ pressed }) => ({
+                  alignSelf: "flex-start",
+                  borderRadius: 10,
+                  borderCurve: "continuous",
+                  backgroundColor: themeColors.accent,
+                  paddingHorizontal: 12,
+                  paddingVertical: 9,
+                  opacity:
+                    autoRewindRules.length >= MAX_AUTO_REWIND_RULES ? 0.45 : pressed ? 0.78 : 1,
+                })}
+              >
+                <Text
+                  selectable
+                  style={{
+                    color: themeColors.accentForeground,
+                    fontSize: 13,
+                    fontWeight: "700",
+                  }}
+                >
+                  Add Rule
+                </Text>
+              </Pressable>
+              <View style={{ height: 1, backgroundColor: themeColors.border }} />
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Text
+                    selectable
+                    style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
+                  >
+                    Limit to chapter
+                  </Text>
+                  <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
+                    Do not rewind before the current chapter start when chapters are available.
+                  </Text>
+                </View>
+                <Switch
+                  value={autoRewindLimitToChapter}
+                  onValueChange={setAutoRewindLimitToChapter}
+                  trackColor={{ false: themeColors.border, true: themeColors.accent }}
+                  thumbColor={autoRewindLimitToChapter ? themeColors.accentForeground : "#f4f4f5"}
+                />
+              </View>
+            </>
+          ) : null}
+        </View>
+
+        <View
+          style={{
+            borderWidth: 1,
+            borderColor: themeColors.border,
+            borderRadius: 16,
+            borderCurve: "continuous",
+            padding: 14,
+            gap: 10,
+            backgroundColor: themeColors.surface,
+          }}
+        >
+          <Text selectable style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}>
             Book Progress Display
           </Text>
           <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
@@ -506,16 +909,62 @@ export const SettingsPlaybackScreen = () => {
   const disableLockScreenSeek = useSettingsStore((state) => state.disableLockScreenSeek);
   const remoteCommandMode = useSettingsStore((state) => state.remoteCommandMode);
   const restoreLastBookOnStartup = useSettingsStore((state) => state.restoreLastBookOnStartup);
+  const autoRewindEnabled = useSettingsStore((state) => state.autoRewindEnabled);
+  const autoRewindRules = useSettingsStore((state) => state.autoRewindRules);
+  const autoRewindLimitToChapter = useSettingsStore(
+    (state) => state.autoRewindLimitToChapter,
+  );
   const {
+    addAutoRewindRule,
+    removeAutoRewindRule,
+    setAutoRewindEnabled,
+    setAutoRewindLimitToChapter,
     setDefaultBookProgressTimeDisplay,
     setDisableLockScreenSeek,
     setRemoteCommandMode,
     setRestoreLastBookOnStartup,
     setSeekBackwardSeconds,
     setSeekForwardSeconds,
+    sortAutoRewindRules,
+    updateAutoRewindRule,
   } = useSettingsActions();
   const [isBackwardExpanded, setIsBackwardExpanded] = useState(false);
   const [isForwardExpanded, setIsForwardExpanded] = useState(false);
+  const [expandedAutoRewindRuleIndex, setExpandedAutoRewindRuleIndex] = useState<number | null>(
+    null,
+  );
+  const handleAutoRewindEnabledChange = (enabled: boolean) => {
+    if (!enabled) {
+      deviceBooksStore.getState().actions.clearAllListeningInterruptions();
+    }
+    setAutoRewindEnabled(enabled);
+  };
+  const handleRemoveAutoRewindRule = (index: number) => {
+    if (autoRewindRules.length <= 1) {
+      deviceBooksStore.getState().actions.clearAllListeningInterruptions();
+    }
+    setExpandedAutoRewindRuleIndex(null);
+    removeAutoRewindRule(index);
+  };
+  const sortAutoRewindRulesWithAnimation = () => {
+    animateAutoRewindRuleSort();
+    sortAutoRewindRules();
+  };
+  const handleAutoRewindRuleExpansionChange = (index: number, isExpanded: boolean) => {
+    setExpandedAutoRewindRuleIndex((currentIndex) => {
+      if (isExpanded) {
+        if (currentIndex !== null && currentIndex !== index) {
+          sortAutoRewindRulesWithAnimation();
+        }
+        return index;
+      }
+      if (currentIndex === index) {
+        sortAutoRewindRulesWithAnimation();
+        return null;
+      }
+      return currentIndex;
+    });
+  };
 
   if (Platform.OS !== "ios") {
     return <PlaybackSettingsFallback />;
@@ -581,6 +1030,54 @@ export const SettingsPlaybackScreen = () => {
             <SwiftText>Disable lock screen seek</SwiftText>
             <SwiftText>Prevent scrubbing from Lock Screen and Now Playing controls.</SwiftText>
           </Toggle>
+        </Section>
+
+        <Section
+          title="Auto Rewind"
+          footer={
+            <SwiftText>
+              Automatically skip back when you return to a book after being away. The largest
+              matching rule is applied before playback starts.
+            </SwiftText>
+          }
+        >
+          <Toggle isOn={autoRewindEnabled} onIsOnChange={handleAutoRewindEnabledChange}>
+            <SwiftText>Rewind on resume</SwiftText>
+          </Toggle>
+          {autoRewindEnabled
+            ? autoRewindRules.map((rule, index) => (
+                <AutoRewindRulePickerRow
+                  key={`auto-rewind-${rule.thresholdMinutes}`}
+                  rule={rule}
+                  index={index}
+                  rules={autoRewindRules}
+                  isExpanded={expandedAutoRewindRuleIndex === index}
+                  onIsExpandedChange={(isExpanded) =>
+                    handleAutoRewindRuleExpansionChange(index, isExpanded)
+                  }
+                  onChange={updateAutoRewindRule}
+                  onRemove={handleRemoveAutoRewindRule}
+                />
+              ))
+            : null}
+          {autoRewindEnabled ? (
+            <Button
+              label="Add Rule"
+              onPress={() => addAutoRewindRule()}
+              modifiers={[
+                buttonStyle("borderless"),
+                disabled(autoRewindRules.length >= MAX_AUTO_REWIND_RULES),
+              ]}
+            />
+          ) : null}
+          {autoRewindEnabled ? (
+            <Toggle
+              isOn={autoRewindLimitToChapter}
+              onIsOnChange={setAutoRewindLimitToChapter}
+            >
+              <SwiftText>Limit to current chapter</SwiftText>
+            </Toggle>
+          ) : null}
         </Section>
 
         <Section

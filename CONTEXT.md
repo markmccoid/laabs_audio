@@ -109,7 +109,7 @@ The Audiobookshelf User Identity whose local listening state should change when 
 _Avoid_: download entitlement, sync server
 
 **Listening State Owner**:
-The Audiobookshelf User Identity whose local listening state (Bookmark, Progress Sync Intent, Listening Position, Playback Rate) applies to an audiobook right now: the signed-in or remembered User Session identity when present, otherwise the audiobook's Downloaded Audio Asset Owner.
+The Audiobookshelf User Identity whose local listening state (Bookmark, Progress Sync Intent, Listening Position, Playback Rate, Listening Interruption) applies to an audiobook right now: the signed-in or remembered User Session identity when present, otherwise the audiobook's Downloaded Audio Asset Owner.
 _Avoid_: current user, owner key
 
 **Legacy Downloaded Audio Asset**:
@@ -179,6 +179,22 @@ _Avoid_: Transition, touch guard, pending command
 **Audible Playback State**:
 The player condition where the user-facing audio engine has reached the requested listening state, such as playing or paused, even if follow-up progress or cache work is still running.
 _Avoid_: Fully synced state, settled playback
+
+**Listening Interruption**:
+The time gap between an audiobook leaving Audible Playback State and that same audiobook returning to audible playback. It may begin when the audiobook is paused, interrupted, or stopped because the user switches to another audiobook.
+_Avoid_: Pause duration, stopped duration, away time
+
+**Auto Rewind Rule**:
+A user preference that maps a minimum Listening Interruption, expressed in whole minutes, to the number of seconds LAABS Audio should move the Listening Position backward when the audiobook returns to audible playback.
+_Avoid_: Pause range, rewind range, auto-skip rule
+
+**Auto Rewind**:
+An automatic Listening Position change applied when an audiobook returns to audible playback after a Listening Interruption that matches an Auto Rewind Rule.
+_Avoid_: Manual rewind, skip back on pause
+
+**Auto Rewind Preference**:
+The device-level playback preference that enables Auto Rewind, stores Auto Rewind Rules, and chooses whether Auto Rewind may cross a chapter boundary.
+_Avoid_: Per-book rewind settings, pause ranges
 
 **Remote Command Mode**:
 The device-level preference that chooses which secondary controls LAABS Audio exposes on system playback surfaces, such as chapter navigation, skip intervals, or neither.
@@ -519,6 +535,32 @@ _Avoid_: Five minute window, scrubber window
 - A failed **Skip Burst** should not replace a newer user-intended **Displayed Listening Position**.
 - **Displayed Listening Position** is derived from saved and live progress evidence, not a separate durable listening state.
 - Player and browsing surfaces should use the same **Displayed Listening Position** for **Active Playback**.
+- A **Listening Interruption** begins when an audiobook leaves audible playback because it is paused, interrupted, or stopped while switching to another audiobook.
+- Switching away from a paused audiobook preserves the existing **Listening Interruption** start time instead of replacing it with the later switch time.
+- A loaded audiobook that has not been audibly playing does not create a **Listening Interruption** when it is unloaded or replaced.
+- **Listening Interruption** is scoped per audiobook and **Listening State Owner**.
+- Resuming one audiobook does not clear another audiobook's **Listening Interruption**.
+- **Auto Rewind** applies only when resuming from the current saved **Listening Position** after a **Listening Interruption**.
+- A user-initiated **Listening Position** change, including slider scrubbing, chapter navigation, and **Play from Bookmark**, takes precedence over **Auto Rewind** and clears the previous **Listening Interruption**.
+- **Auto Rewind Preference** is device-global, not scoped to an audiobook or **Listening State Owner**.
+- **Auto Rewind Preference** has a master enabled state; existing users start with it disabled.
+- Disabled **Auto Rewind Preference** does not record new **Listening Interruptions**.
+- Disabling **Auto Rewind Preference** clears stored **Listening Interruptions**.
+- Enabling **Auto Rewind Preference** with no existing rules seeds default **Auto Rewind Rules** for zero, 10, and 60 minutes.
+- Deleting the last **Auto Rewind Rule** disables **Auto Rewind Preference**.
+- LAABS Audio may store at most 10 **Auto Rewind Rules**.
+- **Auto Rewind Rules** are displayed as thresholds, not ranges.
+- **Auto Rewind Rules** are displayed in ascending threshold order after saving.
+- **Auto Rewind** uses the **Auto Rewind Rule** with the largest minimum **Listening Interruption** that is still satisfied.
+- **Auto Rewind Rule** thresholds are unique whole-minute values from zero to 120; a threshold of zero means every **Listening Interruption** can match that rule.
+- **Auto Rewind Rule** rewind amounts are whole-second values from zero to 300 seconds.
+- **Auto Rewind** should apply before audible playback starts when the resume path is controlled by LAABS Audio.
+- Applying or skipping **Auto Rewind** consumes the **Listening Interruption** for that audiobook.
+- If no **Auto Rewind Rule** matches when an audiobook resumes, the **Listening Interruption** still ends.
+- **Auto Rewind** is a real **Listening Position** change and should create local progress evidence before any server sync attempt.
+- **Auto Rewind** is automatic and should not be treated as a user-initiated seek.
+- **Auto Rewind** should not move the **Listening Position** before the current chapter start when the chapter limit preference is enabled and chapter data is available.
+- **Auto Rewind** should not apply when the audiobook is already finished or resuming from the natural end threshold.
 - **Remote Command Mode** may expose skip interval controls, next and previous controls, or no secondary controls on system playback surfaces.
 - When **Remote Command Mode** exposes skip interval controls, those controls use the app's forward and backward skip interval preferences.
 - Skip interval controls on system playback surfaces follow the same **Skip Burst** rules as in-app skip interval controls.

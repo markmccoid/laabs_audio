@@ -6,6 +6,7 @@ export type ProgressSyncIntentTrigger =
   | "pause"
   | "external_pause"
   | "seek"
+  | "auto_rewind"
   | "close"
   | "finish"
   | "natural_completion"

@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-06-30` `pending` - Add Auto Rewind on resume playback settings and behavior.
+  Tester focus: verify Playback settings show Auto Rewind below Lock Screen Controls; enabling it seeds default rules; editing rules respects the 0-120 minute and 0-300 second limits; rules sort after closing an edited row; pausing or switching away from a playing book records an interruption and resuming applies the matching rewind without crossing the current chapter when that option is enabled.
 - `2026-06-14` `pending` - Update typecheck remediation plan status and remaining scope.
   Tester focus: no app behavior change expected; verify the planning docs identify completed prerequisite work and the remaining TypeScript cleanup targets.
 - `2026-06-13` `4b86b67` - Refine sign-in session handling and refresh the Search filter experience.

@@ -36,6 +36,10 @@ import {
 } from "../store/progress-log-store";
 import { settingsStore } from "../store/settings-store";
 import type { AudioTrack } from "../types/absTypes";
+import {
+  resolveAutoRewindDecision,
+  type AutoRewindDecision,
+} from "./auto-rewind";
 import { createAudioEngine } from "./audio-engine";
 import { buildChapterIndex, findChapterForPosition, findTrackForPosition } from "./chapters";
 import { clipPreviewStore } from "./clip-preview-store";
@@ -75,6 +79,7 @@ type ProgressSyncReason =
   | "pause"
   | "external_pause"
   | "seek"
+  | "auto_rewind"
   | "close"
   | "logout"
   | "finish"
@@ -516,9 +521,23 @@ class PlayerService {
         sessionKind,
         serverStateSource: cachedUserServerState.source,
       });
+      const provisionalAutoRewindDecision =
+        !shouldUseDownloadedAudio && options?.autoPlay
+          ? this.consumeAutoRewindDecision({
+              libraryItemId: resolvedLibraryItemId,
+              positionMs: resumePositionMs,
+              durationMs,
+              chapterIndex,
+              isFinished: durationMs > 0 && resumePositionMs >= durationMs - secondsToMs(3),
+            })
+          : null;
+      const playbackStartPositionMs =
+        provisionalAutoRewindDecision?.status === "applied"
+          ? provisionalAutoRewindDecision.toPositionMs
+          : resumePositionMs;
       displayedListeningPositionStore.getState().actions.setResumeResolution({
         libraryItemId: resolvedLibraryItemId,
-        positionMs: resumePositionMs,
+        positionMs: playbackStartPositionMs,
         durationMs,
       });
 
@@ -535,8 +554,9 @@ class PlayerService {
           queue,
           durationMs,
           chapterIndex,
-          resumePositionMs,
+          resumePositionMs: playbackStartPositionMs,
           rate: storedBookRate,
+          autoRewindDecision: provisionalAutoRewindDecision,
         });
         return;
       }
@@ -560,9 +580,9 @@ class PlayerService {
       }
       playbackStore.getState().actions.setRate(storedBookRate);
 
-      const targetTrack = findTrackForPosition(queue, resumePositionMs) ?? queue[0];
+      const targetTrack = findTrackForPosition(queue, playbackStartPositionMs) ?? queue[0];
       const targetIndex = queue.indexOf(targetTrack);
-      const trackPositionMs = Math.max(0, resumePositionMs - targetTrack.startOffsetMs);
+      const trackPositionMs = Math.max(0, playbackStartPositionMs - targetTrack.startOffsetMs);
 
       await this.loadTrack(targetIndex, { initialPositionMs: trackPositionMs });
       this.logSnapshot("after loadBook");
@@ -641,6 +661,7 @@ class PlayerService {
     chapterIndex: ReturnType<typeof buildChapterIndex>;
     resumePositionMs: number;
     rate: number;
+    autoRewindDecision?: AutoRewindDecision | null;
   }) {
     const targetTrack = findTrackForPosition(payload.queue, payload.resumePositionMs) ?? payload.queue[0];
     if (!targetTrack) {
@@ -704,6 +725,13 @@ class PlayerService {
 
       this.lastTrackedPositionMs = bookPositionMs;
       this.lastSyncAttemptAt = Date.now();
+      if (payload.autoRewindDecision?.status === "applied") {
+        this.runPlaybackFollowUp("auto-rewind-progress-sync", () =>
+          this.syncProgress("auto_rewind", {
+            state: playbackStore.getState(),
+          }),
+        );
+      }
       this.touchUserServerStateCacheForPlayStart();
       this.logPlaybackResult("started");
     } catch (error) {
@@ -915,6 +943,7 @@ class PlayerService {
       (state.playbackState === "playing" || state.playbackState === "paused");
 
     if (state.playbackState === "playing") {
+      this.recordListeningInterruptionForState(state);
       try {
         await this.engine.pause();
       } catch (error) {
@@ -1031,6 +1060,81 @@ class PlayerService {
 
   private resolveUserKeyForLibraryItem(libraryItemId: string | null | undefined) {
     return resolveListeningOwnerKey(libraryItemId);
+  }
+
+  private recordListeningInterruptionForState(state: PlaybackStoreState, startedAtMs = Date.now()) {
+    if (!settingsStore.getState().autoRewindEnabled) return;
+    if (!state.libraryItemId) return;
+    deviceBooksStore.getState().actions.recordListeningInterruption(
+      state.libraryItemId,
+      startedAtMs,
+      {
+        userKey: this.resolveUserKeyForLibraryItem(state.libraryItemId),
+      },
+    );
+  }
+
+  private consumeAutoRewindDecision(payload: {
+    libraryItemId: string;
+    positionMs: number;
+    durationMs: number;
+    chapterIndex: PlaybackStoreState["chapterIndex"];
+    isFinished: boolean;
+  }): AutoRewindDecision {
+    const settings = settingsStore.getState();
+    if (!settings.autoRewindEnabled) {
+      return { status: "disabled" };
+    }
+
+    const interruption = deviceBooksStore.getState().actions.consumeListeningInterruption(
+      payload.libraryItemId,
+      {
+        userKey: this.resolveUserKeyForLibraryItem(payload.libraryItemId),
+      },
+    );
+
+    return resolveAutoRewindDecision({
+      enabled: settings.autoRewindEnabled,
+      rules: settings.autoRewindRules,
+      interruptionStartedAtMs: interruption?.startedAtMs ?? null,
+      nowMs: Date.now(),
+      positionMs: payload.positionMs,
+      durationMs: payload.durationMs,
+      chapters: payload.chapterIndex,
+      limitToChapter: settings.autoRewindLimitToChapter,
+      isFinished: payload.isFinished,
+    });
+  }
+
+  private async applyAutoRewindBeforePlay(state: PlaybackStoreState) {
+    if (!state.libraryItemId || !state.queue.length) return null;
+    const isFinished =
+      state.durationMs > 0 && state.positionMs >= state.durationMs - secondsToMs(3);
+    const decision = this.consumeAutoRewindDecision({
+      libraryItemId: state.libraryItemId,
+      positionMs: state.positionMs,
+      durationMs: state.durationMs,
+      chapterIndex: state.chapterIndex,
+      isFinished,
+    });
+
+    if (decision.status !== "applied") {
+      return decision;
+    }
+
+    if (decision.toPositionMs !== decision.fromPositionMs) {
+      await this.seekToImmediate(decision.toPositionMs, {
+        confirmDisplayedPosition: true,
+        rollbackOptimisticPositionMs: decision.toPositionMs,
+        syncProgress: true,
+        allowDuringPlaybackControlIntent: true,
+        progressSyncReason: "auto_rewind",
+      });
+    } else {
+      await this.syncProgress("auto_rewind");
+    }
+
+    return decision;
   }
 
   private resolvePreferredRateForState(state: PlaybackStoreState) {
@@ -1809,11 +1913,17 @@ class PlayerService {
     touchProgressCache?: boolean;
     updatePlaybackStore?: boolean;
     disableLocalStreamFallback?: boolean;
+    applyAutoRewind?: boolean;
   }) {
     this.logDebug("play");
     const state = playbackStore.getState();
     if (!state.queue.length) return;
-    const currentTrack = state.queue[state.currentTrackIndex];
+    if (options?.updatePlaybackStore !== false && options?.applyAutoRewind !== false) {
+      await this.applyAutoRewindBeforePlay(state);
+    }
+    const playbackStateAfterAutoRewind = playbackStore.getState();
+    const currentTrack =
+      playbackStateAfterAutoRewind.queue[playbackStateAfterAutoRewind.currentTrackIndex];
     const shouldVerifyDownloadedPlayback =
       options?.updatePlaybackStore !== false && Boolean(currentTrack?.source.isLocal);
 
@@ -1939,10 +2049,14 @@ class PlayerService {
   private async performPause(options?: { syncProgress?: boolean; updatePlaybackStore?: boolean }) {
     this.logDebug("pause");
     await this.flushPendingSkipBurstBeforeExit();
+    const stateBeforePause = playbackStore.getState();
     await this.engine.pause();
     this.logSnapshot("after pause");
     if (options?.updatePlaybackStore !== false) {
       playbackStore.getState().actions.setPlaybackState("paused");
+    }
+    if (options?.updatePlaybackStore !== false && stateBeforePause.playbackState === "playing") {
+      this.recordListeningInterruptionForState(stateBeforePause);
     }
     if (options?.updatePlaybackStore !== false && options?.syncProgress !== false) {
       this.runPlaybackFollowUp("pause-progress-sync", () =>
@@ -2142,6 +2256,7 @@ class PlayerService {
       syncProgress?: boolean;
       rollbackOptimisticPositionMs?: number;
       allowDuringPlaybackControlIntent?: boolean;
+      progressSyncReason?: Extract<ProgressSyncReason, "seek" | "auto_rewind">;
     },
   ) {
     const state = playbackStore.getState();
@@ -2208,7 +2323,7 @@ class PlayerService {
     playbackStore.getState().actions.setCurrentChapter(chapterAtPosition?.id ?? null);
     this.lastTrackedPositionMs = boundedPosition;
     if (options?.syncProgress !== false) {
-      await this.syncProgress("seek");
+      await this.syncProgress(options?.progressSyncReason ?? "seek");
     }
   }
 
@@ -2217,6 +2332,12 @@ class PlayerService {
     if (this.skipSeekInFlight) {
       await this.skipSeekInFlight.catch(() => undefined);
     }
+    const state = playbackStore.getState();
+    if (state.libraryItemId) {
+      deviceBooksStore.getState().actions.clearListeningInterruption(state.libraryItemId, {
+        userKey: this.resolveUserKeyForLibraryItem(state.libraryItemId),
+      });
+    }
     await this.seekToImmediate(positionMs, options);
   }
 
@@ -2224,6 +2345,9 @@ class PlayerService {
     const state = playbackStore.getState();
     if (state.playbackControlIntent) return;
     if (!state.queue.length || !state.libraryItemId) return;
+    deviceBooksStore.getState().actions.clearListeningInterruption(state.libraryItemId, {
+      userKey: this.resolveUserKeyForLibraryItem(state.libraryItemId),
+    });
     let skipMs = secondsToMs(seconds);
     if (goBackwards) {
       skipMs = -skipMs;
@@ -2634,7 +2758,7 @@ class PlayerService {
     this.lastTrackedPositionMs = bookPositionMs;
 
     if (options?.autoPlay) {
-      await this.performPlay();
+      await this.performPlay({ applyAutoRewind: false });
     }
   }
 
@@ -2738,6 +2862,7 @@ class PlayerService {
 
     let externalPauseSyncResult: { syncAttempted: boolean; dedupeSkipped: boolean } | null = null;
     if (didTransitionToNonPlaying && !status.didJustFinish) {
+      this.recordListeningInterruptionForState(state);
       externalPauseSyncResult = await this.syncPauseLikeProgress("external_pause", {
         state: playbackStore.getState(),
       });
@@ -2765,6 +2890,10 @@ class PlayerService {
             : "Native engine reported playback stopped without a manual pause path"
           : "Native engine reported playback resumed outside the direct play() path",
       });
+    }
+
+    if (status.isPlaying && previousPlaybackState !== "playing") {
+      await this.applyAutoRewindBeforePlay(playbackStore.getState());
     }
 
     if (status.didJustFinish) {
@@ -2929,6 +3058,7 @@ class PlayerService {
     const previousCurrentTimeSeconds = Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0));
     const shouldPreventTransientRegression =
       payload.reason !== "seek" &&
+      payload.reason !== "auto_rewind" &&
       !payload.isFinished &&
       Boolean(cachedProgress) &&
       !cachedProgress?.isFinished &&

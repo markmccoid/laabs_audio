@@ -2,6 +2,13 @@ import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { mmkvStorage } from "./mmkv-storage";
+import {
+  DEFAULT_AUTO_REWIND_RULES,
+  MAX_AUTO_REWIND_RULES,
+  normalizeAutoRewindRule,
+  normalizeAutoRewindRules,
+  type AutoRewindRule,
+} from "../player/auto-rewind";
 import type { PitchCorrectionQuality } from "../player/types";
 import { DEFAULT_DARK_ACCENT_COLOR, DEFAULT_LIGHT_ACCENT_COLOR, normalizeAccentHex } from "../theme/accent-color";
 
@@ -124,6 +131,9 @@ export type SettingsState = {
   showFavoriteBadgeOnCovers: boolean;
   showFinishedBadgeOnCovers: boolean;
   restoreLastBookOnStartup: boolean;
+  autoRewindEnabled: boolean;
+  autoRewindRules: AutoRewindRule[];
+  autoRewindLimitToChapter: boolean;
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>;
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
   actions: {
@@ -146,6 +156,13 @@ export type SettingsState = {
     setShowFavoriteBadgeOnCovers: (enabled: boolean) => void;
     setShowFinishedBadgeOnCovers: (enabled: boolean) => void;
     setRestoreLastBookOnStartup: (enabled: boolean) => void;
+    setAutoRewindEnabled: (enabled: boolean) => void;
+    setAutoRewindRules: (rules: AutoRewindRule[]) => void;
+    sortAutoRewindRules: () => void;
+    addAutoRewindRule: (rule?: AutoRewindRule) => void;
+    updateAutoRewindRule: (index: number, rule: AutoRewindRule) => void;
+    removeAutoRewindRule: (index: number) => void;
+    setAutoRewindLimitToChapter: (enabled: boolean) => void;
     setHomeShelfVisibility: (scopeKey: string | null, shelfId: string, isVisible: boolean) => void;
     setHomeShelfItemCount: (scopeKey: string | null, shelfId: string, homeItemCount: number) => void;
     setHomeShelfOrder: (scopeKey: string | null, orderedShelfIds: string[]) => void;
@@ -182,6 +199,9 @@ export const settingsStore = createStore<SettingsState>()(
       showFavoriteBadgeOnCovers: true,
       showFinishedBadgeOnCovers: true,
       restoreLastBookOnStartup: true,
+      autoRewindEnabled: false,
+      autoRewindRules: [],
+      autoRewindLimitToChapter: true,
       homeShelvesByScope: {},
       discoverShelfByScope: {},
       actions: {
@@ -232,6 +252,79 @@ export const settingsStore = createStore<SettingsState>()(
           set({ showFinishedBadgeOnCovers }),
         setRestoreLastBookOnStartup: (restoreLastBookOnStartup) =>
           set({ restoreLastBookOnStartup }),
+        setAutoRewindEnabled: (autoRewindEnabled) =>
+          set((state) => {
+            return {
+              autoRewindEnabled,
+              autoRewindRules:
+                autoRewindEnabled && state.autoRewindRules.length === 0
+                  ? DEFAULT_AUTO_REWIND_RULES
+                  : state.autoRewindRules,
+            };
+          }),
+        setAutoRewindRules: (autoRewindRules) =>
+          set(() => {
+            const normalizedRules = normalizeAutoRewindRules(autoRewindRules);
+            return {
+              autoRewindRules: normalizedRules,
+              autoRewindEnabled: normalizedRules.length > 0,
+            };
+          }),
+        sortAutoRewindRules: () =>
+          set((state) => {
+            const normalizedRules = normalizeAutoRewindRules(state.autoRewindRules);
+            return {
+              autoRewindRules: normalizedRules,
+              autoRewindEnabled: normalizedRules.length > 0,
+            };
+          }),
+        addAutoRewindRule: (rule) =>
+          set((state) => {
+            if (state.autoRewindRules.length >= MAX_AUTO_REWIND_RULES) return state;
+            const existingThresholds = new Set(
+              state.autoRewindRules.map((candidate) => candidate.thresholdMinutes),
+            );
+            const fallbackThreshold = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120].find(
+              (threshold) => !existingThresholds.has(threshold),
+            );
+            if (fallbackThreshold === undefined && !rule) return state;
+            const normalizedRules = normalizeAutoRewindRules([
+              ...state.autoRewindRules,
+              normalizeAutoRewindRule(
+                rule ?? {
+                  thresholdMinutes: fallbackThreshold ?? 0,
+                  rewindSeconds: 15,
+                },
+              ),
+            ]);
+            return {
+              autoRewindEnabled: normalizedRules.length > 0,
+              autoRewindRules: normalizedRules,
+            };
+          }),
+        updateAutoRewindRule: (index, rule) =>
+          set((state) => {
+            if (index < 0 || index >= state.autoRewindRules.length) return state;
+            const nextRules = [...state.autoRewindRules];
+            nextRules[index] = normalizeAutoRewindRule(rule);
+            return {
+              autoRewindEnabled: nextRules.length > 0,
+              autoRewindRules: nextRules,
+            };
+          }),
+        removeAutoRewindRule: (index) =>
+          set((state) => {
+            if (index < 0 || index >= state.autoRewindRules.length) return state;
+            const normalizedRules = normalizeAutoRewindRules(
+              state.autoRewindRules.filter((_, ruleIndex) => ruleIndex !== index),
+            );
+            return {
+              autoRewindEnabled: normalizedRules.length > 0 ? state.autoRewindEnabled : false,
+              autoRewindRules: normalizedRules,
+            };
+          }),
+        setAutoRewindLimitToChapter: (autoRewindLimitToChapter) =>
+          set({ autoRewindLimitToChapter }),
         setHomeShelfVisibility: (scopeKey, shelfId, isVisible) => {
           const normalizedScopeKey = normalizeScopeKey(scopeKey);
           const normalizedShelfId = normalizeShelfId(shelfId);
@@ -414,10 +507,13 @@ export const settingsStore = createStore<SettingsState>()(
         disableLockScreenSeek: state.disableLockScreenSeek,
         remoteCommandMode: state.remoteCommandMode,
         restoreLastBookOnStartup: state.restoreLastBookOnStartup,
+        autoRewindEnabled: state.autoRewindEnabled,
+        autoRewindRules: state.autoRewindRules,
+        autoRewindLimitToChapter: state.autoRewindLimitToChapter,
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 14,
+      version: 15,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -437,6 +533,9 @@ export const settingsStore = createStore<SettingsState>()(
             disableLockScreenSeek: true,
             remoteCommandMode: DEFAULT_REMOTE_COMMAND_MODE,
             restoreLastBookOnStartup: true,
+            autoRewindEnabled: false,
+            autoRewindRules: [],
+            autoRewindLimitToChapter: true,
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
           };
@@ -500,6 +599,18 @@ export const settingsStore = createStore<SettingsState>()(
           restoreLastBookOnStartup:
             version >= 14
               ? state.restoreLastBookOnStartup ?? true
+              : true,
+          autoRewindEnabled:
+            version >= 15
+              ? state.autoRewindEnabled ?? false
+              : false,
+          autoRewindRules:
+            version >= 15
+              ? normalizeAutoRewindRules(state.autoRewindRules)
+              : [],
+          autoRewindLimitToChapter:
+            version >= 15
+              ? state.autoRewindLimitToChapter ?? true
               : true,
           homeShelvesByScope:
             version >= 11
