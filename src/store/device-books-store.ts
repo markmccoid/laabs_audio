@@ -35,7 +35,7 @@ import {
 
 export const DEFAULT_BOOK_PLAYBACK_RATE = 1;
 const MIN_BOOK_PLAYBACK_RATE = 0.25;
-const MAX_BOOK_PLAYBACK_RATE = 2.0;
+const MAX_BOOK_PLAYBACK_RATE = 4.0;
 const ZERO_PROGRESS_REGRESSION_GUARD_SECONDS = 5;
 const PROGRESS_FLOOR_QUEUE_TRIGGERS = new Set([
   "background_app_state",

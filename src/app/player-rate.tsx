@@ -10,7 +10,7 @@ import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated"
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const MIN_RATE = 0.25;
-const MAX_RATE = 2.0;
+const MAX_RATE = 4.0;
 const RATE_STEP = 0.05;
 const SLIDER_STEP = RATE_STEP * 100;
 
@@ -48,7 +48,7 @@ export default function PlayerRateRoute() {
     setRate(currentRate);
   }, [currentRate, isSliding]);
 
-  const fixedRates = useMemo(() => [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2], []);
+  const fixedRates = useMemo(() => [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4], []);
   const sliderWidth = Math.max(220, width - 96);
 
   const commitRate = useCallback(

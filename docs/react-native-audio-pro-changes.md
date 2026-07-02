@@ -81,3 +81,39 @@ point…") — watch device logs to confirm which path fired.
 `play()` still funnels start position through `pendingStartTimeMs` (consumed in the
 `observeValue` `.readyToPlay` branch). Re-apply the three touch points if the surrounding code
 moved.
+
+---
+
+## Change 2 — Raise playback speed cap to 4.0x (JS clamp + iOS time-pitch algorithm)
+
+**Files:** `src/audioPro.ts`, `ios/AudioPro.swift` (plus the mirrored built output in
+`lib/module/`, `lib/commonjs/`, and `lib/typescript/`)
+**Date:** 2026-07-02
+
+**Problem.** Upstream clamps `setPlaybackSpeed()` to 0.25–2.0 in JS
+(`Math.max(0.25, Math.min(2.0, speed))`). The native side has no cap of its own, but it also
+never sets `AVPlayerItem.audioTimePitchAlgorithm`. For apps linked before iOS 15 the default
+algorithm (`LowQualityZeroLatency`) snapped rates to a fixed set topping out at 2.0 — the
+historical reason for the 2x cap. Apps linked on/after iOS 15 default to `timeDomain`
+(1/32–32x), but that's a linkage-dependent implicit behavior.
+
+**Fix.**
+- `src/audioPro.ts` `setPlaybackSpeed()`: clamp raised from `Math.min(2.0, speed)` to
+  `Math.min(4.0, speed)`; doc comments on `setPlaybackSpeed`/`getPlaybackSpeed` updated. The
+  same change was hand-applied to the built `lib/` output (Metro resolves the module's
+  `react-native` field → `src/`, but Jest and anything using `main` resolves `lib/commonjs/`).
+- `ios/AudioPro.swift` `play()`: after creating the `AVPlayerItem`, explicitly set
+  `item.audioTimePitchAlgorithm = .timeDomain` so rates above 2.0 keep producing pitch-corrected
+  audio regardless of linkage defaults. `timeDomain` is Apple's voice-suited algorithm; swap to
+  `.spectral` if higher quality at high rates is ever wanted (more CPU).
+
+App-side companions (not part of this module): `MAX_PLAYBACK_RATE = 4.0` in
+`src/player/player-service.ts` and `MAX_RATE = 4.0` + extended presets (2.5/3/3.5/4) in
+`src/app/player-rate.tsx`.
+
+**Note for Android.** The shared JS clamp now allows up to 4.0 on Android too. ExoPlayer
+handles >2x via Sonic time-stretching, but Android behavior at 3–4x has not been verified —
+sanity-check before relying on it.
+
+**Upgrade check.** On an upstream sync, re-apply the JS clamp (upstream will still say 2.0) and
+the `audioTimePitchAlgorithm` line after `AVPlayerItem` creation in `play()`.

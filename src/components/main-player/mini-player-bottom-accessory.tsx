@@ -8,7 +8,7 @@ import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
-const RATE_OPTIONS = [0.75, 1, 1.25, 1.5, 1.75, 2];
+const RATE_OPTIONS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4];
 
 type MiniPlayerBottomAccessoryProps = {
   author?: string | null;

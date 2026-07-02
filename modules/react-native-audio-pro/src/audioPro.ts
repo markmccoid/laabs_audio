@@ -375,10 +375,10 @@ export const AudioPro = {
 	/**
 	 * Set the playback speed rate
 	 *
-	 * @param speed - Playback speed rate (0.25 to 2.0, normal speed is 1.0)
+	 * @param speed - Playback speed rate (0.25 to 4.0, normal speed is 1.0)
 	 */
 	setPlaybackSpeed(speed: number) {
-		const validatedSpeed = Math.max(0.25, Math.min(2.0, speed));
+		const validatedSpeed = Math.max(0.25, Math.min(4.0, speed));
 		if (validatedSpeed !== speed) {
 			console.warn(
 				`[react-native-audio-pro]: Playback speed ${speed} out of range, clamped to ${validatedSpeed}`,
@@ -398,7 +398,7 @@ export const AudioPro = {
 	/**
 	 * Get the current playback speed rate
 	 *
-	 * @returns Current playback speed rate (0.25 to 2.0, normal speed is 1.0)
+	 * @returns Current playback speed rate (0.25 to 4.0, normal speed is 1.0)
 	 */
 	getPlaybackSpeed() {
 		return internalStore.getState().playbackSpeed;

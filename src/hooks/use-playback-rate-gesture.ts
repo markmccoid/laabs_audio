@@ -5,7 +5,7 @@ import { Gesture } from "react-native-gesture-handler";
 import { runOnJS, useSharedValue, withSpring } from "react-native-reanimated";
 
 const DEFAULT_MIN_RATE = 0.25;
-const DEFAULT_MAX_RATE = 2.0;
+const DEFAULT_MAX_RATE = 4.0;
 const RATE_STEP = 0.05;
 const PIXELS_PER_STEP = 10;
 const DEFAULT_LONG_PRESS_DELAY_MS = 250;

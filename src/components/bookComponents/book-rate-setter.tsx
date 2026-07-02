@@ -20,7 +20,7 @@ const BookRateSetter = ({ libraryItemId }: Props) => {
       libraryItemId,
       gestureMode: "vertical",
       minRate: 0.5,
-      maxRate: 2,
+      maxRate: 4,
     });
 
   const iconAnimatedStyle = useAnimatedStyle(() => ({

@@ -498,6 +498,11 @@ class AudioPro: RCTEventEmitter {
 			item = AVPlayerItem(url: url)
 		}
 
+		// Pin the time-pitch algorithm so rates above 2.0 keep producing audio.
+		// The pre-iOS-15 linkage default (LowQualityZeroLatency) snaps rates to a
+		// fixed set capped at 2.0; timeDomain supports 1/32–32x and suits speech.
+		item.audioTimePitchAlgorithm = .timeDomain
+
 		// Add observer to the new item
 		item.addObserver(self, forKeyPath: "status", options: [.new], context: nil)
 		isStatusObserverAdded = true
