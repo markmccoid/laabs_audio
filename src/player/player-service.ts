@@ -83,7 +83,8 @@ type ProgressSyncReason =
   | "close"
   | "logout"
   | "finish"
-  | "natural_completion";
+  | "natural_completion"
+  | "download_deleted";
 type CachedUserServerStateSource =
   | "unavailable"
   | "cache_hit"
@@ -117,6 +118,13 @@ type ClipPreviewSession = {
   restoreState: ClipPreviewRestoreState;
   currentTrackIndex: number;
   stoppedAtEnd: boolean;
+};
+
+export type DownloadedBookDeletionPlaybackSnapshot = {
+  libraryItemId: string;
+  wasActiveLocalSession: boolean;
+  wasPlaying: boolean;
+  positionMs: number;
 };
 
 type SkipBurst = {
@@ -2164,6 +2172,72 @@ class PlayerService {
 
   async stop() {
     await this.closeActiveBookForTransition();
+  }
+
+  async prepareForDownloadedBookDeletion(
+    libraryItemId: string,
+  ): Promise<DownloadedBookDeletionPlaybackSnapshot | null> {
+    await this.flushPendingSkipBurstBeforeExit();
+    const state = playbackStore.getState();
+    const isActiveLocalSession =
+      state.libraryItemId === libraryItemId &&
+      state.sessionId === LOCAL_SESSION_ID &&
+      state.queue.some((track) => track.source.isLocal);
+
+    if (!isActiveLocalSession) {
+      return null;
+    }
+
+    const snapshot: DownloadedBookDeletionPlaybackSnapshot = {
+      libraryItemId,
+      wasActiveLocalSession: true,
+      wasPlaying: state.playbackState === "playing",
+      positionMs: state.positionMs,
+    };
+
+    if (state.playbackState === "playing") {
+      this.recordListeningInterruptionForState(state);
+      try {
+        await this.engine.pause();
+      } catch (error) {
+        if (__DEV__) {
+          console.warn("[player-service] download-delete:pause-before-delete-failed", {
+            libraryItemId,
+            error,
+          });
+        }
+      }
+      playbackStore.getState().actions.setPlaybackState("paused");
+    }
+
+    await this.syncProgress("download_deleted", {
+      state: playbackStore.getState(),
+      forceDirectProgressUpdate: true,
+    });
+
+    await this.unloadAndResetPlayback({ preservePlaybackControlIntent: true });
+    return snapshot;
+  }
+
+  async resumeAfterDownloadedBookDeletion(
+    snapshot: DownloadedBookDeletionPlaybackSnapshot | null,
+  ) {
+    if (!snapshot?.wasActiveLocalSession) return;
+
+    try {
+      await this.loadBook(
+        snapshot.libraryItemId,
+        { autoPlay: snapshot.wasPlaying },
+        { preferDownloaded: false },
+      );
+    } catch (error) {
+      if (__DEV__) {
+        console.warn("[player-service] download-delete:stream-reload-failed", {
+          libraryItemId: snapshot.libraryItemId,
+          error,
+        });
+      }
+    }
   }
 
   async finishActiveBook(payload: { libraryItemId: string; durationSeconds?: number }) {

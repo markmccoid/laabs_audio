@@ -10,6 +10,7 @@ export type ProgressSyncIntentTrigger =
   | "close"
   | "finish"
   | "natural_completion"
+  | "download_deleted"
   | "background_app_state"
   | "sync_failure"
   | "interval"

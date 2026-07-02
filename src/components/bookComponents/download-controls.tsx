@@ -7,6 +7,7 @@ import {
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import type { BookDetailRouteSource } from "@/navigation/book-links";
+import { playerService } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { formatMegabytes } from "@/utils/formatUtils";
 import { router, usePathname } from "expo-router";
@@ -79,7 +80,9 @@ const DownloadControls = ({
   const handleDelete = async () => {
     if (!libraryItemId) return;
     logDownloadControls("remove:pressed", { libraryItemId, pathname, context });
+    const playbackSnapshot = await playerService.prepareForDownloadedBookDeletion(libraryItemId);
     await deleteDownloadedBookData(libraryItemId);
+    await playerService.resumeAfterDownloadedBookDeletion(playbackSnapshot);
     if (isBookDownloadsSheet) {
       router.back();
     }
