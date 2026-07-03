@@ -17,6 +17,7 @@ import { Toaster } from "react-native-sonner";
 import { Uniwind } from "uniwind";
 import { AmbientCoordinator } from "../ambient/ambient-coordinator";
 import { selectAccessMode, useAuthStore } from "../auth/auth-store";
+import { CarPlayShelfPublisher } from "../carplay/carplay-shelf-publisher";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
 import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
 import { useSqliteActiveLibraryRefresh } from "../data/sqlite/use-sqlite-active-library-refresh";
@@ -631,6 +632,7 @@ export default function RootLayout() {
           <OfflineConnectionBanner />
           <SleepTimerCoordinator />
           <AmbientCoordinator />
+          <CarPlayShelfPublisher />
           <LibraryActivationOverlay />
           <View style={{ flex: 1 }}>
             <Stack
