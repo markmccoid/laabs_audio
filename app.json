@@ -2,7 +2,7 @@
   "expo": {
     "name": "LAABS Audiobookshelf",
     "slug": "laabs_audio",
-    "version": "1.5.3",
+    "version": "1.5.8",
     "orientation": "portrait",
     "scheme": "laabsaudio",
     "userInterfaceStyle": "automatic",
@@ -55,7 +55,8 @@
       "expo-font",
       "expo-status-bar",
       "expo-web-browser",
-      "expo-sqlite"
+      "expo-sqlite",
+      "./plugins/with-carplay"
     ],
     "experiments": {
       "typedRoutes": true,
