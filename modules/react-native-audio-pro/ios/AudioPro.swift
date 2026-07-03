@@ -16,6 +16,7 @@ class AudioPro: RCTEventEmitter {
 	private var hasListeners = false
 	private let EVENT_NAME = "AudioProEvent"
 	private let AMBIENT_EVENT_NAME = "AudioProAmbientEvent"
+	private let CARPLAY_EVENT_NAME = "AudioProCarPlayEvent"
 
 	private var ambientPlayer: AVPlayer?
 	private var ambientPlayerItem: AVPlayerItem?
@@ -116,7 +117,7 @@ class AudioPro: RCTEventEmitter {
 	////////////////////////////////////////////////////////////
 
 	override func supportedEvents() -> [String]! {
-		return [EVENT_NAME, AMBIENT_EVENT_NAME]
+		return [EVENT_NAME, AMBIENT_EVENT_NAME, CARPLAY_EVENT_NAME]
 	}
 
 	override static func requiresMainQueueSetup() -> Bool {
@@ -129,6 +130,137 @@ class AudioPro: RCTEventEmitter {
 
 	override func stopObserving() {
 		hasListeners = false
+	}
+
+	////////////////////////////////////////////////////////////
+	// MARK: - CarPlay
+	//
+	// The CarPlay scene delegate (CarPlaySceneDelegate.swift) is created by
+	// UIKit, not React Native, so it communicates with this emitter instance
+	// via NotificationCenter. JS may also miss the CONNECTED event on a cold
+	// launch from the car, so carPlayGetStatus exists for catch-up polling.
+	//
+	// IMPORTANT: the observers live for the module instance's lifetime
+	// (init → deinit) and CarPlay events are sent WITHOUT the hasListeners
+	// gate. Tying them to startObserving/stopObserving proved fragile: a
+	// transient zero-listener moment (or a recycled module instance) detached
+	// the observers and silently swallowed every subsequent CarPlay tap.
+	////////////////////////////////////////////////////////////
+
+	override init() {
+		super.init()
+		addCarPlayObservers()
+		// Pin the emitter's internal listener count: RCTEventEmitter.sendEvent
+		// drops events entirely while the count is zero, and the count can
+		// transiently hit zero (or reset on a recycled module instance) even
+		// though the JS-side subscription persists. One permanent native-side
+		// registration keeps the pipe open for CarPlay control events.
+		addListener(CARPLAY_EVENT_NAME)
+	}
+
+	deinit {
+		removeCarPlayObservers()
+	}
+
+	private func addCarPlayObservers() {
+		let center = NotificationCenter.default
+		center.addObserver(
+			self,
+			selector: #selector(handleCarPlayConnected),
+			name: CarPlayNotification.connected,
+			object: nil
+		)
+		center.addObserver(
+			self,
+			selector: #selector(handleCarPlayDisconnected),
+			name: CarPlayNotification.disconnected,
+			object: nil
+		)
+		center.addObserver(
+			self,
+			selector: #selector(handleCarPlayItemSelected(_:)),
+			name: CarPlayNotification.itemSelected,
+			object: nil
+		)
+		center.addObserver(
+			self,
+			selector: #selector(handleCarPlayChapterSelected(_:)),
+			name: CarPlayNotification.chapterSelected,
+			object: nil
+		)
+		center.addObserver(
+			self,
+			selector: #selector(handleCarPlayRateSelected(_:)),
+			name: CarPlayNotification.rateSelected,
+			object: nil
+		)
+	}
+
+	private func removeCarPlayObservers() {
+		let center = NotificationCenter.default
+		center.removeObserver(self, name: CarPlayNotification.connected, object: nil)
+		center.removeObserver(self, name: CarPlayNotification.disconnected, object: nil)
+		center.removeObserver(self, name: CarPlayNotification.itemSelected, object: nil)
+		center.removeObserver(self, name: CarPlayNotification.chapterSelected, object: nil)
+		center.removeObserver(self, name: CarPlayNotification.rateSelected, object: nil)
+	}
+
+	private func sendCarPlayEvent(_ body: [String: Any]) {
+		// Deliberately not gated on hasListeners: CarPlay control events must
+		// never be dropped. Worst case RN logs a "no listeners" warning.
+		NSLog("[CarPlay] emit %@ (hasListeners=%d)", (body["type"] as? String) ?? "?", hasListeners ? 1 : 0)
+		sendEvent(withName: CARPLAY_EVENT_NAME, body: body)
+	}
+
+	@objc private func handleCarPlayConnected() {
+		sendCarPlayEvent(["type": "CONNECTED"])
+	}
+
+	@objc private func handleCarPlayDisconnected() {
+		sendCarPlayEvent(["type": "DISCONNECTED"])
+	}
+
+	@objc private func handleCarPlayItemSelected(_ notification: Notification) {
+		guard let itemId = notification.userInfo?[CarPlayNotification.itemIdKey] as? String else { return }
+		sendCarPlayEvent(["type": "ITEM_SELECTED", "itemId": itemId])
+	}
+
+	@objc private func handleCarPlayChapterSelected(_ notification: Notification) {
+		guard let chapterId = notification.userInfo?[CarPlayNotification.itemIdKey] as? Int else { return }
+		sendCarPlayEvent(["type": "CHAPTER_SELECTED", "chapterId": chapterId])
+	}
+
+	@objc private func handleCarPlayRateSelected(_ notification: Notification) {
+		guard let rate = notification.userInfo?[CarPlayNotification.itemIdKey] as? Double else { return }
+		sendCarPlayEvent(["type": "RATE_SELECTED", "rate": rate])
+	}
+
+	@objc(carPlaySetShelves:)
+	func carPlaySetShelves(_ shelves: NSArray) {
+		CarPlayCoordinator.shared.setShelves((shelves as? [[String: Any]]) ?? [])
+	}
+
+	@objc(carPlaySetChapters:)
+	func carPlaySetChapters(_ chapters: NSArray) {
+		CarPlayCoordinator.shared.setChapters((chapters as? [[String: Any]]) ?? [])
+	}
+
+	@objc(carPlaySetRates:)
+	func carPlaySetRates(_ rates: NSArray) {
+		CarPlayCoordinator.shared.setRates((rates as? [[String: Any]]) ?? [])
+	}
+
+	@objc(carPlayShowAlert:)
+	func carPlayShowAlert(_ message: NSString) {
+		CarPlayCoordinator.shared.showAlert(message as String)
+	}
+
+	@objc(carPlayGetStatus:withRejecter:)
+	func carPlayGetStatus(
+		_ resolve: @escaping RCTPromiseResolveBlock,
+		withRejecter reject: RCTPromiseRejectBlock
+	) {
+		resolve(["connected": CarPlayCoordinator.shared.isConnected])
 	}
 
 	private func setupAudioSessionInterruptionObserver() {
@@ -261,13 +393,16 @@ class AudioPro: RCTEventEmitter {
 
 					// Resume playback
 					player?.play()
+					if currentPlaybackSpeed != 1.0 {
+						player?.rate = currentPlaybackSpeed
+					}
 					startProgressTimer()
 
 					// Emit PLAYING state
 					sendPlayingStateEvent()
 
 					// Update now playing info
-					updateNowPlayingInfo(time: player?.currentTime().seconds ?? 0, rate: 1.0)
+					updateNowPlayingInfo(time: player?.currentTime().seconds ?? 0, rate: currentPlaybackSpeed)
 				} catch {
 					log("Failed to reactivate audio session: \(error.localizedDescription)")
 					emitPlaybackError("Failed to resume after interruption: \(error.localizedDescription)")
@@ -349,6 +484,15 @@ class AudioPro: RCTEventEmitter {
 			"duration": info.duration
 		]
 		sendEvent(type: EVENT_TYPE_PROGRESS, track: info.track, payload: payload)
+
+		// Keep MPNowPlayingInfoCenter truthful while playing. Consumers that
+		// don't extrapolate reliably (CarPlay Now Playing, some head units)
+		// otherwise show a frozen progress bar, and a stale rate makes the
+		// play/pause button state wrong.
+		let currentTime = player.currentTime().seconds
+		if currentTime.isFinite {
+			updateNowPlayingInfo(time: currentTime, rate: player.rate)
+		}
 	}
 
 	////////////////////////////////////////////////////////////
@@ -462,15 +606,18 @@ class AudioPro: RCTEventEmitter {
 		let artist = track["artist"] as? String
 
 		// Update now playing info without resetting the entire dictionary
-		var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [String: Any]()
-		nowPlayingInfo[MPMediaItemPropertyTitle] = title
-		if let album = album {
-			nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = album
+		// (on main — see updateNowPlayingInfo for why).
+		DispatchQueue.main.async {
+			var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [String: Any]()
+			nowPlayingInfo[MPMediaItemPropertyTitle] = title
+			if let album = album {
+				nowPlayingInfo[MPMediaItemPropertyAlbumTitle] = album
+			}
+			if let artist = artist {
+				nowPlayingInfo[MPMediaItemPropertyArtist] = artist
+			}
+			MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
 		}
-		if let artist = artist {
-			nowPlayingInfo[MPMediaItemPropertyArtist] = artist
-		}
-		MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
 
 		DispatchQueue.main.async {
 			UIApplication.shared.beginReceivingRemoteControlEvents()
@@ -537,9 +684,12 @@ class AudioPro: RCTEventEmitter {
 		if currentPlaybackSpeed != 1.0 {
 			player?.rate = currentPlaybackSpeed
 
-			var currentInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-			currentInfo[MPNowPlayingInfoPropertyPlaybackRate] = Double(currentPlaybackSpeed)
-			MPNowPlayingInfoCenter.default().nowPlayingInfo = currentInfo
+			let speed = Double(currentPlaybackSpeed)
+			DispatchQueue.main.async {
+				var currentInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+				currentInfo[MPNowPlayingInfoPropertyPlaybackRate] = speed
+				MPNowPlayingInfoCenter.default().nowPlayingInfo = currentInfo
+			}
 		}
 
 		if autoPlay {
@@ -704,36 +854,63 @@ class AudioPro: RCTEventEmitter {
 		)
 	}
 
+	/// Run on the main thread (immediately if already there, else async).
+	/// pause()/resume() bodies run through this so JS-initiated calls (RN
+	/// bridge queue) take exactly the same path as CarPlay/lock-screen remote
+	/// commands (main thread) — MediaRemote/CarPlay track the session state
+	/// unreliably when the player is driven from a background thread.
+	private func runOnMain(_ block: @escaping () -> Void) {
+		if Thread.isMainThread {
+			block()
+		} else {
+			DispatchQueue.main.async(execute: block)
+		}
+	}
+
 	@objc(pause)
 	func pause() {
-		shouldBePlaying = false
-		player?.pause()
-		stopTimer()
-		sendPausedStateEvent()
-		updateNowPlayingInfo(time: player?.currentTime().seconds ?? 0, rate: 0)
+		runOnMain { [weak self] in
+			guard let self = self else { return }
+			self.shouldBePlaying = false
+			self.player?.pause()
+			self.stopTimer()
+			self.sendPausedStateEvent()
+			self.updateNowPlayingInfo(time: self.player?.currentTime().seconds ?? 0, rate: 0)
+		}
 	}
 
 	@objc(resume)
 	func resume() {
-		shouldBePlaying = true
+		runOnMain { [weak self] in
+			guard let self = self else { return }
+			self.shouldBePlaying = true
 
-		// Try to reactivate the audio session if needed
-		do {
-			if !AVAudioSession.sharedInstance().isOtherAudioPlaying {
-				try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+			// Try to reactivate the audio session if needed
+			do {
+				if !AVAudioSession.sharedInstance().isOtherAudioPlaying {
+					try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+				}
+			} catch {
+				self.log("Failed to reactivate audio session: \(error.localizedDescription)")
+				// Continue anyway, as the play command might still work
 			}
-		} catch {
-			log("Failed to reactivate audio session: \(error.localizedDescription)")
-			// Continue anyway, as the play command might still work
+
+			self.player?.play()
+
+			// play() resets the rate to the player's default (1.0); re-apply the
+			// configured speed so native-initiated resumes (remote commands,
+			// CarPlay) don't drop back to 1x. JS-initiated resumes re-apply speed
+			// themselves, for which this is a harmless no-op.
+			if self.currentPlaybackSpeed != 1.0 {
+				self.player?.rate = self.currentPlaybackSpeed
+			}
+
+			// Ensure lock screen controls are properly updated
+			self.updateNowPlayingInfo(time: self.player?.currentTime().seconds ?? 0, rate: self.currentPlaybackSpeed)
+
+			// Note: We don't need to call sendPlayingStateEvent() here because
+			// the rate change will trigger observeValue which now calls sendPlayingStateEvent()
 		}
-
-		player?.play()
-
-		// Ensure lock screen controls are properly updated
-		updateNowPlayingInfo(time: player?.currentTime().seconds ?? 0, rate: 1.0)
-
-		// Note: We don't need to call sendPlayingStateEvent() here because
-		// the rate change will trigger observeValue which now calls sendPlayingStateEvent()
 	}
 
 	/// stop is meant to halt playback and update the state without destroying persistent info
@@ -1180,12 +1357,31 @@ class AudioPro: RCTEventEmitter {
 		cleanup(emitStateChange: false)
 	}
 
-	/// Updates Now Playing Info with specified parameters, preserving existing values
+	/// Updates Now Playing Info with specified parameters, preserving existing values.
+	/// Always writes on the main thread: MPNowPlayingInfoCenter writes from a
+	/// background thread (the RN bridge queue, for JS-initiated pause/resume)
+	/// intermittently fail to propagate to external observers — lock screen and
+	/// especially CarPlay — while main-thread writes (remote-command handlers,
+	/// the progress timer) do. Values are captured before hopping threads.
 	private func updateNowPlayingInfo(time: Double? = nil, rate: Float? = nil, duration: Double? = nil, track: NSDictionary? = nil) {
+		let resolvedRate = rate ?? player?.rate ?? 0
+		if !Thread.isMainThread {
+			DispatchQueue.main.async { [weak self] in
+				self?.updateNowPlayingInfoOnMain(time: time, rate: resolvedRate, duration: duration, track: track)
+			}
+			return
+		}
+		updateNowPlayingInfoOnMain(time: time, rate: resolvedRate, duration: duration, track: track)
+	}
+
+	private func updateNowPlayingInfoOnMain(time: Double?, rate: Float, duration: Double?, track: NSDictionary?) {
 		var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [String: Any]()
 
-		// Update rate if provided, otherwise use current player rate
-		nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = rate ?? player?.rate ?? 0
+		nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = rate
+		// The user-chosen speed, independent of the momentary rate (which is 0
+		// while paused). CarPlay's CPNowPlayingPlaybackRateButton renders THIS
+		// key as its label — without it the button reads "0x" forever.
+		nowPlayingInfo[MPNowPlayingInfoPropertyDefaultPlaybackRate] = currentPlaybackSpeed
 
 		applyNowPlayingSeekMetadata(&nowPlayingInfo, time: time, duration: duration)
 
@@ -1338,6 +1534,12 @@ class AudioPro: RCTEventEmitter {
 
 		if isRemoteCommandCenterSetup { return }
 
+		// Register with MediaRemote so external now-playing consumers
+		// (CarPlay in particular) associate this app with the session.
+		DispatchQueue.main.async {
+			UIApplication.shared.beginReceivingRemoteControlEvents()
+		}
+
 		// Register command targets as before (disabling just hides/prevents UI, targets are safe to always register)
 		commandCenter.skipForwardCommand.addTarget { [weak self] event in
 			guard let self = self, let skipEvent = event as? MPSkipIntervalCommandEvent else { return .commandFailed }
@@ -1351,22 +1553,24 @@ class AudioPro: RCTEventEmitter {
 			return .success
 		}
 
+		// Play/pause are idempotent: if the requested state already holds,
+		// report success instead of .commandFailed. A consumer with a stale
+		// button state (e.g. CarPlay Now Playing) otherwise gets a dead button —
+		// its tap routes to the "wrong" command, which then refuses to act.
 		commandCenter.playCommand.addTarget { [weak self] _ in
-			guard let self = self else { return .commandFailed }
+			guard let self = self, self.player != nil else { return .commandFailed }
 			if self.player?.rate == 0 {
 				self.resume()
-				return .success
 			}
-			return .commandFailed
+			return .success
 		}
 
 		commandCenter.pauseCommand.addTarget { [weak self] _ in
-			guard let self = self else { return .commandFailed }
+			guard let self = self, self.player != nil else { return .commandFailed }
 			if self.player?.rate != 0 {
 				self.pause()
-				return .success
 			}
-			return .commandFailed
+			return .success
 		}
 
 		// Magic Tap Support: Toggle Play/Pause command
