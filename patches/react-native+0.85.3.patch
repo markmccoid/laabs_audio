@@ -1,0 +1,41 @@
+diff --git a/node_modules/react-native/React/CoreModules/RCTAppearance.mm b/node_modules/react-native/React/CoreModules/RCTAppearance.mm
+index d25d9f6..874988f 100644
+--- a/node_modules/react-native/React/CoreModules/RCTAppearance.mm
++++ b/node_modules/react-native/React/CoreModules/RCTAppearance.mm
+@@ -113,8 +113,14 @@ RCT_EXPORT_METHOD(setColorScheme : (NSString *)style)
+ {
+   UIUserInterfaceStyle userInterfaceStyle = [RCTConvert UIUserInterfaceStyle:style];
+   NSMutableArray<UIWindow *> *windows = [NSMutableArray new];
+-  for (UIWindowScene *scene in RCTSharedApplication().connectedScenes) {
+-    [windows addObjectsFromArray:scene.windows];
++  for (UIScene *scene in RCTSharedApplication().connectedScenes) {
++    // A CarPlay-capable app also has non-window scenes (CPTemplateApplicationScene),
++    // which do not respond to -windows; blind-casting crashes with
++    // doesNotRecognizeSelector when CarPlay is connected.
++    if (![scene isKindOfClass:[UIWindowScene class]]) {
++      continue;
++    }
++    [windows addObjectsFromArray:((UIWindowScene *)scene).windows];
+   }
+ 
+   for (UIWindow *window in windows) {
+diff --git a/node_modules/react-native/React/CoreModules/RCTDevMenu.mm b/node_modules/react-native/React/CoreModules/RCTDevMenu.mm
+index 890c159..bc8b070 100644
+--- a/node_modules/react-native/React/CoreModules/RCTDevMenu.mm
++++ b/node_modules/react-native/React/CoreModules/RCTDevMenu.mm
+@@ -235,8 +235,13 @@ RCT_EXPORT_MODULE()
+ {
+   if ([((RCTDevSettings *)[_moduleRegistry moduleForName:"DevSettings"]) isShakeToShowDevMenuEnabled]) {
+     NSMutableArray<UIWindow *> *windows = [NSMutableArray new];
+-    for (UIWindowScene *scene in RCTSharedApplication().connectedScenes) {
+-      [windows addObjectsFromArray:scene.windows];
++    for (UIScene *scene in RCTSharedApplication().connectedScenes) {
++      // Non-window scenes (e.g. CarPlay's CPTemplateApplicationScene) do not
++      // respond to -windows; blind-casting crashes on shake with CarPlay connected.
++      if (![scene isKindOfClass:[UIWindowScene class]]) {
++        continue;
++      }
++      [windows addObjectsFromArray:((UIWindowScene *)scene).windows];
+     }
+     for (UIWindow *window in windows) {
+       NSString *recursiveDescription = [window valueForKey:@"recursiveDescription"];
