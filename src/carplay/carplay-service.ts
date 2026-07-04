@@ -9,7 +9,9 @@ import {
 } from "../store/device-books-store";
 import { toDownloadedBookSummary } from "../store/downloaded-book-helpers";
 import { mmkvStorage } from "../store/mmkv-storage";
+import { settingsStore } from "../store/settings-store";
 import {
+	getCarPlayResumeSnapshotMap,
 	recordCarPlayProgressSnapshotMap,
 	recordCarPlayResumeSnapshot,
 } from "./carplay-resume-snapshot";
@@ -37,6 +39,8 @@ type CarPlayBookPayload = {
 	id: string;
 	title: string;
 	detail?: string;
+	/** Time read/left line rendered under the cover in shelf image rows (iOS 26). */
+	subtitle?: string;
 	coverUrl?: string;
 	isPlaying?: boolean;
 };
@@ -62,7 +66,7 @@ const SNAPSHOT_KEY = "carplay-shelves-snapshot-v1";
 // Logged at init so a device capture proves WHICH build is running — a stale
 // install burned a whole hardware test session on 2026-07-03. Bump on every
 // CarPlay-affecting change.
-const CARPLAY_SERVICE_BUILD = "attempt-g-20260704";
+const CARPLAY_SERVICE_BUILD = "attempt-h-20260704";
 
 let initialized = false;
 let isConnected = false;
@@ -98,15 +102,48 @@ const log = (...args: unknown[]) => {
 // Payload building
 ////////////////////////////////////////////////////////////
 
-const formatTimeLeft = (secondsLeft: number): string | null => {
-	if (!Number.isFinite(secondsLeft) || secondsLeft <= 0) return null;
-	const totalMinutes = Math.round(secondsLeft / 60);
-	if (totalMinutes < 1) return "<1m left";
-	const hours = Math.floor(totalMinutes / 60);
-	const minutes = totalMinutes % 60;
-	if (hours <= 0) return `${minutes}m left`;
-	return `${hours}h ${minutes}m left`;
+// Same "Xh YYm" format as the phone's shelf cards (shelf-book-card.tsx).
+const formatDurationBadge = (durationSeconds: number): string => {
+	const seconds = Math.max(0, Math.floor(durationSeconds));
+	const hours = Math.floor(seconds / 3600);
+	const minutes = Math.floor((seconds % 3600) / 60);
+	if (hours > 0) return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
+	return `${minutes}m`;
 };
+
+/**
+ * Time line for a book, honoring the phone's progress-time setting
+ * (Settings > Playback): "elapsed" → time read ("10h 26m"), "remaining" →
+ * time left ("10h 26m left"). Mirrors shelf-book-card.tsx: no label until the
+ * book has progress; finished books show the full duration when elapsed.
+ */
+const formatTimeLabelParts = (
+	currentTimeSeconds: number,
+	rawDurationSeconds: number,
+	isFinished: boolean,
+): string | null => {
+	const durationSeconds = Math.max(0, Math.floor(rawDurationSeconds || 0));
+	const rawProgressSeconds = Math.max(0, Math.floor(currentTimeSeconds));
+	const progressSeconds =
+		durationSeconds > 0 ? Math.min(rawProgressSeconds, durationSeconds) : rawProgressSeconds;
+	if (progressSeconds <= 0 && !isFinished) return null;
+
+	const display = settingsStore.getState().defaultBookProgressTimeDisplay;
+	if (display === "elapsed" || durationSeconds <= 0) {
+		return formatDurationBadge(isFinished ? durationSeconds : progressSeconds);
+	}
+	return `${formatDurationBadge(Math.max(durationSeconds - progressSeconds, 0))} left`;
+};
+
+const formatBookTimeLabel = (
+	progress: UserBookProgress | undefined,
+	fallbackDurationSeconds: number,
+): string | null =>
+	formatTimeLabelParts(
+		progress?.currentTime ?? 0,
+		progress?.duration || fallbackDurationSeconds || 0,
+		Boolean(progress?.isFinished),
+	);
 
 const normalizeCoverUrl = (cover: string | null | undefined): string | undefined => {
 	if (!cover) return undefined;
@@ -138,15 +175,13 @@ export const buildCarPlayShelves = (
 		title: shelf.title,
 		books: shelf.books.map((book) => {
 			const progress = progressByBookId[book.id];
-			const timeLeft =
-				progress && !progress.isFinished && progress.currentTime > 0
-					? formatTimeLeft((progress.duration || book.duration) - progress.currentTime)
-					: null;
-			const detail = [book.author, timeLeft].filter(Boolean).join(" · ");
+			const timeLabel = formatBookTimeLabel(progress, book.duration);
+			const detail = [book.author, timeLabel].filter(Boolean).join(" · ");
 			return {
 				id: book.id,
 				title: book.title,
 				detail: detail || undefined,
+				subtitle: timeLabel ?? undefined,
 				coverUrl: normalizeCoverUrl(book.cover),
 			};
 		}),
@@ -213,11 +248,19 @@ const pushChaptersToNative = () => {
 // Publishing (from the React-side CarPlayShelfPublisher)
 ////////////////////////////////////////////////////////////
 
+// Kept so a progress-time-display setting change can rebuild the shelf labels
+// without waiting for the next publish from the phone UI.
+let lastPublishInputs: {
+	visibleShelves: HomeShelf[];
+	progressByBookId: Record<string, UserBookProgress>;
+} | null = null;
+
 export const publishCarPlayShelves = (
 	visibleShelves: HomeShelf[],
 	progressByBookId: Record<string, UserBookProgress>,
 ) => {
 	if (Platform.OS !== "ios") return;
+	lastPublishInputs = { visibleShelves, progressByBookId };
 	recordCarPlayProgressSnapshotMap(progressByBookId);
 	shelves = buildCarPlayShelves(visibleShelves, progressByBookId);
 	void Promise.resolve(mmkvStorage.setItem(SNAPSHOT_KEY, JSON.stringify(shelves))).catch(
@@ -233,13 +276,23 @@ export const publishCarPlayShelves = (
  */
 const buildDownloadedFallbackShelf = (): CarPlayShelfPayload[] => {
 	const { downloadedDetailsById } = deviceBooksStore.getState();
+	const resumeRecords = getCarPlayResumeSnapshotMap();
 	const books = Object.values(downloadedDetailsById)
 		.map((details) => {
 			const summary = toDownloadedBookSummary(details);
+			const record = resumeRecords[summary.id];
+			const timeLabel = record
+				? formatTimeLabelParts(
+						record.currentTimeSeconds,
+						record.durationSeconds,
+						record.isFinished,
+					)
+				: null;
 			return {
 				id: summary.id,
 				title: summary.title ?? "Untitled",
-				detail: summary.author ?? undefined,
+				detail: [summary.author, timeLabel].filter(Boolean).join(" · ") || undefined,
+				subtitle: timeLabel ?? undefined,
 				coverUrl: normalizeCoverUrl(summary.cover),
 			};
 		})
@@ -467,6 +520,21 @@ export const initCarPlayService = () => {
 			pushChaptersToNative();
 			pushRatesToNative();
 		}
+	});
+
+	// Rebuild shelf time labels when the user flips the progress-time-display
+	// setting (elapsed vs remaining) so the CarPlay covers match the phone.
+	settingsStore.subscribe((state, prevState) => {
+		if (
+			state.defaultBookProgressTimeDisplay === prevState.defaultBookProgressTimeDisplay ||
+			!lastPublishInputs
+		) {
+			return;
+		}
+		publishCarPlayShelves(
+			lastPublishInputs.visibleShelves,
+			lastPublishInputs.progressByBookId,
+		);
 	});
 
 	snapshotReady = loadSnapshot().then(() => {

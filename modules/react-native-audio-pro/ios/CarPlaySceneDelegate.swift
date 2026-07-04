@@ -44,6 +44,8 @@ struct CarPlayBook {
 	let id: String
 	let title: String
 	let detail: String?
+	/// Time read/left line rendered under the cover in shelf image rows (iOS 26).
+	let subtitle: String?
 	let coverUrl: String?
 	let isPlaying: Bool
 
@@ -52,6 +54,7 @@ struct CarPlayBook {
 		self.id = id
 		self.title = (dict["title"] as? String) ?? "Untitled"
 		self.detail = dict["detail"] as? String
+		self.subtitle = dict["subtitle"] as? String
 		self.coverUrl = dict["coverUrl"] as? String
 		self.isPlaying = (dict["isPlaying"] as? Bool) ?? false
 	}
@@ -330,12 +333,39 @@ final class CarPlayCoordinator: NSObject {
 		}
 	}
 
+	/// Cover size for shelf image rows. The legacy row-item constant was
+	/// deprecated in iOS 26 in favor of per-element sizes.
+	private var rowImageMaxSize: CGSize {
+		if #available(iOS 26.0, *) {
+			return CPListImageRowItemRowElement.maximumImageSize
+		}
+		return CPListImageRowItem.maximumImageSize
+	}
+
 	private func buildRootSections() -> [CPListSection] {
 		guard !shelves.isEmpty else { return [] }
 		let items: [CPListTemplateItem] = shelves.map { shelf in
 			let rowBooks = Array(shelf.books.prefix(maxRowImages))
-			let images = rowBooks.map { coverImage(for: $0, maxSize: CPListImageRowItem.maximumImageSize) }
-			let item = CPListImageRowItem(text: shelf.title, images: images)
+			let item: CPListImageRowItem
+			if #available(iOS 26.0, *) {
+				// Row elements render title + time read/left under each cover
+				// (same presentation Audible uses on the iOS 26 CarPlay home).
+				let elements = rowBooks.map { book in
+					CPListImageRowItemRowElement(
+						image: coverImage(for: book, maxSize: rowImageMaxSize),
+						title: book.title,
+						subtitle: book.subtitle
+					)
+				}
+				item = CPListImageRowItem(
+					text: shelf.title,
+					elements: elements,
+					allowsMultipleLines: false
+				)
+			} else {
+				let images = rowBooks.map { coverImage(for: $0, maxSize: rowImageMaxSize) }
+				item = CPListImageRowItem(text: shelf.title, images: images)
+			}
 			// Tap on an individual cover: play that book.
 			item.listImageRowHandler = { [weak self] _, index, completion in
 				if index < rowBooks.count {
@@ -460,7 +490,7 @@ final class CarPlayCoordinator: NSObject {
 	}
 
 	private func prefetchArtwork() {
-		let size = CPListImageRowItem.maximumImageSize
+		let size = rowImageMaxSize
 		var needsRefreshScheduled = false
 		for shelf in shelves {
 			for book in shelf.books {

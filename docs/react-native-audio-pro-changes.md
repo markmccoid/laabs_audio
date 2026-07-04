@@ -561,3 +561,29 @@ resume. Change rate while playing → applies immediately.
 
 **Upgrade check.** Upstream has both unconditional `player.rate` assignments — re-apply the
 `autoPlay` gate in `play()` and the `isPlaying` gate in `setPlaybackSpeed()` on sync.
+
+---
+
+## Change 14 — Shelf covers show title + time read/left (iOS 26 image-row elements)
+
+**File:** `ios/CarPlaySceneDelegate.swift` (+ app-side `src/carplay/carplay-service.ts`)
+**Date:** 2026-07-04
+
+**What.** The CarPlay home shelves now render each cover with its book title and a time line
+underneath (Audible-style). iOS 26 deprecated `CPListImageRowItem(text:images:)` in favor of
+element-based rows; `buildRootSections` uses `CPListImageRowItemRowElement(image:title:subtitle:)`
+inside `CPListImageRowItem(text:elements:allowsMultipleLines:false)` behind
+`if #available(iOS 26.0, *)`, falling back to the legacy images-only initializer on older iOS.
+Cover sizing goes through `rowImageMaxSize` (`CPListImageRowItemRowElement.maximumImageSize` on
+26+, the deprecated row-item constant before). `CarPlayBook` gained `subtitle`.
+
+**App side.** `carplay-service` computes the per-book time label honoring the phone's
+`defaultBookProgressTimeDisplay` setting — "elapsed" → time read (`10h 26m`), "remaining" →
+time left (`10h 26m left`), no label until a book has progress — using the same format as
+`shelf-book-card.tsx`. The label feeds both the image-row `subtitle` and the shelf drill-down
+`detail` (author · time). A settings subscription republishes shelves when the display setting
+flips; the headless downloaded fallback shelf labels covers from the CarPlay resume snapshot.
+
+**Upgrade check.** `CarPlaySceneDelegate.swift` has no upstream counterpart. If Apple removes
+the deprecated initializer in a later SDK, drop the `#available` else-branch and raise the
+pod's minimum where appropriate.

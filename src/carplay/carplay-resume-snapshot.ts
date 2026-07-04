@@ -95,6 +95,10 @@ export const recordCarPlayProgressSnapshotMap = (
 	writeSnapshot(snapshot);
 };
 
+/** Full per-book snapshot map — used to label headless fallback shelves. */
+export const getCarPlayResumeSnapshotMap = (): Record<string, CarPlayResumeRecord> =>
+	readSnapshot();
+
 export const getCarPlayResumeSnapshotForCandidateIds = (candidateIds: string[]) => {
 	if (!candidateIds.length) return null;
 	const snapshot = readSnapshot();
