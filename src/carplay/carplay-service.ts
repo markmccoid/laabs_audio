@@ -62,7 +62,7 @@ const SNAPSHOT_KEY = "carplay-shelves-snapshot-v1";
 // Logged at init so a device capture proves WHICH build is running — a stale
 // install burned a whole hardware test session on 2026-07-03. Bump on every
 // CarPlay-affecting change.
-const CARPLAY_SERVICE_BUILD = "attempt-f-20260703";
+const CARPLAY_SERVICE_BUILD = "attempt-g-20260704";
 
 let initialized = false;
 let isConnected = false;

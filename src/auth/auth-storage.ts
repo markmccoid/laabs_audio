@@ -54,10 +54,22 @@ const logAvailability = async () => {
   return available;
 };
 
-const getItem = (key: string) => SecureStore.getItemAsync(key);
+// Secrets must be readable from a background/headless CarPlay launch while
+// the phone is locked. The expo-secure-store default accessibility
+// (WHEN_UNLOCKED) makes Keychain reads fail whenever the device is locked,
+// which blocks headless auth hydration, token refresh, and streaming in the
+// car. AFTER_FIRST_UNLOCK is the standard class for background-capable apps:
+// items become readable at the first unlock after boot and stay readable.
+// Existing items are re-written to this class by the v3 migration in
+// migrateLegacySessionIfNeeded. See docs/carplay-cold-start-streaming.md.
+const SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+};
+
+const getItem = (key: string) => SecureStore.getItemAsync(key, SECURE_STORE_OPTIONS);
 const setItem = (key: string, value: string) =>
-  SecureStore.setItemAsync(key, value);
-const deleteItem = (key: string) => SecureStore.deleteItemAsync(key);
+  SecureStore.setItemAsync(key, value, SECURE_STORE_OPTIONS);
+const deleteItem = (key: string) => SecureStore.deleteItemAsync(key, SECURE_STORE_OPTIONS);
 
 const DEFAULT_SESSION_SNAPSHOT: AuthSessionsSnapshot = {
   sessions: [],
@@ -339,26 +351,72 @@ export const authStorage = {
   },
 
   async migrateLegacySessionIfNeeded() {
-    const snapshot = readSessionSnapshot();
-    if (snapshot.migrationVersion >= 2) return snapshot;
+    let snapshot = readSessionSnapshot();
 
-    const oldSessions = snapshot.sessions;
-    await Promise.all(
-      oldSessions.map((session) =>
-        this.setSessionSecrets(session.key, {
-          password: null,
-          accessToken: null,
-          refreshToken: null,
+    if (snapshot.migrationVersion < 2) {
+      const oldSessions = snapshot.sessions;
+      await Promise.all(
+        oldSessions.map((session) =>
+          this.setSessionSecrets(session.key, {
+            password: null,
+            accessToken: null,
+            refreshToken: null,
+          }),
+        ),
+      );
+      snapshot = {
+        sessions: [],
+        activeSessionKey: null,
+        migrationVersion: 2,
+      };
+      writeSessionSnapshot(snapshot);
+      await this.clearLegacySession();
+    }
+
+    if (snapshot.migrationVersion < 3) {
+      snapshot = await this.migrateSecretsToAfterFirstUnlock(snapshot);
+    }
+
+    return snapshot;
+  },
+
+  /**
+   * v3: re-write every stored secret so it adopts the AFTER_FIRST_UNLOCK
+   * Keychain accessibility class (items written before the class change keep
+   * WHEN_UNLOCKED and are unreadable while the phone is locked — e.g. during
+   * a headless CarPlay launch in the car). Delete-then-add guarantees the new
+   * class regardless of how SecItemUpdate treats accessibility changes. If
+   * the Keychain is unavailable (locked device), the version is NOT bumped so
+   * the next foreground hydrate retries.
+   */
+  async migrateSecretsToAfterFirstUnlock(
+    snapshot: AuthSessionsSnapshot,
+  ): Promise<AuthSessionsSnapshot> {
+    try {
+      await Promise.all(
+        snapshot.sessions.map(async (session) => {
+          const secrets = await this.getSessionSecrets(session.key);
+          const rewrites: Promise<void>[] = [];
+          (["password", "accessToken", "refreshToken"] as const).forEach((field) => {
+            const value = secrets[field];
+            if (!value) return;
+            const key = getSecretKey(session.key, field);
+            rewrites.push(deleteItem(key).then(() => setItem(key, value)));
+          });
+          await Promise.all(rewrites);
         }),
-      ),
-    );
+      );
+    } catch {
+      // Keychain unavailable (e.g. device locked during a headless launch):
+      // keep the old migrationVersion so a later foreground hydrate retries.
+      return snapshot;
+    }
+
     const migratedSnapshot: AuthSessionsSnapshot = {
-      sessions: [],
-      activeSessionKey: null,
-      migrationVersion: 2,
+      ...snapshot,
+      migrationVersion: 3,
     };
     writeSessionSnapshot(migratedSnapshot);
-    await this.clearLegacySession();
     return migratedSnapshot;
   },
 

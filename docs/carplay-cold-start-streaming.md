@@ -3,6 +3,12 @@
 _Written 2026-07-03/04, current as of commit `bdbff49` (Attempt F). Companion to
 `docs/carplay-debugging-log.md`._
 
+> **Status update (2026-07-04): Phases 1 and 2 are IMPLEMENTED** (plus the Phase-2 risk-list
+> hardening: token-refresh persist failures no longer discard in-memory tokens). Phase 3
+> (NetInfo seed, per-error alert copy) remains optional/unimplemented. Verification per the
+> phase checklists below is pending hardware testing; the desk-rig check for Phase 1 is a
+> headless cold launch streaming a non-downloaded book with the phone unlocked.
+
 ## Executive summary
 
 Streaming a book from a headless CarPlay cold launch fails because **auth hydration is a React

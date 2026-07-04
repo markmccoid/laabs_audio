@@ -84,6 +84,12 @@ const getHasStoredSession = (state: {
 const getUserKey = (userId: string | null | undefined) => userId?.trim() || null;
 
 let refreshPromise: Promise<string | null> | null = null;
+// Single-flight guard for hydrateFromStorage: the headless CarPlay bootstrap
+// (src/carplay/carplay-init.ts) and useAuthBootstrap's effect can both call it
+// around startup; concurrent runs would interleave their set()s. Later calls
+// (e.g. on hasOfflineContent changes) still re-hydrate once the prior run
+// finishes. See docs/carplay-cold-start-streaming.md.
+let hydratePromise: Promise<void> | null = null;
 
 export const authStore = createStore<AuthState>()(
   persist(
@@ -107,6 +113,8 @@ export const authStore = createStore<AuthState>()(
       activeLibraryUserKey: null,
       actions: {
         hydrateFromStorage: async (initialOfflineContent) => {
+          if (hydratePromise) return hydratePromise;
+          const run = async () => {
           const isInitialHydrate = get().status === "hydrating";
           const hydrateStartedAtMs = isInitialHydrate ? markStartup("auth-hydrate-start") : null;
           if (isInitialHydrate) {
@@ -236,6 +244,11 @@ export const authStore = createStore<AuthState>()(
               });
             }
           }
+          };
+          hydratePromise = run().finally(() => {
+            hydratePromise = null;
+          });
+          return hydratePromise;
         },
 
         setOnlineStatus: (isOnline) => {
@@ -503,14 +516,27 @@ export const authStore = createStore<AuthState>()(
             }
 
             if (activeSessionKey) {
-              await authStorage.setSessionSecrets(activeSessionKey, {
-                accessToken: tokens.accessToken,
-                refreshToken: tokens.refreshToken,
-              });
-              authStorage.updateSession(activeSessionKey, {
-                needsAttention: false,
-                lastError: null,
-              });
+              try {
+                await authStorage.setSessionSecrets(activeSessionKey, {
+                  accessToken: tokens.accessToken,
+                  refreshToken: tokens.refreshToken,
+                });
+                authStorage.updateSession(activeSessionKey, {
+                  needsAttention: false,
+                  lastError: null,
+                });
+              } catch (persistError) {
+                // Keychain persist can fail transiently (e.g. locked device on
+                // a headless CarPlay launch). The server already rotated the
+                // tokens — losing them here would force a re-login. Keep them
+                // in memory; the next successful refresh persists again.
+                log("refresh:persist-failed", {
+                  error:
+                    persistError instanceof Error
+                      ? persistError.message
+                      : String(persistError),
+                });
+              }
             }
 
             set((state) => ({

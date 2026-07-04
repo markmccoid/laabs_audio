@@ -711,8 +711,12 @@ class AudioPro: RCTEventEmitter {
 			object: item
 		)
 
-		// Set up playback speed
-		if currentPlaybackSpeed != 1.0 {
+		// Set up playback speed. Only pre-roll the rate when auto-playing:
+		// assigning a non-zero rate to AVPlayer STARTS playback, which
+		// silently defeated autoPlay:false for any track with a speed ≠ 1
+		// (app startup restore audibly began playing). When paused,
+		// currentPlaybackSpeed is applied by resume().
+		if autoPlay && currentPlaybackSpeed != 1.0 {
 			player?.rate = currentPlaybackSpeed
 
 			let speed = Double(currentPlaybackSpeed)
@@ -1205,9 +1209,18 @@ class AudioPro: RCTEventEmitter {
 		}
 
 		log("Setting playback speed to ", speed)
-		player.rate = Float(speed)
+		// Only drive the live rate when already playing: assigning a non-zero
+		// rate to AVPlayer STARTS playback, so doing it while paused silently
+		// un-paused tracks (e.g. right after a load with autoPlay:false).
+		// While paused, the speed is recorded above and applied by resume().
+		let isPlaying = player.rate != 0
+		if isPlaying {
+			player.rate = Float(speed)
+		}
 
-		updateNowPlayingInfo(rate: Float(speed))
+		// Momentary rate stays 0 while paused; the user-chosen speed reaches
+		// consumers via MPNowPlayingInfoPropertyDefaultPlaybackRate.
+		updateNowPlayingInfo(rate: isPlaying ? Float(speed) : 0)
 
 		if hasListeners {
 			let playbackInfo = getPlaybackInfo()

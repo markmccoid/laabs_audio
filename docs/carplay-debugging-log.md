@@ -258,6 +258,33 @@ Verify: while a downloaded book plays via CarPlay (headless), select a stream-on
 alert appears → OK → the downloaded book must still be audibly playing with working
 pause/resume. Then confirm normal downloaded→downloaded switches still work.
 
+### Attempt G (2026-07-04): startup-autoplay regression fix + headless streaming (Phases 1–2)
+
+**Startup autoplay regression.** After `bdbff49`, the app-startup restore
+(`_layout.tsx` → `loadBook(autoPlay:false)`) audibly started playing any book with a saved
+rate ≠ 1×. Root cause: assigning a non-zero `rate` to `AVPlayer` IS the play command, and two
+native spots did it regardless of pause state — `play()` pre-rolled the rate BEFORE its
+`autoPlay` check, and `setPlaybackSpeed()` assigned `player.rate` unconditionally. Latent until
+the CarPlay rate fix started seeding the real book rate before `play()`. Fixed by gating both
+(changes doc Change 13); paused rate changes now apply on `resume()`, which already re-applies
+`currentPlaybackSpeed`.
+
+**Headless streaming (docs/carplay-cold-start-streaming.md Phases 1–2, implemented):**
+
+- Phase 1: `hydrateFromStorage` is single-flighted in `auth-store` and now also called at
+  bundle scope from `carplay-init.ts`, so a car-initiated cold launch hydrates
+  serverUrl/tokens without React. Expected capture lines: `hydrate:start` near boot, then a
+  streamed selection reaching `loadBook:session-resolved … kind=streamed`.
+- Phase 2: SecureStore secrets now use `AFTER_FIRST_UNLOCK` keychain accessibility (readable
+  during a locked-phone car session); a v3 migration delete-and-rewrites existing secrets to
+  adopt the class, skipping (and retrying next hydrate) if the Keychain is unavailable.
+  Token-refresh persist failures no longer discard freshly rotated in-memory tokens.
+
+Build marker: `attempt-g-20260704`. Hardware checks: (1) headless cold launch, phone unlocked,
+stream a non-downloaded book from CarPlay — should play; (2) same with the phone LOCKED (after
+having unlocked once since boot) — should also play; (3) startup restore with a 1.25× book —
+must load paused; (4) regression pass on the A→B→C switch + rate matrix.
+
 ## CarPlay Simulator + physical iPhone test workflow (2026-07-03)
 
 Repeatable desk setup — no car needed. Uses **CarPlay Simulator.app** (installed in

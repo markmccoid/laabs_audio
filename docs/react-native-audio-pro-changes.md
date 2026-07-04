@@ -534,3 +534,30 @@ targeted removal. CarPlay observers remain init→deinit.
 **Upgrade check.** Upstream still has the blanket `removeObserver(self)` in `cleanup()` —
 re-apply the targeted removal on every sync. Any future blanket `removeObserver(self)` anywhere
 in this class is a CarPlay-killer; grep for it after syncing.
+
+---
+
+## Change 13 — Rate changes must never start playback (autoPlay:false regression)
+
+**File:** `ios/AudioPro.swift`
+**Date:** 2026-07-04
+
+**Problem.** Assigning a non-zero `rate` to `AVPlayer` IS the play command. Two spots did that
+regardless of pause state: (1) `play()` pre-rolled `player.rate = currentPlaybackSpeed` when
+speed ≠ 1.0 BEFORE its `autoPlay` check; (2) `setPlaybackSpeed()` always assigned
+`player.rate`. Latent until Change 10's companion (rate seeded into the module store before
+`play()` for CarPlay): after that, the app-startup restore (`loadBook(autoPlay:false)` from
+`_layout.tsx`) audibly started playing any book with a saved rate ≠ 1×.
+
+**Fix.** `play()` pre-rolls the rate only when `autoPlay` is true. `setPlaybackSpeed()` records
+`currentPlaybackSpeed` always, but assigns `player.rate` only when already playing
+(`player.rate != 0`); while paused it publishes `DefaultPlaybackRate` metadata with momentary
+rate 0. `resume()` already re-applies `currentPlaybackSpeed` (Change 8-era behavior), so a
+paused rate change takes effect on the next resume.
+
+**Verify.** Enable "restore last book on startup" with a book saved at 1.25×; launch the app:
+the book must load paused. Change rate while paused → still paused, plays at the new rate on
+resume. Change rate while playing → applies immediately.
+
+**Upgrade check.** Upstream has both unconditional `player.rate` assignments — re-apply the
+`autoPlay` gate in `play()` and the `isPlaying` gate in `setPlaybackSpeed()` on sync.
