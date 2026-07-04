@@ -167,18 +167,23 @@ export const refreshShadowUserOverlays = (options: { scope?: SqliteLibraryScope 
         ),
       );
 
-      await db.runAsync(`DELETE FROM user_favorites WHERE user_id = ?`, [context.userId]);
-      const favoriteIds = Object.keys(serverState.favoriteByLibraryItemId ?? {});
-      await bulkUpsertRows(
-        db,
-        {
-          prefix: `INSERT OR REPLACE INTO user_favorites (
-            user_id, library_item_id, source, server_observed_at
-          )`,
-          rowPlaceholder: "(?, ?, 'server', ?)",
-        },
-        favoriteIds.map((libraryItemId) => [context.userId, libraryItemId, observedAt]),
-      );
+      // null = the favorites fetch failed (unknown). Skip the replace rather
+      // than wiping user_favorites over a transient failure — search's
+      // favorite filter reads this table.
+      if (serverState.favoriteByLibraryItemId) {
+        await db.runAsync(`DELETE FROM user_favorites WHERE user_id = ?`, [context.userId]);
+        const favoriteIds = Object.keys(serverState.favoriteByLibraryItemId);
+        await bulkUpsertRows(
+          db,
+          {
+            prefix: `INSERT OR REPLACE INTO user_favorites (
+              user_id, library_item_id, source, server_observed_at
+            )`,
+            rowPlaceholder: "(?, ?, 'server', ?)",
+          },
+          favoriteIds.map((libraryItemId) => [context.userId, libraryItemId, observedAt]),
+        );
+      }
 
       await db.runAsync(`DELETE FROM server_bookmark_snapshots WHERE user_id = ?`, [
         context.userId,

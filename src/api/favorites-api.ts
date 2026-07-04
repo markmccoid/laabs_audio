@@ -9,14 +9,19 @@ export type FavoriteInfo = {
 const normalizeTags = (tags?: string[] | null) => tags?.filter(Boolean) ?? [];
 
 export const favoritesApi = {
+  /** Non-throwing tag builder for callers that can render before auth hydrates. */
+  buildFavoriteTagValue(username: string | null | undefined): string | null {
+    return username ? `${username}-laab-favorite` : null;
+  },
+
   getUserFavoriteInfo(): FavoriteInfo {
     const { storedUsername } = authStore.getState();
+    const favoriteUserTagValue = favoritesApi.buildFavoriteTagValue(storedUsername);
 
-    if (!storedUsername) {
+    if (!favoriteUserTagValue) {
       throw new Error("Missing username for favorite tagging");
     }
 
-    const favoriteUserTagValue = `${storedUsername}-laab-favorite`;
     const favoriteSearchString = btoa(favoriteUserTagValue);
 
     return {

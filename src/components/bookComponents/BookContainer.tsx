@@ -1,4 +1,5 @@
 import { AbsApiError } from "@/api/abs-client";
+import { favoritesApi } from "@/api/favorites-api";
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import { normalizeUserProgressByLibraryItemId, type UserBookProgress } from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
@@ -132,8 +133,17 @@ const BookContainer = ({ libraryItemId }: Props) => {
     () => bookData?.media?.tags ?? bookData?.tags ?? [],
     [bookData?.media?.tags, bookData?.tags],
   );
+  // The item's own tags are the server truth for favorites — the toggle
+  // mutation edits exactly these tags. The aggregated userServerState map is
+  // a separate fetch that can cache an empty result after a transient failure
+  // (seen on fresh installs), so it is only the fallback while details load.
+  const storedUsername = useAuthStore((state) => state.storedUsername);
+  const favoriteTagValue = favoritesApi.buildFavoriteTagValue(storedUsername);
   const favoriteByLibraryItemId = userServerState?.favoriteByLibraryItemId ?? {};
-  const isFavorite = Boolean(libraryItemId ? favoriteByLibraryItemId[libraryItemId] : false);
+  const isFavorite =
+    bookData && favoriteTagValue
+      ? favoritesApi.hasFavoriteTag(tags, favoriteTagValue)
+      : Boolean(libraryItemId ? favoriteByLibraryItemId[libraryItemId] : false);
   const durationSeconds = bookData?.media?.duration ?? bookData?.duration ?? 0;
   const progressByBookId = useMemo(
     () =>

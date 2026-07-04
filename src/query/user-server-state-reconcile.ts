@@ -123,6 +123,10 @@ export const reconcileUserServerState = (
 
   return {
     ...incomingState,
+    // null = the favorites fetch failed (unknown); keep the last known map
+    // instead of caching a transient failure as "no favorites".
+    favoriteByLibraryItemId:
+      incomingState.favoriteByLibraryItemId ?? previousState?.favoriteByLibraryItemId ?? null,
     progressByLibraryItemId: reconciledProgressByLibraryItemId,
   };
 };

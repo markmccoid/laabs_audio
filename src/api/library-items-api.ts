@@ -145,8 +145,11 @@ export const libraryItemsApi = {
     const favoriteSearchString =
       favoriteTag ?? favoritesApi.getUserFavoriteInfo().favoriteSearchString;
 
+    // The tag filter is base64 and can contain '+', '/', '=' — left raw in a
+    // query string some servers mangle them (e.g. '+' → space), silently
+    // returning zero favorites for affected usernames.
     const response = await absClient.get<{ results: LibraryItem[] }>(
-      `/api/libraries/${libraryIdToUse}/items?filter=tags.${favoriteSearchString}`,
+      `/api/libraries/${libraryIdToUse}/items?filter=tags.${encodeURIComponent(favoriteSearchString)}`,
     );
 
     return response.results;

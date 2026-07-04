@@ -6,6 +6,7 @@ import { librariesApi } from "./libraries-api";
 import type {
   Bookmark,
   ItemsInProgressResponse,
+  LibraryItem,
   MediaProgress,
   User,
 } from "../types/absTypes";
@@ -44,7 +45,13 @@ export type UserServerState = {
   userId: string;
   progressByLibraryItemId: Record<string, UserBookProgress>;
   bookmarksByLibraryItemId: Record<string, Bookmark[]>;
-  favoriteByLibraryItemId: Record<string, true>;
+  /**
+   * null means the favorites fetch FAILED (unknown), not "no favorites" —
+   * consumers must preserve their previous map instead of treating a
+   * transient failure as an empty favorites list (a fresh-install fetch race
+   * cached {} as truth and made every book screen show "not favorited").
+   */
+  favoriteByLibraryItemId: Record<string, true> | null;
 };
 
 type UserProgressLike = {
@@ -113,21 +120,36 @@ export const normalizeUserProgressByLibraryItemId = <T extends UserProgressLike>
   }, {});
 };
 
-const getFavoriteItemsAcrossLibraries = async () => {
+// Returns null when the favorites state is UNKNOWN (libraries fetch failed,
+// username unavailable, or any per-library query failed). Failure must be
+// distinguishable from "no favorites": returning [] here used to get cached
+// and persisted as an empty favorites map.
+const getFavoriteItemsAcrossLibraries = async (): Promise<LibraryItem[] | null> => {
   let librariesResponse: Awaited<ReturnType<typeof librariesApi.getAll>>;
 
   try {
     librariesResponse = await librariesApi.getAll();
   } catch {
-    return [];
+    return null;
   }
 
-  const { favoriteSearchString } = favoritesApi.getUserFavoriteInfo();
+  let favoriteSearchString: string;
+  try {
+    ({ favoriteSearchString } = favoritesApi.getUserFavoriteInfo());
+  } catch {
+    return null;
+  }
+
   const results = await Promise.allSettled(
     librariesResponse.libraries.map((library) =>
       libraryItemsApi.getFavorites(library.id, favoriteSearchString),
     ),
   );
+
+  // One failed library would silently drop its favorites from the map.
+  if (results.some((result) => result.status === "rejected")) {
+    return null;
+  }
 
   return results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
 };
@@ -226,7 +248,9 @@ export const meApi = {
       userId: userData.id,
       progressByLibraryItemId,
       bookmarksByLibraryItemId,
-      favoriteByLibraryItemId: favoritesApi.buildFavoriteByLibraryItemId(favoriteItems),
+      favoriteByLibraryItemId: favoriteItems
+        ? favoritesApi.buildFavoriteByLibraryItemId(favoriteItems)
+        : null,
     };
   },
 
