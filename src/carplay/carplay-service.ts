@@ -3,9 +3,16 @@ import type { UserBookProgress } from "../api/me-api";
 import type { HomeShelf } from "../hooks/use-home-shelves";
 import { playbackStore } from "../player/playback-store";
 import { playerService } from "../player/player-service";
-import { deviceBooksStore } from "../store/device-books-store";
+import {
+	deviceBooksStore,
+	selectHasPlayableBookDownload,
+} from "../store/device-books-store";
 import { toDownloadedBookSummary } from "../store/downloaded-book-helpers";
 import { mmkvStorage } from "../store/mmkv-storage";
+import {
+	recordCarPlayProgressSnapshotMap,
+	recordCarPlayResumeSnapshot,
+} from "./carplay-resume-snapshot";
 
 /**
  * CarPlay bridge — see docs/carplay-integration-plan.md.
@@ -52,6 +59,10 @@ const RATE_PRESETS = [0.75, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0];
 
 const CARPLAY_EVENT_NAME = "AudioProCarPlayEvent";
 const SNAPSHOT_KEY = "carplay-shelves-snapshot-v1";
+// Logged at init so a device capture proves WHICH build is running — a stale
+// install burned a whole hardware test session on 2026-07-03. Bump on every
+// CarPlay-affecting change.
+const CARPLAY_SERVICE_BUILD = "attempt-f-20260703";
 
 let initialized = false;
 let isConnected = false;
@@ -60,7 +71,27 @@ let lastPushedShelvesJson = "";
 let lastPushedChaptersJson = "";
 
 const log = (...args: unknown[]) => {
-	if (__DEV__) console.log("[CarPlay]", ...args);
+	console.log("[CarPlay]", ...args);
+	// Mirror into the device syslog via native NSLog: console.log never
+	// reaches the phone's log in Release builds, which left hardware tests
+	// blind on the JS side. Visible in Console.app / idevicesyslog as
+	// "[CarPlay][JS] …".
+	try {
+		const message = args
+			.map((value) => {
+				if (typeof value === "string") return value;
+				if (value instanceof Error) return value.message;
+				try {
+					return JSON.stringify(value);
+				} catch {
+					return String(value);
+				}
+			})
+			.join(" ");
+		NativeModules.AudioPro?.carPlayLog?.(message);
+	} catch {
+		// Logging must never break the CarPlay flow.
+	}
 };
 
 ////////////////////////////////////////////////////////////
@@ -187,6 +218,7 @@ export const publishCarPlayShelves = (
 	progressByBookId: Record<string, UserBookProgress>,
 ) => {
 	if (Platform.OS !== "ios") return;
+	recordCarPlayProgressSnapshotMap(progressByBookId);
 	shelves = buildCarPlayShelves(visibleShelves, progressByBookId);
 	void Promise.resolve(mmkvStorage.setItem(SNAPSHOT_KEY, JSON.stringify(shelves))).catch(
 		() => {},
@@ -259,41 +291,82 @@ const pushAfterSnapshot = () => {
 // that must not dead-end: remember the latest selection and retry until the
 // gate clears. A newer tap supersedes an older pending one.
 let pendingSelectionId: string | null = null;
+let pendingSelectionAttempt = 0;
+let pendingSelectionBusy = false;
+let lastSelectionAttemptAt = 0;
 const SELECTION_RETRY_MS = 700;
-const SELECTION_MAX_ATTEMPTS = 10;
+// A competing start can legitimately hold the playback-control intent for up
+// to the 20s streamed-start timeout; the retry window must outlast it (and the
+// player-service stale-intent recovery at ~22s) or a tap made while another
+// book is still starting dead-ends into an alert. 40 × 700ms ≈ 28s.
+const SELECTION_MAX_ATTEMPTS = 40;
+const RESUME_SNAPSHOT_WRITE_INTERVAL_MS = 10_000;
+let lastResumeSnapshotWriteAt = 0;
 
 const handleItemSelected = (itemId: string) => {
 	log("book selected", itemId);
+	// A fresh tap supersedes any pending selection and restarts its budget.
 	pendingSelectionId = itemId;
-	void runPendingSelection(itemId, 0);
+	pendingSelectionAttempt = 0;
+	void runPendingSelection(itemId);
 };
 
-const runPendingSelection = async (itemId: string, attempt: number) => {
+// Timer-free retry driver. setTimeout does NOT fire in a headless/background
+// CarPlay launch (verified on hardware 2026-07-03), so retries are also driven
+// by playbackStore updates — native progress events tick the store at ~1 Hz
+// while audio plays, giving an event-driven clock. Called from the store
+// subscription in initCarPlayService.
+const maybeRetryPendingSelection = () => {
+	if (!pendingSelectionId || pendingSelectionBusy) return;
+	if (Date.now() - lastSelectionAttemptAt < SELECTION_RETRY_MS) return;
+	void runPendingSelection(pendingSelectionId);
+};
+
+const isDownloadedBook = (itemId: string) =>
+	selectHasPlayableBookDownload(deviceBooksStore.getState(), itemId);
+
+const showStartFailureAlert = (itemId: string) => {
+	const message = isDownloadedBook(itemId)
+		? "Couldn't start this book"
+		: "Open LAABS on your phone to stream this book";
+	NativeModules.AudioPro?.carPlayShowAlert?.(message);
+};
+
+const runPendingSelection = async (itemId: string) => {
 	if (pendingSelectionId !== itemId) return; // superseded by a newer tap
+	if (pendingSelectionBusy) return;
+	pendingSelectionBusy = true;
+	lastSelectionAttemptAt = Date.now();
+	const attempt = pendingSelectionAttempt;
 	try {
 		const result = await playerService.requestStart(itemId);
+		if (pendingSelectionId !== itemId) return; // superseded while awaiting
 		log("requestStart result", result.status, `attempt ${attempt}`);
 		if (result.status === "ignored") {
+			pendingSelectionAttempt = attempt + 1;
 			if (attempt < SELECTION_MAX_ATTEMPTS) {
+				// Foreground path — in headless launches this timer never fires
+				// and maybeRetryPendingSelection (store-tick driven) takes over.
 				setTimeout(() => {
-					if (pendingSelectionId) void runPendingSelection(pendingSelectionId, attempt + 1);
+					maybeRetryPendingSelection();
 				}, SELECTION_RETRY_MS);
 			} else {
+				log("selection retries exhausted", itemId);
 				pendingSelectionId = null;
-				NativeModules.AudioPro?.carPlayShowAlert?.("Couldn't start this book");
+				showStartFailureAlert(itemId);
 			}
 			return;
 		}
 		pendingSelectionId = null;
 		if (result.status !== "accepted" && result.status !== "already_satisfied") {
-			NativeModules.AudioPro?.carPlayShowAlert?.("Couldn't start this book");
+			showStartFailureAlert(itemId);
 		}
 	} catch (error) {
 		log("requestStart failed", error);
 		pendingSelectionId = null;
-		NativeModules.AudioPro?.carPlayShowAlert?.(
-			"Couldn't start this book — check your connection",
-		);
+		showStartFailureAlert(itemId);
+	} finally {
+		pendingSelectionBusy = false;
 	}
 };
 
@@ -359,6 +432,30 @@ export const initCarPlayService = () => {
 
 	// Keep playing indicators + chapters in sync with the player, headless or not.
 	playbackStore.subscribe((state, prevState) => {
+		// Headless retry clock: store updates tick at ~1 Hz during playback.
+		maybeRetryPendingSelection();
+		const now = Date.now();
+		if (
+			state.libraryItemId &&
+			// A zero position carries no resume information and would clobber a
+			// good snapshot: setSession zeroes positionMs before the resume seek.
+			state.positionMs > 0 &&
+			(state.positionMs !== prevState.positionMs ||
+				state.durationMs !== prevState.durationMs ||
+				state.libraryItemId !== prevState.libraryItemId) &&
+			(state.libraryItemId !== prevState.libraryItemId ||
+				now - lastResumeSnapshotWriteAt >= RESUME_SNAPSHOT_WRITE_INTERVAL_MS)
+		) {
+			lastResumeSnapshotWriteAt = now;
+			recordCarPlayResumeSnapshot({
+				libraryItemId: state.libraryItemId,
+				currentTimeSeconds: Math.floor(state.positionMs / 1000),
+				durationSeconds: Math.floor(state.durationMs / 1000),
+				isFinished:
+					state.durationMs > 0 && state.positionMs >= state.durationMs - 3000,
+				updatedAt: Date.now(),
+			});
+		}
 		if (
 			state.libraryItemId !== prevState.libraryItemId ||
 			state.chapterIndex !== prevState.chapterIndex ||
@@ -377,5 +474,5 @@ export const initCarPlayService = () => {
 		// shelves so the template is ready the instant the scene connects.
 		pushShelvesToNative();
 	});
-	log("service initialized");
+	log("service initialized", CARPLAY_SERVICE_BUILD);
 };

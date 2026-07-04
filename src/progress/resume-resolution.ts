@@ -6,6 +6,7 @@ import type {
 const selectionPriority: Record<Exclude<ProgressResolutionSource, "none">, number> = {
   queue: 3,
   persisted_playback: 2,
+  carplay_resume_snapshot: 2,
   persisted_query_cache: 1,
   fresh_server_fetch: 1,
 };

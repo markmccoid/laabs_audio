@@ -24,6 +24,7 @@ export type ProgressSyncOutcome = "synced_to_server" | "queued_offline" | "queue
 export type ProgressResolutionSource =
   | "fresh_server_fetch"
   | "persisted_query_cache"
+  | "carplay_resume_snapshot"
   | "queue"
   | "persisted_playback"
   | "none";

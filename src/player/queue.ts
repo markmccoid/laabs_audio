@@ -27,7 +27,10 @@ export const buildPlaybackQueue = (session: AudiobookSession) => {
       libraryItemId,
       sessionId: session.id,
       trackIndex: index,
-      title: track.title || title,
+      // Book title, not the per-file track title: this string becomes the
+      // Now Playing title on the lock screen and CarPlay, where a raw
+      // filename like "01.mp3" is meaningless.
+      title,
       author,
       artworkUri,
       durationMs: secondsToMs(track.duration),

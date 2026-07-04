@@ -9,6 +9,10 @@ import { playbackApi } from "../api/playback-api";
 import { sessionsApi } from "../api/sessions-api";
 import { buildCoverUrls } from "../api/cover-urls";
 import { authStore } from "../auth/auth-store";
+import {
+  getCarPlayResumeSnapshotForCandidateIds,
+  recordCarPlayResumeSnapshot,
+} from "../carplay/carplay-resume-snapshot";
 import { resolveListeningOwnerKey } from "../auth/listening-owner";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
@@ -49,6 +53,7 @@ import {
   StreamedPlaybackStartFailureError,
   withPlaybackStartTimeout,
 } from "./playback-start-attempt";
+import { NativeModules } from "react-native";
 import type { PlaybackStoreState } from "./playback-store";
 import { playbackStore } from "./playback-store";
 import { buildPlaybackQueue } from "./queue";
@@ -60,6 +65,14 @@ const PAUSE_SYNC_DEDUPE_WINDOW_MS = 2000;
 const DEBUG_PLAYBACK_EVENTS = false;
 const CHAPTER_RESTART_THRESHOLD_MS = 3000;
 const PLAYBACK_CONTROL_SETTLE_MS = 350;
+// A legitimate start holds the intent for at most the streamed-start timeout
+// (STREAMED_PLAYBACK_START_TIMEOUT_MS, 20s) plus settle; past ~22s the intent
+// is a leak and must not keep blocking controls (CarPlay taps would otherwise
+// dead-end until app restart, and the phone's transport controls would jam).
+// Kept just above the streamed timeout so a slow-but-valid start is not
+// preempted, and below the CarPlay selection retry window (~28s) so a leaked
+// intent self-heals before the retry loop gives up.
+const PLAYBACK_CONTROL_INTENT_STALE_MS = 22_000;
 const MIN_PLAYBACK_RATE = 0.25;
 const MAX_PLAYBACK_RATE = 4.0;
 const LOCAL_SESSION_ID = "local";
@@ -204,6 +217,21 @@ class PlayerService {
     return `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  // Book-switch breadcrumbs. console.log is the reliable device-log channel:
+  // RCTLog forwards it to os_log at Info level, which idevicesyslog relays
+  // even in Release builds — verified on hardware 2026-07-03. (NSLog-based
+  // mirrors do NOT relay through idevicesyslog on current iOS, so the native
+  // carPlayLog mirror is only a Console.app convenience, not the main path.)
+  // Fires once per load step — negligible cost.
+  private carPlayTrace(message: string) {
+    console.log("[CarPlay][trace]", message);
+    try {
+      NativeModules.AudioPro?.carPlayLog?.(`trace ${message}`);
+    } catch {
+      // Tracing must never break playback.
+    }
+  }
+
   private beginPlaybackControlIntent(payload: {
     kind: "start" | "play" | "pause";
     libraryItemId: string | null;
@@ -211,11 +239,26 @@ class PlayerService {
   }): PlaybackControlResult {
     const activeIntent = playbackStore.getState().playbackControlIntent;
     if (activeIntent) {
-      return {
-        status: "ignored",
-        reason: "intent_active",
-        activeIntentKind: activeIntent.kind,
-      };
+      const now = Date.now();
+      const ageMs = now - activeIntent.startedAt;
+      // Time-based clearing, checked at the next control request: the settle
+      // timer in finishPlaybackControlIntent never fires in a headless
+      // CarPlay launch (JS timers are frozen in background), so a finished
+      // intent must not depend on it to unblock the gate.
+      const settleExpired =
+        typeof activeIntent.finishedAt === "number" &&
+        now - activeIntent.finishedAt >= PLAYBACK_CONTROL_SETTLE_MS;
+      if (!settleExpired && ageMs < PLAYBACK_CONTROL_INTENT_STALE_MS) {
+        return {
+          status: "ignored",
+          reason: "intent_active",
+          activeIntentKind: activeIntent.kind,
+        };
+      }
+      this.carPlayTrace(
+        `intent:${settleExpired ? "settle-expired" : "stale"}-cleared kind=${activeIntent.kind} ageMs=${ageMs} item=${activeIntent.libraryItemId ?? "none"}`,
+      );
+      playbackStore.getState().actions.setPlaybackControlIntent(null);
     }
 
     if (this.playbackControlIntentClearTimeout) {
@@ -235,6 +278,17 @@ class PlayerService {
   }
 
   private finishPlaybackControlIntent(intentId: string) {
+    // Stamp finishedAt synchronously — gate checks treat an expired settle
+    // window as cleared even if the timer below never fires (JS timers are
+    // frozen in a headless/background CarPlay launch).
+    const activeIntent = playbackStore.getState().playbackControlIntent;
+    if (activeIntent?.id === intentId && typeof activeIntent.finishedAt !== "number") {
+      playbackStore.getState().actions.setPlaybackControlIntent({
+        ...activeIntent,
+        finishedAt: Date.now(),
+      });
+    }
+
     if (this.playbackControlIntentClearTimeout) {
       clearTimeout(this.playbackControlIntentClearTimeout);
       this.playbackControlIntentClearTimeout = null;
@@ -441,25 +495,17 @@ class PlayerService {
   ) {
     const suppressErrorState = options?.suppressErrorState ?? false;
     const existingState = playbackStore.getState();
-    if (
-      existingState.libraryItemId &&
-      existingState.libraryItemId !== libraryItemId &&
-      existingState.queue.length > 0
-    ) {
-      await this.closeActiveBookForTransition();
-    }
-
-    this.seedDisplayedResumePositionForLoad({
-      candidateIds: this.buildCandidateIds(libraryItemId),
-      cachedUserServerState: this.getCachedUserServerStateSnapshot().state,
-      libraryItemId,
-      durationMs: 0,
-    });
-
-    playbackStore.getState().actions.setPlaybackState("loading");
-    playbackStore.getState().actions.setError(null);
+    this.carPlayTrace(
+      `loadBook:start ${libraryItemId} (from=${existingState.libraryItemId ?? "none"})`,
+    );
     const preferDownloaded = internalOptions?.preferDownloaded ?? true;
     let attemptedDownloadedAudio = false;
+    // False until current playback has been torn down (or none existed). A
+    // failure BEFORE teardown must leave the currently playing book fully
+    // intact — resolving the new session first means a non-startable book
+    // (e.g. streamed with no server URL on a headless CarPlay launch) fails
+    // as a no-op instead of killing audio and leaving a zombie Now Playing.
+    let tornDownExistingPlayback = false;
 
     if (__DEV__) {
       console.log("[player-service] loadBook:start", { libraryItemId });
@@ -476,6 +522,34 @@ class PlayerService {
       let durationMs = 0;
       let chapterIndex: ReturnType<typeof buildChapterIndex> = [];
 
+      // Preflight (current playback untouched): fetch the streamed session
+      // BEFORE closing the active book so a failure keeps it playing.
+      const streamedSession = downloadedSession
+        ? null
+        : await withPlaybackStartTimeout(playbackApi.getPlayInfo(libraryItemId));
+
+      // Commit point — the new book is startable; NOW tear down the old one.
+      const stateBeforeTransition = playbackStore.getState();
+      if (
+        stateBeforeTransition.libraryItemId &&
+        stateBeforeTransition.libraryItemId !== libraryItemId &&
+        stateBeforeTransition.queue.length > 0
+      ) {
+        await this.closeActiveBookForTransition();
+        this.carPlayTrace(`loadBook:transition-closed ${stateBeforeTransition.libraryItemId}`);
+      }
+      tornDownExistingPlayback = true;
+
+      this.seedDisplayedResumePositionForLoad({
+        candidateIds: this.buildCandidateIds(libraryItemId),
+        cachedUserServerState: this.getCachedUserServerStateSnapshot().state,
+        libraryItemId,
+        durationMs: 0,
+      });
+
+      playbackStore.getState().actions.setPlaybackState("loading");
+      playbackStore.getState().actions.setError(null);
+
       if (downloadedSession) {
         resolvedLibraryItemId = downloadedSession.libraryItemId;
         resolvedBookTitle = downloadedSession.bookTitle;
@@ -484,20 +558,21 @@ class PlayerService {
         durationMs = downloadedSession.durationMs;
         chapterIndex = downloadedSession.chapterIndex;
         this.logQueue("downloaded", queue);
-      } else {
-        // Fallback to streamed playback when no valid local download metadata is available.
-        const session = await withPlaybackStartTimeout(playbackApi.getPlayInfo(libraryItemId));
-        resolvedLibraryItemId = session.libraryItem.id;
-        resolvedBookTitle = session.libraryItem.media.metadata.title || "Unknown";
-        resolvedSessionId = session.id;
-        const builtQueue = buildPlaybackQueue(session);
+      } else if (streamedSession) {
+        resolvedLibraryItemId = streamedSession.libraryItem.id;
+        resolvedBookTitle = streamedSession.libraryItem.media.metadata.title || "Unknown";
+        resolvedSessionId = streamedSession.id;
+        const builtQueue = buildPlaybackQueue(streamedSession);
         queue = builtQueue.queue;
         durationMs = builtQueue.durationMs;
-        chapterIndex = buildChapterIndex(session.chapters, session.audioTracks);
+        chapterIndex = buildChapterIndex(streamedSession.chapters, streamedSession.audioTracks);
         this.logQueue("streaming", queue);
       }
 
       const sessionKind = shouldUseDownloadedAudio ? "downloaded" : "streamed";
+      this.carPlayTrace(
+        `loadBook:session-resolved ${resolvedLibraryItemId} kind=${sessionKind} tracks=${queue.length}`,
+      );
       const rateCandidateIds = this.buildCandidateIds(resolvedLibraryItemId, libraryItemId);
       const cachedUserServerState = await this.getCachedUserServerState({
         fetchIfMissing: false,
@@ -594,12 +669,21 @@ class PlayerService {
 
       await this.loadTrack(targetIndex, { initialPositionMs: trackPositionMs });
       this.logSnapshot("after loadBook");
+      this.carPlayTrace(
+        `loadBook:track-loaded ${resolvedLibraryItemId} track=${targetIndex} rate=${storedBookRate}`,
+      );
 
       if (options?.autoPlay) {
         await this.performPlay();
+        this.carPlayTrace(
+          `loadBook:play-result ${resolvedLibraryItemId} state=${playbackStore.getState().playbackState}`,
+        );
         if (shouldUseDownloadedAudio) {
           const postPlayState = playbackStore.getState();
           if (postPlayState.playbackState !== "playing") {
+            this.carPlayTrace(
+              `loadBook:downloaded-play-stalled ${resolvedLibraryItemId} → retry streamed`,
+            );
             await this.loadBook(libraryItemId, options, { preferDownloaded: false });
             return;
           }
@@ -608,6 +692,17 @@ class PlayerService {
         playbackStore.getState().actions.setPlaybackState("ready");
       }
     } catch (error) {
+      this.carPlayTrace(
+        `loadBook:error ${libraryItemId} ${error instanceof Error ? error.message : String(error)}`,
+      );
+      if (!tornDownExistingPlayback) {
+        // Preflight failure: the previously playing book is still fully
+        // intact — do NOT reset playback state to error/idle over it. The
+        // caller surfaces the failure (CarPlay alert / phone toast).
+        this.carPlayTrace(`loadBook:preflight-failed-kept-playing ${libraryItemId}`);
+        if (suppressErrorState) return;
+        throw error;
+      }
       if (preferDownloaded && attemptedDownloadedAudio) {
         try {
           await this.loadBook(libraryItemId, options, { preferDownloaded: false });
@@ -1507,6 +1602,9 @@ class PlayerService {
       payload.candidateIds,
       payload.cachedUserServerState,
     );
+    const carPlayResumeSnapshot = getCarPlayResumeSnapshotForCandidateIds(
+      payload.candidateIds,
+    );
     const queuedProgress = this.getQueuedProgressForCandidateIds(payload.candidateIds);
     const persisted = playbackStore.getState();
     const persistedPositionMs = payload.candidateIds.some(
@@ -1521,6 +1619,10 @@ class PlayerService {
     const queuedCurrentTimeSeconds =
       typeof queuedProgress?.currentTime === "number"
         ? Math.max(0, Math.floor(queuedProgress.currentTime))
+        : null;
+    const carPlayCurrentTimeSeconds =
+      typeof carPlayResumeSnapshot?.currentTimeSeconds === "number"
+        ? Math.max(0, Math.floor(carPlayResumeSnapshot.currentTimeSeconds))
         : null;
     const persistedCurrentTimeSeconds =
       persistedPositionMs > 0 ? msToSeconds(persistedPositionMs) : null;
@@ -1545,6 +1647,24 @@ class PlayerService {
             ? Math.max(0, Math.floor(cachedUserProgress.lastUpdate))
             : null,
         note: "Seeded from cached user server state before fresh server progress returned",
+      },
+      {
+        source: "carplay_resume_snapshot",
+        available: carPlayCurrentTimeSeconds !== null,
+        currentTimeSeconds: carPlayCurrentTimeSeconds,
+        durationSeconds:
+          typeof carPlayResumeSnapshot?.durationSeconds === "number"
+            ? Math.max(0, Math.floor(carPlayResumeSnapshot.durationSeconds))
+            : null,
+        isFinished:
+          typeof carPlayResumeSnapshot?.isFinished === "boolean"
+            ? carPlayResumeSnapshot.isFinished
+            : null,
+        lastUpdate:
+          typeof carPlayResumeSnapshot?.updatedAt === "number"
+            ? Math.max(0, Math.floor(carPlayResumeSnapshot.updatedAt))
+            : null,
+        note: "Seeded from CarPlay's local per-book resume snapshot",
       },
       {
         source: "queue",
@@ -1590,6 +1710,7 @@ class PlayerService {
     const candidateIds = this.buildCandidateIds(libraryItemId);
     const cachedProgress = this.getCachedProgressForLibraryItem(libraryItemId);
     const queuedProgress = this.getQueuedProgressForCandidateIds(candidateIds);
+    const carPlayResumeSnapshot = getCarPlayResumeSnapshotForCandidateIds(candidateIds);
     const persisted = playbackStore.getState();
     const persistedPositionMs =
       persisted.libraryItemId === libraryItemId ? Math.max(0, persisted.positionMs) : 0;
@@ -1599,12 +1720,16 @@ class PlayerService {
     const queuedPositionMs = secondsToMs(
       Math.max(0, Math.floor(queuedProgress?.currentTime ?? 0)),
     );
+    const carPlayPositionMs = secondsToMs(
+      Math.max(0, Math.floor(carPlayResumeSnapshot?.currentTimeSeconds ?? 0)),
+    );
 
     return Math.max(
       0,
       requestedPositionMs,
       persistedPositionMs,
       cachedPositionMs,
+      carPlayPositionMs,
       queuedPositionMs,
     );
   }
@@ -1631,6 +1756,7 @@ class PlayerService {
       candidateIds,
       cachedUserServerState,
     );
+    const carPlayResumeSnapshot = getCarPlayResumeSnapshotForCandidateIds(candidateIds);
     const queuedProgress = this.getQueuedProgressForCandidateIds(candidateIds);
 
     const persisted = playbackStore.getState();
@@ -1653,6 +1779,10 @@ class PlayerService {
     const queuedCurrentTimeSeconds =
       typeof queuedProgress?.currentTime === "number"
         ? Math.max(0, Math.floor(queuedProgress.currentTime))
+        : null;
+    const carPlayCurrentTimeSeconds =
+      typeof carPlayResumeSnapshot?.currentTimeSeconds === "number"
+        ? Math.max(0, Math.floor(carPlayResumeSnapshot.currentTimeSeconds))
         : null;
     const persistedCurrentTimeSeconds =
       persistedPositionMs > 0 ? msToSeconds(persistedPositionMs) : null;
@@ -1703,6 +1833,26 @@ class PlayerService {
             : "No persisted React Query progress candidate was available",
       },
       {
+        source: "carplay_resume_snapshot",
+        available: carPlayCurrentTimeSeconds !== null,
+        currentTimeSeconds: carPlayCurrentTimeSeconds,
+        durationSeconds:
+          typeof carPlayResumeSnapshot?.durationSeconds === "number"
+            ? Math.max(0, Math.floor(carPlayResumeSnapshot.durationSeconds))
+            : null,
+        isFinished:
+          typeof carPlayResumeSnapshot?.isFinished === "boolean"
+            ? carPlayResumeSnapshot.isFinished
+            : null,
+        lastUpdate:
+          typeof carPlayResumeSnapshot?.updatedAt === "number"
+            ? Math.max(0, Math.floor(carPlayResumeSnapshot.updatedAt))
+            : null,
+        note: carPlayResumeSnapshot
+          ? "CarPlay local per-book resume snapshot"
+          : "No CarPlay resume snapshot was available",
+      },
+      {
         source: "queue",
         available: queuedCurrentTimeSeconds !== null,
         currentTimeSeconds: queuedCurrentTimeSeconds,
@@ -1745,6 +1895,8 @@ class PlayerService {
           : "Queued local progress was the only available resume point"
         : chosenSource === "persisted_playback"
           ? "Persisted playback-store position was ahead of the other resume candidates"
+          : chosenSource === "carplay_resume_snapshot"
+            ? "CarPlay local resume snapshot was the best available resume point"
           : chosenSource === "fresh_server_fetch"
             ? "Fresh server progress was the best available resume point"
             : chosenSource === "persisted_query_cache"
@@ -1904,7 +2056,10 @@ class PlayerService {
       libraryItemId: payload.libraryItemId,
       sessionId: LOCAL_SESSION_ID,
       trackIndex: payload.trackIndex,
-      title: payload.detailsTrack?.title || payload.track.filename || payload.fallbackTitle,
+      // Book title, not the per-file track title: this string becomes the
+      // Now Playing title on the lock screen and CarPlay, where a raw
+      // filename like "01.mp3" is meaningless.
+      title: payload.fallbackTitle,
       author: payload.author,
       artworkUri: payload.artworkUri,
       durationMs: secondsToMs(payload.track.normalizedDuration ?? payload.track.duration),
@@ -1937,15 +2092,20 @@ class PlayerService {
 
     try {
       await this.engine.play();
+      this.carPlayTrace("performPlay:waiting-for-playing");
 
       try {
         await this.engine.waitForPlaying({ timeoutMs: 15000 });
-      } catch {
+      } catch (waitError) {
+        this.carPlayTrace(
+          `performPlay:playing-wait-retry ${waitError instanceof Error ? waitError.message : String(waitError)}`,
+        );
         // Some devices can settle in PAUSED/STOPPED briefly after load.
         // Retry play once, then wait again before surfacing an error.
         await this.engine.play();
         await this.engine.waitForPlaying({ timeoutMs: 15000 });
       }
+      this.carPlayTrace("performPlay:playing-confirmed");
 
       this.logSnapshot("after play");
       if (options?.updatePlaybackStore !== false) {
@@ -2095,14 +2255,15 @@ class PlayerService {
       }
     }
 
-    this.seedDisplayedResumePositionForLoad({
-      candidateIds: this.buildCandidateIds(libraryItemId),
-      cachedUserServerState: this.getCachedUserServerStateSnapshot().state,
-      libraryItemId,
-      durationMs: 0,
-    });
-
     try {
+      // Inside the try: a throw here would otherwise leak the intent and
+      // block every subsequent playback control until it goes stale.
+      this.seedDisplayedResumePositionForLoad({
+        candidateIds: this.buildCandidateIds(libraryItemId),
+        cachedUserServerState: this.getCachedUserServerStateSnapshot().state,
+        libraryItemId,
+        durationMs: 0,
+      });
       await this.loadBook(libraryItemId, { autoPlay: true });
       return accepted;
     } finally {
@@ -2804,6 +2965,7 @@ class PlayerService {
         track.source.uri ?? track.source.sourceModule ?? "unknown"
       }`,
     );
+    this.carPlayTrace(`loadTrack:engine-load index=${index} local=${String(track.source.isLocal ?? false)}`);
 
     await this.engine.load(track, {
       initialPositionMs: options?.initialPositionMs ?? 0,
@@ -3181,6 +3343,13 @@ class PlayerService {
       isFinished,
       reason,
     });
+    recordCarPlayResumeSnapshot({
+      libraryItemId: state.libraryItemId,
+      currentTimeSeconds: promotedProgress.currentTimeSeconds,
+      durationSeconds: promotedProgress.durationSeconds,
+      isFinished: promotedProgress.isFinished,
+      updatedAt: Date.now(),
+    });
 
     if (promotedProgress.preventedRegression && __DEV__) {
       console.warn("[player-service] progress:prevented-transient-regression", {
@@ -3307,6 +3476,14 @@ class PlayerService {
     durationSeconds: number;
     isFinished: boolean;
   }) {
+    recordCarPlayResumeSnapshot({
+      libraryItemId: payload.libraryItemId,
+      currentTimeSeconds: payload.currentTimeSeconds,
+      durationSeconds: payload.durationSeconds,
+      isFinished: payload.isFinished,
+      updatedAt: Date.now(),
+    });
+
     const activeLibraryUserKey = authStore.getState().activeLibraryUserKey;
     if (!activeLibraryUserKey) {
       return;

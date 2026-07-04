@@ -57,6 +57,14 @@ class AudioPro: RCTEventEmitter {
 
 	private var currentPlaybackSpeed: Float = 1.0
 	private var currentTrack: NSDictionary?
+	private var lastPublishedCarPlayDefaultPlaybackRate: Float?
+	// Mirrors the rate presets JS pushes via carPlaySetRates. CarPlay's
+	// CPNowPlayingPlaybackRateButton only renders a real "N×" label when
+	// changePlaybackRateCommand is enabled with supported rates; the default
+	// list covers a cold CarPlay launch before the first JS push.
+	private var carPlaySupportedPlaybackRates: [NSNumber] = [
+		0.75, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0,
+	]
 
 	private var settingDebug: Bool = false
 	private var settingDebugIncludeProgress: Bool = false
@@ -208,7 +216,7 @@ class AudioPro: RCTEventEmitter {
 	private func sendCarPlayEvent(_ body: [String: Any]) {
 		// Deliberately not gated on hasListeners: CarPlay control events must
 		// never be dropped. Worst case RN logs a "no listeners" warning.
-		NSLog("[CarPlay] emit %@ (hasListeners=%d)", (body["type"] as? String) ?? "?", hasListeners ? 1 : 0)
+		carPlayDebugLog("[CarPlay] emit \((body["type"] as? String) ?? "?") (hasListeners=\(hasListeners ? 1 : 0))")
 		sendEvent(withName: CARPLAY_EVENT_NAME, body: body)
 	}
 
@@ -247,7 +255,26 @@ class AudioPro: RCTEventEmitter {
 
 	@objc(carPlaySetRates:)
 	func carPlaySetRates(_ rates: NSArray) {
-		CarPlayCoordinator.shared.setRates((rates as? [[String: Any]]) ?? [])
+		let parsed = (rates as? [[String: Any]]) ?? []
+		let values = parsed.compactMap { $0["value"] as? NSNumber }
+		if !values.isEmpty {
+			carPlaySupportedPlaybackRates = values
+			DispatchQueue.main.async {
+				let command = MPRemoteCommandCenter.shared().changePlaybackRateCommand
+				command.isEnabled = true
+				command.supportedPlaybackRates = values
+			}
+		}
+		CarPlayCoordinator.shared.setRates(parsed)
+	}
+
+	@objc(carPlayLog:)
+	func carPlayLog(_ message: NSString) {
+		// JS-side CarPlay breadcrumbs. console.log never reaches the device
+		// syslog in Release builds (RCTLog's release threshold is error), so
+		// the CarPlay service mirrors its logs through this method: one
+		// unified `[CarPlay]` stream in Console/idevicesyslog on hardware.
+		carPlayDebugLog("[CarPlay][JS] \(message)")
 	}
 
 	@objc(carPlayShowAlert:)
@@ -535,6 +562,10 @@ class AudioPro: RCTEventEmitter {
 		isInErrorState = false
 		// Reset last emitted state when playing a new track
 		lastEmittedState = ""
+		// New session: force the next now-playing write to (re)publish the
+		// CarPlay default playback rate so the rate label reflects this book,
+		// not a stale value carried over from the previous one.
+		lastPublishedCarPlayDefaultPlaybackRate = nil
 		currentTrack = track
 		settingDebug = getBool(options["debug"]) ?? false
 		settingDebugIncludeProgress = getBool(options["debugIncludesProgress"]) ?? false
@@ -986,7 +1017,20 @@ class AudioPro: RCTEventEmitter {
 
 		shouldBePlaying = false
 
-		NotificationCenter.default.removeObserver(self)
+		// Remove ONLY the main player's end-of-track observer. The previous
+		// blanket removeObserver(self) also tore down the CarPlay
+		// NotificationCenter observers registered in init — cleanup() runs on
+		// every book switch (clear() → resetInternal), so after the FIRST
+		// switch every CarPlay tap/rate pick posted to a dead observer and was
+		// silently dropped ("stuck on current book", hardware 2026-07-03). It
+		// also killed the ambient player's end-of-track observer.
+		if let currentItem = player?.currentItem {
+			NotificationCenter.default.removeObserver(
+				self,
+				name: .AVPlayerItemDidPlayToEndTime,
+				object: currentItem
+			)
+		}
 
 		// Explicitly remove audio session interruption observer
 		removeAudioSessionInterruptionObserver()
@@ -1376,12 +1420,17 @@ class AudioPro: RCTEventEmitter {
 
 	private func updateNowPlayingInfoOnMain(time: Double?, rate: Float, duration: Double?, track: NSDictionary?) {
 		var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [String: Any]()
+		let previousDefaultRate = lastPublishedCarPlayDefaultPlaybackRate
 
 		nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = rate
 		// The user-chosen speed, independent of the momentary rate (which is 0
 		// while paused). CarPlay's CPNowPlayingPlaybackRateButton renders THIS
 		// key as its label — without it the button reads "0x" forever.
 		nowPlayingInfo[MPNowPlayingInfoPropertyDefaultPlaybackRate] = currentPlaybackSpeed
+		if previousDefaultRate == nil || abs((previousDefaultRate ?? 0) - currentPlaybackSpeed) > 0.0001 {
+			lastPublishedCarPlayDefaultPlaybackRate = currentPlaybackSpeed
+			carPlayDebugLog(String(format: "[CarPlay] nowPlaying rates playback=%.2f default=%.2f", rate, currentPlaybackSpeed))
+		}
 
 		applyNowPlayingSeekMetadata(&nowPlayingInfo, time: time, duration: duration)
 
@@ -1520,6 +1569,12 @@ class AudioPro: RCTEventEmitter {
 		commandCenter.pauseCommand.isEnabled = true
 		commandCenter.togglePlayPauseCommand.isEnabled = true
 		commandCenter.changePlaybackPositionCommand.isEnabled = !settingDisableLockScreenSeek
+
+		// CarPlay's CPNowPlayingPlaybackRateButton derives its "N×" label from
+		// this command's state; with it disabled the label renders "0×" even
+		// when MPNowPlayingInfoPropertyDefaultPlaybackRate is correct.
+		commandCenter.changePlaybackRateCommand.isEnabled = true
+		commandCenter.changePlaybackRateCommand.supportedPlaybackRates = carPlaySupportedPlaybackRates
 	}
 
 	private func remoteCommandIntervalSeconds(_ intervalMs: Double) -> NSNumber {
@@ -1607,6 +1662,22 @@ class AudioPro: RCTEventEmitter {
 			return .success
 		}
 
+		// System-initiated rate changes (Siri, CarPlay rate cycling). Route
+		// through the same notification pipeline as the CarPlay rate picker so
+		// JS applies the rate and persists the per-book preference.
+		commandCenter.changePlaybackRateCommand.addTarget { event in
+			guard let rateEvent = event as? MPChangePlaybackRateCommandEvent else {
+				return .commandFailed
+			}
+			carPlayDebugLog(String(format: "[CarPlay] changePlaybackRateCommand fired rate=%.2f", rateEvent.playbackRate))
+			NotificationCenter.default.post(
+				name: CarPlayNotification.rateSelected,
+				object: nil,
+				userInfo: [CarPlayNotification.itemIdKey: Double(rateEvent.playbackRate)]
+			)
+			return .success
+		}
+
 		commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
 			guard let self = self, let positionEvent = event as? MPChangePlaybackPositionCommandEvent else {
 				return .commandFailed
@@ -1636,6 +1707,7 @@ class AudioPro: RCTEventEmitter {
 		commandCenter.nextTrackCommand.removeTarget(nil)
 		commandCenter.previousTrackCommand.removeTarget(nil)
 		commandCenter.changePlaybackPositionCommand.removeTarget(nil)
+		commandCenter.changePlaybackRateCommand.removeTarget(nil)
 		commandCenter.skipForwardCommand.removeTarget(nil)
 		commandCenter.skipBackwardCommand.removeTarget(nil)
 	}

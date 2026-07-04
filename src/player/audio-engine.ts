@@ -197,6 +197,11 @@ export const createAudioEngine = (): AudioEngine => {
   type StateWaiter = {
     label: string;
     timeoutId: ReturnType<typeof setTimeout>;
+    // Timers do not fire in a headless/background CarPlay launch, so the
+    // timeout is ALSO enforced on every incoming event (settleStateWaiters).
+    // Audio events tick at ~1s while anything plays, so an expired waiter is
+    // rejected at the next event instead of hanging forever.
+    deadlineAtMs: number;
     predicate: (event?: AudioProEvent) => boolean;
     resolve: () => void;
     reject: (error: Error) => void;
@@ -263,11 +268,19 @@ export const createAudioEngine = (): AudioEngine => {
   });
 
   const settleStateWaiters = (event?: AudioProEvent) => {
+    const now = Date.now();
     const pending: StateWaiter[] = [];
     for (const waiter of stateWaiters) {
       if (waiter.predicate(event)) {
         clearTimeout(waiter.timeoutId);
         waiter.resolve();
+      } else if (now >= waiter.deadlineAtMs) {
+        // Event-driven timeout enforcement — the setTimeout backing this
+        // waiter never fires while the app is backgrounded/headless.
+        clearTimeout(waiter.timeoutId);
+        waiter.reject(
+          new Error(`Timed out waiting for ${waiter.label} (state=${AudioPro.getState()})`),
+        );
       } else {
         pending.push(waiter);
       }
@@ -304,6 +317,7 @@ export const createAudioEngine = (): AudioEngine => {
       stateWaiters.push({
         label,
         timeoutId,
+        deadlineAtMs: Date.now() + timeoutMs,
         predicate,
         resolve,
         reject,
@@ -398,6 +412,16 @@ export const createAudioEngine = (): AudioEngine => {
       const headers = track.source.headers ? { audio: track.source.headers } : undefined;
       currentHeaders = headers;
 
+      // Set the rate BEFORE play() so the new session is established at the
+      // correct speed atomically. AudioPro.play() reads its playbackSpeed from
+      // the module's internal store, which otherwise still holds the PREVIOUS
+      // book's rate — the session (and the CarPlay Now Playing rate label it
+      // seeds from MPNowPlayingInfoPropertyDefaultPlaybackRate) would briefly
+      // show the wrong rate on a book switch, and CarPlay can cache that label.
+      if (typeof options?.rate === "number") {
+        AudioPro.setPlaybackSpeed(options.rate);
+      }
+
       // We explicitly start paused; playerService decides when to play.
       AudioPro.play(audioTrack, {
         autoPlay: false,
@@ -407,6 +431,9 @@ export const createAudioEngine = (): AudioEngine => {
       // AudioPro can still start playback even with autoPlay: false; force paused state.
       // AudioPro.pause();
 
+      // Re-assert after play(): native play() resets currentPlaybackSpeed from
+      // the options snapshot, so a final set pins the intended rate once the
+      // new player exists.
       if (typeof options?.rate === "number") {
         AudioPro.setPlaybackSpeed(options.rate);
       }

@@ -372,3 +372,165 @@ user-chosen speed, independent of play/pause state). All rate changes funnel thr
 **Upgrade check.** Keep the constructor block in `AudioPro.mm` verbatim (no upstream
 counterpart). On sync, re-add the `MPNowPlayingInfoPropertyDefaultPlaybackRate` line in
 `updateNowPlayingInfoOnMain` (upstream only writes `MPNowPlayingInfoPropertyPlaybackRate`).
+
+---
+
+## Change 9 — CarPlay hardware follow-up: cold-start resume, stream prompt, rate diagnostics
+
+**Files:** `ios/AudioPro.swift`, `ios/CarPlaySceneDelegate.swift`
+**Date:** 2026-07-03
+
+**Context.** First hardware verification after the committed CarPlay branch showed:
+cold-start CarPlay lists and downloaded-book playback work, the phone-open crash is fixed, and
+the CarPlay rate picker changes actual audio speed. Remaining issues: streamed books selected
+from a headless cold launch fail with a generic connection prompt; downloaded books selected
+from cold launch can start at 0 instead of the saved position; and the system rate button still
+shows `0×` on hardware even though speed changes apply.
+
+**App-side companions (not part of this native module):**
+- `src/carplay/carplay-resume-snapshot.ts` — MMKV snapshot
+  `carplay-resume-snapshot-v1`, keyed by `libraryItemId`, storing
+  `{ currentTimeSeconds, durationSeconds, isFinished, updatedAt }`. It is written from the
+  CarPlay shelf publisher's home progress payload, from playback progress while CarPlay is
+  initialized (throttled to ~10 s), and from `player-service` whenever progress is promoted or
+  synced.
+- `src/player/player-service.ts` — resume resolution now includes a
+  `carplay_resume_snapshot` candidate, so a downloaded book selected from a headless CarPlay
+  launch can resume from the last locally known per-book position before React Query/auth/server
+  state hydrates. Queue progress still wins priority ties.
+- `src/carplay/carplay-service.ts` — CarPlay start failures distinguish downloaded vs.
+  non-downloaded books. Non-downloaded failures now show
+  `"Open LAABS on your phone to stream this book"` instead of a generic connection message.
+
+**Native follow-up.**
+- `CarPlayCoordinator.setRates` logs the current rate option pushed from JS.
+- `AudioPro.updateNowPlayingInfoOnMain` logs the momentary/default now-playing rate values
+  whenever the default playback rate changes. These are the next diagnostic breadcrumb if
+  CarPlay continues to render stale `0×` text despite correct `MPNowPlayingInfoCenter`
+  metadata.
+
+**Backed-out attempt.** A brief attempt reinstalled `CPNowPlayingPlaybackRateButton` whenever
+default rate metadata changed, hoping to bust a CarPlay label cache. Hardware testing showed
+that this regressed the previously-working picker: rate changes stopped applying and saved
+per-book rates were not reflected. That reinstall was removed; do not reintroduce it without a
+separate minimal repro. See `docs/carplay-debugging-log.md`.
+
+**Verify on hardware.**
+1. Kill LAABS, launch from CarPlay, choose a downloaded book with saved progress: playback
+   should start near the saved position, not at 0.
+2. Kill LAABS, launch from CarPlay, choose a non-downloaded/streamed book before opening the
+   phone app: alert should say `Open LAABS on your phone to stream this book`.
+3. Open the phone app, choose the same streamed book from CarPlay: streaming should work as
+   before.
+4. Change speed from CarPlay and capture device logs for
+   `[CarPlay] nowPlaying rates playback=... default=...` and
+   `[CarPlay] setRates current=...`; if the button still shows `0×` while logs show the correct
+   default rate, treat it as a system button rendering/cache issue and consider a custom Now
+   Playing button.
+
+**Upgrade check.** Re-apply the passive rate metadata logging around
+`updateNowPlayingInfoOnMain` and keep the app-side CarPlay resume snapshot if the player
+service is refactored. Do **not** re-add rate-button reinstall-on-rate-change; it regressed the
+picker on hardware. No upstream counterpart exists.
+
+---
+
+## Change 10 — Enable changePlaybackRateCommand for the CarPlay rate label
+
+**Files:** `ios/AudioPro.swift`
+**Date:** 2026-07-03
+
+**Context.** After Attempt A's revert (see `docs/carplay-debugging-log.md`), the CarPlay
+Now Playing rate button still rendered `0×` on hardware even though
+`MPNowPlayingInfoPropertyDefaultPlaybackRate` was published correctly.
+`CPNowPlayingPlaybackRateButton` derives its "N×" label from
+`MPRemoteCommandCenter.changePlaybackRateCommand`, which this module never enabled.
+
+**What changed.**
+- New ivar `carPlaySupportedPlaybackRates` (defaults mirror the JS rate presets in
+  `src/carplay/carplay-service.ts`).
+- `applyRemoteTransportControlSettings` enables `changePlaybackRateCommand` and sets
+  `supportedPlaybackRates` on every (re)configure.
+- `carPlaySetRates` also refreshes the command's `supportedPlaybackRates` from the values JS
+  pushes, so a custom slider rate becomes a supported rate.
+- `setupRemoteTransportControls` registers a `changePlaybackRateCommand` target that posts the
+  existing `CarPlayNotification.rateSelected` notification, so a system-initiated rate change
+  (Siri, CarPlay rate cycling) flows through the same JS path as a rate-picker tap
+  (`playerService.setRate` → per-book persistence → `carPlaySetRates` push-back).
+- `removeRemoteTransportControls` removes the new target.
+
+**Deliberately not changed.** The `CPNowPlayingPlaybackRateButton` installation in
+`CarPlaySceneDelegate.swift` is untouched — reinstalling it on rate changes regressed the
+picker on hardware (Attempt A).
+
+**Verify on hardware.** Start a book from CarPlay, open Now Playing: the rate button should
+show the actual rate (e.g. `1×`/`1.5×`), and tapping it should still open the custom Speed
+picker. Change speed; the label should update after the pick.
+
+**Follow-up (same area).** For book switches the rate must be seeded on the new session, not
+patched afterward: `play()` resets `lastPublishedCarPlayDefaultPlaybackRate = nil` so the new
+book's default rate is re-published, and the app-side `audio-engine.ts` now calls
+`setPlaybackSpeed(rate)` **before** `AudioPro.play()` (as well as after) so `play()` reads the
+correct rate from the module's internal store instead of the previous book's. Without the
+before-call, CarPlay seeds its rate-button label from the stale rate at session establishment
+and caches it.
+
+**Upgrade check.** On upstream sync, re-add: the `carPlaySupportedPlaybackRates` ivar, the
+`changePlaybackRateCommand` enablement in `applyRemoteTransportControlSettings`, the
+`supportedPlaybackRates` refresh in `carPlaySetRates`, the command target (with its
+`[CarPlay] changePlaybackRateCommand fired` log) in `setupRemoteTransportControls`, its removal
+in `removeRemoteTransportControls`, and the `lastPublishedCarPlayDefaultPlaybackRate = nil`
+reset at the top of `play()`. Keep the before-`play()` `setPlaybackSpeed` in `audio-engine.ts`.
+No upstream counterpart exists.
+
+---
+
+## Change 11 — carPlayLog bridge: JS log mirroring into the device syslog
+
+**Files:** `ios/AudioPro.swift`, `ios/AudioPro.mm`
+**Date:** 2026-07-03
+
+**Context.** Release builds drop JS `console.log` (RCTLog's release threshold is error), so
+hardware CarPlay sessions were untraceable on the JS side. Diagnosing the book-switch bug
+requires seeing the JS decision points in the same stream as the native `[CarPlay]` NSLogs.
+
+**What changed.** New fire-and-forget bridge method:
+
+```swift
+@objc(carPlayLog:)
+func carPlayLog(_ message: NSString) {
+    NSLog("[CarPlay][JS] %@", message)
+}
+```
+
+plus its `RCT_EXTERN_METHOD` declaration. App-side callers: `src/carplay/carplay-service.ts`
+mirrors every `[CarPlay]` log line, and `src/player/player-service.ts` emits
+`trace loadBook:* / intent:*` breadcrumbs through it. Captured with
+`scripts/carplay-log-capture.sh` (idevicesyslog). See the workflow section in
+`docs/carplay-debugging-log.md`.
+
+**Upgrade check.** Re-add both the Swift method and the `RCT_EXTERN_METHOD` line on upstream
+sync. No upstream counterpart exists.
+
+---
+
+## Change 12 — cleanup() must not blanket-remove NotificationCenter observers
+
+**File:** `ios/AudioPro.swift`
+**Date:** 2026-07-03
+
+**Problem.** `cleanup()` (runs on every `clear()`, i.e. every book switch and unload) called
+`NotificationCenter.default.removeObserver(self)` — the blanket form removes ALL observers for
+the instance, including the five CarPlay observers registered in `init`
+(connected/disconnected/itemSelected/chapterSelected/rateSelected) and the ambient player's
+end-of-track observer. Result on hardware: the first book switch silently killed every
+subsequent CarPlay tap and rate pick ("stuck on current book"). Confirmed by capture: native
+`[CarPlay] book selected:` logged with no `emit ITEM_SELECTED` following.
+
+**Fix.** `cleanup()` now removes only the main player's `AVPlayerItemDidPlayToEndTime`
+observer, scoped to `player?.currentItem`. The interruption observer keeps its explicit
+targeted removal. CarPlay observers remain init→deinit.
+
+**Upgrade check.** Upstream still has the blanket `removeObserver(self)` in `cleanup()` —
+re-apply the targeted removal on every sync. Any future blanket `removeObserver(self)` anywhere
+in this class is a CarPlay-killer; grep for it after syncing.

@@ -1,6 +1,22 @@
 import CarPlay
 import Foundation
 import UIKit
+import os.log
+
+////////////////////////////////////////////////////////////
+// MARK: - CarPlay debug logging
+//
+// os_log, NOT NSLog: NSLog output does not relay through the device syslog
+// service (idevicesyslog / Console streaming) on current iOS, which made
+// hardware captures look like the native code wasn't running at all
+// (2026-07-03). os_log at .default (Notice) level relays reliably.
+////////////////////////////////////////////////////////////
+
+let carPlayDebugOSLog = OSLog(subsystem: "laabs.carplay", category: "CarPlayDBG")
+
+func carPlayDebugLog(_ message: String) {
+	os_log("%{public}@", log: carPlayDebugOSLog, type: .default, message)
+}
 
 ////////////////////////////////////////////////////////////
 // MARK: - Notification bridge
@@ -186,7 +202,7 @@ final class CarPlayCoordinator: NSObject {
 	////////////////////////////////////////////////////////////
 
 	func connect(_ controller: CPInterfaceController) {
-		NSLog("[CarPlay] scene connected (hasShelves=%d)", shelves.isEmpty ? 0 : 1)
+		carPlayDebugLog("[CarPlay] scene connected (hasShelves=\(shelves.isEmpty ? 0 : 1))")
 		interfaceController = controller
 		isConnected = true
 
@@ -211,7 +227,7 @@ final class CarPlayCoordinator: NSObject {
 		// actionable one so a stuck screen is diagnosable at a glance.
 		DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
 			guard let self = self, self.isConnected, !self.hasReceivedShelves else { return }
-			NSLog("[CarPlay] no shelf data from JS 20s after connect — app JS likely not running")
+			carPlayDebugLog("[CarPlay] no shelf data from JS 20s after connect — app JS likely not running")
 			self.rootTemplate.emptyViewTitleVariants = ["LAABS couldn't load"]
 			self.rootTemplate.emptyViewSubtitleVariants = [
 				"Open the LAABS app on your phone, then try again"
@@ -222,7 +238,7 @@ final class CarPlayCoordinator: NSObject {
 	}
 
 	func disconnect() {
-		NSLog("[CarPlay] scene disconnected")
+		carPlayDebugLog("[CarPlay] scene disconnected")
 		CPNowPlayingTemplate.shared.remove(self)
 		interfaceController = nil
 		isConnected = false
@@ -241,7 +257,7 @@ final class CarPlayCoordinator: NSObject {
 		DispatchQueue.main.async {
 			self.hasReceivedShelves = true
 			self.shelves = rawShelves.compactMap { CarPlayShelf($0) }
-			NSLog("[CarPlay] setShelves: %d shelves", self.shelves.count)
+			carPlayDebugLog("[CarPlay] setShelves: \(self.shelves.count) shelves")
 			self.prefetchArtwork()
 			self.refreshTemplates()
 		}
@@ -260,6 +276,9 @@ final class CarPlayCoordinator: NSObject {
 	func setRates(_ rawRates: [[String: Any]]) {
 		DispatchQueue.main.async {
 			self.rateOptions = rawRates.compactMap { CarPlayRateOption($0) }
+			if let current = self.rateOptions.first(where: { $0.isCurrent }) {
+				carPlayDebugLog(String(format: "[CarPlay] setRates current=%@ value=%.2f", current.label, current.value))
+			}
 			if let template = self.rateTemplate {
 				template.updateSections(self.buildRateSections())
 			}
@@ -410,7 +429,7 @@ final class CarPlayCoordinator: NSObject {
 	////////////////////////////////////////////////////////////
 
 	private func selectBook(_ bookId: String) {
-		NSLog("[CarPlay] book selected: %@", bookId)
+		carPlayDebugLog("[CarPlay] book selected: \(bookId)")
 		NotificationCenter.default.post(
 			name: CarPlayNotification.itemSelected,
 			object: nil,

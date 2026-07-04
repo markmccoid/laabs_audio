@@ -10,6 +10,11 @@ export type PlaybackControlIntent = {
   libraryItemId: string | null;
   requestedAudibleState: "playing" | "paused";
   startedAt: number;
+  // Set when the owning request finished and the intent entered its settle
+  // window. Cleared-by-timer is unreliable: JS setTimeout does not fire in a
+  // headless/background CarPlay launch, so gate checks must treat an intent
+  // with an expired settle window as cleared (time-based, not timer-based).
+  finishedAt?: number;
 };
 
 export type PlaybackStoreState = {

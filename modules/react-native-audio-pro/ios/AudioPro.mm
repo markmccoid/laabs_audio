@@ -67,6 +67,7 @@ RCT_EXTERN_METHOD(ambientSeekTo:(double)positionMs)
 RCT_EXTERN_METHOD(carPlaySetShelves:(NSArray *)shelves)
 RCT_EXTERN_METHOD(carPlaySetChapters:(NSArray *)chapters)
 RCT_EXTERN_METHOD(carPlaySetRates:(NSArray *)rates)
+RCT_EXTERN_METHOD(carPlayLog:(NSString *)message)
 RCT_EXTERN_METHOD(carPlayShowAlert:(NSString *)message)
 RCT_EXTERN_METHOD(carPlayGetStatus:(RCTPromiseResolveBlock)resolve
                   withRejecter:(RCTPromiseRejectBlock)reject)
