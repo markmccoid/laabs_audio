@@ -15,6 +15,13 @@ import {
 	recordCarPlayProgressSnapshotMap,
 	recordCarPlayResumeSnapshot,
 } from "./carplay-resume-snapshot";
+import {
+	buildCarPlayShelves,
+	formatCarPlayTimeLabel,
+	normalizeCarPlayCoverUrl,
+	overlayCarPlayShelfProgress,
+	type CarPlayShelfPayload,
+} from "./carplay-shelf-labels";
 
 /**
  * CarPlay bridge — see docs/carplay-integration-plan.md.
@@ -35,22 +42,6 @@ import {
  * the CarPlay surface stays isolated from the audio API.
  */
 
-type CarPlayBookPayload = {
-	id: string;
-	title: string;
-	detail?: string;
-	/** Time read/left line rendered under the cover in shelf image rows (iOS 26). */
-	subtitle?: string;
-	coverUrl?: string;
-	isPlaying?: boolean;
-};
-
-type CarPlayShelfPayload = {
-	id: string;
-	title: string;
-	books: CarPlayBookPayload[];
-};
-
 type CarPlayEvent = {
 	type: "CONNECTED" | "DISCONNECTED" | "ITEM_SELECTED" | "CHAPTER_SELECTED" | "RATE_SELECTED";
 	itemId?: string;
@@ -66,7 +57,7 @@ const SNAPSHOT_KEY = "carplay-shelves-snapshot-v1";
 // Logged at init so a device capture proves WHICH build is running — a stale
 // install burned a whole hardware test session on 2026-07-03. Bump on every
 // CarPlay-affecting change.
-const CARPLAY_SERVICE_BUILD = "attempt-h-20260704";
+const CARPLAY_SERVICE_BUILD = "attempt-i-20260705";
 
 let initialized = false;
 let isConnected = false;
@@ -102,91 +93,7 @@ const log = (...args: unknown[]) => {
 // Payload building
 ////////////////////////////////////////////////////////////
 
-// Same "Xh YYm" format as the phone's shelf cards (shelf-book-card.tsx).
-const formatDurationBadge = (durationSeconds: number): string => {
-	const seconds = Math.max(0, Math.floor(durationSeconds));
-	const hours = Math.floor(seconds / 3600);
-	const minutes = Math.floor((seconds % 3600) / 60);
-	if (hours > 0) return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
-	return `${minutes}m`;
-};
-
-/**
- * Time line for a book, honoring the phone's progress-time setting
- * (Settings > Playback): "elapsed" → time read ("10h 26m"), "remaining" →
- * time left ("10h 26m left"). Mirrors shelf-book-card.tsx: no label until the
- * book has progress; finished books show the full duration when elapsed.
- */
-const formatTimeLabelParts = (
-	currentTimeSeconds: number,
-	rawDurationSeconds: number,
-	isFinished: boolean,
-): string | null => {
-	const durationSeconds = Math.max(0, Math.floor(rawDurationSeconds || 0));
-	const rawProgressSeconds = Math.max(0, Math.floor(currentTimeSeconds));
-	const progressSeconds =
-		durationSeconds > 0 ? Math.min(rawProgressSeconds, durationSeconds) : rawProgressSeconds;
-	if (progressSeconds <= 0 && !isFinished) return null;
-
-	const display = settingsStore.getState().defaultBookProgressTimeDisplay;
-	if (display === "elapsed" || durationSeconds <= 0) {
-		return formatDurationBadge(isFinished ? durationSeconds : progressSeconds);
-	}
-	return `${formatDurationBadge(Math.max(durationSeconds - progressSeconds, 0))} left`;
-};
-
-const formatBookTimeLabel = (
-	progress: UserBookProgress | undefined,
-	fallbackDurationSeconds: number,
-): string | null =>
-	formatTimeLabelParts(
-		progress?.currentTime ?? 0,
-		progress?.duration || fallbackDurationSeconds || 0,
-		Boolean(progress?.isFinished),
-	);
-
-const normalizeCoverUrl = (cover: string | null | undefined): string | undefined => {
-	if (!cover) return undefined;
-	if (cover.startsWith("http://") || cover.startsWith("https://") || cover.startsWith("file://")) {
-		return cover;
-	}
-	if (cover.startsWith("/")) return `file://${cover}`;
-	return undefined;
-};
-
-/**
- * Convert the home hook's visible shelves into the compact native payload:
- * drop Discover (a browsing shelf, not a driving one), drop empty shelves,
- * pin Continue Listening first, keep phone ordering otherwise.
- */
-export const buildCarPlayShelves = (
-	visibleShelves: HomeShelf[],
-	progressByBookId: Record<string, UserBookProgress>,
-): CarPlayShelfPayload[] => {
-	const eligible = visibleShelves.filter(
-		(shelf) => shelf.id !== "discover" && shelf.books.length > 0,
-	);
-	const pinned = [
-		...eligible.filter((shelf) => shelf.id === "continueListening"),
-		...eligible.filter((shelf) => shelf.id !== "continueListening"),
-	];
-	return pinned.map((shelf) => ({
-		id: shelf.id,
-		title: shelf.title,
-		books: shelf.books.map((book) => {
-			const progress = progressByBookId[book.id];
-			const timeLabel = formatBookTimeLabel(progress, book.duration);
-			const detail = [book.author, timeLabel].filter(Boolean).join(" · ");
-			return {
-				id: book.id,
-				title: book.title,
-				detail: detail || undefined,
-				subtitle: timeLabel ?? undefined,
-				coverUrl: normalizeCoverUrl(book.cover),
-			};
-		}),
-	}));
-};
+const getProgressTimeDisplay = () => settingsStore.getState().defaultBookProgressTimeDisplay;
 
 ////////////////////////////////////////////////////////////
 // Native pushes
@@ -262,6 +169,27 @@ let lastPublishInputs: {
 	progressByBookId: Record<string, UserBookProgress>;
 } | null = null;
 
+const persistShelvesSnapshot = () => {
+	void Promise.resolve(mmkvStorage.setItem(SNAPSHOT_KEY, JSON.stringify(shelves))).catch(
+		() => {},
+	);
+};
+
+const refreshShelfProgressLabels = (
+	resumeRecords: ReturnType<typeof getCarPlayResumeSnapshotMap>,
+) => {
+	if (shelves.length === 0) return false;
+	const nextShelves = overlayCarPlayShelfProgress(
+		shelves,
+		resumeRecords,
+		getProgressTimeDisplay(),
+	);
+	if (nextShelves === shelves) return false;
+	shelves = nextShelves;
+	persistShelvesSnapshot();
+	return true;
+};
+
 export const publishCarPlayShelves = (
 	visibleShelves: HomeShelf[],
 	progressByBookId: Record<string, UserBookProgress>,
@@ -269,10 +197,13 @@ export const publishCarPlayShelves = (
 	if (Platform.OS !== "ios") return;
 	lastPublishInputs = { visibleShelves, progressByBookId };
 	recordCarPlayProgressSnapshotMap(progressByBookId);
-	shelves = buildCarPlayShelves(visibleShelves, progressByBookId);
-	void Promise.resolve(mmkvStorage.setItem(SNAPSHOT_KEY, JSON.stringify(shelves))).catch(
-		() => {},
+	shelves = buildCarPlayShelves(
+		visibleShelves,
+		progressByBookId,
+		getProgressTimeDisplay(),
 	);
+	refreshShelfProgressLabels(getCarPlayResumeSnapshotMap());
+	persistShelvesSnapshot();
 	pushShelvesToNative();
 };
 
@@ -289,18 +220,20 @@ const buildDownloadedFallbackShelf = (): CarPlayShelfPayload[] => {
 			const summary = toDownloadedBookSummary(details);
 			const record = resumeRecords[summary.id];
 			const timeLabel = record
-				? formatTimeLabelParts(
+				? formatCarPlayTimeLabel(
 						record.currentTimeSeconds,
 						record.durationSeconds,
 						record.isFinished,
+						getProgressTimeDisplay(),
 					)
 				: null;
 			return {
 				id: summary.id,
 				title: summary.title ?? "Untitled",
+				author: summary.author,
 				detail: [summary.author, timeLabel].filter(Boolean).join(" · ") || undefined,
 				subtitle: timeLabel ?? undefined,
-				coverUrl: normalizeCoverUrl(summary.cover),
+				coverUrl: normalizeCarPlayCoverUrl(summary.cover),
 			};
 		})
 		.sort((a, b) => a.title.localeCompare(b.title));
@@ -324,6 +257,7 @@ const loadSnapshot = async () => {
 		shelves = buildDownloadedFallbackShelf();
 		if (shelves.length > 0) log("using downloaded-books fallback shelf");
 	}
+	refreshShelfProgressLabels(getCarPlayResumeSnapshotMap());
 };
 
 // Pushes triggered by connect events await this so an early, still-empty
@@ -507,14 +441,18 @@ export const initCarPlayService = () => {
 				now - lastResumeSnapshotWriteAt >= RESUME_SNAPSHOT_WRITE_INTERVAL_MS)
 		) {
 			lastResumeSnapshotWriteAt = now;
-			recordCarPlayResumeSnapshot({
+			const resumeRecord = {
 				libraryItemId: state.libraryItemId,
 				currentTimeSeconds: Math.floor(state.positionMs / 1000),
 				durationSeconds: Math.floor(state.durationMs / 1000),
 				isFinished:
 					state.durationMs > 0 && state.positionMs >= state.durationMs - 3000,
 				updatedAt: Date.now(),
-			});
+			};
+			recordCarPlayResumeSnapshot(resumeRecord);
+			if (refreshShelfProgressLabels({ [state.libraryItemId]: resumeRecord }) && isConnected) {
+				pushShelvesToNative();
+			}
 		}
 		if (
 			state.libraryItemId !== prevState.libraryItemId ||
@@ -538,6 +476,8 @@ export const initCarPlayService = () => {
 					lastPublishInputs.visibleShelves,
 					lastPublishInputs.progressByBookId,
 				);
+			} else if (refreshShelfProgressLabels(getCarPlayResumeSnapshotMap())) {
+				pushShelvesToNative();
 			}
 		}
 		if (

@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-05` `pending` - Refresh CarPlay shelf time-left labels during headless playback.
+  Tester focus: start LAABS only from CarPlay, play a book for at least 10 seconds, return to the CarPlay root shelf, and verify the visible time-left label updates without opening the phone app; verify old CarPlay shelf snapshots still render.
 - `2026-07-05` `pending` - Initialize player progress handling during headless CarPlay launches.
   Tester focus: start LAABS only from CarPlay, play a book, switch to another book, then return to the first book and verify it resumes near the CarPlay-listened position; also verify normal phone playback, pause, and book switching still update progress once.
 - `2026-07-05` `pending` - Add configurable playback rate limits for player, mini-player, and CarPlay controls.
