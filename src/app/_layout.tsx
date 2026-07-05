@@ -497,7 +497,6 @@ export default function RootLayout() {
 
   useEffect(() => {
     playerService.init();
-    return () => playerService.destroy();
   }, []);
 
   // Startup Active Playback Restore: once startup has settled (auth resolved, query cache

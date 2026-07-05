@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-05` `pending` - Initialize player progress handling during headless CarPlay launches.
+  Tester focus: start LAABS only from CarPlay, play a book, switch to another book, then return to the first book and verify it resumes near the CarPlay-listened position; also verify normal phone playback, pause, and book switching still update progress once.
 - `2026-07-05` `pending` - Add configurable playback rate limits for player, mini-player, and CarPlay controls.
   Tester focus: verify Playback settings can set minimum and maximum speed, player speed controls only show allowed speeds, saved audiobook speeds outside the range clamp to the nearest boundary, CarPlay rate choices respect the same limits, and the build reports version 1.6.1.
 - `2026-07-01` `pending` - Fix deleting an active downloaded audiobook by pausing, syncing, unloading local playback, and restarting on stream.
