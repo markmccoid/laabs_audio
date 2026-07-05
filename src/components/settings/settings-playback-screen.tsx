@@ -2,6 +2,7 @@ import {
   type BookProgressTimeDisplay,
   DEFAULT_REMOTE_COMMAND_MODE,
   MAX_SKIP_SECONDS,
+  PLAYBACK_RATE_RANGE_OPTIONS,
   type RemoteCommandMode,
   useSettingsActions,
   useSettingsStore,
@@ -101,6 +102,8 @@ const formatSkipDuration = (totalSeconds: number) => {
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 };
+
+const formatPlaybackRate = (rate: number) => `${Number(rate.toFixed(2))}x`;
 
 type SkipDurationRowProps = {
   title: string;
@@ -901,6 +904,8 @@ const PlaybackSettingsFallback = () => {
 };
 
 export const SettingsPlaybackScreen = () => {
+  const playbackRateRangeMin = useSettingsStore((state) => state.playbackRateRangeMin);
+  const playbackRateRangeMax = useSettingsStore((state) => state.playbackRateRangeMax);
   const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
   const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
   const defaultBookProgressTimeDisplay = useSettingsStore(
@@ -921,6 +926,8 @@ export const SettingsPlaybackScreen = () => {
     setAutoRewindLimitToChapter,
     setDefaultBookProgressTimeDisplay,
     setDisableLockScreenSeek,
+    setPlaybackRateRangeMax,
+    setPlaybackRateRangeMin,
     setRemoteCommandMode,
     setRestoreLastBookOnStartup,
     setSeekBackwardSeconds,
@@ -965,6 +972,12 @@ export const SettingsPlaybackScreen = () => {
       return currentIndex;
     });
   };
+  const minPlaybackRateOptions = PLAYBACK_RATE_RANGE_OPTIONS.filter(
+    (rate) => rate <= playbackRateRangeMax,
+  );
+  const maxPlaybackRateOptions = PLAYBACK_RATE_RANGE_OPTIONS.filter(
+    (rate) => rate >= playbackRateRangeMin,
+  );
 
   if (Platform.OS !== "ios") {
     return <PlaybackSettingsFallback />;
@@ -985,6 +998,41 @@ export const SettingsPlaybackScreen = () => {
           <Toggle isOn={restoreLastBookOnStartup} onIsOnChange={setRestoreLastBookOnStartup}>
             <SwiftText>Restore last book on startup</SwiftText>
           </Toggle>
+        </Section>
+
+        <Section
+          title="Playback Rate"
+          footer={
+            <SwiftText>
+              Player speed controls only offer speeds in this range. Saved audiobook speeds outside
+              the range move to the closest boundary.
+            </SwiftText>
+          }
+        >
+          <Picker
+            label="Minimum Speed"
+            selection={playbackRateRangeMin}
+            onSelectionChange={setPlaybackRateRangeMin as any}
+            modifiers={[pickerStyle("menu")]}
+          >
+            {minPlaybackRateOptions.map((rate) => (
+              <SwiftText key={`min-rate-${rate}`} modifiers={[tag(rate)]}>
+                {formatPlaybackRate(rate)}
+              </SwiftText>
+            ))}
+          </Picker>
+          <Picker
+            label="Maximum Speed"
+            selection={playbackRateRangeMax}
+            onSelectionChange={setPlaybackRateRangeMax as any}
+            modifiers={[pickerStyle("menu")]}
+          >
+            {maxPlaybackRateOptions.map((rate) => (
+              <SwiftText key={`max-rate-${rate}`} modifiers={[tag(rate)]}>
+                {formatPlaybackRate(rate)}
+              </SwiftText>
+            ))}
+          </Picker>
         </Section>
 
         <Section

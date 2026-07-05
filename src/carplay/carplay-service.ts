@@ -9,7 +9,7 @@ import {
 } from "../store/device-books-store";
 import { toDownloadedBookSummary } from "../store/downloaded-book-helpers";
 import { mmkvStorage } from "../store/mmkv-storage";
-import { settingsStore } from "../store/settings-store";
+import { clampPlaybackRateToRange, settingsStore } from "../store/settings-store";
 import {
 	getCarPlayResumeSnapshotMap,
 	recordCarPlayProgressSnapshotMap,
@@ -58,7 +58,7 @@ type CarPlayEvent = {
 	rate?: number;
 };
 
-// Same range the phone's rate screen offers (0.75–4.0, see player-rate.tsx).
+// Same presets the phone's rate surfaces offer, filtered by Playback Rate Range.
 const RATE_PRESETS = [0.75, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0];
 
 const CARPLAY_EVENT_NAME = "AudioProCarPlayEvent";
@@ -215,11 +215,18 @@ const pushShelvesToNative = () => {
 let lastPushedRatesJson = "";
 
 const pushRatesToNative = () => {
-	const currentRate = playbackStore.getState().rate;
+	const { playbackRateRangeMin, playbackRateRangeMax } = settingsStore.getState();
+	const currentRate = clampPlaybackRateToRange(playbackStore.getState().rate, {
+		min: playbackRateRangeMin,
+		max: playbackRateRangeMax,
+	});
+	const presetValues = RATE_PRESETS.filter(
+		(preset) => preset >= playbackRateRangeMin && preset <= playbackRateRangeMax,
+	);
 	// Include a non-preset custom rate (set via the phone slider) as its own row.
-	const values = RATE_PRESETS.some((preset) => Math.abs(preset - currentRate) < 0.01)
-		? RATE_PRESETS
-		: [...RATE_PRESETS, currentRate].sort((a, b) => a - b);
+	const values = presetValues.some((preset) => Math.abs(preset - currentRate) < 0.01)
+		? presetValues
+		: [...presetValues, currentRate].sort((a, b) => a - b);
 	const rates = values.map((value) => ({
 		value,
 		label: `${Number(value.toFixed(2))}×`,
@@ -525,16 +532,20 @@ export const initCarPlayService = () => {
 	// Rebuild shelf time labels when the user flips the progress-time-display
 	// setting (elapsed vs remaining) so the CarPlay covers match the phone.
 	settingsStore.subscribe((state, prevState) => {
-		if (
-			state.defaultBookProgressTimeDisplay === prevState.defaultBookProgressTimeDisplay ||
-			!lastPublishInputs
-		) {
-			return;
+		if (state.defaultBookProgressTimeDisplay !== prevState.defaultBookProgressTimeDisplay) {
+			if (lastPublishInputs) {
+				publishCarPlayShelves(
+					lastPublishInputs.visibleShelves,
+					lastPublishInputs.progressByBookId,
+				);
+			}
 		}
-		publishCarPlayShelves(
-			lastPublishInputs.visibleShelves,
-			lastPublishInputs.progressByBookId,
-		);
+		if (
+			state.playbackRateRangeMin !== prevState.playbackRateRangeMin ||
+			state.playbackRateRangeMax !== prevState.playbackRateRangeMax
+		) {
+			pushRatesToNative();
+		}
 	});
 
 	snapshotReady = loadSnapshot().then(() => {

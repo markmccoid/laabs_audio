@@ -38,7 +38,7 @@ import {
   type ProgressResolutionSource,
   type ServerProgressFetchResult,
 } from "../store/progress-log-store";
-import { settingsStore } from "../store/settings-store";
+import { clampPlaybackRateToRange, settingsStore } from "../store/settings-store";
 import type { AudioTrack } from "../types/absTypes";
 import {
   resolveAutoRewindDecision,
@@ -73,8 +73,6 @@ const PLAYBACK_CONTROL_SETTLE_MS = 350;
 // preempted, and below the CarPlay selection retry window (~28s) so a leaked
 // intent self-heals before the retry loop gives up.
 const PLAYBACK_CONTROL_INTENT_STALE_MS = 22_000;
-const MIN_PLAYBACK_RATE = 0.25;
-const MAX_PLAYBACK_RATE = 4.0;
 const LOCAL_SESSION_ID = "local";
 const PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS = 5;
 const LOCAL_PLAYBACK_PROGRESS_TIMEOUT_MS = 4000;
@@ -158,8 +156,13 @@ export type PlaybackControlResult =
 
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
-const clampPlaybackRate = (rate: number) =>
-  Math.max(MIN_PLAYBACK_RATE, Math.min(MAX_PLAYBACK_RATE, rate));
+const clampPlaybackRate = (rate: number) => {
+  const { playbackRateRangeMin, playbackRateRangeMax } = settingsStore.getState();
+  return clampPlaybackRateToRange(rate, {
+    min: playbackRateRangeMin,
+    max: playbackRateRangeMax,
+  });
+};
 
 const pickNewestProgress = <
   T extends { libraryItemId?: string; mediaItemId?: string; lastUpdate?: number },
@@ -206,6 +209,7 @@ class PlayerService {
   private skipSeekInFlight: Promise<void> | null = null;
   private nativeSeekPauseGuardUntilMs = 0;
   private clipPreviewSession: ClipPreviewSession | null = null;
+  private unsubscribeSettings: (() => void) | null = null;
   private postPreviewStatusGuard:
     | {
         untilMs: number;
@@ -471,10 +475,20 @@ class PlayerService {
         void this.previousChapter();
       },
     });
+    this.unsubscribeSettings = settingsStore.subscribe((state, previousState) => {
+      if (
+        state.playbackRateRangeMin !== previousState.playbackRateRangeMin ||
+        state.playbackRateRangeMax !== previousState.playbackRateRangeMax
+      ) {
+        void this.reconcilePlaybackRateRange();
+      }
+    });
   }
 
   destroy() {
     this.initialized = false;
+    this.unsubscribeSettings?.();
+    this.unsubscribeSettings = null;
     this.cancelPendingSkipBurst();
   }
 
@@ -1151,11 +1165,25 @@ class PlayerService {
     }
     const deviceBooksState = deviceBooksStore.getState();
     const userKey = this.resolveUserKeyForLibraryItem(rateCandidateIds[0]);
-    const storedRate = rateCandidateIds
-      .map((candidateId) => selectBookPlaybackRateIfStored(deviceBooksState, candidateId, userKey))
-      .find((rate): rate is number => rate !== null);
-    if (typeof storedRate === "number") {
-      return clampPlaybackRate(storedRate);
+    const storedRateCandidate = rateCandidateIds
+      .map((candidateId) => ({
+        candidateId,
+        rate: selectBookPlaybackRateIfStored(deviceBooksState, candidateId, userKey),
+      }))
+      .find(
+        (candidate): candidate is { candidateId: string; rate: number } =>
+          candidate.rate !== null,
+      );
+    if (storedRateCandidate) {
+      const normalizedRate = clampPlaybackRate(storedRateCandidate.rate);
+      if (Math.abs(normalizedRate - storedRateCandidate.rate) > 0.0001) {
+        deviceBooksStore.getState().actions.setBookPlaybackRate(
+          storedRateCandidate.candidateId,
+          normalizedRate,
+          { userKey },
+        );
+      }
+      return normalizedRate;
     }
     const fallbackRate = selectBookPlaybackRate(deviceBooksState, rateCandidateIds[0], userKey);
     return typeof fallbackRate === "number" ? clampPlaybackRate(fallbackRate) : null;
@@ -2855,6 +2883,15 @@ class PlayerService {
       }
       playbackStore.getState().actions.setPlaybackState(previousPlaybackState);
     }
+  }
+
+  async reconcilePlaybackRateRange() {
+    const state = playbackStore.getState();
+    const normalizedRate = clampPlaybackRate(state.rate ?? DEFAULT_BOOK_PLAYBACK_RATE);
+    if (Math.abs(normalizedRate - state.rate) < 0.0001) {
+      return;
+    }
+    await this.setRate(normalizedRate);
   }
 
   async setPitchCorrectionQuality(quality: PitchCorrectionQuality) {

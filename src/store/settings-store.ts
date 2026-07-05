@@ -19,6 +19,11 @@ export const DEFAULT_SEEK_BACKWARD_SECONDS = 15;
 export const DEFAULT_SEEK_FORWARD_SECONDS = 30;
 export const MIN_SKIP_SECONDS = 5;
 export const MAX_SKIP_SECONDS = 120;
+export const MIN_PLAYBACK_RATE_RANGE = 0.5;
+export const MAX_PLAYBACK_RATE_RANGE = 4.0;
+export const PLAYBACK_RATE_RANGE_STEP = 0.5;
+export const DEFAULT_PLAYBACK_RATE_RANGE_MIN = MIN_PLAYBACK_RATE_RANGE;
+export const DEFAULT_PLAYBACK_RATE_RANGE_MAX = MAX_PLAYBACK_RATE_RANGE;
 export type RemoteCommandMode = "next-prev" | "skip-intervals" | "none";
 export const DEFAULT_REMOTE_COMMAND_MODE: RemoteCommandMode = "skip-intervals";
 export const HOME_PREVIEW_SIZE_SMALL = "small";
@@ -97,6 +102,42 @@ export const clampHomeShelfItemCount = (value: number) =>
 export const clampSkipSeconds = (value: number) =>
   Math.max(MIN_SKIP_SECONDS, Math.min(MAX_SKIP_SECONDS, Math.round(value)));
 
+export const PLAYBACK_RATE_RANGE_OPTIONS = Array.from(
+  {
+    length:
+      Math.floor((MAX_PLAYBACK_RATE_RANGE - MIN_PLAYBACK_RATE_RANGE) / PLAYBACK_RATE_RANGE_STEP) +
+      1,
+  },
+  (_, index) =>
+    Number((MIN_PLAYBACK_RATE_RANGE + index * PLAYBACK_RATE_RANGE_STEP).toFixed(2)),
+);
+
+const roundPlaybackRateRangeBoundary = (value: number) =>
+  Number((Math.round(value / PLAYBACK_RATE_RANGE_STEP) * PLAYBACK_RATE_RANGE_STEP).toFixed(2));
+
+export const normalizePlaybackRateRangeBoundary = (value: number) =>
+  Math.max(
+    MIN_PLAYBACK_RATE_RANGE,
+    Math.min(MAX_PLAYBACK_RATE_RANGE, roundPlaybackRateRangeBoundary(value)),
+  );
+
+export const normalizePlaybackRateRange = (minRate: number, maxRate: number) => {
+  const min = normalizePlaybackRateRangeBoundary(minRate);
+  const max = normalizePlaybackRateRangeBoundary(maxRate);
+  if (min <= max) return { min, max };
+  return { min: max, max: min };
+};
+
+export const clampPlaybackRateToRange = (
+  rate: number,
+  range: { min: number; max: number },
+) => {
+  const normalizedRange = normalizePlaybackRateRange(range.min, range.max);
+  return Number(
+    Math.max(normalizedRange.min, Math.min(normalizedRange.max, rate)).toFixed(2),
+  );
+};
+
 export const getHomePreviewCoverSize = (size: HomePreviewSize) => {
   switch (size) {
     case HOME_PREVIEW_SIZE_SMALL:
@@ -116,6 +157,8 @@ const resolveScopeSettings = (
 
 export type SettingsState = {
   playbackRate: number;
+  playbackRateRangeMin: number;
+  playbackRateRangeMax: number;
   pitchCorrectionQuality: PitchCorrectionQuality;
   seekBackwardSeconds: number;
   seekForwardSeconds: number;
@@ -138,6 +181,8 @@ export type SettingsState = {
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
   actions: {
     setPlaybackRate: (rate: number) => void;
+    setPlaybackRateRangeMin: (rate: number) => void;
+    setPlaybackRateRangeMax: (rate: number) => void;
     setPitchCorrectionQuality: (quality: PitchCorrectionQuality) => void;
     setSeekBackwardSeconds: (seconds: number) => void;
     setSeekForwardSeconds: (seconds: number) => void;
@@ -184,6 +229,8 @@ export const settingsStore = createStore<SettingsState>()(
   persist(
     (set) => ({
       playbackRate: 1,
+      playbackRateRangeMin: DEFAULT_PLAYBACK_RATE_RANGE_MIN,
+      playbackRateRangeMax: DEFAULT_PLAYBACK_RATE_RANGE_MAX,
       pitchCorrectionQuality: "medium",
       seekBackwardSeconds: DEFAULT_SEEK_BACKWARD_SECONDS,
       seekForwardSeconds: DEFAULT_SEEK_FORWARD_SECONDS,
@@ -206,6 +253,28 @@ export const settingsStore = createStore<SettingsState>()(
       discoverShelfByScope: {},
       actions: {
         setPlaybackRate: (playbackRate) => set({ playbackRate }),
+        setPlaybackRateRangeMin: (playbackRateRangeMin) =>
+          set((state) => {
+            const normalizedRange = normalizePlaybackRateRange(
+              playbackRateRangeMin,
+              state.playbackRateRangeMax,
+            );
+            return {
+              playbackRateRangeMin: normalizedRange.min,
+              playbackRateRangeMax: normalizedRange.max,
+            };
+          }),
+        setPlaybackRateRangeMax: (playbackRateRangeMax) =>
+          set((state) => {
+            const normalizedRange = normalizePlaybackRateRange(
+              state.playbackRateRangeMin,
+              playbackRateRangeMax,
+            );
+            return {
+              playbackRateRangeMin: normalizedRange.min,
+              playbackRateRangeMax: normalizedRange.max,
+            };
+          }),
         setPitchCorrectionQuality: (pitchCorrectionQuality) =>
           set({ pitchCorrectionQuality }),
         setSeekBackwardSeconds: (seekBackwardSeconds) =>
@@ -494,6 +563,8 @@ export const settingsStore = createStore<SettingsState>()(
       storage: createJSONStorage(() => mmkvStorage),
       partialize: (state) => ({
         playbackRate: state.playbackRate,
+        playbackRateRangeMin: state.playbackRateRangeMin,
+        playbackRateRangeMax: state.playbackRateRangeMax,
         pitchCorrectionQuality: state.pitchCorrectionQuality,
         seekBackwardSeconds: state.seekBackwardSeconds,
         seekForwardSeconds: state.seekForwardSeconds,
@@ -513,13 +584,15 @@ export const settingsStore = createStore<SettingsState>()(
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 15,
+      version: 16,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
         if (!state) {
           return {
             playbackRate: 1,
+            playbackRateRangeMin: DEFAULT_PLAYBACK_RATE_RANGE_MIN,
+            playbackRateRangeMax: DEFAULT_PLAYBACK_RATE_RANGE_MAX,
             pitchCorrectionQuality: "medium",
             seekBackwardSeconds: DEFAULT_SEEK_BACKWARD_SECONDS,
             seekForwardSeconds: DEFAULT_SEEK_FORWARD_SECONDS,
@@ -541,8 +614,19 @@ export const settingsStore = createStore<SettingsState>()(
           };
         }
 
+        const playbackRateRange = normalizePlaybackRateRange(
+          version >= 16
+            ? state.playbackRateRangeMin ?? DEFAULT_PLAYBACK_RATE_RANGE_MIN
+            : DEFAULT_PLAYBACK_RATE_RANGE_MIN,
+          version >= 16
+            ? state.playbackRateRangeMax ?? DEFAULT_PLAYBACK_RATE_RANGE_MAX
+            : DEFAULT_PLAYBACK_RATE_RANGE_MAX,
+        );
+
         return {
           playbackRate: state.playbackRate ?? 1,
+          playbackRateRangeMin: playbackRateRange.min,
+          playbackRateRangeMax: playbackRateRange.max,
           pitchCorrectionQuality: state.pitchCorrectionQuality ?? "medium",
           seekBackwardSeconds:
             version >= 5

@@ -1,6 +1,7 @@
 import { CoverImage } from "@/components/images/cover-image";
 import { playerService, usePlaybackStore } from "@/player";
 import type { PlaybackControlIntent } from "@/player/playback-store";
+import { clampPlaybackRateToRange, useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { MenuView, type MenuAction, type NativeActionEvent } from "@expo/ui/community/menu";
 import { router } from "expo-router";
@@ -38,6 +39,15 @@ export function MiniPlayerBottomAccessory({
   const placement = NativeTabs.BottomAccessory.usePlacement();
   const isInline = placement === "inline";
   const playbackRate = usePlaybackStore((state) => state.rate);
+  const playbackRateRangeMin = useSettingsStore((state) => state.playbackRateRangeMin);
+  const playbackRateRangeMax = useSettingsStore((state) => state.playbackRateRangeMax);
+  const displayPlaybackRate = clampPlaybackRateToRange(playbackRate, {
+    min: playbackRateRangeMin,
+    max: playbackRateRangeMax,
+  });
+  const rateOptions = RATE_OPTIONS.filter(
+    (rate) => rate >= playbackRateRangeMin && rate <= playbackRateRangeMax,
+  );
 
   const handleOpenMainPlayer = () => {
     router.push("/main-player");
@@ -48,12 +58,12 @@ export function MiniPlayerBottomAccessory({
   const menuActions: MenuAction[] = [
     {
       id: "speed",
-      title: `Speed (${playbackRate}×)`,
+      title: `Speed (${displayPlaybackRate}×)`,
       image: "speedometer",
-      subactions: RATE_OPTIONS.map((rate): MenuAction => ({
+      subactions: rateOptions.map((rate): MenuAction => ({
         id: `rate-${rate}`,
         title: `${rate}×`,
-        state: Math.abs(playbackRate - rate) < 0.001 ? "on" : "off",
+        state: Math.abs(displayPlaybackRate - rate) < 0.001 ? "on" : "off",
       })),
     },
     {

@@ -1,21 +1,22 @@
 import { playerService, usePlaybackStore } from "@/player";
 import { useBookPlaybackRate, useDeviceBooksActions } from "@/store/device-books-store";
+import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import Slider from "@react-native-community/slider";
 import { router, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-const MIN_RATE = 0.25;
-const MAX_RATE = 4.0;
 const RATE_STEP = 0.05;
 const SLIDER_STEP = RATE_STEP * 100;
 
-const clampRate = (value: number) => Math.max(MIN_RATE, Math.min(MAX_RATE, value));
-const normalizeRate = (value: number) => Number(clampRate(value).toFixed(2));
+const clampRate = (value: number, minRate: number, maxRate: number) =>
+  Math.max(minRate, Math.min(maxRate, value));
+const normalizeRate = (value: number, minRate: number, maxRate: number) =>
+  Number(clampRate(value, minRate, maxRate).toFixed(2));
 
 export default function PlayerRateRoute() {
   const params = useLocalSearchParams<{ libraryItemId?: string | string[] }>();
@@ -23,6 +24,8 @@ export default function PlayerRateRoute() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const deviceBookActions = useDeviceBooksActions();
+  const playbackRateRangeMin = useSettingsStore((state) => state.playbackRateRangeMin);
+  const playbackRateRangeMax = useSettingsStore((state) => state.playbackRateRangeMax);
 
   const routeLibraryItemId = Array.isArray(params.libraryItemId)
     ? params.libraryItemId[0]
@@ -36,40 +39,58 @@ export default function PlayerRateRoute() {
     Boolean(targetLibraryItemId) && targetLibraryItemId === activeLibraryItemId && queueLength > 0;
 
   const currentRate = useMemo(
-    () => normalizeRate(isTargetLoaded ? playbackRate : storedRate),
-    [isTargetLoaded, playbackRate, storedRate],
+    () =>
+      normalizeRate(
+        isTargetLoaded ? playbackRate : storedRate,
+        playbackRateRangeMin,
+        playbackRateRangeMax,
+      ),
+    [isTargetLoaded, playbackRate, playbackRateRangeMax, playbackRateRangeMin, storedRate],
   );
 
-  const [rate, setRate] = useState<number>(currentRate);
+  const [draftRate, setDraftRate] = useState<number | null>(null);
   const [isSliding, setIsSliding] = useState(false);
+  const rate = draftRate ?? currentRate;
 
-  useEffect(() => {
-    if (isSliding) return;
-    setRate(currentRate);
-  }, [currentRate, isSliding]);
-
-  const fixedRates = useMemo(() => [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4], []);
+  const fixedRates = useMemo(
+    () =>
+      [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4].filter(
+        (fixedRate) =>
+          fixedRate >= playbackRateRangeMin && fixedRate <= playbackRateRangeMax,
+      ),
+    [playbackRateRangeMax, playbackRateRangeMin],
+  );
   const sliderWidth = Math.max(220, width - 96);
 
   const commitRate = useCallback(
     async (nextRate: number) => {
       if (!targetLibraryItemId) return;
-      const resolvedRate = normalizeRate(nextRate);
-      setRate(resolvedRate);
+      const resolvedRate = normalizeRate(nextRate, playbackRateRangeMin, playbackRateRangeMax);
+      setDraftRate(resolvedRate);
 
-      if (isTargetLoaded) {
-        await playerService.setRate(resolvedRate);
-        return;
+      try {
+        if (isTargetLoaded) {
+          await playerService.setRate(resolvedRate);
+          return;
+        }
+
+        deviceBookActions.setBookPlaybackRate(targetLibraryItemId, resolvedRate);
+      } finally {
+        setDraftRate(null);
       }
-
-      deviceBookActions.setBookPlaybackRate(targetLibraryItemId, resolvedRate);
     },
-    [deviceBookActions, isTargetLoaded, targetLibraryItemId],
+    [
+      deviceBookActions,
+      isTargetLoaded,
+      playbackRateRangeMax,
+      playbackRateRangeMin,
+      targetLibraryItemId,
+    ],
   );
 
   const animatedBadgeStyle = useAnimatedStyle(() => ({
     transform: [
-      { scale: withTiming(isSliding ? 1.18 : 1, { duration: 220 }) },
+      { scale: withTiming(isSliding ? 1.5 : 1, { duration: 220 }) },
       { translateY: withTiming(isSliding ? 4 : 0, { duration: 220 }) },
     ],
   }));
@@ -108,12 +129,47 @@ export default function PlayerRateRoute() {
         }}
       >
         <View
-          style={{ flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8 }}
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 8,
+          }}
         >
-          <SymbolView name="hare" size={18} tintColor={themeColors.accent} />
-          <Text selectable style={{ fontSize: 14, fontWeight: "600", color: themeColors.text }}>
-            Audio Speed
-          </Text>
+          <View className="gap-2 justify-center items-center flex-row">
+            <SymbolView name="hare" size={18} tintColor={themeColors.accent} />
+            <Text selectable style={{ fontSize: 14, fontWeight: "600", color: themeColors.text }}>
+              Audio Speed
+            </Text>
+          </View>
+          <View style={{ alignItems: "flex-end", paddingRight: 16 }}>
+            <Animated.View
+              style={[
+                animatedBadgeStyle,
+                {
+                  borderRadius: 10,
+                  borderCurve: "continuous",
+                  borderWidth: StyleSheet.hairlineWidth,
+                  borderColor: themeColors.border,
+                  backgroundColor: themeColors.accent,
+                  paddingHorizontal: 12,
+                  paddingVertical: 4,
+                },
+              ]}
+            >
+              <Text
+                selectable
+                style={{
+                  color: themeColors.accentForeground,
+                  fontSize: 20,
+                  fontWeight: "700",
+                  fontVariant: ["tabular-nums"],
+                }}
+              >
+                {rate.toFixed(2)}x
+              </Text>
+            </Animated.View>
+          </View>
         </View>
 
         <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8 }}>
@@ -160,49 +216,23 @@ export default function PlayerRateRoute() {
           minimumTrackTintColor={themeColors.accent}
           maximumTrackTintColor={themeColors.border}
           thumbTintColor={themeColors.accent}
-          minimumValue={MIN_RATE * 100}
-          maximumValue={MAX_RATE * 100}
+          minimumValue={playbackRateRangeMin * 100}
+          maximumValue={playbackRateRangeMax * 100}
           step={SLIDER_STEP}
           value={rate * 100}
           onValueChange={(value) => {
-            setRate(normalizeRate(value / 100));
+            setDraftRate(normalizeRate(value / 100, playbackRateRangeMin, playbackRateRangeMax));
           }}
-          onSlidingStart={() => setIsSliding(true)}
+          onSlidingStart={() => {
+            setIsSliding(true);
+            setDraftRate(rate);
+          }}
           onSlidingComplete={(value) => {
             setIsSliding(false);
             void commitRate(value / 100);
           }}
           disabled={!targetLibraryItemId}
         />
-
-        <View style={{ alignItems: "flex-end", paddingRight: 6 }}>
-          <Animated.View
-            style={[
-              animatedBadgeStyle,
-              {
-                borderRadius: 10,
-                borderCurve: "continuous",
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: themeColors.border,
-                backgroundColor: themeColors.accent,
-                paddingHorizontal: 12,
-                paddingVertical: 4,
-              },
-            ]}
-          >
-            <Text
-              selectable
-              style={{
-                color: themeColors.accentForeground,
-                fontSize: 20,
-                fontWeight: "700",
-                fontVariant: ["tabular-nums"],
-              }}
-            >
-              {rate.toFixed(2)}x
-            </Text>
-          </Animated.View>
-        </View>
 
         {!targetLibraryItemId ? (
           <Text

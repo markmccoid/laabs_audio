@@ -1,5 +1,6 @@
 import { playerService, usePlaybackStore } from "@/player";
 import { useBookPlaybackRate, useDeviceBooksActions } from "@/store/device-books-store";
+import { useSettingsStore } from "@/store/settings-store";
 import { useCallback, useEffect, useState } from "react";
 import { Gesture } from "react-native-gesture-handler";
 import { runOnJS, useSharedValue, withSpring } from "react-native-reanimated";
@@ -45,6 +46,8 @@ export const usePlaybackRateGesture = ({
   onGestureFinalize,
 }: UsePlaybackRateGestureOptions = {}) => {
   const deviceBookActions = useDeviceBooksActions();
+  const playbackRateRangeMin = useSettingsStore((state) => state.playbackRateRangeMin);
+  const playbackRateRangeMax = useSettingsStore((state) => state.playbackRateRangeMax);
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId ?? undefined);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const playbackRate = usePlaybackStore((state) => state.rate);
@@ -52,10 +55,12 @@ export const usePlaybackRateGesture = ({
   const storedRate = useBookPlaybackRate(targetLibraryItemId);
   const isTargetLoaded =
     Boolean(targetLibraryItemId) && targetLibraryItemId === activeLibraryItemId && queueLength > 0;
+  const effectiveMinRate = Math.max(minRate, playbackRateRangeMin);
+  const effectiveMaxRate = Math.min(maxRate, playbackRateRangeMax);
   const currentRate = normalizeRate(
     isTargetLoaded ? playbackRate : storedRate,
-    DEFAULT_MIN_RATE,
-    DEFAULT_MAX_RATE,
+    effectiveMinRate,
+    effectiveMaxRate,
   );
 
   const [displayRate, setDisplayRate] = useState(currentRate);
@@ -79,7 +84,7 @@ export const usePlaybackRateGesture = ({
     async (nextRate: number) => {
       if (!targetLibraryItemId) return;
 
-      const resolvedRate = normalizeRate(nextRate, minRate, maxRate);
+      const resolvedRate = normalizeRate(nextRate, effectiveMinRate, effectiveMaxRate);
       setDisplayRate(resolvedRate);
 
       if (isTargetLoaded) {
@@ -89,12 +94,12 @@ export const usePlaybackRateGesture = ({
 
       deviceBookActions.setBookPlaybackRate(targetLibraryItemId, resolvedRate);
     },
-    [deviceBookActions, isTargetLoaded, maxRate, minRate, targetLibraryItemId],
+    [deviceBookActions, effectiveMaxRate, effectiveMinRate, isTargetLoaded, targetLibraryItemId],
   );
 
   const updateDisplayRate = useCallback((nextRate: number) => {
-    setDisplayRate(normalizeRate(nextRate, minRate, maxRate));
-  }, [maxRate, minRate]);
+    setDisplayRate(normalizeRate(nextRate, effectiveMinRate, effectiveMaxRate));
+  }, [effectiveMaxRate, effectiveMinRate]);
 
   const notifyGestureStart = useCallback(() => {
     onGestureStart?.();
@@ -108,7 +113,7 @@ export const usePlaybackRateGesture = ({
     .enabled(Boolean(targetLibraryItemId))
     .activateAfterLongPress(longPressDelayMs)
     .onStart(() => {
-      startRate.value = normalizeRateWorklet(pendingRate.value, minRate, maxRate);
+      startRate.value = normalizeRateWorklet(pendingRate.value, effectiveMinRate, effectiveMaxRate);
       pendingRate.value = startRate.value;
       lockedAxis.value = "none";
       dragOffsetX.value = 0;
@@ -127,8 +132,8 @@ export const usePlaybackRateGesture = ({
         bubbleOffsetY.value = 0;
         nextRate = normalizeRateWorklet(
           startRate.value + (-event.translationY / PIXELS_PER_STEP) * RATE_STEP,
-          minRate,
-          maxRate,
+          effectiveMinRate,
+          effectiveMaxRate,
         );
       } else {
         const absTranslationX = Math.abs(event.translationX);
@@ -147,8 +152,8 @@ export const usePlaybackRateGesture = ({
           bubbleOffsetY.value = event.translationY;
           nextRate = normalizeRateWorklet(
             startRate.value + Math.max(0, -event.translationY / PIXELS_PER_STEP) * RATE_STEP,
-            minRate,
-            maxRate,
+            effectiveMinRate,
+            effectiveMaxRate,
           );
         } else if (lockedAxis.value === "x") {
           dragOffsetX.value = event.translationX;
@@ -156,8 +161,8 @@ export const usePlaybackRateGesture = ({
           bubbleOffsetY.value = 0;
           nextRate = normalizeRateWorklet(
             startRate.value - Math.max(0, -event.translationX / PIXELS_PER_STEP) * RATE_STEP,
-            minRate,
-            maxRate,
+            effectiveMinRate,
+            effectiveMaxRate,
           );
         } else {
           dragOffsetX.value = 0;

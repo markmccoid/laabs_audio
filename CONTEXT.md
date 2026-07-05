@@ -164,6 +164,10 @@ _Avoid_: Auto-resume, resume on launch, reload last book
 The listening speed preference for an audiobook, scoped to a User Session when the user is signed in.
 _Avoid_: Global speed, book speed
 
+**Playback Rate Range**:
+The device-level preference that defines the slowest and fastest Playback Rate the app should offer or apply through user-facing player controls.
+_Avoid_: Speed filter, rate preset list
+
 **Ambient Playback Preference**:
 A LAABS Audio local preference for an Audiobook Identity that remembers which imported ambient audio track should play with that audiobook, where that ambient track should resume, and how loud it should be for that audiobook.
 _Avoid_: Ambient book metadata, global ambient settings, per-track volume

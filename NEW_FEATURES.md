@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-05` `pending` - Add configurable playback rate limits for player, mini-player, and CarPlay controls.
+  Tester focus: verify Playback settings can set minimum and maximum speed, player speed controls only show allowed speeds, saved audiobook speeds outside the range clamp to the nearest boundary, CarPlay rate choices respect the same limits, and the build reports version 1.6.1.
 - `2026-07-01` `pending` - Fix deleting an active downloaded audiobook by pausing, syncing, unloading local playback, and restarting on stream.
   Tester focus: verify that removing the currently playing downloaded audiobook saves the current position, stops local playback cleanly, deletes the offline files, and resumes the same book as a stream when online; verify that deleting a different downloaded book still just removes the files.
 - `2026-06-30` `pending` - Add Auto Rewind on resume playback settings and behavior.
