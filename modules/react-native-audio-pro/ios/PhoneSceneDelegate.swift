@@ -23,9 +23,21 @@ final class PhoneSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
 	private func attachWindow(to windowScene: UIWindowScene, retriesLeft: Int) {
 		if let delegateWindow = appDelegateWindow() {
-			delegateWindow.windowScene = windowScene
-			delegateWindow.makeKeyAndVisible()
-			window = delegateWindow
+			let sceneWindow: UIWindow
+			if delegateWindow.windowScene === windowScene {
+				sceneWindow = delegateWindow
+			} else {
+				sceneWindow = UIWindow(windowScene: windowScene)
+				sceneWindow.rootViewController = delegateWindow.rootViewController
+				sceneWindow.backgroundColor = delegateWindow.backgroundColor
+				sceneWindow.tintColor = delegateWindow.tintColor
+				delegateWindow.rootViewController = nil
+				delegateWindow.isHidden = true
+				(UIApplication.shared.delegate as AnyObject).setValue(sceneWindow, forKey: "window")
+			}
+			sceneWindow.frame = windowScene.coordinateSpace.bounds
+			sceneWindow.makeKeyAndVisible()
+			window = sceneWindow
 			NSLog("[CarPlay] PhoneSceneDelegate attached AppDelegate window to phone scene")
 			return
 		}
