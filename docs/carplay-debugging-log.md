@@ -400,6 +400,7 @@ Expected log sequence:
 [CarPlay] event RATE_SELECTED
 [CarPlay] rate selected <rate>
 [CarPlay] nowPlaying rates playback=<rate> default=<rate>
+[CarPlay] refreshed Now Playing rate button label=<rate>
 ```
 
 Interpretation:
@@ -408,9 +409,10 @@ Interpretation:
 - `emit RATE_SELECTED` present but missing `event RATE_SELECTED`: RN event bridge/listener problem.
 - `rate selected` present but no speed change: `playerService.setRate` or native `setPlaybackSpeed`
   path problem.
-- Correct `nowPlaying rates ... default=<rate>` but label remains `0×`: CarPlay system button
-  rendering/caching issue; next option is a custom Now Playing button instead of
-  `CPNowPlayingPlaybackRateButton`.
+- Correct `setRates current=...` but missing `refreshed Now Playing rate button label=...`:
+  native `CarPlayCoordinator.setRates` did not refresh the custom image button.
+- Refresh log present but the visible button is stale: capture the current button image path;
+  the app should be using `CPNowPlayingImageButton`, not `CPNowPlayingPlaybackRateButton`.
 
 ### Book switch regression check
 

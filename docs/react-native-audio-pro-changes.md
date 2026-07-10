@@ -587,3 +587,29 @@ flips; the headless downloaded fallback shelf labels covers from the CarPlay res
 **Upgrade check.** `CarPlaySceneDelegate.swift` has no upstream counterpart. If Apple removes
 the deprecated initializer in a later SDK, drop the `#available` else-branch and raise the
 pod's minimum where appropriate.
+
+---
+
+## Change 15 — CarPlay rate button uses app-rendered current-rate image
+
+**File:** `ios/CarPlaySceneDelegate.swift` (+ `ios/AudioPro.swift`)
+**Date:** 2026-07-07
+
+**Problem.** `CPNowPlayingPlaybackRateButton` can cache its visible rate while paused and during
+book switches. The JS/native rate model updates correctly, and playback resumes at the selected
+speed, but the system-rendered button can keep showing the old value until playback starts
+again. Earlier attempts to reinstall the system rate button regressed picker events on hardware.
+
+**Fix.** The Now Playing rate control is now a `CPNowPlayingImageButton` whose image is rendered
+from the current app rate (`1x`, `1.25x`, `2x`, etc.) whenever `carPlaySetRates` changes the
+current option. Tapping it still opens the existing Speed list, so rate selection continues to
+flow through `RATE_SELECTED` → `playerService.setRate`. `AudioPro.swift` keeps paused now-playing
+metadata semantically correct: momentary playback rate is `0` while paused, and
+`MPNowPlayingInfoPropertyDefaultPlaybackRate` carries the selected speed.
+
+**Verify.** Pause at `1x`, choose `2x` from CarPlay, return to Now Playing: the button image
+should show `2x` before pressing play, and playback should remain paused until play is tapped.
+Switch books with different saved rates: the button should never show `0x`.
+
+**Upgrade check.** Keep the custom image button in `CarPlaySceneDelegate.swift`; do not restore
+`CPNowPlayingPlaybackRateButton` unless Apple exposes a reliable current-label invalidation API.

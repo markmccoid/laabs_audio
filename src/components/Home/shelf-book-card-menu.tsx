@@ -1,3 +1,4 @@
+import { usePlaybackStore } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView } from "expo-symbols";
 import { Alert, Pressable, View } from "react-native";
@@ -8,6 +9,8 @@ import {
 
 export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
   const themeColors = useThemeColors();
+  const loadedLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const isLoadedBook = loadedLibraryItemId === props.book.id;
   const {
     continueListeningVisibilityLabel,
     favoriteDisabled,
@@ -24,8 +27,7 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
     handleToggleFavorite,
     handleToggleFinished,
     isBusy,
-  } =
-    useShelfBookCardMenuActions(props);
+  } = useShelfBookCardMenuActions(props);
 
   return (
     <View>
@@ -98,7 +100,11 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
           boxShadow: "0 8px 18px rgba(15, 23, 42, 0.25)",
         })}
       >
-        <SymbolView name="ellipsis.circle.fill" size={18} tintColor={themeColors.bg} />
+        <SymbolView
+          name={isLoadedBook ? "waveform.low" : "ellipsis.circle.fill"}
+          size={18}
+          tintColor={themeColors.bg}
+        />
       </Pressable>
     </View>
   );

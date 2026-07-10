@@ -183,6 +183,7 @@ final class CarPlayCoordinator: NSObject {
 	private var chapters: [CarPlayChapter] = []
 	private var rateOptions: [CarPlayRateOption] = []
 	private var rateTemplate: CPListTemplate?
+	private var nowPlayingRateButtonSignature: String?
 	// False until JS pushes shelves at least once — distinguishes "JS still
 	// booting" from "JS reported an empty library".
 	private var hasReceivedShelves = false
@@ -213,11 +214,7 @@ final class CarPlayCoordinator: NSObject {
 		nowPlaying.isAlbumArtistButtonEnabled = false
 		nowPlaying.upNextTitle = "Chapters"
 		nowPlaying.isUpNextButtonEnabled = !chapters.isEmpty
-		nowPlaying.updateNowPlayingButtons([
-			CPNowPlayingPlaybackRateButton { [weak self] _ in
-				self?.pushRatePicker()
-			}
-		])
+		refreshNowPlayingRateButton(force: true)
 		nowPlaying.add(self)
 
 		rootTemplate.updateSections(buildRootSections())
@@ -285,6 +282,7 @@ final class CarPlayCoordinator: NSObject {
 			if let template = self.rateTemplate {
 				template.updateSections(self.buildRateSections())
 			}
+			self.refreshNowPlayingRateButton()
 		}
 	}
 
@@ -432,6 +430,83 @@ final class CarPlayCoordinator: NSObject {
 			return item
 		}
 		return [CPListSection(items: items)]
+	}
+
+	private func refreshNowPlayingRateButton(force: Bool = false) {
+		let current = rateOptions.first(where: { $0.isCurrent })
+		let label = formatRateButtonLabel(current)
+		let signature = "\(current?.value ?? -1):\(label)"
+		guard force || signature != nowPlayingRateButtonSignature else { return }
+
+		nowPlayingRateButtonSignature = signature
+		let numberButton = CPNowPlayingImageButton(image: makeRateNumberButtonImage(rate: current)) { [weak self] _ in
+			self?.pushRatePicker()
+		}
+		CPNowPlayingTemplate.shared.updateNowPlayingButtons([numberButton])
+		carPlayDebugLog("[CarPlay] refreshed Now Playing rate button label=\(label)")
+	}
+
+	private func formatRateButtonLabel(_ rate: CarPlayRateOption?) -> String {
+		guard let rate = rate else { return "Rate" }
+		let rounded = (rate.value * 100).rounded() / 100
+		if abs(rounded.rounded() - rounded) < 0.001 {
+			return String(format: "%.0fx", rounded)
+		}
+		if abs((rounded * 10).rounded() - (rounded * 10)) < 0.001 {
+			return String(format: "%.1fx", rounded)
+		}
+		return String(format: "%.2fx", rounded)
+	}
+
+	private func makeRateNumberButtonImage(rate: CarPlayRateOption?) -> UIImage {
+		let maxSize = CPNowPlayingButtonMaximumImageSize
+		let size = CGSize(
+			width: maxSize.width > 0 ? maxSize.width : 44,
+			height: maxSize.height > 0 ? maxSize.height : 44
+		)
+		let renderer = UIGraphicsImageRenderer(size: size)
+		return renderer.image { _ in
+			guard let rate = rate else {
+				let attributes: [NSAttributedString.Key: Any] = [
+					.font: UIFont.systemFont(ofSize: 17, weight: .semibold),
+					.foregroundColor: UIColor.black,
+				]
+				let text = "Rate"
+				let textSize = text.size(withAttributes: attributes)
+				text.draw(
+					at: CGPoint(x: (size.width - textSize.width) / 2, y: (size.height - textSize.height) / 2),
+					withAttributes: attributes
+				)
+				return
+			}
+
+			let label = formatRateButtonLabel(rate)
+			let number = String(label.dropLast())
+			let safeWidth = min(size.width - 10, 34)
+			let safeHeight = min(size.height - 4, 30)
+			var fontSize: CGFloat = number.count > 3 ? 20 : 23
+			var attributes = makeRateTextAttributes(fontSize: fontSize, kern: -0.3)
+			var textSize = number.size(withAttributes: attributes)
+
+			while (textSize.width > safeWidth || textSize.height > safeHeight) && fontSize > 10 {
+				fontSize -= 1
+				attributes = makeRateTextAttributes(fontSize: fontSize, kern: -0.3)
+				textSize = number.size(withAttributes: attributes)
+			}
+
+			number.draw(at: CGPoint(
+				x: (size.width - textSize.width) / 2,
+				y: (size.height - textSize.height) / 2
+			), withAttributes: attributes)
+		}.withRenderingMode(.alwaysTemplate)
+	}
+
+	private func makeRateTextAttributes(fontSize: CGFloat, kern: CGFloat) -> [NSAttributedString.Key: Any] {
+		[
+			.font: UIFont.systemFont(ofSize: fontSize, weight: .semibold),
+			.foregroundColor: UIColor.black,
+			.kern: kern,
+		]
 	}
 
 	private func buildChapterSections() -> [CPListSection] {

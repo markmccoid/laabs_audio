@@ -2,6 +2,7 @@ import type { LibraryItemSummary } from "../api/library-items-api";
 import {
 	buildCarPlayShelves,
 	overlayCarPlayShelfProgress,
+	promoteCarPlayContinueListeningBook,
 	type CarPlayShelfPayload,
 } from "./carplay-shelf-labels";
 
@@ -129,6 +130,46 @@ describe("CarPlay shelf labels", () => {
 		expect(nextShelves[0]?.books[0]).toMatchObject({
 			detail: "Author One · 5h 00m left",
 			subtitle: "4h 00m left",
+		});
+	});
+
+	it("promotes a newly played headless book into Continue Listening", () => {
+		const shelves: CarPlayShelfPayload[] = [
+			{
+				id: "continueListening",
+				title: "Continue Listening",
+				books: [
+					{
+						id: "book-1",
+						title: "Book One",
+						author: "Author One",
+						detail: "Author One · 5h 00m left",
+						subtitle: "5h 00m left",
+					},
+				],
+			},
+		];
+
+		const nextShelves = promoteCarPlayContinueListeningBook(
+			shelves,
+			{
+				id: "book-2",
+				title: "Book Two",
+				author: "Author Two",
+				currentTimeSeconds: 1_800,
+				durationSeconds: 36_000,
+				isFinished: false,
+			},
+			"remaining",
+			{ isVisible: true, maxBooks: 15 },
+		);
+
+		expect(nextShelves).not.toBe(shelves);
+		expect(nextShelves[0]?.books.map((book) => book.id)).toEqual(["book-2", "book-1"]);
+		expect(nextShelves[0]?.books[0]).toMatchObject({
+			title: "Book Two",
+			detail: "Author Two · 9h 30m left",
+			subtitle: "9h 30m left",
 		});
 	});
 });

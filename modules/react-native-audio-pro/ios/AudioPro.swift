@@ -259,11 +259,7 @@ class AudioPro: RCTEventEmitter {
 		let values = parsed.compactMap { $0["value"] as? NSNumber }
 		if !values.isEmpty {
 			carPlaySupportedPlaybackRates = values
-			DispatchQueue.main.async {
-				let command = MPRemoteCommandCenter.shared().changePlaybackRateCommand
-				command.isEnabled = true
-				command.supportedPlaybackRates = values
-			}
+			refreshCarPlayPlaybackRateCommand(values)
 		}
 		CarPlayCoordinator.shared.setRates(parsed)
 	}
@@ -380,8 +376,13 @@ class AudioPro: RCTEventEmitter {
 				// Emit PAUSED state to ensure UI is in sync
 				sendPausedStateEvent()
 
-				// Update now playing info to show paused state
-				updateNowPlayingInfo(time: player?.currentTime().seconds ?? 0, rate: 0)
+				// Momentary playback rate is 0 while paused; DefaultPlaybackRate
+				// still carries the selected speed for external UIs.
+				updateNowPlayingInfo(
+					time: player?.currentTime().seconds ?? 0,
+					rate: 0,
+					playbackState: .paused
+				)
 			}
 
 		case .ended:
@@ -701,7 +702,12 @@ class AudioPro: RCTEventEmitter {
 		// Set up volume to ensure it's applied before playback starts
 		player?.volume = activeVolume
 
-		updateNowPlayingInfo(time: 0, rate: 1.0, duration: item.asset.duration.seconds)
+		updateNowPlayingInfo(
+			time: 0,
+			rate: autoPlay ? currentPlaybackSpeed : 0,
+			duration: item.asset.duration.seconds,
+			playbackState: autoPlay ? .playing : .paused
+		)
 
 		// Add notification observer for track completion to the new item
 		NotificationCenter.default.addObserver(
@@ -910,7 +916,11 @@ class AudioPro: RCTEventEmitter {
 			self.player?.pause()
 			self.stopTimer()
 			self.sendPausedStateEvent()
-			self.updateNowPlayingInfo(time: self.player?.currentTime().seconds ?? 0, rate: 0)
+			self.updateNowPlayingInfo(
+				time: self.player?.currentTime().seconds ?? 0,
+				rate: 0,
+				playbackState: .paused
+			)
 		}
 	}
 
@@ -941,7 +951,11 @@ class AudioPro: RCTEventEmitter {
 			}
 
 			// Ensure lock screen controls are properly updated
-			self.updateNowPlayingInfo(time: self.player?.currentTime().seconds ?? 0, rate: self.currentPlaybackSpeed)
+			self.updateNowPlayingInfo(
+				time: self.player?.currentTime().seconds ?? 0,
+				rate: self.currentPlaybackSpeed,
+				playbackState: .playing
+			)
 
 			// Note: We don't need to call sendPlayingStateEvent() here because
 			// the rate change will trigger observeValue which now calls sendPlayingStateEvent()
@@ -1220,7 +1234,11 @@ class AudioPro: RCTEventEmitter {
 
 		// Momentary rate stays 0 while paused; the user-chosen speed reaches
 		// consumers via MPNowPlayingInfoPropertyDefaultPlaybackRate.
-		updateNowPlayingInfo(rate: isPlaying ? Float(speed) : 0)
+		updateNowPlayingInfo(rate: isPlaying ? Float(speed) : 0, playbackState: isPlaying ? .playing : .paused)
+		// A paused now-playing metadata write does not reliably repaint
+		// CPNowPlayingPlaybackRateButton; refreshing the command state nudges
+		// CarPlay without setting AVPlayer.rate and accidentally resuming audio.
+		refreshCarPlayPlaybackRateCommand()
 
 		if hasListeners {
 			let playbackInfo = getPlaybackInfo()
@@ -1420,18 +1438,42 @@ class AudioPro: RCTEventEmitter {
 	/// intermittently fail to propagate to external observers — lock screen and
 	/// especially CarPlay — while main-thread writes (remote-command handlers,
 	/// the progress timer) do. Values are captured before hopping threads.
-	private func updateNowPlayingInfo(time: Double? = nil, rate: Float? = nil, duration: Double? = nil, track: NSDictionary? = nil) {
+	private func updateNowPlayingInfo(
+		time: Double? = nil,
+		rate: Float? = nil,
+		duration: Double? = nil,
+		track: NSDictionary? = nil,
+		playbackState: MPNowPlayingPlaybackState? = nil
+	) {
 		let resolvedRate = rate ?? player?.rate ?? 0
 		if !Thread.isMainThread {
 			DispatchQueue.main.async { [weak self] in
-				self?.updateNowPlayingInfoOnMain(time: time, rate: resolvedRate, duration: duration, track: track)
+				self?.updateNowPlayingInfoOnMain(
+					time: time,
+					rate: resolvedRate,
+					duration: duration,
+					track: track,
+					playbackState: playbackState
+				)
 			}
 			return
 		}
-		updateNowPlayingInfoOnMain(time: time, rate: resolvedRate, duration: duration, track: track)
+		updateNowPlayingInfoOnMain(
+			time: time,
+			rate: resolvedRate,
+			duration: duration,
+			track: track,
+			playbackState: playbackState
+		)
 	}
 
-	private func updateNowPlayingInfoOnMain(time: Double?, rate: Float, duration: Double?, track: NSDictionary?) {
+	private func updateNowPlayingInfoOnMain(
+		time: Double?,
+		rate: Float,
+		duration: Double?,
+		track: NSDictionary?,
+		playbackState: MPNowPlayingPlaybackState?
+	) {
 		var nowPlayingInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [String: Any]()
 		let previousDefaultRate = lastPublishedCarPlayDefaultPlaybackRate
 
@@ -1461,7 +1503,11 @@ class AudioPro: RCTEventEmitter {
 			}
 		}
 
-		MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+		let center = MPNowPlayingInfoCenter.default()
+		center.nowPlayingInfo = nowPlayingInfo
+		if let playbackState = playbackState {
+			center.playbackState = playbackState
+		}
 	}
 
 	private func applyNowPlayingSeekMetadata(
@@ -1588,6 +1634,15 @@ class AudioPro: RCTEventEmitter {
 		// when MPNowPlayingInfoPropertyDefaultPlaybackRate is correct.
 		commandCenter.changePlaybackRateCommand.isEnabled = true
 		commandCenter.changePlaybackRateCommand.supportedPlaybackRates = carPlaySupportedPlaybackRates
+	}
+
+	private func refreshCarPlayPlaybackRateCommand(_ rates: [NSNumber]? = nil) {
+		let supportedRates = rates ?? carPlaySupportedPlaybackRates
+		DispatchQueue.main.async {
+			let command = MPRemoteCommandCenter.shared().changePlaybackRateCommand
+			command.isEnabled = true
+			command.supportedPlaybackRates = supportedRates
+		}
 	}
 
 	private func remoteCommandIntervalSeconds(_ intervalMs: Double) -> NSNumber {

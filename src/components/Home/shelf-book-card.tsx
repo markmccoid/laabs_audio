@@ -12,6 +12,7 @@ import {
   useSettingsStore,
   type BookProgressTimeDisplay,
 } from "@/store/settings-store";
+import { deriveProgressFillColor } from "@/theme/accent-color";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -26,6 +27,7 @@ import Animated, {
   useSharedValue,
   type SharedValue,
 } from "react-native-reanimated";
+import { useUniwind } from "uniwind";
 import { ShelfBookCardMenu } from "./shelf-book-card-menu";
 
 // ============================================================
@@ -49,6 +51,15 @@ import { ShelfBookCardMenu } from "./shelf-book-card-menu";
 const FADE_END_OFFSET = 0;
 const FADE_DISTANCE = 40;
 const STACKED_BADGE_TOP_OFFSET = 34;
+
+// The progress pill doubles as the progress bar: a fill grows behind the label,
+// so both the fill and the empty track must keep the theme text color readable.
+// "Time listened" fills from the left with a muted accent; "time left" fills
+// from the RIGHT with amber, sized to the remaining fraction.
+const PROGRESS_PILL_COLORS = {
+  dark: { track: "#212D26", remainingFill: "#8A6524" },
+  light: { track: "#E9E3D4", remainingFill: "#E4D3A9" },
+} as const;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
@@ -164,6 +175,10 @@ export const ShelfBookCard = ({
   scrollY,
 }: ShelfBookCardProps) => {
   const themeColors = useThemeColors();
+  const { theme } = useUniwind();
+  const scheme = theme === "dark" ? "dark" : "light";
+  const pillColors = PROGRESS_PILL_COLORS[scheme];
+  const elapsedFillColor = deriveProgressFillColor(themeColors.accent, scheme);
   const coverRef = useRef<View>(null);
   const cardScrollOffset = useSharedValue(-1);
   const defaultProgressTimeDisplay = useSettingsStore(
@@ -193,7 +208,7 @@ export const ShelfBookCard = ({
   const progressPercent = durationSeconds > 0 ? progressSeconds / durationSeconds : 0;
   const visualProgressPercent = progress?.isFinished ? 1 : progressPercent;
   const showProgressLabel = progressSeconds > 0 || Boolean(progress?.isFinished);
-  const showProgressLine = showProgressLabel && durationSeconds > 0;
+  const showProgressFill = showProgressLabel && durationSeconds > 0;
   const progressDisplay =
     progressDisplayState.bookId === book.id &&
     progressDisplayState.defaultDisplay === defaultProgressTimeDisplay
@@ -234,145 +249,158 @@ export const ShelfBookCard = ({
         gap: 7,
       }}
     >
-      <View ref={coverRef} onLayout={measureCover} style={{ width: coverSize, height: coverSize }}>
-        <Link
-          href={{
-            pathname: "/(tabs)/(home)/[libraryItemId]",
-            params: { libraryItemId: book.id },
-          }}
-          asChild
+      <View>
+        <View
+          ref={coverRef}
+          onLayout={measureCover}
+          style={{ width: coverSize, height: coverSize }}
         >
-          <Pressable
-            style={({ pressed }) => ({
-              width: coverSize,
-              height: coverSize,
-              opacity: pressed ? 0.96 : 1,
-            })}
+          <Link
+            href={{
+              pathname: "/(tabs)/(home)/[libraryItemId]",
+              params: { libraryItemId: book.id },
+            }}
+            asChild
           >
-            <CoverImage
-              libraryItemId={book.id}
-              coverUri={book.cover}
-              localCoverUri={coverLocalUri}
-              variant="thumb"
-              showFavoriteIndicator={isFavorite}
-              showFinishedIndicator={showFinishedIndicator}
-              showDownloadedIndicator={isFullyDownloaded}
-              style={{
+            <Pressable
+              style={({ pressed }) => ({
                 width: coverSize,
                 height: coverSize,
-                borderRadius: 8,
-                borderWidth: StyleSheet.hairlineWidth,
-                backgroundColor: themeColors.surface,
-                opacity: showOfflineUnavailable ? 0.55 : 1,
-              }}
-            />
-            {showOfflineUnavailable ? (
+                opacity: pressed ? 0.96 : 1,
+              })}
+            >
               <View
                 style={{
-                  position: "absolute",
-                  top: showFinishedIndicator ? STACKED_BADGE_TOP_OFFSET : 6,
-                  right: 6,
-                  borderRadius: 999,
-                  borderCurve: "continuous",
-                  borderWidth: 1,
+                  width: coverSize,
+                  height: coverSize,
+                  borderRadius: 8,
+                  borderWidth: StyleSheet.hairlineWidth,
                   borderColor: themeColors.border,
-                  backgroundColor: themeColors.surface,
-                  width: 22,
-                  height: 22,
-                  alignItems: "center",
-                  justifyContent: "center",
+                  borderCurve: "continuous",
+                  overflow: "hidden",
                 }}
               >
-                <SymbolView name="wifi.slash" size={12} tintColor={themeColors.textMuted} />
+                <CoverImage
+                  libraryItemId={book.id}
+                  coverUri={book.cover}
+                  localCoverUri={coverLocalUri}
+                  variant="thumb"
+                  showFavoriteIndicator={isFavorite}
+                  showFinishedIndicator={showFinishedIndicator}
+                  showDownloadedIndicator={isFullyDownloaded}
+                  style={{
+                    width: coverSize,
+                    height: coverSize,
+                    borderRadius: 8,
+                    backgroundColor: themeColors.surface,
+                    opacity: showOfflineUnavailable ? 0.55 : 1,
+                  }}
+                />
               </View>
-            ) : null}
-          </Pressable>
-        </Link>
-        {renderMenu ? (
-          <CardMenuOverlay
-            book={book}
-            headerHeight={headerHeight}
-            isFavorite={isFavorite}
-            cardScrollOffset={cardScrollOffset}
-            progress={progress}
-            scrollY={scrollY}
-          />
-        ) : null}
+              {showOfflineUnavailable ? (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: showFinishedIndicator ? STACKED_BADGE_TOP_OFFSET : 6,
+                    right: 6,
+                    borderRadius: 999,
+                    borderCurve: "continuous",
+                    borderWidth: 1,
+                    borderColor: themeColors.border,
+                    backgroundColor: themeColors.surface,
+                    width: 22,
+                    height: 22,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <SymbolView name="wifi.slash" size={12} tintColor={themeColors.textMuted} />
+                </View>
+              ) : null}
+            </Pressable>
+          </Link>
+          {renderMenu ? (
+            <CardMenuOverlay
+              book={book}
+              headerHeight={headerHeight}
+              isFavorite={isFavorite}
+              cardScrollOffset={cardScrollOffset}
+              progress={progress}
+              scrollY={scrollY}
+            />
+          ) : null}
+        </View>
       </View>
-      {showProgressLine ? (
-        <View
-          style={{
-            width: coverSize,
-            height: 5,
+      <Text
+        numberOfLines={2}
+        style={{
+          color: themeColors.text,
+          fontSize: 12,
+          fontWeight: "600",
+          lineHeight: 15,
+          minHeight: 30,
+        }}
+      >
+        {book.title}
+      </Text>
+      {showProgressLabel ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Toggle progress display"
+          onPress={() =>
+            setProgressDisplayState({
+              bookId: book.id,
+              defaultDisplay: defaultProgressTimeDisplay,
+              value: progressDisplay === "elapsed" ? "remaining" : "elapsed",
+            })
+          }
+          style={({ pressed }) => ({
+            width: "100%",
             borderRadius: 999,
             borderCurve: "continuous",
+            borderWidth: 1,
+            borderColor: themeColors.border,
+            backgroundColor: pillColors.track,
+            paddingHorizontal: 9,
+            paddingVertical: 4,
+            opacity: pressed ? 0.82 : 1,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 5,
             overflow: "hidden",
-            backgroundColor: "rgba(148, 163, 184, 0.35)",
-          }}
+          })}
         >
-          <View
-            style={{
-              width: `${visualProgressPercent * 100}%`,
-              height: "100%",
-              backgroundColor: themeColors.accent,
-            }}
-          />
-        </View>
-      ) : null}
-      {/* <Text
-          selectable
-          numberOfLines={1}
-          style={{ color: themeColors.text, fontSize: 11, fontWeight: "600", lineHeight: 16 }}
-        >
-          {book.title}
-        </Text> */}
-      {showProgressLabel ? (
-        <View className="flex-row justify-center">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Toggle progress display"
-            onPress={() =>
-              setProgressDisplayState({
-                bookId: book.id,
-                defaultDisplay: defaultProgressTimeDisplay,
-                value: progressDisplay === "elapsed" ? "remaining" : "elapsed",
-              })
-            }
-            style={({ pressed }) => ({
-              borderRadius: 999,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: isElapsedView ? themeColors.accent : themeColors.border,
-              backgroundColor: isElapsedView ? themeColors.accent : themeColors.bg,
-              paddingHorizontal: 9,
-              paddingVertical: 5,
-              opacity: pressed ? 0.82 : 1,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 5,
-              alignSelf: "flex-start",
-              boxShadow: isElapsedView ? "0 6px 14px rgba(15, 23, 42, 0.18)" : undefined,
-            })}
-          >
-            <SymbolView
-              name={progressDisplay === "elapsed" ? "gauge.with.needle.fill" : "hourglass"}
-              size={13}
-              tintColor={isElapsedView ? themeColors.bg : themeColors.textMuted}
-            />
-            <Text
-              selectable
-              numberOfLines={1}
+          {showProgressFill ? (
+            <View
+              pointerEvents="none"
               style={{
-                fontSize: 11,
-                fontWeight: "700",
-                color: isElapsedView ? themeColors.bg : themeColors.textMuted,
-                fontVariant: ["tabular-nums"],
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                ...(isElapsedView ? { left: 0 } : { right: 0 }),
+                width: `${(isElapsedView ? visualProgressPercent : 1 - visualProgressPercent) * 100}%`,
+                backgroundColor: isElapsedView ? elapsedFillColor : pillColors.remainingFill,
               }}
-            >
-              {progressLabel}
-            </Text>
-          </Pressable>
-        </View>
+            />
+          ) : null}
+          <SymbolView
+            name={progressDisplay === "elapsed" ? "gauge.with.needle.fill" : "hourglass"}
+            size={11}
+            tintColor={themeColors.text}
+          />
+          <Text
+            selectable
+            numberOfLines={1}
+            style={{
+              fontSize: 10.5,
+              fontWeight: "700",
+              color: themeColors.text,
+              fontVariant: ["tabular-nums"],
+            }}
+          >
+            {progressLabel}
+          </Text>
+        </Pressable>
       ) : null}
     </View>
   );

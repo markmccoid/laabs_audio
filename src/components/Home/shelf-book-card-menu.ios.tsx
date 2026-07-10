@@ -1,3 +1,4 @@
+import { usePlaybackStore } from "@/player";
 import { Button, Host, Menu } from "@expo/ui/swift-ui";
 import { buttonStyle, disabled, labelStyle } from "@expo/ui/swift-ui/modifiers";
 import {
@@ -6,6 +7,8 @@ import {
 } from "./shelf-book-card-menu-shared";
 
 export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
+  const loadedLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const isLoadedBook = loadedLibraryItemId === props.book.id;
   const {
     continueListeningVisibilityIcon,
     continueListeningVisibilityLabel,
@@ -37,7 +40,7 @@ export const ShelfBookCardMenu = (props: ShelfBookCardMenuProps) => {
     <Host matchContents>
       <Menu
         label="Book actions"
-        systemImage="ellipsis"
+        systemImage={isLoadedBook ? "waveform.low" : "ellipsis"}
         modifiers={[buttonStyle("glass"), labelStyle("iconOnly")]}
       >
         <Button

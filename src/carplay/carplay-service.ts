@@ -1,25 +1,33 @@
 import { NativeEventEmitter, NativeModules, Platform } from "react-native";
 import type { UserBookProgress } from "../api/me-api";
+import { authStore } from "../auth/auth-store";
 import type { HomeShelf } from "../hooks/use-home-shelves";
 import { playbackStore } from "../player/playback-store";
 import { playerService } from "../player/player-service";
 import {
 	deviceBooksStore,
 	selectHasPlayableBookDownload,
+	toHomeShelfScopeKey,
 } from "../store/device-books-store";
 import { toDownloadedBookSummary } from "../store/downloaded-book-helpers";
 import { mmkvStorage } from "../store/mmkv-storage";
-import { clampPlaybackRateToRange, settingsStore } from "../store/settings-store";
+import {
+	clampPlaybackRateToRange,
+	selectHomeShelfSettings,
+	settingsStore,
+} from "../store/settings-store";
 import {
 	getCarPlayResumeSnapshotMap,
 	recordCarPlayProgressSnapshotMap,
 	recordCarPlayResumeSnapshot,
+	type CarPlayResumeRecord,
 } from "./carplay-resume-snapshot";
 import {
 	buildCarPlayShelves,
 	formatCarPlayTimeLabel,
 	normalizeCarPlayCoverUrl,
 	overlayCarPlayShelfProgress,
+	promoteCarPlayContinueListeningBook,
 	type CarPlayShelfPayload,
 } from "./carplay-shelf-labels";
 
@@ -57,7 +65,7 @@ const SNAPSHOT_KEY = "carplay-shelves-snapshot-v1";
 // Logged at init so a device capture proves WHICH build is running — a stale
 // install burned a whole hardware test session on 2026-07-03. Bump on every
 // CarPlay-affecting change.
-const CARPLAY_SERVICE_BUILD = "attempt-i-20260705";
+const CARPLAY_SERVICE_BUILD = "attempt-m-20260707";
 
 let initialized = false;
 let isConnected = false;
@@ -173,6 +181,42 @@ const persistShelvesSnapshot = () => {
 	void Promise.resolve(mmkvStorage.setItem(SNAPSHOT_KEY, JSON.stringify(shelves))).catch(
 		() => {},
 	);
+};
+
+const getContinueListeningShelfSettings = () => {
+	const { activeLibraryUserKey, activeLibraryId } = authStore.getState();
+	const scopeKey = toHomeShelfScopeKey(activeLibraryUserKey, activeLibraryId);
+	return selectHomeShelfSettings(settingsStore.getState(), scopeKey, "continueListening");
+};
+
+const promoteActivePlaybackInContinueListening = (
+	state: ReturnType<typeof playbackStore.getState>,
+	resumeRecord: CarPlayResumeRecord,
+) => {
+	if (!state.libraryItemId) return false;
+	const currentTrack = state.queue[state.currentTrackIndex] ?? state.queue[0];
+	const shelfSettings = getContinueListeningShelfSettings();
+	const nextShelves = promoteCarPlayContinueListeningBook(
+		shelves,
+		{
+			id: state.libraryItemId,
+			title: state.bookTitle ?? currentTrack?.title ?? "Untitled",
+			author: currentTrack?.author,
+			coverUrl: currentTrack?.artworkUri,
+			currentTimeSeconds: resumeRecord.currentTimeSeconds,
+			durationSeconds: resumeRecord.durationSeconds,
+			isFinished: resumeRecord.isFinished,
+		},
+		getProgressTimeDisplay(),
+		{
+			isVisible: shelfSettings.isVisible,
+			maxBooks: shelfSettings.homeItemCount,
+		},
+	);
+	if (nextShelves === shelves) return false;
+	shelves = nextShelves;
+	persistShelvesSnapshot();
+	return true;
 };
 
 const refreshShelfProgressLabels = (
@@ -450,7 +494,9 @@ export const initCarPlayService = () => {
 				updatedAt: Date.now(),
 			};
 			recordCarPlayResumeSnapshot(resumeRecord);
-			if (refreshShelfProgressLabels({ [state.libraryItemId]: resumeRecord }) && isConnected) {
+			const didPromote = promoteActivePlaybackInContinueListening(state, resumeRecord);
+			const didRefresh = refreshShelfProgressLabels({ [state.libraryItemId]: resumeRecord });
+			if ((didPromote || didRefresh) && isConnected) {
 				pushShelvesToNative();
 			}
 		}

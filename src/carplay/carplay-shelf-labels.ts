@@ -20,6 +20,16 @@ export type CarPlayShelfPayload = {
 	books: CarPlayBookPayload[];
 };
 
+export type CarPlayContinueListeningBookInput = {
+	id: string;
+	title: string;
+	author?: string | null;
+	coverUrl?: string | null;
+	currentTimeSeconds: number;
+	durationSeconds: number;
+	isFinished: boolean;
+};
+
 // Same "Xh YYm" format as the phone's shelf cards (shelf-book-card.tsx).
 export const formatCarPlayDurationBadge = (durationSeconds: number): string => {
 	const seconds = Math.max(0, Math.floor(durationSeconds));
@@ -155,4 +165,76 @@ export const overlayCarPlayShelfProgress = (
 	});
 
 	return didChange ? nextShelves : shelves;
+};
+
+export const promoteCarPlayContinueListeningBook = (
+	shelves: CarPlayShelfPayload[],
+	book: CarPlayContinueListeningBookInput,
+	display: BookProgressTimeDisplay,
+	options: { isVisible: boolean; maxBooks: number },
+): CarPlayShelfPayload[] => {
+	const existingIndex = shelves.findIndex((shelf) => shelf.id === "continueListening");
+	const existingShelf = existingIndex >= 0 ? shelves[existingIndex] : null;
+	const maxBooks = Math.max(1, Math.floor(options.maxBooks));
+	const isCandidate =
+		options.isVisible &&
+		book.id.length > 0 &&
+		book.currentTimeSeconds > 0 &&
+		!book.isFinished;
+
+	if (!isCandidate) {
+		if (!existingShelf?.books.some((candidate) => candidate.id === book.id)) {
+			return shelves;
+		}
+		const nextBooks = existingShelf.books.filter((candidate) => candidate.id !== book.id);
+		if (nextBooks.length === existingShelf.books.length) return shelves;
+		const nextShelves =
+			nextBooks.length > 0
+				? shelves.map((shelf, index) =>
+						index === existingIndex ? { ...existingShelf, books: nextBooks } : shelf,
+					)
+				: shelves.filter((_, index) => index !== existingIndex);
+		return nextShelves;
+	}
+
+	const timeLabel = formatCarPlayTimeLabel(
+		book.currentTimeSeconds,
+		book.durationSeconds,
+		false,
+		display,
+	);
+	const promotedBook: CarPlayBookPayload = {
+		id: book.id,
+		title: book.title,
+		author: book.author,
+		detail: formatCarPlayBookDetail(book.author, timeLabel),
+		subtitle: timeLabel ?? undefined,
+		coverUrl: normalizeCarPlayCoverUrl(book.coverUrl),
+	};
+	const previousBooks = existingShelf?.books ?? [];
+	const nextBooks = [
+		promotedBook,
+		...previousBooks.filter((candidate) => candidate.id !== book.id),
+	].slice(0, maxBooks);
+	const nextShelf: CarPlayShelfPayload = {
+		id: "continueListening",
+		title: existingShelf?.title ?? "Continue Listening",
+		books: nextBooks,
+	};
+
+	if (!existingShelf) {
+		return [nextShelf, ...shelves];
+	}
+
+	const didBookAlreadyLead =
+		previousBooks[0]?.id === promotedBook.id &&
+		previousBooks[0]?.title === promotedBook.title &&
+		previousBooks[0]?.author === promotedBook.author &&
+		previousBooks[0]?.detail === promotedBook.detail &&
+		previousBooks[0]?.subtitle === promotedBook.subtitle &&
+		previousBooks[0]?.coverUrl === promotedBook.coverUrl &&
+		previousBooks.length === nextBooks.length;
+	if (didBookAlreadyLead) return shelves;
+
+	return shelves.map((shelf, index) => (index === existingIndex ? nextShelf : shelf));
 };

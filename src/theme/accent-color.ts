@@ -83,6 +83,31 @@ export const getAccentForegroundColor = (accentColor: string) => {
 const lightenChannel = (channel: number, amount: number) =>
   Math.round(channel + (255 - channel) * amount);
 
+const darkenChannel = (channel: number, amount: number) => Math.round(channel * (1 - amount));
+
+const PROGRESS_FILL_DARKEN_AMOUNT = 0.25;
+const PROGRESS_FILL_LIGHTEN_AMOUNT = 0.72;
+
+/**
+ * Muted accent used as the progress-pill fill: darkened in dark theme, lifted
+ * toward white in light theme, so the theme text color stays >= 4.5:1 on top of
+ * it as well as on the empty track behind it.
+ */
+export const deriveProgressFillColor = (accentColor: string, theme: AccentThemeName) => {
+  const normalizedAccent = normalizeAccentHex(accentColor) ?? DEFAULT_ACCENT_BY_THEME[theme];
+  const red = Number.parseInt(normalizedAccent.slice(1, 3), 16);
+  const green = Number.parseInt(normalizedAccent.slice(3, 5), 16);
+  const blue = Number.parseInt(normalizedAccent.slice(5, 7), 16);
+  const transform =
+    theme === "dark"
+      ? (channel: number) => darkenChannel(channel, PROGRESS_FILL_DARKEN_AMOUNT)
+      : (channel: number) => lightenChannel(channel, PROGRESS_FILL_LIGHTEN_AMOUNT);
+
+  return `#${[transform(red), transform(green), transform(blue)]
+    .map((value) => value.toString(16).padStart(2, "0").toUpperCase())
+    .join("")}`;
+};
+
 export const deriveDarkAccentFromLight = (lightAccentColor: string) => {
   const normalizedAccent = normalizeAccentHex(lightAccentColor) ?? DEFAULT_LIGHT_ACCENT_COLOR;
   const red = Number.parseInt(normalizedAccent.slice(1, 3), 16);
