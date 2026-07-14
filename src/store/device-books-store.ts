@@ -995,11 +995,11 @@ const deleteAllBookDownloads = async () => {
   }
 };
 
-const downloadCoverImage = async (libraryItemId: string) => {
+const downloadCoverImage = async (libraryItemId: string, version?: number | null) => {
   try {
     // Covers are part of the offline payload and live beside the downloaded audio files.
     const token = authStore.getState().accessToken;
-    const coverUrls = buildCoverUrls(libraryItemId, { token });
+    const coverUrls = buildCoverUrls(libraryItemId, { token, version });
     const dir = await ensureDownloadDir(libraryItemId);
     const attemptDownload = async (url: string | null) => {
       if (!url) return null;
@@ -3637,7 +3637,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               sourceBookRoute,
             });
             logDownload("cover:start", { libraryItemId, token: myToken });
-            const coverRelativePath = await downloadCoverImage(libraryItemId);
+            const coverRelativePath = await downloadCoverImage(libraryItemId, details.updatedAt);
             if (!isTokenActive()) {
               logDownload("token:stale-after-cover", { libraryItemId, token: myToken });
               return;

@@ -1,3 +1,4 @@
+import { versionCoverUrl } from "@/api/cover-urls";
 import type { LibraryItemSummary, LibraryItemsSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
 import { type Db, getDb, initializeShadowDatabaseInternal } from "./shadow-db-core";
@@ -52,7 +53,12 @@ const addSummaryRows = (
 ) => {
   const summaries: LibraryItemSummary[] = [];
   for (const row of rows) {
-    const summary = JSON.parse(row.summary_json) as LibraryItemSummary;
+    const parsed = JSON.parse(row.summary_json) as LibraryItemSummary;
+    const summary = {
+      ...parsed,
+      cover: versionCoverUrl(parsed.cover, parsed.updatedAt),
+      coverFull: versionCoverUrl(parsed.coverFull, parsed.updatedAt),
+    };
     catalogById.set(summary.id, summary);
     summaries.push(summary);
   }

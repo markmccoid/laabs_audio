@@ -281,7 +281,7 @@ export const meApi = {
       if (!book) continue;
       if (book.libraryId !== libraryIdToUse) continue;
 
-      const coverUrls = buildCoverUrls(book.id);
+      const coverUrls = buildCoverUrls(book.id, { version: book.updatedAt });
 
       itemsInProgress.push({
         progressId: mediaMatch?.id,

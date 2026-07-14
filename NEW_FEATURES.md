@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-13` `pending` - Refresh cached cover artwork when server images change.
+  Tester focus: change a book cover on the server, refresh or switch libraries, and verify home shelves, library/search lists, detail views, and player artwork update to the new image; downloaded local covers should still keep their local artwork until they are replaced.
 - `2026-07-09` `pending` - Fix malformed iOS share sheet after CarPlay scene setup.
   Tester focus: open a book action menu, choose Share Book, and verify the iOS share sheet appears as a normal full-width bottom sheet instead of a clipped right-side panel; verify the phone app still launches normally with CarPlay support enabled.
 - `2026-07-05` `pending` - Refresh CarPlay shelf time-left labels during headless playback.

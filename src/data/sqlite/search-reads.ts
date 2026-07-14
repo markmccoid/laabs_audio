@@ -1,3 +1,4 @@
+import { versionCoverUrl } from "@/api/cover-urls";
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import { getDb, initializeShadowDatabaseInternal } from "./shadow-db-core";
 import { buildSearchExpression, type ShadowSearchParams } from "./search-expression";
@@ -16,6 +17,15 @@ type SearchRow = {
   summary_json: string;
   is_favorite?: number;
   is_finished?: number;
+};
+
+const parseSummary = (summaryJson: string): LibraryItemSummary => {
+  const summary = JSON.parse(summaryJson) as LibraryItemSummary;
+  return {
+    ...summary,
+    cover: versionCoverUrl(summary.cover, summary.updatedAt),
+    coverFull: versionCoverUrl(summary.coverFull, summary.updatedAt),
+  };
 };
 
 export type ShadowSearchResult = {
@@ -68,7 +78,7 @@ export const getShadowItemSummariesByIds = async (
     );
 
     for (const row of rows) {
-      itemById.set(row.library_item_id, JSON.parse(row.summary_json) as LibraryItemSummary);
+      itemById.set(row.library_item_id, parseSummary(row.summary_json));
     }
   }
 
@@ -99,7 +109,7 @@ export const runShadowSearchTest = async (
   const sqlElapsedMs = now() - sqlStarted;
 
   const mapStarted = now();
-  const summaries = rows.map((row) => JSON.parse(row.summary_json) as LibraryItemSummary);
+  const summaries = rows.map((row) => parseSummary(row.summary_json));
   const mapElapsedMs = now() - mapStarted;
 
   const [activeCatalogRows, missingCatalogRows, progressRows, favoriteRows, localBookmarkRows] =

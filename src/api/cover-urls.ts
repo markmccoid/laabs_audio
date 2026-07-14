@@ -8,6 +8,7 @@ export type CoverUrlOptions = {
   width?: number;
   token?: string | null;
   serverUrl?: string | null;
+  version?: string | number | null;
 };
 
 export type CoverUrls = {
@@ -15,6 +16,19 @@ export type CoverUrls = {
   full: string;
   thumbWithToken: string | null;
   fullWithToken: string | null;
+};
+
+export const versionCoverUrl = (
+  uri: string,
+  version: string | number | null | undefined,
+) => {
+  if (version === null || version === undefined) return uri;
+
+  const encodedVersion = encodeURIComponent(String(version));
+  const versionedExistingUri = uri.replace(/([?&])v=[^&]*/, `$1v=${encodedVersion}`);
+  if (versionedExistingUri !== uri) return versionedExistingUri;
+
+  return `${uri}${uri.includes("?") ? "&" : "?"}v=${encodedVersion}`;
 };
 
 export const buildCoverUrls = (itemId: string, options: CoverUrlOptions = {}): CoverUrls => {
@@ -27,9 +41,14 @@ export const buildCoverUrls = (itemId: string, options: CoverUrlOptions = {}): C
   const base = authService.normalizeServerUrl(serverUrl);
   const format = options.format ?? "webp";
   const width = options.width ?? 240;
-
-  const thumb = `${base}/api/items/${itemId}/cover?format=${format}&width=${width}`;
-  const full = `${base}/api/items/${itemId}/cover?format=${format}`;
+  const thumb = versionCoverUrl(
+    `${base}/api/items/${itemId}/cover?format=${format}&width=${width}`,
+    options.version,
+  );
+  const full = versionCoverUrl(
+    `${base}/api/items/${itemId}/cover?format=${format}`,
+    options.version,
+  );
 
   const token = options.token?.trim() ? options.token.trim() : null;
   const thumbWithToken = token ? `${thumb}&token=${token}` : null;

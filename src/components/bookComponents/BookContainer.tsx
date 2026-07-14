@@ -10,6 +10,7 @@ import {
   useGetUserServerState,
   useReconcileBookProgress,
 } from "@/hooks/abs-data-hooks";
+import type { BookDetailRouteSource } from "@/navigation/book-links";
 import { usePlaybackStore } from "@/player";
 import { shareBook } from "@/sharing/book-share";
 import {
@@ -212,8 +213,13 @@ const BookContainer = ({ libraryItemId }: Props) => {
     }
     return hasPlayableLocalDownload ? "Local" : "Stream";
   }, [currentTrackIndex, hasPlayableLocalDownload, isOffline, isViewedBookActive, queue]);
-  const sourceTab = useMemo<"home" | "search">(
-    () => (segments.some((segment) => segment === "search") ? "search" : "home"),
+  const sourceTab = useMemo<BookDetailRouteSource>(
+    () =>
+      segments.some((segment) => segment === "search")
+        ? "search"
+        : segments.some((segment) => segment === "library")
+          ? "library"
+          : "home",
     [segments],
   );
   const menuBook = useMemo<LibraryItemSummary>(
@@ -316,6 +322,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
       author,
       coverUri: coverURL,
       localCoverUri,
+      version: bookData?.updatedAt,
     });
   };
 

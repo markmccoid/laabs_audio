@@ -32,6 +32,13 @@ const getPreferredMode = (preferTokened: boolean, hasTokenedRemote: boolean): Co
   return "remote-tokenless";
 };
 
+const addAccessToken = (uri: string, accessToken?: string | null) => {
+  const token = accessToken?.trim();
+  if (!token || /(?:[?&])token=/.test(uri)) return uri;
+
+  return `${uri}${uri.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+};
+
 export const resolveCoverImageCandidates = ({
   accessToken,
   coverUri,
@@ -60,10 +67,12 @@ export const resolveCoverImageCandidates = ({
 
   if (libraryItemId && serverUrl) {
     const urls = buildCoverUrls(libraryItemId, { token: accessToken, serverUrl });
+    const preferredRemoteUri = coverUri?.trim() || (variant === "thumb" ? urls.thumb : urls.full);
+
     return {
       localUri: null,
-      tokenlessRemoteUri: variant === "thumb" ? urls.thumb : urls.full,
-      tokenedRemoteUri: variant === "thumb" ? urls.thumbWithToken : urls.fullWithToken,
+      tokenlessRemoteUri: preferredRemoteUri,
+      tokenedRemoteUri: accessToken ? addAccessToken(preferredRemoteUri, accessToken) : null,
     };
   }
 

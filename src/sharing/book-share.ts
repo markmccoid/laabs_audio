@@ -11,12 +11,16 @@ export type ShareBookParams = {
   author?: string | null;
   coverUri?: string | null;
   localCoverUri?: string | null;
+  version?: string | number | null;
 };
 
-const resolveRemoteCoverUri = ({ libraryItemId }: Pick<ShareBookParams, "libraryItemId">) => {
+const resolveRemoteCoverUri = ({
+  libraryItemId,
+  version,
+}: Pick<ShareBookParams, "libraryItemId" | "version">) => {
   const accessToken = authStore.getState().accessToken;
   const useTokenWithCoverImages = settingsStore.getState().useTokenWithCoverImages;
-  const coverUrls = buildCoverUrls(libraryItemId, { token: accessToken });
+  const coverUrls = buildCoverUrls(libraryItemId, { token: accessToken, version });
 
   return useTokenWithCoverImages && coverUrls.fullWithToken ? coverUrls.fullWithToken : coverUrls.full;
 };

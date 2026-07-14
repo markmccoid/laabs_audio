@@ -2010,6 +2010,7 @@ class PlayerService {
       try {
         const artworkUrls = buildCoverUrls(libraryItemId, {
           token: authStore.getState().accessToken,
+          version: details.updatedAt,
         });
         return artworkUrls.fullWithToken ?? artworkUrls.full;
       } catch {

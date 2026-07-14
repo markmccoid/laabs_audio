@@ -33,7 +33,7 @@ export const itemsApi = {
       authorBookCount = authorResponse.libraryItems.length;
     }
 
-    const coverUrls = buildCoverUrls(response.id);
+    const coverUrls = buildCoverUrls(response.id, { version: response.updatedAt });
 
     return {
       id: response.id,

@@ -66,7 +66,7 @@ const requireLibraryId = (libraryId: string, requestName: string) => {
 
 export const libraryItemsApi = {
   toSummary(item: LibraryItem): LibraryItemSummary {
-    const coverUrls = buildCoverUrls(item.id);
+    const coverUrls = buildCoverUrls(item.id, { version: item.updatedAt });
 
     return {
       id: item.id,
@@ -169,7 +169,7 @@ export const libraryItemsApi = {
     const resultMap = new Map<string, FavoriteOrFinishedItem>();
 
     const mergeItem = (item: LibraryItem, type: "isFavorite" | "isRead") => {
-      const coverUrls = buildCoverUrls(item.id);
+      const coverUrls = buildCoverUrls(item.id, { version: item.updatedAt });
 
       const existing = resultMap.get(item.id);
       if (existing) {

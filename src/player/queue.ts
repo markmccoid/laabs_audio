@@ -17,6 +17,7 @@ export const buildPlaybackQueue = (session: AudiobookSession) => {
   const libraryItemId = session.libraryItem.id;
   const artworkUrls = buildCoverUrls(libraryItemId, {
     token: authStore.getState().accessToken,
+    version: session.libraryItem.updatedAt,
   });
   const artworkUri = artworkUrls.fullWithToken ?? artworkUrls.full;
 
