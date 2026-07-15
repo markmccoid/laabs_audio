@@ -1,7 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 const DATABASE_NAME = "laabs-shadow-library.db";
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS libraries (
   media_type TEXT,
   last_catalog_refresh_at INTEGER,
   last_overlay_refresh_at INTEGER,
+  last_collections_refresh_at INTEGER,
+  last_series_refresh_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, library_id)
@@ -287,6 +289,59 @@ CREATE TABLE IF NOT EXISTS item_detail_snapshots (
   PRIMARY KEY (user_id, library_item_id)
 );
 
+CREATE TABLE IF NOT EXISTS library_collections (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  collection_id TEXT NOT NULL,
+  server_user_id TEXT,
+  name TEXT NOT NULL,
+  description TEXT,
+  created_at_server INTEGER,
+  updated_at_server INTEGER,
+  last_seen_at INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, collection_id)
+);
+
+CREATE TABLE IF NOT EXISTS library_collection_memberships (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  collection_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  observed_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, collection_id, position)
+);
+
+CREATE TABLE IF NOT EXISTS library_series (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  series_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  name_sort TEXT NOT NULL,
+  added_at_server INTEGER,
+  total_duration REAL,
+  last_seen_at INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, series_id)
+);
+
+CREATE TABLE IF NOT EXISTS library_series_memberships (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  series_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  sequence TEXT,
+  sequence_number REAL,
+  source_position INTEGER NOT NULL,
+  observed_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, series_id, library_item_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_catalog_added
   ON library_catalog_items(user_id, library_id, is_missing, added_at);
 CREATE INDEX IF NOT EXISTS idx_catalog_title
@@ -311,6 +366,14 @@ CREATE INDEX IF NOT EXISTS idx_local_bookmarks_lookup
   ON local_bookmarks(user_id, library_item_id, start_time_seconds);
 CREATE INDEX IF NOT EXISTS idx_favorites_lookup
   ON user_favorites(user_id, library_item_id);
+CREATE INDEX IF NOT EXISTS idx_library_collections_name
+  ON library_collections(user_id, library_id, name, collection_id);
+CREATE INDEX IF NOT EXISTS idx_collection_memberships_item
+  ON library_collection_memberships(user_id, library_id, library_item_id, collection_id);
+CREATE INDEX IF NOT EXISTS idx_library_series_name
+  ON library_series(user_id, library_id, name_sort, series_id);
+CREATE INDEX IF NOT EXISTS idx_series_memberships_sequence
+  ON library_series_memberships(user_id, library_id, series_id, sequence_number, sequence, source_position);
 
 CREATE TABLE IF NOT EXISTS timing_logs (
   id TEXT PRIMARY KEY NOT NULL,
@@ -346,6 +409,12 @@ export const initializeShadowDatabaseInternal = async () => {
   `).catch(() => undefined);
   await db.execAsync(`
     ALTER TABLE library_refresh_runs ADD COLUMN finalize_elapsed_ms INTEGER;
+  `).catch(() => undefined);
+  await db.execAsync(`
+    ALTER TABLE libraries ADD COLUMN last_collections_refresh_at INTEGER;
+  `).catch(() => undefined);
+  await db.execAsync(`
+    ALTER TABLE libraries ADD COLUMN last_series_refresh_at INTEGER;
   `).catch(() => undefined);
   if (!shadowSqliteRuntimeState.didEnsureEffectiveProgressView) {
     await db.execAsync(`

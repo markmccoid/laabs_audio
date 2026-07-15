@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-15` `pending` - Build out Lists browsing with Series, Collections, and Playlists.
+  Tester focus: verify the former Library tab appears as Lists; verify Series, Collections, and Playlists load from Audiobookshelf and cached SQLite data; verify Series rows show stacked covers and book counts, pull-down search filters series names, and opening any list pushes a normal card with the shared book list rows and actions.
 - `2026-07-13` `pending` - Refresh cached cover artwork when server images change.
   Tester focus: change a book cover on the server, refresh or switch libraries, and verify home shelves, library/search lists, detail views, and player artwork update to the new image; downloaded local covers should still keep their local artwork until they are replaced.
 - `2026-07-09` `pending` - Fix malformed iOS share sheet after CarPlay scene setup.

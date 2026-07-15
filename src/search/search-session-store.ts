@@ -1,9 +1,10 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { mmkvStorage } from "@/store/mmkv-storage";
+import type { CatalogSortBy, CatalogSortDirection } from "@/sort/catalog-sort";
 
-export type SearchSortBy = "addedAt" | "author" | "title" | "duration" | "publishedYear";
-export type SearchSortDirection = "asc" | "desc";
+export type SearchSortBy = CatalogSortBy;
+export type SearchSortDirection = CatalogSortDirection;
 export type SearchFilterOperator = "and" | "or";
 export type SearchFavoriteFilter = "all" | "only" | "exclude";
 export type SearchResultsViewMode = "list" | "grid";

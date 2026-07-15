@@ -3,7 +3,7 @@ import type { UserBookProgress } from "@/api/me-api";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList, FlashListRef } from "@shopify/flash-list";
 import type { RefObject } from "react";
-import { useDeferredValue, useMemo } from "react";
+import { useCallback, useDeferredValue, useMemo } from "react";
 import { Text } from "react-native";
 import { BookshelfBuiltInItem } from "./bookshelf-built-in-item";
 
@@ -54,7 +54,8 @@ export const BookshelfBuiltInList = ({
     return searchableBooks
       .filter(
         ({ normalizedTitle, normalizedAuthor }) =>
-          normalizedTitle.includes(normalizedQuery) || normalizedAuthor.includes(normalizedQuery),
+          normalizedTitle.includes(normalizedQuery) ||
+          normalizedAuthor.includes(normalizedQuery),
       )
       .map(({ book }) => book);
   }, [books, normalizedQuery, searchableBooks]);
@@ -70,6 +71,17 @@ export const BookshelfBuiltInList = ({
     }),
     [favoriteByBookId, isOffline, progressByBookId],
   );
+  const renderBuiltInItem = useCallback(
+    ({ item }: { item: LibraryItemSummary }) => (
+      <BookshelfBuiltInItem
+        book={item}
+        isFavorite={Boolean(favoriteByBookId[item.id])}
+        isOffline={isOffline}
+        progress={progressByBookId[item.id]}
+      />
+    ),
+    [favoriteByBookId, isOffline, progressByBookId],
+  );
 
   return (
     <FlashList
@@ -77,14 +89,7 @@ export const BookshelfBuiltInList = ({
       data={filteredBooks}
       extraData={listExtraData}
       keyExtractor={(book) => book.id}
-      renderItem={({ item }) => (
-        <BookshelfBuiltInItem
-          book={item}
-          isFavorite={Boolean(favoriteByBookId[item.id])}
-          isOffline={isOffline}
-          progress={progressByBookId[item.id]}
-        />
-      )}
+      renderItem={renderBuiltInItem}
       ListEmptyComponent={
         <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
           {listEmptyMessage}

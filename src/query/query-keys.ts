@@ -37,6 +37,70 @@ export const queryKeys = {
     itemIds: readonly string[],
   ) =>
     ["sqlite", "catalog", "user", userKey ?? null, "library", libraryId ?? null, "itemSummaries", itemIds] as const,
+  sqliteCollections: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+  ) =>
+    ["sqlite", "catalog", "user", userKey ?? null, "library", libraryId ?? null, "collections"] as const,
+  sqliteCollectionBookIds: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+    collectionId: string | null | undefined,
+    snapshotVersion?: number,
+  ) =>
+    [
+      "sqlite",
+      "catalog",
+      "user",
+      userKey ?? null,
+      "library",
+      libraryId ?? null,
+      "collection",
+      collectionId ?? null,
+      "bookIds",
+      snapshotVersion ?? 0,
+    ] as const,
+  sqliteCollectionBookIdsForCollections: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+    collectionIds: readonly string[],
+    snapshotVersion?: number,
+  ) =>
+    [
+      "sqlite",
+      "catalog",
+      "user",
+      userKey ?? null,
+      "library",
+      libraryId ?? null,
+      "collectionBookIds",
+      collectionIds,
+      snapshotVersion ?? 0,
+    ] as const,
+  sqliteSeries: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+  ) => ["sqlite", "catalog", "user", userKey ?? null, "library", libraryId ?? null, "series"] as const,
+  sqliteSeriesBookIds: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+    seriesId: string | null | undefined,
+    snapshotVersion?: number,
+  ) =>
+    [
+      "sqlite", "catalog", "user", userKey ?? null, "library", libraryId ?? null,
+      "series", seriesId ?? null, "bookIds", snapshotVersion ?? 0,
+    ] as const,
+  sqliteSeriesBookIdsForSeries: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+    seriesIds: readonly string[],
+    snapshotVersion?: number,
+  ) =>
+    [
+      "sqlite", "catalog", "user", userKey ?? null, "library", libraryId ?? null,
+      "seriesBookIds", seriesIds, snapshotVersion ?? 0,
+    ] as const,
   itemDetails: (
     userKey: string | null | undefined,
     itemId: string | null | undefined,

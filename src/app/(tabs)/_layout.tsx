@@ -46,10 +46,10 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="house.fill" md="home" />
       </NativeTabs.Trigger>
-      {/* <NativeTabs.Trigger name="library">
-        <NativeTabs.Trigger.Icon sf="book.fill" md="settings" />
-        <NativeTabs.Trigger.Label>Library</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger> */}
+      <NativeTabs.Trigger name="library">
+        <NativeTabs.Trigger.Label>Lists</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="books.vertical.fill" md="library_books" />
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <NativeTabs.Trigger.Icon sf="gear" md="settings" />
         <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>

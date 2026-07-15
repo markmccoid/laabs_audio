@@ -8,10 +8,7 @@ import { SymbolView } from "expo-symbols";
 import { useEffect, useMemo, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
-import Animated, {
-  FadeInRight,
-  LinearTransition,
-} from "react-native-reanimated";
+import Animated, { FadeInRight, LinearTransition } from "react-native-reanimated";
 import { ShelfBookCard } from "./shelf-book-card";
 
 type HomeShelfSectionProps = {
@@ -54,13 +51,9 @@ export const HomeShelfSection = ({
   const themeColors = useThemeColors();
   const hasBooks = books.length > 0;
   const seenBookIdsRef = useRef<Set<string>>(new Set());
-  const [enteringEnabled, setEnteringEnabled] = useRecyclingState(
-    false,
-    [shelfId],
-    () => {
-      seenBookIdsRef.current = new Set();
-    },
-  );
+  const [enteringEnabled, setEnteringEnabled] = useRecyclingState(false, [shelfId], () => {
+    seenBookIdsRef.current = new Set();
+  });
   useEffect(() => {
     // Every id that has appeared on this shelf is "seen"; FlatList mounting a
     // seen card lazily (windowing) must not replay its entering animation.
@@ -88,7 +81,7 @@ export const HomeShelfSection = ({
   );
 
   return (
-    <View style={{ gap: 12 }}>
+    <View style={{ gap: 12 }} className="mb-3">
       <View className="flex-row items-center justify-between px-[18] py-[1]">
         <View className="pl-4 pr-10 rounded-xl overflow-hidden border-hairline border-accent border-t-0 border-l-0 border-r-0">
           {/* <LinearGradient
@@ -127,11 +120,7 @@ export const HomeShelfSection = ({
                 justifyContent: "center",
               }}
             >
-              <SymbolView
-                name="arrow.clockwise"
-                tintColor={themeColors.textMuted}
-                size={16}
-              />
+              <SymbolView name="arrow.clockwise" tintColor={themeColors.textMuted} size={16} />
             </Pressable>
           ) : null}
           {hasBooks ? (
@@ -150,11 +139,7 @@ export const HomeShelfSection = ({
                   justifyContent: "center",
                 }}
               >
-                <SymbolView
-                  name="chevron.right"
-                  tintColor={themeColors.textMuted}
-                  size={14}
-                />
+                <SymbolView name="chevron.right" tintColor={themeColors.textMuted} size={14} />
               </Pressable>
             </Link>
           ) : null}
@@ -178,19 +163,15 @@ export const HomeShelfSection = ({
             extraData={listExtraData}
             horizontal
             keyExtractor={(book) => book.id}
-            itemLayoutAnimation={
-              enteringEnabled ? LinearTransition.duration(220) : undefined
-            }
+            itemLayoutAnimation={enteringEnabled ? LinearTransition.duration(220) : undefined}
             renderItem={({ item, index }) => {
-              const isNewArrival =
-                enteringEnabled && !seenBookIdsRef.current.has(item.id);
+              const isNewArrival = enteringEnabled && !seenBookIdsRef.current.has(item.id);
               return (
                 <Animated.View
                   entering={
                     isNewArrival
                       ? FadeInRight.duration(260).delay(
-                          Math.min(index, ENTERING_MAX_STAGGERED_ITEMS) *
-                            ENTERING_STAGGER_MS,
+                          Math.min(index, ENTERING_MAX_STAGGERED_ITEMS) * ENTERING_STAGGER_MS,
                         )
                       : undefined
                   }

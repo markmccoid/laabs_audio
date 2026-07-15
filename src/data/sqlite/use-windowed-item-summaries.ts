@@ -2,7 +2,7 @@ import type { LibraryItemSummary } from "@/api/library-items-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { queryKeys } from "@/query/query-keys";
 import { useQueries } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sqliteSearchRepository } from "./search-repository";
 
 // Resolves Search Result Set ids to display summaries in viewport-sized
@@ -19,15 +19,16 @@ export const useWindowedItemSummaries = (resultIds: string[]) => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const [maxViewedIndex, setMaxViewedIndex] = useState(0);
+  const previousResultIdsRef = useRef(resultIds);
 
   // Reset the window when the result set changes (new search/sort/filter) so
   // a deep scroll position from the previous set doesn't fan out fetches for
   // chunks of the new set that were never viewed.
-  const [previousResultIds, setPreviousResultIds] = useState(resultIds);
-  if (previousResultIds !== resultIds) {
-    setPreviousResultIds(resultIds);
+  useEffect(() => {
+    if (previousResultIdsRef.current === resultIds) return;
+    previousResultIdsRef.current = resultIds;
     setMaxViewedIndex(0);
-  }
+  }, [resultIds]);
 
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewableItem[] }) => {

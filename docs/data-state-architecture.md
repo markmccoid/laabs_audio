@@ -9,10 +9,13 @@ and [ReactQueryPersister.md](./ReactQueryPersister.md) for persistence rules.
 1. Library Catalog read model (SQLite shadow database)
 - Owner: ABS server, projected locally (ADR-0017/0018)
 - Holds: catalog projection columns + `summary_json`, FTS index, genre/tag facet rows,
-  server progress snapshots, favorites, bookmarks, pending progress intents
+  server progress snapshots, favorites, bookmarks, pending progress intents, and the
+  server-owned Collection metadata/membership projection
 - Read through: `sqliteSearchRepository`, `sqliteHomeRepository`
 - React Query keys (never persisted): `["sqlite", "overlay" | "catalog", ...]`
 - Refreshed by the Library Refresh Coordinator (paged catalog refresh, overlay refresh)
+- Collections are refreshed on first Collections-segment access and retained locally for
+  offline display; a complete successful response atomically replaces the prior snapshot.
 
 2. User server state (React Query + MMKV persistence)
 - Owner: ABS server
@@ -92,6 +95,12 @@ Home (`useHomeShelves` → `sqliteHomeRepository.getHomeProjection`):
 
 Single items (`useCachedBookSummary`, series sheet, filter sheets):
 - resolve by Audiobook Identity through `getItemSummariesByIds` (chunked IN queries)
+
+Collections (`useLibraryCollections` → `sqliteCollectionsRepository`):
+- Collection metadata and ordered memberships come from SQLite.
+- Collection cover grids and detail rows resolve book metadata through the existing
+  `useWindowedItemSummaries` catalog reader.
+- Collection reads are catalog-shaped and do not include Favorite/progress overlays.
 
 ## Invalidation
 

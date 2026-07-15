@@ -44,8 +44,51 @@ Fields:
 - `media_type`: Library media type when available.
 - `last_catalog_refresh_at`: Last completed catalog refresh timestamp.
 - `last_overlay_refresh_at`: Last completed overlay refresh timestamp.
+- `last_collections_refresh_at`: Last completed Collection snapshot refresh timestamp.
 - `created_at`: Local row creation timestamp.
 - `updated_at`: Local row update timestamp.
+
+## `library_collections`
+
+Purpose: Stores the server-owned Collection metadata snapshot for one Audiobookshelf User Identity and Library.
+
+```sql
+CREATE TABLE IF NOT EXISTS library_collections (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  collection_id TEXT NOT NULL,
+  server_user_id TEXT,
+  name TEXT NOT NULL,
+  description TEXT,
+  created_at_server INTEGER,
+  updated_at_server INTEGER,
+  last_seen_at INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, collection_id)
+);
+```
+
+Collection rows are replaced only after a complete successful server response. A failed refresh leaves the previous rows intact.
+
+## `library_collection_memberships`
+
+Purpose: Stores the ordered `libraryItemId` membership of each cached Collection.
+
+```sql
+CREATE TABLE IF NOT EXISTS library_collection_memberships (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  collection_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  observed_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, collection_id, position)
+);
+```
+
+Membership rows contain IDs only. Book titles, covers, and other presentation metadata are resolved from `library_catalog_items`.
 
 ## `library_refresh_runs`
 

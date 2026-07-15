@@ -1,29 +1,39 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
-import { normalizeUserProgressByLibraryItemId, type UserBookProgress } from "@/api/me-api";
+import {
+  normalizeUserProgressByLibraryItemId,
+  type UserBookProgress,
+} from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
-import { BookFlashListRow } from "@/components/books/book-flashlist-row";
+import { LIBRARY_BOOK_ACTIONS } from "@/components/books/book-action-types";
+import { BookListItem } from "@/components/books/book-list-item";
 import { sqliteSearchRepository } from "@/data/sqlite/search-repository";
-import { useGetSeriesWithProgress, useGetUserServerState } from "@/hooks/abs-data-hooks";
-import { getBookDetailHref } from "@/navigation/book-links";
+import {
+  useGetSeriesWithProgress,
+  useGetUserServerState,
+} from "@/hooks/abs-data-hooks";
+import {
+  getBookDetailHref,
+  type BookDetailRouteSource,
+} from "@/navigation/book-links";
 import { queryKeys } from "@/query/query-keys";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
 import { useQuery } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
-type SourceTab = "home" | "search";
-
 export const BookSeriesSheet = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
   const isOffline = useAuthStore((state) => state.isOnline === false);
   const { data: userServerState } = useGetUserServerState();
   const {
@@ -41,7 +51,12 @@ export const BookSeriesSheet = () => {
   const seriesName = resolveParam(seriesNameParam) ?? "Series";
   const currentAudiobookId = resolveParam(currentAudiobookIdParam);
   const sourceTabParamResolved = resolveParam(sourceTabParam);
-  const sourceTab: SourceTab = sourceTabParamResolved === "search" ? "search" : "home";
+  const sourceTab: BookDetailRouteSource =
+    sourceTabParamResolved === "search"
+      ? "search"
+      : sourceTabParamResolved === "library"
+        ? "library"
+        : "home";
   const {
     data: seriesWithProgress,
     isLoading,
@@ -53,7 +68,9 @@ export const BookSeriesSheet = () => {
     () =>
       normalizeUserProgressByLibraryItemId(
         userServerState as
-          | (typeof userServerState & { progressByBookId?: Record<string, UserBookProgress> })
+          | (typeof userServerState & {
+              progressByBookId?: Record<string, UserBookProgress>;
+            })
           | undefined,
       ),
     [userServerState],
@@ -68,7 +85,8 @@ export const BookSeriesSheet = () => {
       activeLibraryId,
       seriesLibraryItemIds,
     ),
-    queryFn: () => sqliteSearchRepository.getItemSummariesByIds(seriesLibraryItemIds),
+    queryFn: () =>
+      sqliteSearchRepository.getItemSummariesByIds(seriesLibraryItemIds),
     enabled:
       Boolean(activeLibraryUserKey) &&
       Boolean(activeLibraryId) &&
@@ -81,21 +99,48 @@ export const BookSeriesSheet = () => {
       .filter((book): book is LibraryItemSummary => Boolean(book));
   }, [seriesItemById, seriesLibraryItemIds]);
 
-  const missingBooksCount = Math.max(0, seriesLibraryItemIds.length - seriesBooks.length);
+  const missingBooksCount = Math.max(
+    0,
+    seriesLibraryItemIds.length - seriesBooks.length,
+  );
 
-  const handleBookPress = (libraryItemId: string) => {
-    if (currentAudiobookId && libraryItemId === currentAudiobookId) {
+  const handleBookPress = useCallback(
+    (libraryItemId: string) => {
+      if (currentAudiobookId && libraryItemId === currentAudiobookId) {
+        router.back();
+        return;
+      }
+
+      const destination = getBookDetailHref(libraryItemId, {
+        routeSource: sourceTab,
+      });
+
       router.back();
-      return;
-    }
+      setTimeout(() => {
+        router.push(destination);
+      }, 0);
+    },
+    [currentAudiobookId, sourceTab],
+  );
 
-    const destination = getBookDetailHref(libraryItemId, { routeSource: sourceTab });
+  const renderSeriesBook = useCallback(
+    ({ item }: { item: LibraryItemSummary }) => {
+      const progress = progressByBookId[item.id];
 
-    router.back();
-    setTimeout(() => {
-      router.push(destination);
-    }, 0);
-  };
+      return (
+        <BookListItem
+          book={item}
+          actionIds={LIBRARY_BOOK_ACTIONS}
+          isOffline={isOffline}
+          isFinished={Boolean(progress?.isFinished)}
+          isCurrentAudiobook={currentAudiobookId === item.id}
+          progress={progress}
+          onPress={() => handleBookPress(item.id)}
+        />
+      );
+    },
+    [currentAudiobookId, handleBookPress, isOffline, progressByBookId],
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
@@ -103,19 +148,38 @@ export const BookSeriesSheet = () => {
 
       {!seriesId ? (
         <View
-          style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 }}
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: 24,
+          }}
         >
           <Text
             selectable
-            style={{ color: themeColors.textMuted, fontSize: 14, textAlign: "center" }}
+            style={{
+              color: themeColors.textMuted,
+              fontSize: 14,
+              textAlign: "center",
+            }}
           >
             Series ID is missing. Close and reopen the series list.
           </Text>
         </View>
       ) : isLoading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 10 }}>
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+          }}
+        >
           <ActivityIndicator size="small" color={themeColors.accent} />
-          <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+          <Text
+            selectable
+            style={{ color: themeColors.textMuted, fontSize: 13 }}
+          >
             Loading series books...
           </Text>
         </View>
@@ -131,7 +195,11 @@ export const BookSeriesSheet = () => {
         >
           <Text
             selectable
-            style={{ color: themeColors.textMuted, fontSize: 14, textAlign: "center" }}
+            style={{
+              color: themeColors.textMuted,
+              fontSize: 14,
+              textAlign: "center",
+            }}
           >
             Could not load this series right now.
           </Text>
@@ -152,7 +220,11 @@ export const BookSeriesSheet = () => {
           >
             <Text
               selectable
-              style={{ color: themeColors.accentForeground, fontWeight: "700", fontSize: 13 }}
+              style={{
+                color: themeColors.accentForeground,
+                fontWeight: "700",
+                fontSize: 13,
+              }}
             >
               Retry
             </Text>
@@ -163,29 +235,37 @@ export const BookSeriesSheet = () => {
           data={seriesBooks}
           keyExtractor={(item) => item.id}
           // estimatedItemSize={116}
-          renderItem={({ item }) => (
-            <BookFlashListRow
-              book={item}
-              isOffline={isOffline}
-              isFinished={Boolean(progressByBookId[item.id]?.isFinished)}
-              isCurrentAudiobook={currentAudiobookId === item.id}
-              onPress={() => handleBookPress(item.id)}
-            />
-          )}
+          renderItem={renderSeriesBook}
           // ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListHeaderComponent={
             <View className="p-2 gap-1">
-              <Text selectable style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
+              <Text
+                selectable
+                style={{
+                  color: themeColors.text,
+                  fontSize: 15,
+                  fontWeight: "600",
+                }}
+              >
                 {seriesWithProgress?.name ?? seriesName}
               </Text>
-              <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
-                {seriesBooks.length} cached {seriesBooks.length === 1 ? "book" : "books"}
-                {missingBooksCount > 0 ? ` (${missingBooksCount} unavailable offline)` : ""}
+              <Text
+                selectable
+                style={{ color: themeColors.textMuted, fontSize: 12 }}
+              >
+                {seriesBooks.length} cached{" "}
+                {seriesBooks.length === 1 ? "book" : "books"}
+                {missingBooksCount > 0
+                  ? ` (${missingBooksCount} unavailable offline)`
+                  : ""}
               </Text>
             </View>
           }
           ListEmptyComponent={
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 14 }}
+            >
               {seriesLibraryItemIds.length === 0
                 ? "No books found in this series."
                 : "Series books are not available in the current catalog cache."}

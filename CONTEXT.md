@@ -52,6 +52,10 @@ _Avoid_: Login result, navigation result
 An Audiobookshelf collection of media that the user may browse and play.
 _Avoid_: Bookshelf, catalog
 
+**Collection**:
+A server-defined, library-scoped group of Audiobooks that the user may browse as a read-only grouping. Its membership and metadata are owned by the Audiobookshelf Server.
+_Avoid_: Collection shelf, local collection
+
 **Active Library**:
 The one Library currently selected for browsing, shelves, search, and library-scoped audiobook queries.
 _Avoid_: Current library, selected library
@@ -147,6 +151,18 @@ _Avoid_: Global favorite, app-only favorite
 **Current Audiobook**:
 The audiobook whose detail context the user is presently viewing.
 _Avoid_: Selected book, current book
+
+**Book Action**:
+A user-invoked command available for an Audiobook Identity from a book presentation, such as Play/Pause, Bookshelves, Favorite, Read/Unread, or Share.
+_Avoid_: Menu item, row action
+
+**Book Action Set**:
+The context-specific collection of Book Actions offered from a book presentation, such as a Home Shelf Display or a library list.
+_Avoid_: Book menu, universal menu
+
+**Book Presentation**:
+A user-facing visual representation of an Audiobook Identity, such as a vertical list row, Home shelf card, or sortable grid tile.
+_Avoid_: Book item, book component
 
 **Active Playback**:
 The audiobook currently owned by the player for listening.

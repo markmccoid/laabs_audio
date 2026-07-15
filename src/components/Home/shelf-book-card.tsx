@@ -185,6 +185,7 @@ export const ShelfBookCard = ({
     (state) => state.defaultBookProgressTimeDisplay,
   );
   const homePreviewSize = useSettingsStore((state) => state.homePreviewSize);
+  const homeShowTitles = useSettingsStore((state) => state.homeShowTitles);
   const [progressDisplayState, setProgressDisplayState] = useState<ProgressDisplayState>(() => ({
     bookId: book.id,
     defaultDisplay: defaultProgressTimeDisplay,
@@ -331,18 +332,20 @@ export const ShelfBookCard = ({
           ) : null}
         </View>
       </View>
-      <Text
-        numberOfLines={2}
-        style={{
-          color: themeColors.text,
-          fontSize: 12,
-          fontWeight: "600",
-          lineHeight: 15,
-          minHeight: 30,
-        }}
-      >
-        {book.title}
-      </Text>
+      {homeShowTitles ? (
+        <Text
+          numberOfLines={2}
+          style={{
+            color: themeColors.text,
+            fontSize: 12,
+            fontWeight: "600",
+            lineHeight: 15,
+            minHeight: 30,
+          }}
+        >
+          {book.title}
+        </Text>
+      ) : null}
       {showProgressLabel ? (
         <Pressable
           accessibilityRole="button"

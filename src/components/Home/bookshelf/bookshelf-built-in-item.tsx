@@ -1,6 +1,7 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
-import { BookFlashListRow } from "@/components/books/book-flashlist-row";
+import { LIBRARY_BOOK_ACTIONS } from "@/components/books/book-action-types";
+import { BookListItem } from "@/components/books/book-list-item";
 
 type BookshelfBuiltInItemProps = {
   book: LibraryItemSummary;
@@ -15,11 +16,13 @@ export const BookshelfBuiltInItem = ({
   isOffline,
   progress,
 }: BookshelfBuiltInItemProps) => (
-  <BookFlashListRow
+  <BookListItem
     book={book}
+    actionIds={LIBRARY_BOOK_ACTIONS}
     isFavorite={isFavorite}
     isOffline={isOffline}
     isFinished={Boolean(progress?.isFinished)}
+    progress={progress}
     href={{
       pathname: "/(tabs)/(home)/[libraryItemId]",
       params: { libraryItemId: book.id },

@@ -9,6 +9,7 @@ export type PlaylistSummary = {
   libraryId: string;
   name: string;
   description: string | null;
+  coverPath: string | null;
   items: PlaylistItemRef[];
   createdAt: number | null;
   updatedAt: number | null;
@@ -58,6 +59,7 @@ const normalizePlaylist = (value: unknown): PlaylistSummary | null => {
   const libraryId = asString(record.libraryId) ?? "";
   const name = asString(record.name) ?? "Untitled Playlist";
   const description = asString(record.description);
+  const coverPath = asString(record.coverPath);
   const createdAt = asNumber(record.createdAt);
   const updatedAt = asNumber(record.updatedAt) ?? asNumber(record.lastUpdate);
   const items = toPlaylistItems(record.items);
@@ -67,6 +69,7 @@ const normalizePlaylist = (value: unknown): PlaylistSummary | null => {
     libraryId,
     name,
     description,
+    coverPath,
     items,
     createdAt,
     updatedAt,

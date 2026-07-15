@@ -19,6 +19,8 @@ src/data/sqlite/
 │
 ├── catalog-refresh.ts       Paged Library Catalog refresh: projection + FTS + genre/tag rows
 │                            per page transaction; soft-delete of not-seen rows; run tracking
+├── collections-reads.ts     Collection metadata and ordered membership reads
+├── collections-repository.ts Complete Collection snapshot replacement and read interface
 ├── overlay-writes.ts        Overlay refresh (server progress, favorites, bookmarks, pending
 │                            intents) via chunked multi-row upserts, plus the single-row
 │                            mutation projections (favorite toggle, progress upserts)

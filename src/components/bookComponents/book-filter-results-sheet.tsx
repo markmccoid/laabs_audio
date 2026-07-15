@@ -1,30 +1,37 @@
 import { useAuthStore } from "@/auth/auth-store";
+import { LIBRARY_BOOK_ACTIONS } from "@/components/books/book-action-types";
 import {
-  BookFlashListRow,
-  BookFlashListRowPlaceholder,
-} from "@/components/books/book-flashlist-row";
+  BookListItem,
+  BookListItemPlaceholder,
+} from "@/components/books/book-list-item";
 import {
   sqliteSearchRepository,
   type SqliteSearchParams,
 } from "@/data/sqlite/search-repository";
 import { useWindowedItemSummaries } from "@/data/sqlite/use-windowed-item-summaries";
+import {
+  getBookDetailHref,
+  type BookDetailRouteSource,
+} from "@/navigation/book-links";
 import { queryKeys } from "@/query/query-keys";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
 import { useQuery } from "@tanstack/react-query";
-import { router, Stack, useLocalSearchParams, type Href } from "expo-router";
-import { useDeferredValue, useMemo, useState } from "react";
+import { router, Stack, useLocalSearchParams } from "expo-router";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
-type SourceTab = "home" | "search";
 type FilterType = "genre" | "tag" | "author" | "narrator";
 
 const isFilterType = (value: string | undefined): value is FilterType =>
-  value === "genre" || value === "tag" || value === "author" || value === "narrator";
+  value === "genre" ||
+  value === "tag" ||
+  value === "author" ||
+  value === "narrator";
 
 const getFilterLabel = (filterType: FilterType) => {
   switch (filterType) {
@@ -46,7 +53,9 @@ export const BookFilterResultsSheet = () => {
   const insets = useSafeAreaInsets();
   const [searchText, setSearchText] = useState("");
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
   const isOffline = useAuthStore((state) => state.isOnline === false);
   const {
     filterType: filterTypeParam,
@@ -61,7 +70,12 @@ export const BookFilterResultsSheet = () => {
   const filterType = isFilterType(rawFilterType) ? rawFilterType : undefined;
   const filterValue = resolveParam(filterValueParam);
   const sourceTabParamResolved = resolveParam(sourceTabParam);
-  const sourceTab: SourceTab = sourceTabParamResolved === "search" ? "search" : "home";
+  const sourceTab: BookDetailRouteSource =
+    sourceTabParamResolved === "search"
+      ? "search"
+      : sourceTabParamResolved === "library"
+        ? "library"
+        : "home";
   const deferredSearchText = useDeferredValue(searchText);
   const normalizedSearchQuery = deferredSearchText.trim();
   const hasSearchText = normalizedSearchQuery.length > 0;
@@ -105,7 +119,8 @@ export const BookFilterResultsSheet = () => {
       activeLibraryId,
       filterSearchParams,
     ),
-    queryFn: () => sqliteSearchRepository.querySearchResultSet(filterSearchParams),
+    queryFn: () =>
+      sqliteSearchRepository.querySearchResultSet(filterSearchParams),
     enabled: hasValidFilter,
   });
 
@@ -117,28 +132,52 @@ export const BookFilterResultsSheet = () => {
       activeLibraryId,
       baseFilterParams,
     ),
-    queryFn: () => sqliteSearchRepository.querySearchResultSet(baseFilterParams),
+    queryFn: () =>
+      sqliteSearchRepository.querySearchResultSet(baseFilterParams),
     enabled: hasValidFilter && hasSearchText,
   });
 
-  const resultIds = useMemo(() => filterResultSet?.resultIds ?? [], [filterResultSet?.resultIds]);
+  const resultIds = useMemo(
+    () => filterResultSet?.resultIds ?? [],
+    [filterResultSet?.resultIds],
+  );
   const finishedIds = filterResultSet?.finishedIds;
   const totalMatches = hasSearchText
-    ? baseResultSet?.totalCount ?? filterResultSet?.totalCount ?? 0
-    : filterResultSet?.totalCount ?? 0;
-  const { itemById, onViewableItemsChanged } = useWindowedItemSummaries(resultIds);
+    ? (baseResultSet?.totalCount ?? filterResultSet?.totalCount ?? 0)
+    : (filterResultSet?.totalCount ?? 0);
+  const { itemById, onViewableItemsChanged } =
+    useWindowedItemSummaries(resultIds);
 
-  const handleBookPress = (libraryItemId: string) => {
-    const destination =
-      sourceTab === "search"
-        ? `/(tabs)/search/${libraryItemId}`
-        : `/(tabs)/(home)/${libraryItemId}`;
+  const handleBookPress = useCallback(
+    (libraryItemId: string) => {
+      const destination = getBookDetailHref(libraryItemId, {
+        routeSource: sourceTab,
+      });
 
-    router.back();
-    setTimeout(() => {
-      router.push(destination as Href);
-    }, 0);
-  };
+      router.back();
+      setTimeout(() => {
+        router.push(destination);
+      }, 0);
+    },
+    [sourceTab],
+  );
+
+  const renderFilterResult = useCallback(
+    ({ item: libraryItemId }: { item: string }) => {
+      const book = itemById.get(libraryItemId);
+      if (!book) return <BookListItemPlaceholder />;
+      return (
+        <BookListItem
+          book={book}
+          actionIds={LIBRARY_BOOK_ACTIONS}
+          isOffline={isOffline}
+          isFinished={Boolean(finishedIds?.has(libraryItemId))}
+          onPress={() => handleBookPress(libraryItemId)}
+        />
+      );
+    },
+    [finishedIds, handleBookPress, isOffline, itemById],
+  );
 
   const title = filterValue ?? "Books";
   const filterLabel = filterType ? getFilterLabel(filterType) : "Filter";
@@ -154,11 +193,20 @@ export const BookFilterResultsSheet = () => {
 
       {!filterType || !filterValue ? (
         <View
-          style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 }}
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: 24,
+          }}
         >
           <Text
             selectable
-            style={{ color: themeColors.textMuted, fontSize: 14, textAlign: "center" }}
+            style={{
+              color: themeColors.textMuted,
+              fontSize: 14,
+              textAlign: "center",
+            }}
           >
             Filter details are missing. Close and reopen the selected chip.
           </Text>
@@ -168,31 +216,34 @@ export const BookFilterResultsSheet = () => {
           data={resultIds}
           keyExtractor={(item) => item}
           onViewableItemsChanged={onViewableItemsChanged}
-          renderItem={({ item: libraryItemId }) => {
-            const book = itemById.get(libraryItemId);
-            if (!book) return <BookFlashListRowPlaceholder />;
-            return (
-              <BookFlashListRow
-                book={book}
-                isOffline={isOffline}
-                isFinished={Boolean(finishedIds?.has(libraryItemId))}
-                onPress={() => handleBookPress(libraryItemId)}
-              />
-            );
-          }}
+          renderItem={renderFilterResult}
           ListHeaderComponent={
             <View className="p-2 gap-1">
-              <Text selectable style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
+              <Text
+                selectable
+                style={{
+                  color: themeColors.text,
+                  fontSize: 15,
+                  fontWeight: "600",
+                }}
+              >
                 {filterLabel}: {filterValue}
               </Text>
-              <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
-                {resultIds.length} cached {resultIds.length === 1 ? "book" : "books"}
+              <Text
+                selectable
+                style={{ color: themeColors.textMuted, fontSize: 12 }}
+              >
+                {resultIds.length} cached{" "}
+                {resultIds.length === 1 ? "book" : "books"}
                 {hasSearchText ? ` (${totalMatches} total matches)` : ""}
               </Text>
             </View>
           }
           ListEmptyComponent={
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 14 }}
+            >
               {hasSearchText
                 ? "No books match the current search."
                 : `No cached books match this ${filterLabel.toLowerCase()}.`}

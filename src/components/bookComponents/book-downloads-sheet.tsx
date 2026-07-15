@@ -53,7 +53,9 @@ export const BookDownloadsSheet = () => {
   const libraryItemId = resolveParam(libraryItemIdParam);
   const sourceBookRouteParam = resolveParam(sourceBookRouteParamRaw);
   const sourceBookRoute: BookDetailRouteSource | null =
-    sourceBookRouteParam === "search" || sourceBookRouteParam === "home"
+    sourceBookRouteParam === "search" ||
+    sourceBookRouteParam === "home" ||
+    sourceBookRouteParam === "library"
       ? sourceBookRouteParam
       : null;
   const cachedSummary = useCachedBookSummary(libraryItemId);

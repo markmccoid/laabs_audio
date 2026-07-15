@@ -1,7 +1,7 @@
 import * as Linking from "expo-linking";
 import type { Href } from "expo-router";
 
-export type BookDetailRouteSource = "home" | "search";
+export type BookDetailRouteSource = "home" | "search" | "library";
 
 type BookDetailHrefOptions = {
   openDownloadSheet?: boolean | string;
@@ -18,7 +18,9 @@ export const getBookDetailHref = (
   pathname:
     options?.routeSource === "search"
       ? "/(tabs)/search/[libraryItemId]"
-      : "/(tabs)/(home)/[libraryItemId]",
+      : options?.routeSource === "library"
+        ? "/(tabs)/library/[libraryItemId]"
+        : "/(tabs)/(home)/[libraryItemId]",
   params: {
     libraryItemId,
     ...(options?.openDownloadSheet

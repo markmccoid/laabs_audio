@@ -7,9 +7,8 @@ import {
   useSearchSortDirection,
   useSearchSortedBy,
   useSearchTags,
-  type SearchSortBy,
-  type SearchSortDirection,
 } from "@/search/search-session-store";
+import { CatalogSortMenu } from "@/components/catalog-sort-menu";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { useUniwind } from "uniwind";
 import {
@@ -18,17 +17,12 @@ import {
   Host,
   HStack,
   Image,
-  Menu,
-  Picker,
-  Text,
 } from "@expo/ui/swift-ui";
 import {
   background,
   cornerRadius,
   glassEffect,
-  labelStyle,
   padding,
-  tag,
   tint,
   type BuiltInModifier,
 } from "@expo/ui/swift-ui/modifiers";
@@ -44,14 +38,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 const SEARCH_FIELD_ATTACH_CLEARANCE = 8;
 // The active bottom search field docks above the keyboard; keep the rail above it.
 const ACTIVE_SEARCH_FIELD_CLEARANCE = 58;
-
-const SORT_FIELD_OPTIONS: { value: SearchSortBy; label: string }[] = [
-  { value: "author", label: "Author" },
-  { value: "title", label: "Title" },
-  { value: "addedAt", label: "Added At" },
-  { value: "duration", label: "Duration" },
-  { value: "publishedYear", label: "Published" },
-];
 
 const withAlpha = (hexColor: string, alpha: number) => {
   const normalized = hexColor.trim().replace("#", "");
@@ -138,35 +124,15 @@ export const SearchFilterRail = () => {
       <Host matchContents>
         <GlassEffectContainer spacing={6}>
           <HStack spacing={8}>
-            <Menu
-              label="Sort"
-              systemImage={sortDirection === "asc" ? "arrow.up" : "arrow.down"}
-              modifiers={[...capsule(), labelStyle("iconOnly"), tint(themeColors.text)]}
-            >
-              <Picker
-                label="Sort by"
-                selection={sortedBy}
-                onSelectionChange={(selection) =>
-                  searchActions.setSortedBy(selection as SearchSortBy)
-                }
-              >
-                {SORT_FIELD_OPTIONS.map((option) => (
-                  <Text key={option.value} modifiers={[tag(option.value)]}>
-                    {option.label}
-                  </Text>
-                ))}
-              </Picker>
-              <Picker
-                label="Direction"
-                selection={sortDirection}
-                onSelectionChange={(selection) =>
-                  searchActions.setSortDirection(selection as SearchSortDirection)
-                }
-              >
-                <Text modifiers={[tag("asc")]}>Ascending</Text>
-                <Text modifiers={[tag("desc")]}>Descending</Text>
-              </Picker>
-            </Menu>
+            <CatalogSortMenu
+              presentation="swift-ui"
+              sortedBy={sortedBy}
+              sortDirection={sortDirection}
+              onSortByChange={searchActions.setSortedBy}
+              onSortDirectionChange={searchActions.setSortDirection}
+              modifiers={capsule()}
+              tintColor={themeColors.text}
+            />
 
             <Button
               onPress={openFilterSheet}
@@ -175,7 +141,7 @@ export const SearchFilterRail = () => {
                 tint(themeColors.text),
               ]}
             >
-              <Image systemName="slider.horizontal.3" color={themeColors.text} size={16} />
+              <Image systemName="tag.fill" color={themeColors.text} size={16} />
             </Button>
 
             <Button

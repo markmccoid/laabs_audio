@@ -1,5 +1,9 @@
 import { useAuthStore } from "@/auth/auth-store";
-import { BookFlashListRowPlaceholder } from "@/components/books/book-flashlist-row";
+import { LIBRARY_BOOK_ACTIONS } from "@/components/books/book-action-types";
+import {
+  BookListItem,
+  BookListItemPlaceholder,
+} from "@/components/books/book-list-item";
 import { sqliteRefreshCoordinator } from "@/data/sqlite/refresh-coordinator";
 import {
   useSearchFavoriteFilter,
@@ -16,8 +20,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LibraryFiltersHeader } from "./library-filters-header";
-import { LibraryGridItem, LibraryGridItemPlaceholder } from "./library-grid-item";
-import LibraryItem from "./LibraryItem";
+import {
+  LibraryGridItem,
+  LibraryGridItemPlaceholder,
+} from "./library-grid-item";
 
 type LibraryContainerProps = {
   // While the bottom search field is active the collapsed header stops
@@ -31,12 +37,16 @@ type LibraryListItem =
   | { type: "filters-header"; id: typeof FILTER_HEADER_ITEM_ID }
   | { type: "book"; id: string };
 
-const LibraryContainer = ({ padForStatusBar = false }: LibraryContainerProps) => {
+const LibraryContainer = ({
+  padForStatusBar = false,
+}: LibraryContainerProps) => {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
   const searchActions = useSearchSessionActions();
   const favoriteFilter = useSearchFavoriteFilter();
   const finishedOnly = useSearchFinishedOnly();
@@ -124,7 +134,9 @@ const LibraryContainer = ({ padForStatusBar = false }: LibraryContainerProps) =>
     readiness?.lastCatalogRefreshStatus !== "failed",
   );
   const initialCatalogFailed = Boolean(
-    readiness && !readiness.hasCatalogRows && readiness.lastCatalogRefreshStatus === "failed",
+    readiness &&
+    !readiness.hasCatalogRows &&
+    readiness.lastCatalogRefreshStatus === "failed",
   );
 
   const onRefresh = async () => {
@@ -138,6 +150,66 @@ const LibraryContainer = ({ padForStatusBar = false }: LibraryContainerProps) =>
       setRefreshing(false);
     }
   };
+
+  const renderLibraryListItem = useCallback(
+    ({ item }: { item: LibraryListItem }) => {
+      if (item.type === "filters-header") {
+        return (
+          <LibraryFiltersHeader
+            favoriteFilter={favoriteFilter}
+            finishedOnly={finishedOnly}
+            selectedGenres={selectedGenres}
+            selectedTags={selectedTags}
+            resultCount={resultIds.length}
+            onClearFavoriteFilter={() => searchActions.clearFavoriteFilter()}
+            onClearFinishedOnly={() => searchActions.clearFinishedOnly()}
+            onRemoveGenre={(genre) => searchActions.removeGenre(genre)}
+            onRemoveTag={(tag) => searchActions.removeTag(tag)}
+          />
+        );
+      }
+
+      const libraryItemId = item.id;
+      const libraryItem = itemById.get(libraryItemId);
+      if (!libraryItem) {
+        return viewMode === "grid" ? (
+          <LibraryGridItemPlaceholder />
+        ) : (
+          <BookListItemPlaceholder />
+        );
+      }
+      if (viewMode === "grid") {
+        return (
+          <LibraryGridItem
+            libraryItem={libraryItem}
+            isFavorite={favoriteIds.has(libraryItemId)}
+            isFinished={finishedIds.has(libraryItemId)}
+          />
+        );
+      }
+      return (
+        <BookListItem
+          book={libraryItem}
+          actionIds={LIBRARY_BOOK_ACTIONS}
+          isFavorite={favoriteIds.has(libraryItemId)}
+          isFinished={finishedIds.has(libraryItemId)}
+          href={`/(tabs)/search/${libraryItem.id}`}
+        />
+      );
+    },
+    [
+      favoriteFilter,
+      favoriteIds,
+      finishedIds,
+      finishedOnly,
+      itemById,
+      resultIds.length,
+      searchActions,
+      selectedGenres,
+      selectedTags,
+      viewMode,
+    ],
+  );
 
   if (isPreparingInitialSearch) {
     return (
@@ -190,49 +262,7 @@ const LibraryContainer = ({ padForStatusBar = false }: LibraryContainerProps) =>
           layout.span = viewMode === "grid" ? 3 : 1;
         }
       }}
-      renderItem={({ item }) => {
-        if (item.type === "filters-header") {
-          return (
-            <LibraryFiltersHeader
-              favoriteFilter={favoriteFilter}
-              finishedOnly={finishedOnly}
-              selectedGenres={selectedGenres}
-              selectedTags={selectedTags}
-              resultCount={resultIds.length}
-              onClearFavoriteFilter={() => searchActions.clearFavoriteFilter()}
-              onClearFinishedOnly={() => searchActions.clearFinishedOnly()}
-              onRemoveGenre={(genre) => searchActions.removeGenre(genre)}
-              onRemoveTag={(tag) => searchActions.removeTag(tag)}
-            />
-          );
-        }
-
-        const libraryItemId = item.id;
-        const libraryItem = itemById.get(libraryItemId);
-        if (!libraryItem) {
-          return viewMode === "grid" ? (
-            <LibraryGridItemPlaceholder />
-          ) : (
-            <BookFlashListRowPlaceholder />
-          );
-        }
-        if (viewMode === "grid") {
-          return (
-            <LibraryGridItem
-              libraryItem={libraryItem}
-              isFavorite={favoriteIds.has(libraryItemId)}
-              isFinished={finishedIds.has(libraryItemId)}
-            />
-          );
-        }
-        return (
-          <LibraryItem
-            libraryItem={libraryItem}
-            isFavorite={favoriteIds.has(libraryItemId)}
-            isFinished={finishedIds.has(libraryItemId)}
-          />
-        );
-      }}
+      renderItem={renderLibraryListItem}
       contentContainerStyle={{
         paddingTop: padForStatusBar ? insets.top : 0,
         paddingHorizontal: viewMode === "grid" ? 10 : 0,

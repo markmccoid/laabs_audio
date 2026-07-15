@@ -180,6 +180,15 @@ const playlists = await playlistsApi.getLibraryPlaylists(libraryId);
 await playlistsApi.batchAddItems(playlistId, [libraryItemId]);
 ```
 
+## `src/api/collections-api.ts`
+
+**Purpose**: Read the server-owned, library-scoped Audiobookshelf Collections snapshot.
+
+**Key exports**
+- `collectionsApi.getLibraryCollections(libraryId)` — fetches the complete snapshot with `minified=1` and normalizes ordered book membership references.
+
+Collection synchronization stores only Collection metadata and `libraryItemId` membership references in SQLite. The existing Library Catalog remains the source for book presentation metadata.
+
 ## `src/api/series-api.ts`
 
 **Purpose**: Fetch a series with server progress included.

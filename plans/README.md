@@ -16,6 +16,7 @@ and update your row when done.
 | 005 | Clear 61 ESLint errors; make lint a hard gate | P2 | S–M | 004 | TODO |
 | 006 | Characterization tests for device-books download helpers | P2 | M | — | TODO |
 | 007 | Extract pure download helpers into a concern module | P3 | M | 006 | TODO |
+| 008 | Standardize book-list items and context-specific menus | P2 | M–L | — | DONE (working tree; 2026-07-12) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)
 

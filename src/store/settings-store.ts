@@ -164,6 +164,7 @@ export type SettingsState = {
   seekForwardSeconds: number;
   defaultBookProgressTimeDisplay: BookProgressTimeDisplay;
   homePreviewSize: HomePreviewSize;
+  homeShowTitles: boolean;
   autoCreateDarkAccent: boolean;
   lightAccentColorOverride: string | null;
   darkAccentColorOverride: string | null;
@@ -189,6 +190,7 @@ export type SettingsState = {
     setSkipSeconds: (seconds: number) => void;
     setDefaultBookProgressTimeDisplay: (display: BookProgressTimeDisplay) => void;
     setHomePreviewSize: (size: HomePreviewSize) => void;
+    setHomeShowTitles: (enabled: boolean) => void;
     setAutoCreateDarkAccent: (enabled: boolean) => void;
     setLightAccentColorOverride: (color: string | null) => void;
     resetLightAccentColorOverride: () => void;
@@ -236,6 +238,7 @@ export const settingsStore = createStore<SettingsState>()(
       seekForwardSeconds: DEFAULT_SEEK_FORWARD_SECONDS,
       defaultBookProgressTimeDisplay: "elapsed",
       homePreviewSize: DEFAULT_HOME_PREVIEW_SIZE,
+      homeShowTitles: true,
       autoCreateDarkAccent: false,
       lightAccentColorOverride: null,
       darkAccentColorOverride: null,
@@ -291,6 +294,7 @@ export const settingsStore = createStore<SettingsState>()(
         setDefaultBookProgressTimeDisplay: (defaultBookProgressTimeDisplay) =>
           set({ defaultBookProgressTimeDisplay }),
         setHomePreviewSize: (homePreviewSize) => set({ homePreviewSize }),
+        setHomeShowTitles: (homeShowTitles) => set({ homeShowTitles }),
         setAutoCreateDarkAccent: (autoCreateDarkAccent) => set({ autoCreateDarkAccent }),
         setLightAccentColorOverride: (lightAccentColorOverride) =>
           set({
@@ -570,6 +574,7 @@ export const settingsStore = createStore<SettingsState>()(
         seekForwardSeconds: state.seekForwardSeconds,
         defaultBookProgressTimeDisplay: state.defaultBookProgressTimeDisplay,
         homePreviewSize: state.homePreviewSize,
+        homeShowTitles: state.homeShowTitles,
         autoCreateDarkAccent: state.autoCreateDarkAccent,
         lightAccentColorOverride: state.lightAccentColorOverride,
         darkAccentColorOverride: state.darkAccentColorOverride,
@@ -584,7 +589,7 @@ export const settingsStore = createStore<SettingsState>()(
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 16,
+      version: 17,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -598,6 +603,7 @@ export const settingsStore = createStore<SettingsState>()(
             seekForwardSeconds: DEFAULT_SEEK_FORWARD_SECONDS,
             defaultBookProgressTimeDisplay: "elapsed",
             homePreviewSize: DEFAULT_HOME_PREVIEW_SIZE,
+            homeShowTitles: true,
             autoCreateDarkAccent: false,
             lightAccentColorOverride: null,
             darkAccentColorOverride: null,
@@ -646,6 +652,10 @@ export const settingsStore = createStore<SettingsState>()(
             version >= 7
               ? state.homePreviewSize ?? DEFAULT_HOME_PREVIEW_SIZE
               : DEFAULT_HOME_PREVIEW_SIZE,
+          homeShowTitles:
+            version >= 17
+              ? state.homeShowTitles ?? true
+              : true,
           autoCreateDarkAccent:
             version >= 9
               ? state.autoCreateDarkAccent ?? false

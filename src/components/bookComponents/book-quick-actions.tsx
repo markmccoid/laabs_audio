@@ -133,7 +133,12 @@ export const BookQuickActions = ({ libraryItemId }: BookQuickActionsProps) => {
   );
   const progressPercent = isDownloading ? clampPercent(downloadProgress?.progress ?? 0) : 0;
   const bookmarkBadgeLabel = bookmarkCount > 99 ? "99+" : String(bookmarkCount);
-  const sourceBookRoute: BookDetailRouteSource = (segments as string[])[1] === "search" ? "search" : "home";
+  const sourceBookRoute: BookDetailRouteSource =
+    (segments as string[])[1] === "search"
+      ? "search"
+      : (segments as string[])[1] === "library"
+        ? "library"
+        : "home";
 
   const openBookshelves = () => {
     if (!libraryItemId) return;
