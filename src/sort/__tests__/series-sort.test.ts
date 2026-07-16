@@ -48,4 +48,19 @@ describe("sortSeries", () => {
     sortSeries(series, "bookCount", "desc");
     expect(series.map((entry) => entry.id)).toEqual(originalOrder);
   });
+
+  it("uses series name as the stable tie-breaker for equal durations", () => {
+    const tiedSeries = series.map((entry) => ({ ...entry, totalDuration: 100 }));
+
+    expect(sortSeries(tiedSeries, "totalDuration", "asc").map((entry) => entry.name)).toEqual([
+      "Alpha",
+      "Bravo",
+      "Charlie",
+    ]);
+    expect(sortSeries(tiedSeries, "totalDuration", "desc").map((entry) => entry.name)).toEqual([
+      "Alpha",
+      "Bravo",
+      "Charlie",
+    ]);
+  });
 });

@@ -132,4 +132,24 @@ export const collectionsApi = {
     );
     return extractCollections(payload, libraryIdToUse);
   },
+
+  async updateCollection(
+    collectionId: string,
+    updates: { name?: string; orderedLibraryItemIds?: string[] },
+  ): Promise<CollectionSnapshot | null> {
+    const trimmedCollectionId = collectionId.trim();
+    if (!trimmedCollectionId) {
+      throw new Error("collectionsApi.updateCollection requires a collectionId");
+    }
+
+    const payload = await absClient.patch<unknown>(
+      `/api/collections/${trimmedCollectionId}`,
+      {
+        name: updates.name,
+        books: updates.orderedLibraryItemIds,
+      },
+    );
+    const [collection] = extractCollections(payload, "");
+    return collection ?? null;
+  },
 };

@@ -17,12 +17,18 @@ export type LibrarySeriesSnapshot = {
 
 type UnknownRecord = Record<string, unknown>;
 type SeriesPage = { series: LibrarySeriesSnapshot[]; total: number | null };
+type NormalizedSeriesBook = {
+  ref: SeriesBookRef;
+  duration: number | null;
+};
 
 const SERIES_PAGE_SIZE = 200;
 const asRecord = (value: unknown): UnknownRecord | null =>
   value && typeof value === "object" ? (value as UnknownRecord) : null;
 const asString = (value: unknown) => (typeof value === "string" ? value : null);
 const asNumber = (value: unknown) => (typeof value === "number" ? value : null);
+const asDuration = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 
 const requireLibraryId = (libraryId: string) => {
   const trimmed = libraryId.trim();
@@ -56,14 +62,32 @@ const toBookRef = (value: unknown): SeriesBookRef | null => {
   };
 };
 
+const normalizeSeriesBook = (value: unknown): NormalizedSeriesBook | null => {
+  const ref = toBookRef(value);
+  if (!ref) return null;
+
+  const media = asRecord(asRecord(value)?.media);
+  return {
+    ref,
+    duration: asDuration(media?.duration),
+  };
+};
+
+const totalSeriesDuration = (books: readonly NormalizedSeriesBook[]) => {
+  if (books.length === 0 || books.some((book) => book.duration === null)) return null;
+  return books.reduce((total, book) => total + (book.duration ?? 0), 0);
+};
+
 const normalizeSeries = (value: unknown, libraryId: string): LibrarySeriesSnapshot | null => {
   const record = asRecord(value);
   if (!record) return null;
   const id = asString(record.id)?.trim();
   if (!id) return null;
 
-  const books = Array.isArray(record.books)
-    ? record.books.map(toBookRef).filter((book): book is SeriesBookRef => Boolean(book))
+  const normalizedBooks = Array.isArray(record.books)
+    ? record.books
+        .map(normalizeSeriesBook)
+        .filter((book): book is NormalizedSeriesBook => Boolean(book))
     : [];
   return {
     id,
@@ -74,9 +98,9 @@ const normalizeSeries = (value: unknown, libraryId: string): LibrarySeriesSnapsh
       asString(record.nameIgnorePrefix)?.trim() ||
       asString(record.name)?.trim() ||
       "Untitled Series",
-    books,
+    books: normalizedBooks.map((book) => book.ref),
     createdAt: asNumber(record.createdAt),
-    totalDuration: asNumber(record.totalDuration),
+    totalDuration: totalSeriesDuration(normalizedBooks),
   };
 };
 

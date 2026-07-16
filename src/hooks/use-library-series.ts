@@ -19,48 +19,78 @@ export const useLibrarySeries = () => {
     activeLibraryId && activeLibraryUserKey
       ? { userId: activeLibraryUserKey, libraryId: activeLibraryId }
       : null;
+  const enabled =
+    status === "authenticated" && Boolean(activeLibraryId) && Boolean(activeLibraryUserKey);
 
-  const query = useQuery({
+  const cachedQuery = useQuery({
     queryKey: queryKeys.sqliteSeries(activeLibraryUserKey, activeLibraryId),
-    queryFn: async () => {
-      if (!scope) throw new Error("useLibrarySeries requires an active library");
-      const cached = await sqliteSeriesRepository.getSeries();
-      if (isOnline === false) {
-        if (cached.length === 0) throw new Error("Series are not available offline yet.");
-        return { series: cached, refreshError: null };
-      }
-      try {
-        const refresh = await sqliteSeriesRepository.refreshSeries(scope);
-        if (refresh.status === "failed") {
-          throw new Error(refresh.error ?? "Unable to refresh Series.");
-        }
-        return { series: await sqliteSeriesRepository.getSeries(), refreshError: null };
-      } catch (error) {
-        if (cached.length === 0) throw error;
-        return { series: cached, refreshError: asRefreshError(error) };
-      }
-    },
-    enabled: status === "authenticated" && Boolean(activeLibraryId) && Boolean(activeLibraryUserKey),
+    queryFn: () => sqliteSeriesRepository.getSeries(),
+    enabled,
     meta: { persist: false },
   });
 
-  const seriesIds = query.data?.series.map((entry) => entry.id) ?? [];
+  const refreshQuery = useQuery({
+    queryKey: [
+      ...queryKeys.sqliteSeries(activeLibraryUserKey, activeLibraryId),
+      "serverRefresh",
+    ],
+    queryFn: async () => {
+      if (!scope) throw new Error("useLibrarySeries requires an active library");
+      const refresh = await sqliteSeriesRepository.refreshSeries(scope);
+      if (refresh.status === "failed") {
+        throw new Error(refresh.error ?? "Unable to refresh Series.");
+      }
+      return sqliteSeriesRepository.getSeries();
+    },
+    enabled: enabled && isOnline !== false && cachedQuery.isSuccess,
+    meta: { persist: false },
+  });
+
+  const cachedSeries = cachedQuery.data ?? EMPTY_SERIES;
+  const refreshedSeries = refreshQuery.data;
+  const shouldUseRefreshedSeries =
+    Boolean(refreshedSeries) && refreshQuery.dataUpdatedAt >= cachedQuery.dataUpdatedAt;
+  const series = shouldUseRefreshedSeries ? (refreshedSeries ?? EMPTY_SERIES) : cachedSeries;
+  const hasSeries = series.length > 0;
+  const needsInitialServerSnapshot =
+    cachedQuery.isSuccess && !hasSeries && isOnline !== false;
+  const offlineError =
+    cachedQuery.isSuccess && !hasSeries && isOnline === false
+      ? new Error("Series are not available offline yet.")
+      : null;
+  const error =
+    cachedQuery.error ??
+    offlineError ??
+    (needsInitialServerSnapshot ? refreshQuery.error : null);
+  const isLoading =
+    cachedQuery.isLoading || (needsInitialServerSnapshot && refreshQuery.isLoading);
+  const refreshError =
+    hasSeries && refreshQuery.error ? asRefreshError(refreshQuery.error) : null;
+  const snapshotVersion = Math.max(cachedQuery.dataUpdatedAt, refreshQuery.dataUpdatedAt);
+  const refetch = () =>
+    isOnline === false || cachedQuery.isError ? cachedQuery.refetch() : refreshQuery.refetch();
+
+  const seriesIds = series.map((entry) => entry.id);
   const bookIdsQuery = useQuery({
     queryKey: queryKeys.sqliteSeriesBookIdsForSeries(
       activeLibraryUserKey,
       activeLibraryId,
       seriesIds,
-      query.dataUpdatedAt,
+      snapshotVersion,
     ),
     queryFn: () => sqliteSeriesRepository.getSeriesBookIdsBySeriesIds(seriesIds),
-    enabled: query.isSuccess && seriesIds.length > 0,
+    enabled: cachedQuery.isSuccess && seriesIds.length > 0,
   });
 
   return {
-    ...query,
-    series: query.data?.series ?? EMPTY_SERIES,
-    snapshotVersion: query.dataUpdatedAt,
+    ...cachedQuery,
+    series,
+    error,
+    isLoading,
+    isRefetching: refreshQuery.isRefetching,
+    refetch,
+    snapshotVersion,
     bookIdsBySeriesId: bookIdsQuery.data ?? EMPTY_BOOK_IDS_BY_SERIES_ID,
-    refreshError: query.data?.refreshError ?? null,
+    refreshError,
   };
 };

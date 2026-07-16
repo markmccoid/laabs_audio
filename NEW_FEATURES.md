@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-16` `pending` - Add editable Collections and accurate Series duration metadata.
+  Tester focus: verify Collections and Playlists can be renamed, reordered, and have books removed through the shared editor; verify cached Series appear immediately while refreshing; verify Duration sorting orders Series correctly after refresh; and verify a Series detail screen shows its total as `Series duration N h N m` above the book list.
 - `2026-07-15` `pending` - Enhance Lists browsing and add complete playlist editing.
   Tester focus: verify Series, Collections, and Playlists can switch between list and grid layouts; verify Series sorting and stacked artwork; then open a playlist, rename it, reorder or remove books, and confirm the checkmark applies changes immediately without a spinner and restores the prior state if Audiobookshelf rejects the update.
 - `2026-07-15` `pending` - Build out Lists browsing with Series, Collections, and Playlists.
