@@ -6,6 +6,8 @@ export type SeriesSummary = {
   libraryId: string;
   name: string;
   bookCount: number;
+  createdAt: number | null;
+  totalDuration: number | null;
 };
 
 type SeriesSummaryRow = {
@@ -13,6 +15,8 @@ type SeriesSummaryRow = {
   library_id: string;
   name: string;
   book_count: number;
+  created_at_server: number | null;
+  total_duration: number | null;
 };
 
 type SeriesBookIdRow = { library_item_id: string };
@@ -27,7 +31,9 @@ export const getShadowSeries = async (): Promise<SeriesSummary[]> => {
        series.series_id,
        series.library_id,
        series.name,
-       COUNT(membership.library_item_id) AS book_count
+       COUNT(membership.library_item_id) AS book_count,
+       series.added_at_server AS created_at_server,
+       series.total_duration
      FROM library_series series
      LEFT JOIN library_series_memberships membership
        ON membership.user_id = series.user_id
@@ -35,7 +41,13 @@ export const getShadowSeries = async (): Promise<SeriesSummary[]> => {
        AND membership.series_id = series.series_id
      WHERE series.user_id = ?
        AND series.library_id = ?
-     GROUP BY series.series_id, series.library_id, series.name, series.name_sort
+     GROUP BY
+       series.series_id,
+       series.library_id,
+       series.name,
+       series.name_sort,
+       series.added_at_server,
+       series.total_duration
      ORDER BY series.name_sort COLLATE NOCASE ASC, series.series_id ASC`,
     [context.userId, context.libraryId],
   );
@@ -44,6 +56,8 @@ export const getShadowSeries = async (): Promise<SeriesSummary[]> => {
     libraryId: row.library_id,
     name: row.name,
     bookCount: row.book_count,
+    createdAt: row.created_at_server,
+    totalDuration: row.total_duration,
   }));
 };
 

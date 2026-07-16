@@ -17,7 +17,7 @@ describe("librarySeriesApi", () => {
             { id: "book-1", seriesSequence: "1" },
             { id: "book-2", media: { metadata: { series: { sequence: "2.5" } } } },
           ],
-          addedAt: 10,
+          createdAt: 10,
           totalDuration: 20,
         },
       ],
@@ -34,7 +34,7 @@ describe("librarySeriesApi", () => {
           { libraryItemId: "book-1", sequence: "1" },
           { libraryItemId: "book-2", sequence: "2.5" },
         ],
-        addedAt: 10,
+        createdAt: 10,
         totalDuration: 20,
       },
     ]);

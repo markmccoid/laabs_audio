@@ -1,9 +1,10 @@
-import { LIBRARY_BOOK_ACTIONS } from "@/components/books/book-action-types";
-import { BookListItem, BookListItemPlaceholder } from "@/components/books/book-list-item";
+import { BookListItemPlaceholder } from "@/components/books/book-list-item";
+import { IndicatorBookListItem } from "@/components/books/indicator-book-list-item";
 import { useWindowedItemSummaries } from "@/data/sqlite/use-windowed-item-summaries";
 import { sqliteSeriesRepository } from "@/data/sqlite/series-repository";
 import { useAuthStore } from "@/auth/auth-store";
 import { useLibrarySeries } from "@/hooks/use-library-series";
+import { useBookListIndicators } from "@/hooks/use-book-list-indicators";
 import { queryKeys } from "@/query/query-keys";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
@@ -32,13 +33,14 @@ export const SeriesDetailScreen = ({ seriesId }: { seriesId: string }) => {
   });
   const bookIds = bookIdsQuery.data ?? EMPTY_BOOK_IDS;
   const { itemById, onViewableItemsChanged } = useWindowedItemSummaries(bookIds);
+  const { favoriteIds, finishedIds } = useBookListIndicators();
   const renderBook = useCallback(
     ({ item: libraryItemId }: { item: string }) => {
       const book = itemById.get(libraryItemId);
       if (!book) return <BookListItemPlaceholder />;
-      return <BookListItem book={book} actionIds={LIBRARY_BOOK_ACTIONS} href={{ pathname: "/(tabs)/library/[libraryItemId]", params: { libraryItemId: book.id } }} />;
+      return <IndicatorBookListItem book={book} favoriteIds={favoriteIds} finishedIds={finishedIds} href={{ pathname: "/(tabs)/library/[libraryItemId]", params: { libraryItemId: book.id } }} />;
     },
-    [itemById],
+    [favoriteIds, finishedIds, itemById],
   );
 
   return (

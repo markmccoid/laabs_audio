@@ -153,6 +153,21 @@ export const playlistsApi = {
     return playlist ?? null;
   },
 
+  async updatePlaylist(
+    playlistId: string,
+    updates: { name?: string; orderedLibraryItemIds?: string[] },
+  ): Promise<PlaylistSummary | null> {
+    const payload = await absClient.patch<unknown>(`/api/playlists/${playlistId}`, {
+      name: updates.name,
+      items:
+        updates.orderedLibraryItemIds === undefined
+          ? undefined
+          : buildPlaylistItemPayload(updates.orderedLibraryItemIds),
+    });
+    const [playlist] = extractPlaylists(payload);
+    return playlist ?? null;
+  },
+
   async setPlaylistItems(
     playlistId: string,
     orderedLibraryItemIds: string[],

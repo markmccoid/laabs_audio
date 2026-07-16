@@ -5,12 +5,21 @@ import {
 import type { CollectionSummary } from "@/data/sqlite/collections-repository";
 import { useWindowedItemSummaries } from "@/data/sqlite/use-windowed-item-summaries";
 import { useLibraryCollections } from "@/hooks/use-library-collections";
+import type { LibraryViewMode } from "@/library/lists-preferences-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { memo, useCallback, useMemo } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { LibraryGroupGridItem } from "./library-group-grid-item";
 
 const MAX_COLLECTION_COVER_BOOKS = 4;
 const COLLECTION_COVER_SIZE = 78;
@@ -72,8 +81,33 @@ const CollectionRow = memo(function CollectionRow({ collection, coverImages }: C
   );
 });
 
-export const CollectionsSegment = () => {
+const CollectionGridItem = memo(function CollectionGridItem({
+  collection,
+  coverImages,
+  coverSize,
+}: CollectionRowProps & { coverSize: number }) {
+  const handlePress = useCallback(() => {
+    router.push({
+      pathname: "/(tabs)/library/collection/[collectionId]",
+      params: { collectionId: collection.id },
+    });
+  }, [collection.id]);
+
+  return (
+    <LibraryGroupGridItem
+      title={collection.name}
+      countLabel={collectionCountLabel(collection.bookCount)}
+      coverImages={coverImages}
+      coverSize={coverSize}
+      fallbackSystemName="books.vertical"
+      onPress={handlePress}
+    />
+  );
+});
+
+export const CollectionsSegment = ({ viewMode }: { viewMode: LibraryViewMode }) => {
   const themeColors = useThemeColors();
+  const { width } = useWindowDimensions();
   const {
     collections,
     bookIdsByCollectionId,
@@ -83,6 +117,7 @@ export const CollectionsSegment = () => {
     refreshError,
     refetch,
   } = useLibraryCollections();
+  const gridCoverSize = Math.max(72, Math.min(116, Math.floor((width - 48) / 3)));
   const coverBookIds = useMemo(() => {
     const coverBookIdsByCollectionId = new Map<string, readonly string[]>();
     const allBookIds: string[] = [];
@@ -131,7 +166,7 @@ export const CollectionsSegment = () => {
     },
     [coverBookIds.endIndexByRow, onCoverBookIdsViewable],
   );
-  const renderCollection = useCallback(
+  const renderCollectionRow = useCallback(
     ({ item }: { item: CollectionSummary }) => (
       <CollectionRow
         collection={item}
@@ -139,6 +174,16 @@ export const CollectionsSegment = () => {
       />
     ),
     [coverImagesByCollectionId],
+  );
+  const renderCollectionGridItem = useCallback(
+    ({ item }: { item: CollectionSummary }) => (
+      <CollectionGridItem
+        collection={item}
+        coverImages={coverImagesByCollectionId.get(item.id) ?? EMPTY_COVER_IMAGES}
+        coverSize={gridCoverSize}
+      />
+    ),
+    [coverImagesByCollectionId, gridCoverSize],
   );
 
   if (isLoading && collections.length === 0) {
@@ -186,13 +231,15 @@ export const CollectionsSegment = () => {
         </View>
       ) : null}
       <FlashList
+        key={viewMode}
         contentInsetAdjustmentBehavior="automatic"
         data={collections}
         keyExtractor={(collection) => collection.id}
+        numColumns={viewMode === "grid" ? 3 : 1}
         refreshing={isRefetching}
         onRefresh={() => void refetch()}
         onViewableItemsChanged={onViewableItemsChanged}
-        renderItem={renderCollection}
+        renderItem={viewMode === "grid" ? renderCollectionGridItem : renderCollectionRow}
         ListEmptyComponent={
           <View style={{ padding: 24 }}>
             <Text style={{ color: themeColors.textMuted, fontSize: 14 }}>
@@ -200,7 +247,11 @@ export const CollectionsSegment = () => {
             </Text>
           </View>
         }
-        contentContainerStyle={{ paddingBottom: 96 }}
+        contentContainerStyle={{
+          paddingHorizontal: viewMode === "grid" ? 6 : 0,
+          paddingTop: viewMode === "grid" ? 8 : 0,
+          paddingBottom: 96,
+        }}
         showsVerticalScrollIndicator={false}
       />
     </View>

@@ -76,7 +76,7 @@ const replaceSeriesSnapshot = async (
     entry.id,
     entry.name,
     entry.nameSort,
-    entry.addedAt,
+    entry.createdAt,
     entry.totalDuration,
     observedAt,
     JSON.stringify(entry),

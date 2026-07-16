@@ -37,6 +37,7 @@ export type BookListItemProps = {
   actionIds?: readonly BookActionId[];
   enableLongPressMenu?: boolean;
   actionHandlers?: BookActionHandlers;
+  showRowBorders?: boolean;
 };
 
 export const BookListItem = ({
@@ -52,6 +53,7 @@ export const BookListItem = ({
   actionIds = LIBRARY_BOOK_ACTIONS,
   enableLongPressMenu = true,
   actionHandlers,
+  showRowBorders = true,
 }: BookListItemProps) => {
   const themeColors = useThemeColors();
   const isDownloaded = useDeviceBooksStore((state) =>
@@ -99,8 +101,8 @@ export const BookListItem = ({
           paddingHorizontal: 10,
           marginVertical: 4,
           backgroundColor: isCurrentAudiobook ? themeColors.bg : themeColors.surface,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderTopWidth: showRowBorders ? StyleSheet.hairlineWidth : 0,
+          borderBottomWidth: showRowBorders ? StyleSheet.hairlineWidth : 0,
           borderColor: themeColors.accent,
         }}
       >
@@ -266,7 +268,7 @@ export const BookListItem = ({
 
 // Skeleton matching BookListItem geometry for rows whose summary has not
 // resolved yet (windowed Search Result Set resolution).
-export const BookListItemPlaceholder = () => {
+export const BookListItemPlaceholder = ({ showRowBorders = true }: { showRowBorders?: boolean }) => {
   const themeColors = useThemeColors();
   return (
     <View
@@ -278,8 +280,8 @@ export const BookListItemPlaceholder = () => {
         paddingHorizontal: 10,
         marginVertical: 4,
         backgroundColor: themeColors.surface,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderTopWidth: showRowBorders ? StyleSheet.hairlineWidth : 0,
+        borderBottomWidth: showRowBorders ? StyleSheet.hairlineWidth : 0,
         borderColor: themeColors.accent,
       }}
     >

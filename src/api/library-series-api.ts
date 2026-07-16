@@ -11,7 +11,7 @@ export type LibrarySeriesSnapshot = {
   name: string;
   nameSort: string;
   books: SeriesBookRef[];
-  addedAt: number | null;
+  createdAt: number | null;
   totalDuration: number | null;
 };
 
@@ -75,7 +75,7 @@ const normalizeSeries = (value: unknown, libraryId: string): LibrarySeriesSnapsh
       asString(record.name)?.trim() ||
       "Untitled Series",
     books,
-    addedAt: asNumber(record.addedAt),
+    createdAt: asNumber(record.createdAt),
     totalDuration: asNumber(record.totalDuration),
   };
 };

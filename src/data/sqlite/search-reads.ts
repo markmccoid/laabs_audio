@@ -1,6 +1,6 @@
 import { versionCoverUrl } from "@/api/cover-urls";
 import type { LibraryItemSummary } from "@/api/library-items-api";
-import { getDb, initializeShadowDatabaseInternal } from "./shadow-db-core";
+import { type Db, getDb, initializeShadowDatabaseInternal } from "./shadow-db-core";
 import { buildSearchExpression, type ShadowSearchParams } from "./search-expression";
 import { requireActiveLibraryContext } from "./shadow-scope";
 import { type CountRow, type SummaryRow, getCount, now } from "./shadow-shared";
@@ -48,6 +48,41 @@ export type ShadowSearchResultSet = {
   finishedIds: Set<string>;
   usedFts: boolean;
   sqlElapsedMs: number;
+};
+
+export type ShadowBookIndicators = {
+  favoriteIds: Set<string>;
+  finishedIds: Set<string>;
+};
+
+const getShadowBookIndicators = async (
+  db: Db,
+  userId: string,
+  libraryId: string,
+): Promise<ShadowBookIndicators> => {
+  const [favoriteRows, finishedRows] = await Promise.all([
+    db.getAllAsync<{ library_item_id: string }>(
+      `SELECT library_item_id FROM user_favorites WHERE user_id = ?`,
+      [userId],
+    ),
+    db.getAllAsync<{ library_item_id: string }>(
+      `SELECT library_item_id FROM effective_progress
+       WHERE user_id = ? AND library_id = ? AND is_finished = 1`,
+      [userId, libraryId],
+    ),
+  ]);
+
+  return {
+    favoriteIds: new Set(favoriteRows.map((row) => row.library_item_id)),
+    finishedIds: new Set(finishedRows.map((row) => row.library_item_id)),
+  };
+};
+
+export const queryShadowBookIndicators = async (): Promise<ShadowBookIndicators> => {
+  const context = requireActiveLibraryContext();
+  const db = await getDb();
+  await initializeShadowDatabaseInternal();
+  return getShadowBookIndicators(db, context.userId, context.libraryId);
 };
 
 // Stay below SQLite's bind-variable limit when resolving large ID lists.
@@ -168,28 +203,20 @@ export const queryShadowSearchResults = async (
   // Favorite/finished flags come from two whole-set reads instead of per-row
   // EXISTS probes; consumers only membership-test these sets, so supersets
   // scoped to the user are equivalent.
-  const [idRows, favoriteRows, finishedRows] = await Promise.all([
+  const [idRows, indicators] = await Promise.all([
     db.getAllAsync<{ library_item_id: string }>(
       `SELECT item.library_item_id ${expression.fromSql} WHERE ${expression.whereSql} ${expression.orderSql}`,
       expression.bindings,
     ),
-    db.getAllAsync<{ library_item_id: string }>(
-      `SELECT library_item_id FROM user_favorites WHERE user_id = ?`,
-      [context.userId],
-    ),
-    db.getAllAsync<{ library_item_id: string }>(
-      `SELECT library_item_id FROM effective_progress
-       WHERE user_id = ? AND library_id = ? AND is_finished = 1`,
-      [context.userId, context.libraryId],
-    ),
+    getShadowBookIndicators(db, context.userId, context.libraryId),
   ]);
   const sqlElapsedMs = now() - sqlStarted;
 
   return {
     totalCount: idRows.length,
     resultIds: idRows.map((row) => row.library_item_id),
-    favoriteIds: new Set(favoriteRows.map((row) => row.library_item_id)),
-    finishedIds: new Set(finishedRows.map((row) => row.library_item_id)),
+    favoriteIds: indicators.favoriteIds,
+    finishedIds: indicators.finishedIds,
     usedFts: expression.usedFts,
     sqlElapsedMs,
   };

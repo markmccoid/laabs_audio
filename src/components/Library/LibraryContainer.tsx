@@ -1,9 +1,6 @@
 import { useAuthStore } from "@/auth/auth-store";
-import { LIBRARY_BOOK_ACTIONS } from "@/components/books/book-action-types";
-import {
-  BookListItem,
-  BookListItemPlaceholder,
-} from "@/components/books/book-list-item";
+import { BookListItemPlaceholder } from "@/components/books/book-list-item";
+import { IndicatorBookListItem } from "@/components/books/indicator-book-list-item";
 import { sqliteRefreshCoordinator } from "@/data/sqlite/refresh-coordinator";
 import {
   useSearchFavoriteFilter,
@@ -188,11 +185,10 @@ const LibraryContainer = ({
         );
       }
       return (
-        <BookListItem
+        <IndicatorBookListItem
           book={libraryItem}
-          actionIds={LIBRARY_BOOK_ACTIONS}
-          isFavorite={favoriteIds.has(libraryItemId)}
-          isFinished={finishedIds.has(libraryItemId)}
+          favoriteIds={favoriteIds}
+          finishedIds={finishedIds}
           href={`/(tabs)/search/${libraryItem.id}`}
         />
       );

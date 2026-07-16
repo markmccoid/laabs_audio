@@ -5,12 +5,21 @@ import {
 } from "@/components/images/composite-cover-grid";
 import { useWindowedItemSummaries } from "@/data/sqlite/use-windowed-item-summaries";
 import { useLibraryPlaylists } from "@/hooks/use-library-playlists";
+import type { LibraryViewMode } from "@/library/lists-preferences-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashList } from "@shopify/flash-list";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { memo, useCallback, useMemo } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { LibraryGroupGridItem } from "./library-group-grid-item";
 
 const playlistCountLabel = (count: number) => `${count} ${count === 1 ? "book" : "books"}`;
 const MAX_PLAYLIST_COVER_BOOKS = 4;
@@ -71,9 +80,35 @@ const PlaylistRow = memo(function PlaylistRow({ playlist, coverImages }: Playlis
   );
 });
 
-export const PlaylistsSegment = () => {
+const PlaylistGridItem = memo(function PlaylistGridItem({
+  playlist,
+  coverImages,
+  coverSize,
+}: PlaylistRowProps & { coverSize: number }) {
+  const handlePress = useCallback(() => {
+    router.push({
+      pathname: "/(tabs)/library/playlist/[playlistId]",
+      params: { playlistId: playlist.id },
+    });
+  }, [playlist.id]);
+
+  return (
+    <LibraryGroupGridItem
+      title={playlist.name}
+      countLabel={playlistCountLabel(playlist.items.length)}
+      coverImages={coverImages}
+      coverSize={coverSize}
+      fallbackSystemName="music.note.list"
+      onPress={handlePress}
+    />
+  );
+});
+
+export const PlaylistsSegment = ({ viewMode }: { viewMode: LibraryViewMode }) => {
   const themeColors = useThemeColors();
+  const { width } = useWindowDimensions();
   const { data: playlists = [], error, isLoading, isRefetching, refetch } = useLibraryPlaylists();
+  const gridCoverSize = Math.max(72, Math.min(116, Math.floor((width - 48) / 3)));
   const playlistCoverBookIds = useMemo(() => {
     const bookIdsByPlaylistId = new Map<string, readonly string[]>();
     const allBookIds: string[] = [];
@@ -126,7 +161,7 @@ export const PlaylistsSegment = () => {
     },
     [onCoverBookIdsViewable, playlistCoverBookIds.endIndexByPlaylistRow],
   );
-  const renderPlaylist = useCallback(
+  const renderPlaylistRow = useCallback(
     ({ item }: { item: PlaylistSummary }) => (
       <PlaylistRow
         playlist={item}
@@ -134,6 +169,16 @@ export const PlaylistsSegment = () => {
       />
     ),
     [coverImagesByPlaylistId],
+  );
+  const renderPlaylistGridItem = useCallback(
+    ({ item }: { item: PlaylistSummary }) => (
+      <PlaylistGridItem
+        playlist={item}
+        coverImages={coverImagesByPlaylistId.get(item.id) ?? EMPTY_COVER_IMAGES}
+        coverSize={gridCoverSize}
+      />
+    ),
+    [coverImagesByPlaylistId, gridCoverSize],
   );
 
   if (isLoading && playlists.length === 0) {
@@ -171,13 +216,15 @@ export const PlaylistsSegment = () => {
 
   return (
     <FlashList
+      key={viewMode}
       contentInsetAdjustmentBehavior="automatic"
       data={playlists}
       keyExtractor={(playlist) => playlist.id}
+      numColumns={viewMode === "grid" ? 3 : 1}
       refreshing={isRefetching}
       onRefresh={() => void refetch()}
       onViewableItemsChanged={onViewableItemsChanged}
-      renderItem={renderPlaylist}
+      renderItem={viewMode === "grid" ? renderPlaylistGridItem : renderPlaylistRow}
       ListEmptyComponent={
         <View style={{ padding: 24 }}>
           <Text style={{ color: themeColors.textMuted, fontSize: 14 }}>
@@ -185,7 +232,11 @@ export const PlaylistsSegment = () => {
           </Text>
         </View>
       }
-      contentContainerStyle={{ paddingBottom: 96 }}
+      contentContainerStyle={{
+        paddingHorizontal: viewMode === "grid" ? 6 : 0,
+        paddingTop: viewMode === "grid" ? 8 : 0,
+        paddingBottom: 96,
+      }}
       showsVerticalScrollIndicator={false}
     />
   );

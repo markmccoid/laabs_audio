@@ -1,8 +1,9 @@
-import { LIBRARY_BOOK_ACTIONS } from "@/components/books/book-action-types";
-import { BookListItem, BookListItemPlaceholder } from "@/components/books/book-list-item";
+import { BookListItemPlaceholder } from "@/components/books/book-list-item";
+import { IndicatorBookListItem } from "@/components/books/indicator-book-list-item";
 import { useWindowedItemSummaries } from "@/data/sqlite/use-windowed-item-summaries";
 import { sqliteCollectionsRepository } from "@/data/sqlite/collections-repository";
 import { useLibraryCollections } from "@/hooks/use-library-collections";
+import { useBookListIndicators } from "@/hooks/use-book-list-indicators";
 import { useAuthStore } from "@/auth/auth-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { queryKeys } from "@/query/query-keys";
@@ -45,15 +46,17 @@ export const CollectionDetailScreen = ({ collectionId }: CollectionDetailScreenP
   const bookIdsError = bookIdsQuery.error;
 
   const { itemById, onViewableItemsChanged } = useWindowedItemSummaries(bookIds);
+  const { favoriteIds, finishedIds } = useBookListIndicators();
   const renderBook = useCallback(
     ({ item: libraryItemId }: { item: string }) => {
       const book = itemById.get(libraryItemId);
       if (!book) return <BookListItemPlaceholder />;
 
       return (
-        <BookListItem
+        <IndicatorBookListItem
           book={book}
-          actionIds={LIBRARY_BOOK_ACTIONS}
+          favoriteIds={favoriteIds}
+          finishedIds={finishedIds}
           href={{
             pathname: "/(tabs)/library/[libraryItemId]",
             params: { libraryItemId: book.id },
@@ -61,7 +64,7 @@ export const CollectionDetailScreen = ({ collectionId }: CollectionDetailScreenP
         />
       );
     },
-    [itemById],
+    [favoriteIds, finishedIds, itemById],
   );
 
   return (

@@ -25,6 +25,11 @@ export const queryKeys = {
     params: unknown,
   ) =>
     ["sqlite", "overlay", "user", userKey ?? null, "library", libraryId ?? null, "searchResultSet", params] as const,
+  sqliteBookIndicators: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+  ) =>
+    ["sqlite", "overlay", "user", userKey ?? null, "library", libraryId ?? null, "bookIndicators"] as const,
   sqliteHomeProjection: (
     userKey: string | null | undefined,
     libraryId: string | null | undefined,

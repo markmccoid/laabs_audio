@@ -4,6 +4,8 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-15` `pending` - Enhance Lists browsing and add complete playlist editing.
+  Tester focus: verify Series, Collections, and Playlists can switch between list and grid layouts; verify Series sorting and stacked artwork; then open a playlist, rename it, reorder or remove books, and confirm the checkmark applies changes immediately without a spinner and restores the prior state if Audiobookshelf rejects the update.
 - `2026-07-15` `pending` - Build out Lists browsing with Series, Collections, and Playlists.
   Tester focus: verify the former Library tab appears as Lists; verify Series, Collections, and Playlists load from Audiobookshelf and cached SQLite data; verify Series rows show stacked covers and book counts, pull-down search filters series names, and opening any list pushes a normal card with the shared book list rows and actions.
 - `2026-07-13` `pending` - Refresh cached cover artwork when server images change.
