@@ -1,6 +1,7 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { useRecyclingState } from "@shopify/flash-list";
 import type { Href } from "expo-router";
 import { Link } from "expo-router";
@@ -83,7 +84,10 @@ export const HomeShelfSection = ({
   return (
     <View style={{ gap: 12 }} className="mb-3">
       <View className="flex-row items-center justify-between px-[18] py-[1]">
-        <View className="pl-4 pr-10 rounded-xl overflow-hidden border-hairline border-accent border-t-0 border-l-0 border-r-0">
+        <View
+          className="pl-4 pr-2 rounded-xl overflow-hidden border-hairline border-accent border-t-0 border-l-0 border-r-0"
+          style={{ flex: 1, minWidth: 0, marginRight: 8 }}
+        >
           {/* <LinearGradient
             colors={[`${themeColors.accent}77`, "rgba(255, 255, 255, 0)"]} // 2. Fading to transparent white
             start={{ x: 0, y: 0 }}
@@ -92,19 +96,19 @@ export const HomeShelfSection = ({
             style={StyleSheet.absoluteFill} // 3. This is the magic fix (top:0, left:0, right:0, bottom:0)
           /> */}
           <Text
+            maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
             numberOfLines={1}
             style={{
               color: themeColors.text,
               fontSize: 20,
               fontWeight: "700",
-              flex: 1,
             }}
           >
             {title}
           </Text>
         </View>
 
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0, gap: 6 }}>
           {onRefresh ? (
             <Pressable
               onPress={onRefresh}

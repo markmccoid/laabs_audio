@@ -3,6 +3,7 @@ import { playerService, usePlaybackStore } from "@/player";
 import type { PlaybackControlIntent } from "@/player/playback-store";
 import { clampPlaybackRateToRange, useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { MenuView, type MenuAction, type NativeActionEvent } from "@expo/ui/community/menu";
 import { router } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
@@ -92,7 +93,7 @@ export function MiniPlayerBottomAccessory({
         title={title ?? undefined}
         actions={menuActions}
         onPressAction={handleMenuAction}
-        style={styles.coverMenu}
+        style={[styles.coverMenu, styles.fixedControl]}
       >
         <CoverImage
           libraryItemId={libraryItemId ?? undefined}
@@ -111,13 +112,22 @@ export function MiniPlayerBottomAccessory({
 
       <Pressable
         onPress={handleOpenMainPlayer}
-        className="flex-1 flex-row items-center h-full min-w-0"
+        className="flex-row items-center h-full"
+        style={styles.metadataButton}
       >
         <View className="flex-col justify-center flex-1 items-start h-full">
-          <Text style={{ fontSize: 12, color: themeColors.text }} numberOfLines={1}>
+          <Text
+            maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+            numberOfLines={1}
+            style={{ fontSize: 12, color: themeColors.text }}
+          >
             {title ?? "Starting audiobook"}
           </Text>
-          <Text style={{ fontSize: 10, color: themeColors.textMuted }} numberOfLines={1}>
+          <Text
+            maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+            numberOfLines={1}
+            style={{ fontSize: 10, color: themeColors.textMuted }}
+          >
             {isLoading ? "Starting playback..." : `by ${author ?? ""}`}
           </Text>
         </View>
@@ -155,7 +165,7 @@ function PlayPauseButton({
       disabled={Boolean(playbackControlIntent)}
       className="h-full items-center flex-row w-8 justify-center"
       hitSlop={10}
-      style={{ opacity: playbackControlIntent ? 0.45 : 1 }}
+      style={[styles.fixedControl, { opacity: playbackControlIntent ? 0.45 : 1 }]}
     >
       {isLoading ? (
         <ActivityIndicator size="small" color={themeColors.accent} />
@@ -177,6 +187,15 @@ const styles = StyleSheet.create({
     height: 35,
     width: 35,
   },
+  fixedControl: {
+    flexShrink: 0,
+  },
+  metadataButton: {
+    flexBasis: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
   regularAccessory: {
     alignSelf: "stretch",
     flex: 1,
@@ -184,7 +203,7 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   inlineAccessory: {
-    paddingHorizontal: 12,
-    width: 240,
+    paddingHorizontal: 8,
+    width: "100%",
   },
 });

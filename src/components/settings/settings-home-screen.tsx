@@ -1,5 +1,6 @@
 import { useAuthStore } from "@/auth/auth-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import Constants from "expo-constants";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -56,10 +57,18 @@ const SettingsRow = ({ href, title, subtitle, icon, isLast = false }: SettingsRo
           <SymbolView name={icon} tintColor={themeColors.text} />
         </View>
         <View style={{ flex: 1, gap: 2 }}>
-          <Text selectable style={{ color: themeColors.text, fontSize: 16, fontWeight: "500" }}>
+          <Text
+            maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+            selectable
+            style={{ color: themeColors.text, fontSize: 16, fontWeight: "500" }}
+          >
             {title}
           </Text>
-          <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+          <Text
+            maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+            selectable
+            style={{ color: themeColors.textMuted, fontSize: 13 }}
+          >
             {subtitle}
           </Text>
         </View>

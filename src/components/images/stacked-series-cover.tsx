@@ -1,5 +1,6 @@
 import { CoverImage } from "@/components/images/cover-image";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { SymbolView } from "expo-symbols";
 import { StyleSheet, Text, View } from "react-native";
 import type { CompositeCoverGridImage } from "./composite-cover-grid";
@@ -35,6 +36,7 @@ export const StackedSeriesCover = ({ images, size = 78, bookCount }: StackedSeri
         ]}
       >
         <Text
+          maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
           selectable
           style={[styles.countBadgeText, { color: themeColors.accentForeground }]}
         >

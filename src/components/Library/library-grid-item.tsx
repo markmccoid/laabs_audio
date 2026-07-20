@@ -6,6 +6,7 @@ import {
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { Link } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -54,6 +55,7 @@ export const LibraryGridItem = ({ libraryItem, isFavorite = false, isFinished = 
           }}
         />
         <Text
+          maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
           numberOfLines={1}
           lineBreakMode="tail"
           style={{
@@ -66,6 +68,7 @@ export const LibraryGridItem = ({ libraryItem, isFavorite = false, isFinished = 
           {libraryItem.title}
         </Text>
         <Text
+          maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
           numberOfLines={1}
           lineBreakMode="tail"
           style={{ color: themeColors.textMuted, fontSize: 11 }}

@@ -3,6 +3,7 @@ import {
   type CompositeCoverGridImage,
 } from "@/components/images/composite-cover-grid";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import type { SFSymbol } from "expo-symbols";
 import { memo } from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
@@ -39,6 +40,7 @@ export const LibraryGroupGridItem = memo(function LibraryGroupGridItem({
         size={coverSize}
       />
       <Text
+        maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
         numberOfLines={2}
         selectable
         style={[styles.title, { color: themeColors.text }]}
@@ -46,6 +48,7 @@ export const LibraryGroupGridItem = memo(function LibraryGroupGridItem({
         {title}
       </Text>
       <Text
+        maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
         numberOfLines={1}
         selectable
         style={[styles.count, { color: themeColors.textMuted }]}

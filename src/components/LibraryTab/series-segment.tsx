@@ -10,6 +10,7 @@ import {
   type SeriesSortDirection,
 } from "@/sort/series-sort";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { FlashList } from "@shopify/flash-list";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -66,7 +67,12 @@ const SeriesRow = memo(function SeriesRow({
         bookCount={series.bookCount}
       />
       <View style={styles.rowDetails}>
-        <Text numberOfLines={1} selectable style={[styles.title, { color: themeColors.text }]}>
+        <Text
+          maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          numberOfLines={1}
+          selectable
+          style={[styles.title, { color: themeColors.text }]}
+        >
           {series.name}
         </Text>
       </View>
@@ -105,6 +111,7 @@ const SeriesGridItem = memo(function SeriesGridItem({
         bookCount={series.bookCount}
       />
       <Text
+        maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
         numberOfLines={2}
         selectable
         style={[styles.gridTitle, { color: themeColors.text }]}

@@ -3,6 +3,7 @@ import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { usePlayerDisplayAudiobook, useSleepTimerActions, useSleepTimerStatus } from "@/player";
 import { resolveStoredDownloadCoverUri, useDeviceBooksStore } from "@/store/device-books-store";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
@@ -131,6 +132,7 @@ const MainPlayerScreen = () => {
           />
           <View style={{ paddingHorizontal: 10, alignItems: "center", gap: 4 }}>
             <Text
+              maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
               numberOfLines={2}
               selectable
               style={{
@@ -143,6 +145,7 @@ const MainPlayerScreen = () => {
               {title}
             </Text>
             <Text
+              maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
               numberOfLines={1}
               selectable
               style={{ fontSize: 15, color: themeColors.textMuted, textAlign: "center" }}
@@ -156,6 +159,7 @@ const MainPlayerScreen = () => {
                   <View className="py-[10] self-start border-hairline border-accent mt-[6] px-[10] rounded-full bg-surface flex-row items-center gap-[6]">
                     <SymbolView name="powersleep" size={15} tintColor={themeColors.accent} />
                     <Text
+                      maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
                       style={{
                         height: "100%",
                         fontSize: 13,

@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-19` `pending` - Keep compact player, shelf, library, and settings text readable at large iOS text sizes.
+  Tester focus: enable iOS Display Zoom and larger accessibility text, then verify the inline mini-player keeps its play button; Home shelf headings use the available width; and compact Home, Lists, Search, Settings, and player labels remain visible without bottom clipping.
+
 - `2026-07-19` `pending` - Preserve cached libraries while Audiobookshelf is unreachable and restrict playback to downloads.
   Tester focus: with the device online but Audiobookshelf unavailable, verify Home keeps cached shelves visible, displays the Audiobookshelf-unavailable banner, and allows only downloaded audiobooks to play; retry after restoring Audiobookshelf and verify normal streaming resumes.
 

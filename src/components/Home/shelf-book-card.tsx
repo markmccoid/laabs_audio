@@ -13,6 +13,7 @@ import {
   type BookProgressTimeDisplay,
 } from "@/store/settings-store";
 import { deriveProgressFillColor } from "@/theme/accent-color";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -334,13 +335,14 @@ export const ShelfBookCard = ({
       </View>
       {homeShowTitles ? (
         <Text
+          maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
           numberOfLines={2}
           style={{
             color: themeColors.text,
             fontSize: 12,
             fontWeight: "600",
             lineHeight: 15,
-            minHeight: 30,
+            minHeight: 32,
           }}
         >
           {book.title}
@@ -392,6 +394,7 @@ export const ShelfBookCard = ({
             tintColor={themeColors.text}
           />
           <Text
+            maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
             selectable
             numberOfLines={1}
             style={{

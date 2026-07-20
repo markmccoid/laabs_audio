@@ -7,6 +7,7 @@ import {
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import type { ComponentProps } from "react";
@@ -93,6 +94,7 @@ const ActionIconButton = ({
             }}
           >
             <Text
+              maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
               selectable
               style={{
                 // color: "#ffffff",
@@ -189,6 +191,7 @@ const RateActionButton = ({ libraryItemId, onPress }: RateActionButtonProps) => 
         ]}
       >
         <Text
+          maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
           selectable
           style={{
             color: themeColors.accentForeground,
@@ -235,6 +238,7 @@ const RateActionButton = ({ libraryItemId, onPress }: RateActionButtonProps) => 
 
       <Text
         className="text-text-muted"
+        maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
         style={{ marginTop: -1, fontSize: 12, fontVariant: ["tabular-nums"] }}
       >
         {displayRate.toFixed(2)}x

@@ -7,6 +7,7 @@ import {
   useAmbientStore,
 } from "@/store/store-ambient";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { Pressable, Text, View } from "react-native";
@@ -64,7 +65,11 @@ const MainPlayerAmbientControl = ({ libraryItemId }: MainPlayerAmbientControlPro
         })}
       >
         <SymbolView name="speaker.wave.2.fill" size={25} tintColor={themeColors.accent} />
-        <Text selectable style={{ color: themeColors.text, fontSize: 12, fontWeight: "700" }}>
+        <Text
+          maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          selectable
+          style={{ color: themeColors.text, fontSize: 12, fontWeight: "700" }}
+        >
           Add Ambient
         </Text>
       </Pressable>
@@ -142,6 +147,7 @@ const MainPlayerAmbientControl = ({ libraryItemId }: MainPlayerAmbientControlPro
         })}
       >
         <Text
+          maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
           selectable
           numberOfLines={1}
           style={{ color: themeColors.text, fontSize: 14, fontWeight: "600" }}

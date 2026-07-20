@@ -8,6 +8,7 @@ import {
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { Pressable, Text, View } from "react-native";
@@ -87,6 +88,7 @@ export const BookshelfGridItem = ({
         </View>
         <View style={{ minHeight: 36 }}>
           <Text
+            maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
             selectable
             numberOfLines={1}
             style={{ color: themeColors.text, fontSize: 14, fontWeight: "600", textAlign: "center" }}
