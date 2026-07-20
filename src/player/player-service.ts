@@ -9,6 +9,7 @@ import { playbackApi } from "../api/playback-api";
 import { sessionsApi } from "../api/sessions-api";
 import { buildCoverUrls } from "../api/cover-urls";
 import { authStore } from "../auth/auth-store";
+import { canUseAudiobookshelfServer } from "../auth/server-connection";
 import {
   getCarPlayResumeSnapshotForCandidateIds,
   recordCarPlayResumeSnapshot,
@@ -538,6 +539,11 @@ class PlayerService {
 
       // Preflight (current playback untouched): fetch the streamed session
       // BEFORE closing the active book so a failure keeps it playing.
+      if (!downloadedSession && !this.canUseServer()) {
+        throw new StreamedPlaybackStartFailureError(
+          "Audiobookshelf is unreachable. Only downloaded audiobooks can play.",
+        );
+      }
       const streamedSession = downloadedSession
         ? null
         : await withPlaybackStartTimeout(playbackApi.getPlayInfo(libraryItemId));
@@ -1286,8 +1292,18 @@ class PlayerService {
   }
 
   private shouldFetchFreshServerProgressForLoad() {
+    return this.canUseServer();
+  }
+
+  private canUseServer() {
     const authState = authStore.getState();
-    return authState.status === "authenticated" && authState.isOnline !== false;
+    return (
+      authState.status === "authenticated" &&
+      canUseAudiobookshelfServer({
+        isOnline: authState.isOnline,
+        serverConnectionStatus: authState.serverConnectionStatus,
+      })
+    );
   }
 
   private logFreshServerProgressFetch(payload: {
@@ -2116,6 +2132,11 @@ class PlayerService {
     const playbackStateAfterAutoRewind = playbackStore.getState();
     const currentTrack =
       playbackStateAfterAutoRewind.queue[playbackStateAfterAutoRewind.currentTrackIndex];
+    if (currentTrack && !currentTrack.source.isLocal && !this.canUseServer()) {
+      throw new StreamedPlaybackStartFailureError(
+        "Audiobookshelf is unreachable. Only downloaded audiobooks can play.",
+      );
+    }
     const shouldVerifyDownloadedPlayback =
       options?.updatePlaybackStore !== false && Boolean(currentTrack?.source.isLocal);
 
@@ -2167,8 +2188,7 @@ class PlayerService {
         Boolean(currentState.libraryItemId) &&
         !this.localStreamFallbackInFlight &&
         options?.disableLocalStreamFallback !== true &&
-        authStore.getState().status === "authenticated" &&
-        authStore.getState().isOnline !== false;
+        this.canUseServer();
 
       if (shouldFallbackToStreaming) {
         this.localStreamFallbackInFlight = true;

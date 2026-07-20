@@ -1,5 +1,6 @@
 import { isStreamedPlaybackStartFailure, playerService, usePlaybackStore } from "@/player";
 import { useAuthStore } from "@/auth/auth-store";
+import { canUseAudiobookshelfServer } from "@/auth/server-connection";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -99,6 +100,7 @@ const showStreamedPlaybackStartFailureToast = () => {
 const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
   const themeColors = useThemeColors();
   const isOnline = useAuthStore((state) => state.isOnline);
+  const serverConnectionStatus = useAuthStore((state) => state.serverConnectionStatus);
   const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
   const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
   const playbackState = usePlaybackStore((state) => state.playbackState);
@@ -110,6 +112,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
     if (!libraryItemId) return false;
     return selectHasPlayableBookDownload(state, libraryItemId);
   });
+  const canUseServer = canUseAudiobookshelfServer({ isOnline, serverConnectionStatus });
   const [pendingLoadBookId, setPendingLoadBookId] = useState<string | null>(null);
 
   const hasBookId = Boolean(libraryItemId);
@@ -161,7 +164,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
       viewedBookState === "loaded-active");
   const canUseChapterControls = canControl && chapterCount > 0;
   const canToggle =
-    hasBookId && !isLoading && !hasActivePlaybackControlIntent && (isOnline !== false || isDownloaded);
+    hasBookId && !isLoading && !hasActivePlaybackControlIntent && (canUseServer || isDownloaded);
 
   const seekBackwardIcon = resolveSeekBackwardIcon(seekBackwardSeconds);
   const seekForwardIcon = resolveSeekForwardIcon(seekForwardSeconds);

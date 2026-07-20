@@ -1,4 +1,5 @@
 import { enterUserSession } from "@/auth/enter-user-session";
+import { isConnectionFailureKind } from "@/auth/server-connection";
 import { getSessionDisplayName, type RememberedSessionRecord } from "@/auth/auth-storage";
 import { useAuthStore } from "@/auth/auth-store";
 import { useApplySessionEntryResolution } from "@/auth/use-apply-session-entry-resolution";
@@ -18,9 +19,9 @@ const BUTTON_LABEL_MAX_CHARS = 22;
  * this hook owns the session list and the switch behavior.
  *
  * Picking another session runs the shared enterUserSession restore path. Failure
- * mirrors the Sign-In list screen: a non-offline failure opens that session's edit
- * form, while offline / no-libraries surface an Alert. Success rides Home's existing
- * Library Activation loading.
+ * mirrors the Sign-In list screen: credential failures open that session's edit
+ * form, while connection failures / no-libraries surface an Alert. Success rides
+ * Home's existing Library Activation loading.
  */
 export const useHomeSignInSwitcher = () => {
   const storedUsername = useAuthStore((state) => state.storedUsername);
@@ -72,8 +73,11 @@ export const useHomeSignInSwitcher = () => {
             }
           },
           onFailed: (failure) => {
-            if (failure.kind === "offline") {
-              Alert.alert("You're offline", failure.message);
+            if (isConnectionFailureKind(failure.kind)) {
+              Alert.alert(
+                failure.kind === "offline" ? "You're offline" : "Audiobookshelf unavailable",
+                failure.message,
+              );
               return;
             }
             router.push({

@@ -288,8 +288,10 @@ export const useHomeShelves = () => {
       Boolean(activeLibraryUserKey),
   });
   const readiness = readinessQuery.data;
-  const hasReadySqliteHome =
-    readiness?.hasCatalogRows === true && Boolean(readiness.lastOverlayRefreshAt);
+  // Catalog rows are independently useful: Recently Added, downloaded-book
+  // resolution, custom shelves, and Discover can all render even when the
+  // user-overlay refresh has never completed (or ABS is currently unavailable).
+  const hasReadySqliteHome = readiness?.hasCatalogRows === true;
 
   const homeProjectionQuery = useQuery({
     queryKey: queryKeys.sqliteHomeProjection(

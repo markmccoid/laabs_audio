@@ -62,6 +62,9 @@ export const LibrarySelectionGate = () => {
     if (loginRequired) return;
     if (!isFetched) return;
     if (isFetching) return;
+    // A failed request is not evidence that the user has zero Libraries. Keep
+    // the remembered Active Library so cached SQLite projections stay scoped.
+    if (isError) return;
     if (activationStatus !== "idle") return;
     if (!libraries.length) {
       if (activeLibraryId) {
@@ -104,6 +107,7 @@ export const LibrarySelectionGate = () => {
     clearActiveLibrary,
     isFetched,
     isFetching,
+    isError,
     libraries,
     loginRequired,
     segments,

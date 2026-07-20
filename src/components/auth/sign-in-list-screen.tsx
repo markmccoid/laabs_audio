@@ -1,4 +1,5 @@
 import { enterUserSession } from "@/auth/enter-user-session";
+import { isConnectionFailureKind } from "@/auth/server-connection";
 import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
 import { useApplySessionEntryResolution } from "@/auth/use-apply-session-entry-resolution";
 import { useExplicitLogout } from "@/auth/use-explicit-logout";
@@ -116,7 +117,7 @@ export function SignInListScreen() {
         returnToLibraryItemId,
         onError: setLocalError,
         onFailed: (failure) => {
-          if (failure.kind !== "offline") {
+          if (!isConnectionFailureKind(failure.kind)) {
             openEdit(session);
           }
         },

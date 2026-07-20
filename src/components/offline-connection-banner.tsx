@@ -19,11 +19,12 @@ export const OfflineConnectionBanner = () => {
   const segments = useSegments();
   const rootSegment = segments[0];
   const isOnline = useAuthStore((state) => state.isOnline);
+  const serverConnectionStatus = useAuthStore((state) => state.serverConnectionStatus);
   const status = useAuthStore((state) => state.status);
   const loginRequired = useAuthStore((state) => state.loginRequired);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const { refreshSession, setOnlineStatus } = useAuthActions();
+  const { refreshSession, setOnlineStatus, setServerConnectionStatus } = useAuthActions();
   const [isRetrying, setIsRetrying] = useState(false);
 
   const handleRetry = useCallback(async () => {
@@ -36,6 +37,7 @@ export const OfflineConnectionBanner = () => {
       setOnlineStatus(online);
 
       if (!online) return;
+      setServerConnectionStatus("unknown");
       if (status === "anonymous" || loginRequired) return;
 
       const refreshes: Promise<unknown>[] = [];
@@ -85,10 +87,13 @@ export const OfflineConnectionBanner = () => {
     queryClient,
     refreshSession,
     setOnlineStatus,
+    setServerConnectionStatus,
     status,
   ]);
 
-  if (isOnline !== false || rootSegment === "main-player") return null;
+  const isDeviceOffline = isOnline === false;
+  const isServerUnavailable = isOnline !== false && serverConnectionStatus === "unreachable";
+  if ((!isDeviceOffline && !isServerUnavailable) || rootSegment === "main-player") return null;
 
   return (
     <View
@@ -106,9 +111,15 @@ export const OfflineConnectionBanner = () => {
       }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 }}>
-        <SymbolView name="wifi.slash" size={15} tintColor={themeColors.textMuted} />
+        <SymbolView
+          name={isDeviceOffline ? "wifi.slash" : "exclamationmark.triangle"}
+          size={15}
+          tintColor={themeColors.textMuted}
+        />
         <Text numberOfLines={2} style={{ color: themeColors.textMuted, fontSize: 13, flexShrink: 1 }}>
-          Offline. Connect to refresh.
+          {isDeviceOffline
+            ? "Device offline. Cached library only; downloaded audiobooks can play."
+            : "Audiobookshelf unavailable. Cached library only; downloaded audiobooks can play."}
         </Text>
       </View>
 

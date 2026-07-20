@@ -61,6 +61,7 @@ const mockPrepare = prepareForSignInChange as jest.Mock;
 
 const commitActiveSession = jest.fn();
 const setSessionNeedsAttention = jest.fn();
+const setServerConnectionStatus = jest.fn();
 
 // Shared ordered log so tests can assert phase ordering (persist → cross → commit).
 let calls: string[] = [];
@@ -85,7 +86,7 @@ const setAuthState = (overrides: Record<string, unknown> = {}) => {
     storedUserId: "user-bob",
     activeLibraryId: "lib-bob",
     activeLibraryUserKey: "user-jane",
-    actions: { commitActiveSession, setSessionNeedsAttention },
+    actions: { commitActiveSession, setSessionNeedsAttention, setServerConnectionStatus },
     ...overrides,
   });
 };
@@ -151,7 +152,7 @@ describe("credentials entry", () => {
     expect(commitActiveSession).not.toHaveBeenCalled();
   });
 
-  it("reports offline on a network error", async () => {
+  it("reports ABS unreachable when the device is online but the server request fails", async () => {
     mockLogin.mockRejectedValue(new AuthError("net", "NETWORK_ERROR"));
 
     const result = await enterUserSession({
@@ -161,7 +162,7 @@ describe("credentials entry", () => {
       serverUrl: "https://abs.example.com",
     });
 
-    expect(result).toMatchObject({ outcome: "failed", kind: "offline" });
+    expect(result).toMatchObject({ outcome: "failed", kind: "serverUnreachable" });
     expect(commitActiveSession).not.toHaveBeenCalled();
   });
 });

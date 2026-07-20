@@ -6,6 +6,7 @@ import {
   type UserServerState,
 } from "@/api/me-api";
 import { useAuthStore } from "@/auth/auth-store";
+import { canUseAudiobookshelfServer } from "@/auth/server-connection";
 import type {
   BookActionHandlers,
   BookActionId,
@@ -218,6 +219,7 @@ export const useBookActionController = ({
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const isOnline = useAuthStore((state) => state.isOnline);
+  const serverConnectionStatus = useAuthStore((state) => state.serverConnectionStatus);
   const {
     addBookToCustomShelf,
     addBooksToPlaylistShelfOptimistic,
@@ -247,7 +249,8 @@ export const useBookActionController = ({
   const isBookPlaying = isBookActive && playbackState === "playing";
   const isBookLoading = isBookActive && playbackState === "loading";
   const isBookLoaded = isBookActive && activeQueueLength > 0;
-  const canPlay = !isBookLoading && (isOnline !== false || isDownloaded);
+  const canUseServer = canUseAudiobookshelfServer({ isOnline, serverConnectionStatus });
+  const canPlay = !isBookLoading && (canUseServer || isDownloaded);
   const canMutateShelves = Boolean(activeLibraryId && activeLibraryUserKey);
   const hasStartedContinueListening =
     Math.max(0, Math.floor(progress?.currentTime ?? 0)) > 0 ||
@@ -257,7 +260,7 @@ export const useBookActionController = ({
   );
   const canToggleContinueListeningVisibility = Boolean(
     authStatus === "authenticated" &&
-    isOnline !== false &&
+    canUseServer &&
     hasContinueListeningVisibilityOption,
   );
   const primaryLabel = isBookPlaying ? "Pause" : "Play";
@@ -325,7 +328,7 @@ export const useBookActionController = ({
       return;
     }
 
-    if (isOnline !== false && authStatus === "authenticated") {
+    if (canUseServer && authStatus === "authenticated") {
       const intent = recordProgressSyncIntent({
         libraryItemId: book.id,
         currentTimeSeconds: durationSeconds,
@@ -410,7 +413,7 @@ export const useBookActionController = ({
       );
     }
 
-    if (isOnline !== false && authStatus === "authenticated") {
+    if (canUseServer && authStatus === "authenticated") {
       const intent = recordProgressSyncIntent({
         libraryItemId: book.id,
         currentTimeSeconds: 0,

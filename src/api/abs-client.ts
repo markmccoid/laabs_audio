@@ -30,6 +30,13 @@ export class AbsOfflineError extends AbsApiError {
   }
 }
 
+export class AbsServerUnavailableError extends AbsApiError {
+  constructor(message = "Audiobookshelf server is unreachable") {
+    super(message);
+    this.name = "AbsServerUnavailableError";
+  }
+}
+
 const log = (..._args: unknown[]) => {};
 
 const parseJson = async <T>(response: Response): Promise<T> => {
@@ -64,6 +71,10 @@ const buildError = async (response: Response) => {
 const handleAuthUnavailable = (error: AuthUnavailableError): never => {
   if (error.code === "OFFLINE") {
     throw new AbsOfflineError("Device is offline");
+  }
+
+  if (error.code === "SERVER_UNREACHABLE") {
+    throw new AbsServerUnavailableError();
   }
 
   if (error.code === "TOKEN_REFRESH_FAILED" || error.code === "UNAUTHENTICATED") {

@@ -13,6 +13,7 @@ import { getJwtExpiry, isTokenExpired } from "./auth-token";
 import { recordTimingLog } from "../data/sqlite/timing-logger";
 import { setAuthErrorHandler } from "../api/abs-client";
 import { setAuthProvider } from "../api/auth-fetch";
+import type { ServerConnectionStatus } from "./server-connection";
 
 const log = (...args: unknown[]) => {
   if (__DEV__) {
@@ -34,6 +35,7 @@ export type AuthState = {
   hasStoredCredentials: boolean;
   hasOfflineContent: boolean;
   isOnline: boolean | null;
+  serverConnectionStatus: ServerConnectionStatus;
   storedUsername: string | null;
   storedUserId: string | null;
   serverUrl: string | null;
@@ -50,6 +52,7 @@ export type AuthState = {
   actions: {
     hydrateFromStorage: (initialOfflineContent?: boolean) => Promise<void>;
     setOnlineStatus: (isOnline: boolean) => void;
+    setServerConnectionStatus: (status: ServerConnectionStatus) => void;
     setHasOfflineContent: (hasOfflineContent: boolean) => void;
     setLoginRequired: (required: boolean, message?: string | null) => void;
     setActiveLibrary: (library: { id: string; name: string }) => void;
@@ -98,6 +101,7 @@ export const authStore = createStore<AuthState>()(
       hasStoredCredentials: false,
       hasOfflineContent: false,
       isOnline: null,
+      serverConnectionStatus: "unknown",
       storedUsername: null,
       storedUserId: null,
       serverUrl: null,
@@ -187,6 +191,7 @@ export const authStore = createStore<AuthState>()(
             accessToken: secrets.accessToken,
             refreshToken: secrets.refreshToken,
             accessTokenExpiresAt,
+            serverConnectionStatus: "unknown",
             status: computeEntryStatus(hasStoredSession, offlineContent),
             loginRequired: hasStoredSession ? false : state.loginRequired,
             lastAuthError: hasStoredSession ? null : state.lastAuthError,
@@ -230,6 +235,7 @@ export const authStore = createStore<AuthState>()(
               accessToken: null,
               refreshToken: null,
               accessTokenExpiresAt: null,
+              serverConnectionStatus: "unknown",
               status: computeEntryStatus(false, offlineContent),
               loginRequired: false,
               lastAuthError: "Sign in needed",
@@ -252,7 +258,15 @@ export const authStore = createStore<AuthState>()(
         },
 
         setOnlineStatus: (isOnline) => {
-          set({ isOnline });
+          set((state) => ({
+            isOnline,
+            serverConnectionStatus:
+              !isOnline || state.isOnline === false ? "unknown" : state.serverConnectionStatus,
+          }));
+        },
+
+        setServerConnectionStatus: (serverConnectionStatus) => {
+          set({ serverConnectionStatus });
         },
 
         setHasOfflineContent: (hasOfflineContent) => {
@@ -343,6 +357,7 @@ export const authStore = createStore<AuthState>()(
             accessToken: secrets.accessToken,
             refreshToken: secrets.refreshToken,
             accessTokenExpiresAt: getJwtExpiry(secrets.accessToken),
+            serverConnectionStatus: "unknown",
             hasStoredCredentials: secrets.hasPassword,
             status: computeEntryStatus(true, state.hasOfflineContent),
             lastAuthError: null,
@@ -460,8 +475,10 @@ export const authStore = createStore<AuthState>()(
                 });
               } catch (error) {
                 if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
+                  set({ serverConnectionStatus: "unreachable" });
                   throw error;
                 }
+                set({ serverConnectionStatus: "reachable" });
                 log("refresh:failed");
                 tokens = null;
               }
@@ -486,8 +503,10 @@ export const authStore = createStore<AuthState>()(
                   log("refresh:fallback-success");
                 } catch (error) {
                   if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
+                    set({ serverConnectionStatus: "unreachable" });
                     throw error;
                   }
+                  set({ serverConnectionStatus: "reachable" });
                   log("refresh:fallback-failed");
                   tokens = null;
                 }
@@ -511,6 +530,7 @@ export const authStore = createStore<AuthState>()(
                 status: computeEntryStatus(false, state.hasOfflineContent),
                 lastAuthError: "Login required to stream",
                 loginRequired: true,
+                serverConnectionStatus: "reachable",
               }));
               return null;
             }
@@ -546,6 +566,7 @@ export const authStore = createStore<AuthState>()(
               accessTokenExpiresAt: getJwtExpiry(tokens.accessToken),
               status: computeEntryStatus(true, state.hasOfflineContent),
               lastAuthError: null,
+              serverConnectionStatus: "reachable",
             }));
 
             log("refresh:done", { status: "authenticated" });
@@ -593,6 +614,7 @@ export const authStore = createStore<AuthState>()(
             accessToken: null,
             refreshToken: null,
             accessTokenExpiresAt: null,
+            serverConnectionStatus: "unknown",
             hasStoredCredentials: false,
             activeLibraryId: null,
             activeLibraryName: null,
@@ -632,6 +654,8 @@ setAuthProvider({
     authStore.getState().actions.refreshSession({ force: forceRefresh }),
   setLoginRequired: (required: boolean, message: string) =>
     authStore.getState().actions.setLoginRequired(required, message),
+  setServerConnectionStatus: (status: ServerConnectionStatus) =>
+    authStore.getState().actions.setServerConnectionStatus(status),
 });
 
 export const useAuthStore = <T>(selector: (state: AuthState) => T) => useStore(authStore, selector);

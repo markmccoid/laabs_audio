@@ -38,7 +38,11 @@ export type UserSessionEntryRequest =
       color?: string | null;
     };
 
-export type SessionEntryFailureKind = "offline" | "needsAttention" | "unexpected";
+export type SessionEntryFailureKind =
+  | "offline"
+  | "serverUnreachable"
+  | "needsAttention"
+  | "unexpected";
 
 export type SessionEntryResolution =
   | { outcome: "activate"; library: Library }
@@ -53,6 +57,22 @@ export type SessionEntryResolution =
 
 const isNetworkError = (error: unknown) =>
   error instanceof AuthError && error.code === "NETWORK_ERROR";
+
+const isServerUnreachableError = (error: unknown) =>
+  isNetworkError(error) ||
+  (error instanceof Error &&
+    (error.name === "AbsServerUnavailableError" ||
+      (error.name === "AuthUnavailableError" &&
+        "code" in error &&
+        error.code === "SERVER_UNREACHABLE")));
+
+const toServerUnavailableFailure = (sessionKey?: string): SessionEntryResolution => ({
+  outcome: "failed",
+  kind: "serverUnreachable",
+  message:
+    "Audiobookshelf is not reachable. Your cached library remains available, but only downloaded audiobooks can play.",
+  ...(sessionKey ? { sessionKey } : {}),
+});
 
 const toMessage = (error: unknown, fallback: string) =>
   error instanceof Error && error.message.trim() ? error.message : fallback;
@@ -209,6 +229,10 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
       };
     }
   } catch (error) {
+    if (isServerUnreachableError(error)) {
+      before.actions.setServerConnectionStatus("unreachable");
+      return toServerUnavailableFailure();
+    }
     const message = toMessage(error, "Sign in failed");
     void recordTimingLog("login", timingLabel, startedAt, {
       success: false,
@@ -245,6 +269,7 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
       refreshToken: identity.tokens.refreshToken,
       hasPassword: identity.hasPassword,
     });
+    authStore.getState().actions.setServerConnectionStatus("reachable");
   } catch (error) {
     const message = toMessage(error, "Sign in failed");
     void recordTimingLog("login", timingLabel, startedAt, {
@@ -282,6 +307,10 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
     }
     return { outcome: "activate", library: resolution.library };
   } catch (error) {
+    if (isServerUnreachableError(error)) {
+      authStore.getState().actions.setServerConnectionStatus("unreachable");
+      return toServerUnavailableFailure(identity.sessionKey);
+    }
     return {
       outcome: "failed",
       kind: "unexpected",
