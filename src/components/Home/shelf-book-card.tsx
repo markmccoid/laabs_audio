@@ -90,6 +90,7 @@ type ShelfBookCardProps = {
   isOffline: boolean;
   renderMenu?: boolean;
   scrollY: SharedValue<number>;
+  sizeMultiplier?: number;
 };
 
 type CardMenuOverlayProps = {
@@ -174,6 +175,7 @@ export const ShelfBookCard = ({
   isOffline,
   renderMenu = true,
   scrollY,
+  sizeMultiplier = 1,
 }: ShelfBookCardProps) => {
   const themeColors = useThemeColors();
   const { theme } = useUniwind();
@@ -226,7 +228,7 @@ export const ShelfBookCard = ({
   const progressLabel =
     progressDisplay === "elapsed" || durationSeconds <= 0 ? elapsedLabel : remainingLabel;
   const isElapsedView = progressDisplay === "elapsed";
-  const coverSize = getHomePreviewCoverSize(homePreviewSize);
+  const coverSize = getHomePreviewCoverSize(homePreviewSize) * sizeMultiplier;
   const showFinishedIndicator = Boolean(progress?.isFinished);
 
   const measureCover = useCallback(() => {

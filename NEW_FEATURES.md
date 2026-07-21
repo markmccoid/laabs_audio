@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-20` `pending` - Reset Home to the top after bookshelf reordering and make the first shelf's book cards larger with a configurable multiplier.
+  Tester focus: scroll Home down, reorder shelves in Settings, return Home, and verify the first shelf is correctly inset at the top without a UI pause; verify its cards are 25% larger than the selected Small, Medium, or Large size and adjust `FIRST_SHELF_BOOK_SIZE_MULTIPLIER` to test other differences.
+
 - `2026-07-19` `pending` - Keep compact player, shelf, library, and settings text readable at large iOS text sizes.
   Tester focus: enable iOS Display Zoom and larger accessibility text, then verify the inline mini-player keeps its play button; Home shelf headings use the available width; and compact Home, Lists, Search, Settings, and player labels remain visible without bottom clipping.
 

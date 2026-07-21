@@ -1,7 +1,7 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
-import { useThemeColors } from "@/theme/use-app-theme";
 import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
+import { useThemeColors } from "@/theme/use-app-theme";
 import { useRecyclingState } from "@shopify/flash-list";
 import type { Href } from "expo-router";
 import { Link } from "expo-router";
@@ -25,6 +25,7 @@ type HomeShelfSectionProps = {
   onRefresh?: () => void;
   renderCardMenus?: boolean;
   scrollY: SharedValue<number>;
+  bookSizeMultiplier?: number;
 };
 
 // Shelf content changes animate: books new to the shelf (a Discover re-roll, a
@@ -48,6 +49,7 @@ export const HomeShelfSection = ({
   onRefresh,
   renderCardMenus = true,
   scrollY,
+  bookSizeMultiplier = 1,
 }: HomeShelfSectionProps) => {
   const themeColors = useThemeColors();
   const hasBooks = books.length > 0;
@@ -77,15 +79,16 @@ export const HomeShelfSection = ({
       isOffline,
       progressByBookId,
       renderCardMenus,
+      bookSizeMultiplier,
     }),
-    [favoriteByBookId, isOffline, progressByBookId, renderCardMenus],
+    [bookSizeMultiplier, favoriteByBookId, isOffline, progressByBookId, renderCardMenus],
   );
 
   return (
     <View style={{ gap: 12 }} className="mb-3">
-      <View className="flex-row items-center justify-between px-[18] py-[1]">
+      <View className="flex-row items-center justify-between px-[5] py-[1]">
         <View
-          className="pl-4 pr-2 rounded-xl overflow-hidden border-hairline border-accent border-t-0 border-l-0 border-r-0"
+          className="pl-4 rounded-xl overflow-hidden border-hairline border-accent border-t-0 border-l-0 border-r-0"
           style={{ flex: 1, minWidth: 0, marginRight: 8 }}
         >
           {/* <LinearGradient
@@ -108,7 +111,13 @@ export const HomeShelfSection = ({
           </Text>
         </View>
 
-        <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0, gap: 6 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            flexShrink: 0,
+          }}
+        >
           {onRefresh ? (
             <Pressable
               onPress={onRefresh}
@@ -137,7 +146,7 @@ export const HomeShelfSection = ({
                   borderColor: themeColors.border,
                   borderRadius: 999,
                   borderCurve: "continuous",
-                  width: 32,
+                  width: 52,
                   height: 32,
                   alignItems: "center",
                   justifyContent: "center",
@@ -188,6 +197,7 @@ export const HomeShelfSection = ({
                     progress={progressByBookId[item.id]}
                     renderMenu={renderCardMenus}
                     scrollY={scrollY}
+                    sizeMultiplier={bookSizeMultiplier}
                   />
                 </Animated.View>
               );

@@ -10,6 +10,7 @@ import {
   HOME_PREVIEW_SIZE_LARGE,
   HOME_PREVIEW_SIZE_MEDIUM,
   HOME_PREVIEW_SIZE_SMALL,
+  selectHomeShelfOrder,
   useSettingsStore,
 } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -33,8 +34,11 @@ import { useHomeSignInSwitcher } from "./home-sign-in-switcher";
 
 type HomeShelvesListItem =
   | { type: "refresh-message"; id: "refresh-message"; message: string }
-  | { type: "shelf"; id: string; shelf: HomeShelf }
+  | { type: "shelf"; id: string; shelf: HomeShelf; isFirstShelf: boolean }
   | { type: "footer"; id: "footer" };
+
+// Change this value to test how much larger the first visible shelf's books are.
+const FIRST_SHELF_BOOK_SIZE_MULTIPLIER = 1.25;
 
 const AnimatedFlashList = Animated.createAnimatedComponent(FlashList) as unknown as <TItem>(
   props: FlashListProps<TItem>,
@@ -63,6 +67,7 @@ const HomeShelvesScreen = () => {
     accessMode === "downloadedOnly" ||
     accessMode === "downloadedSessionOnly";
   const {
+    homeScopeKey,
     catalogCount,
     isCatalogLoading,
     progressCount,
@@ -72,6 +77,7 @@ const HomeShelvesScreen = () => {
     progressByBookId,
     refreshDiscover,
   } = useHomeShelves();
+  const shelfOrder = useSettingsStore((state) => selectHomeShelfOrder(state, homeScopeKey));
   const activationProgress = useLibraryActivationStore((state) => state.progress);
   const activateLibrarySelection = useActivateLibrarySelection();
   const {
@@ -95,10 +101,11 @@ const HomeShelvesScreen = () => {
   const didMarkHomeShelfDisplayRef = useRef(false);
   const renderStartedAtMs = useMemo(() => markStartup("home-shelves-screen-render-start"), []);
   const homeListData = useMemo<HomeShelvesListItem[]>(() => {
-    const shelfItems = visibleShelves.map((shelf) => ({
+    const shelfItems = visibleShelves.map((shelf, index) => ({
       type: "shelf" as const,
       id: `${activeLibraryId ?? "no-library"}:${shelf.id}`,
       shelf,
+      isFirstShelf: index === 0,
     }));
 
     return [
@@ -115,6 +122,10 @@ const HomeShelvesScreen = () => {
       { type: "footer", id: "footer" },
     ];
   }, [activeLibraryId, refreshMessage, visibleShelves]);
+  const homeListOrderKey = useMemo(
+    () => `${homeScopeKey ?? "no-scope"}:${JSON.stringify(shelfOrder)}`,
+    [homeScopeKey, shelfOrder],
+  );
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -283,6 +294,7 @@ const HomeShelvesScreen = () => {
           }
           renderCardMenus={shouldRenderCardMenus}
           scrollY={scrollY}
+          bookSizeMultiplier={item.isFirstShelf ? FIRST_SHELF_BOOK_SIZE_MULTIPLIER : 1}
         />
       );
     },
@@ -459,6 +471,7 @@ const HomeShelvesScreen = () => {
         </View>
       ) : (
         <AnimatedFlashList
+          key={homeListOrderKey}
           contentInsetAdjustmentBehavior="automatic"
           data={homeListData}
           keyExtractor={(item) => item.id}
