@@ -91,12 +91,14 @@ struct CarPlayRateOption {
 	let value: Double
 	let label: String
 	let isCurrent: Bool
+	let isCycleOption: Bool
 
 	init?(_ dict: [String: Any]) {
 		guard let value = dict["value"] as? NSNumber else { return nil }
 		self.value = value.doubleValue
 		self.label = (dict["label"] as? String) ?? "\(value)×"
 		self.isCurrent = (dict["isCurrent"] as? Bool) ?? false
+		self.isCycleOption = (dict["isCycleOption"] as? Bool) ?? true
 	}
 }
 
@@ -182,7 +184,7 @@ final class CarPlayCoordinator: NSObject {
 	private var shelves: [CarPlayShelf] = []
 	private var chapters: [CarPlayChapter] = []
 	private var rateOptions: [CarPlayRateOption] = []
-	private var rateTemplate: CPListTemplate?
+	private var selectedRateValue: Double?
 	private var nowPlayingRateButtonSignature: String?
 	// False until JS pushes shelves at least once — distinguishes "JS still
 	// booting" from "JS reported an empty library".
@@ -245,7 +247,7 @@ final class CarPlayCoordinator: NSObject {
 		pushedShelfId = nil
 		pushedShelfTemplate = nil
 		chaptersTemplate = nil
-		rateTemplate = nil
+		selectedRateValue = nil
 		NotificationCenter.default.post(name: CarPlayNotification.disconnected, object: nil)
 	}
 
@@ -277,10 +279,8 @@ final class CarPlayCoordinator: NSObject {
 		DispatchQueue.main.async {
 			self.rateOptions = rawRates.compactMap { CarPlayRateOption($0) }
 			if let current = self.rateOptions.first(where: { $0.isCurrent }) {
+				self.selectedRateValue = current.value
 				carPlayDebugLog(String(format: "[CarPlay] setRates current=%@ value=%.2f", current.label, current.value))
-			}
-			if let template = self.rateTemplate {
-				template.updateSections(self.buildRateSections())
 			}
 			self.refreshNowPlayingRateButton()
 		}
@@ -400,47 +400,44 @@ final class CarPlayCoordinator: NSObject {
 		return [CPListSection(items: items)]
 	}
 
-	private func pushRatePicker() {
-		DispatchQueue.main.async {
-			guard let controller = self.interfaceController, !self.rateOptions.isEmpty else { return }
-			let template = CPListTemplate(title: "Speed", sections: self.buildRateSections())
-			self.rateTemplate = template
-			controller.pushTemplate(template, animated: true, completion: nil)
-		}
+	private func cyclePlaybackRate() {
+		let cycleOptions = rateOptions
+			.filter { $0.isCycleOption }
+			.sorted { $0.value < $1.value }
+		guard !cycleOptions.isEmpty else { return }
+
+		let currentValue = selectedRateValue
+			?? rateOptions.first(where: { $0.isCurrent })?.value
+			?? cycleOptions[0].value
+		let next = cycleOptions.first(where: { $0.value > currentValue + 0.001 })
+			?? cycleOptions[0]
+		selectedRateValue = next.value
+		refreshNowPlayingRateButton(force: true)
+		carPlayDebugLog(String(format: "[CarPlay] cycling playback rate %.2f -> %.2f", currentValue, next.value))
+		NotificationCenter.default.post(
+			name: CarPlayNotification.rateSelected,
+			object: nil,
+			userInfo: [CarPlayNotification.itemIdKey: next.value]
+		)
 	}
 
-	private func buildRateSections() -> [CPListSection] {
-		let checkmark = UIImage(systemName: "checkmark.circle.fill")
-		let items: [CPListTemplateItem] = rateOptions.map { option in
-			let item = CPListItem(
-				text: option.label,
-				detailText: nil,
-				image: option.isCurrent ? checkmark : nil
-			)
-			item.handler = { [weak self] _, completion in
-				NotificationCenter.default.post(
-					name: CarPlayNotification.rateSelected,
-					object: nil,
-					userInfo: [CarPlayNotification.itemIdKey: option.value]
-				)
-				// Return to Now Playing after choosing a speed.
-				self?.interfaceController?.popTemplate(animated: true, completion: nil)
-				completion()
-			}
-			return item
+	private func currentRateOption() -> CarPlayRateOption? {
+		if let selectedRateValue = selectedRateValue,
+		   let selected = rateOptions.first(where: { abs($0.value - selectedRateValue) < 0.001 }) {
+			return selected
 		}
-		return [CPListSection(items: items)]
+		return rateOptions.first(where: { $0.isCurrent })
 	}
 
 	private func refreshNowPlayingRateButton(force: Bool = false) {
-		let current = rateOptions.first(where: { $0.isCurrent })
+		let current = currentRateOption()
 		let label = formatRateButtonLabel(current)
 		let signature = "\(current?.value ?? -1):\(label)"
 		guard force || signature != nowPlayingRateButtonSignature else { return }
 
 		nowPlayingRateButtonSignature = signature
 		let numberButton = CPNowPlayingImageButton(image: makeRateNumberButtonImage(rate: current)) { [weak self] _ in
-			self?.pushRatePicker()
+			self?.cyclePlaybackRate()
 		}
 		CPNowPlayingTemplate.shared.updateNowPlayingButtons([numberButton])
 		carPlayDebugLog("[CarPlay] refreshed Now Playing rate button label=\(label)")
@@ -448,14 +445,12 @@ final class CarPlayCoordinator: NSObject {
 
 	private func formatRateButtonLabel(_ rate: CarPlayRateOption?) -> String {
 		guard let rate = rate else { return "Rate" }
+		if !rate.label.isEmpty { return rate.label }
 		let rounded = (rate.value * 100).rounded() / 100
 		if abs(rounded.rounded() - rounded) < 0.001 {
 			return String(format: "%.0fx", rounded)
 		}
-		if abs((rounded * 10).rounded() - (rounded * 10)) < 0.001 {
-			return String(format: "%.1fx", rounded)
-		}
-		return String(format: "%.2fx", rounded)
+		return String(format: "%.1fx", rounded)
 	}
 
 	private func makeRateNumberButtonImage(rate: CarPlayRateOption?) -> UIImage {
@@ -464,7 +459,9 @@ final class CarPlayCoordinator: NSObject {
 			width: maxSize.width > 0 ? maxSize.width : 44,
 			height: maxSize.height > 0 ? maxSize.height : 44
 		)
-		let renderer = UIGraphicsImageRenderer(size: size)
+		let rendererFormat = UIGraphicsImageRendererFormat()
+		rendererFormat.scale = interfaceController?.carTraitCollection.displayScale ?? UIScreen.main.scale
+		let renderer = UIGraphicsImageRenderer(size: size, format: rendererFormat)
 		return renderer.image { _ in
 			guard let rate = rate else {
 				let attributes: [NSAttributedString.Key: Any] = [
@@ -481,20 +478,19 @@ final class CarPlayCoordinator: NSObject {
 			}
 
 			let label = formatRateButtonLabel(rate)
-			let number = String(label.dropLast())
-			let safeWidth = min(size.width - 10, 34)
+			let safeWidth = size.width - 4
 			let safeHeight = min(size.height - 4, 30)
-			var fontSize: CGFloat = number.count > 3 ? 20 : 23
+			var fontSize: CGFloat = 23
 			var attributes = makeRateTextAttributes(fontSize: fontSize, kern: -0.3)
-			var textSize = number.size(withAttributes: attributes)
+			var textSize = label.size(withAttributes: attributes)
 
 			while (textSize.width > safeWidth || textSize.height > safeHeight) && fontSize > 10 {
 				fontSize -= 1
 				attributes = makeRateTextAttributes(fontSize: fontSize, kern: -0.3)
-				textSize = number.size(withAttributes: attributes)
+				textSize = label.size(withAttributes: attributes)
 			}
 
-			number.draw(at: CGPoint(
+			label.draw(at: CGPoint(
 				x: (size.width - textSize.width) / 2,
 				y: (size.height - textSize.height) / 2
 			), withAttributes: attributes)
@@ -502,8 +498,14 @@ final class CarPlayCoordinator: NSObject {
 	}
 
 	private func makeRateTextAttributes(fontSize: CGFloat, kern: CGFloat) -> [NSAttributedString.Key: Any] {
-		[
-			.font: UIFont.systemFont(ofSize: fontSize, weight: .semibold),
+		let font: UIFont
+		if #available(iOS 16.0, *) {
+			font = UIFont.systemFont(ofSize: fontSize, weight: .semibold, width: .condensed)
+		} else {
+			font = UIFont.systemFont(ofSize: fontSize, weight: .semibold)
+		}
+		return [
+			.font: font,
 			.foregroundColor: UIColor.black,
 			.kern: kern,
 		]

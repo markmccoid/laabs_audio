@@ -50,6 +50,10 @@ import { buildChapterIndex, findChapterForPosition, findTrackForPosition } from 
 import { clipPreviewStore } from "./clip-preview-store";
 import { resolveClipPreviewAvailability } from "./clip-preview-availability";
 import {
+  isPlaybackControlIntentBlocking,
+  PLAYBACK_CONTROL_SETTLE_MS,
+} from "./playback-control-intent";
+import {
   isStreamedPlaybackStartFailure,
   StreamedPlaybackStartFailureError,
   withPlaybackStartTimeout,
@@ -65,15 +69,6 @@ const MAX_LISTEN_DELTA_MS = 5000;
 const PAUSE_SYNC_DEDUPE_WINDOW_MS = 2000;
 const DEBUG_PLAYBACK_EVENTS = false;
 const CHAPTER_RESTART_THRESHOLD_MS = 3000;
-const PLAYBACK_CONTROL_SETTLE_MS = 350;
-// A legitimate start holds the intent for at most the streamed-start timeout
-// (STREAMED_PLAYBACK_START_TIMEOUT_MS, 20s) plus settle; past ~22s the intent
-// is a leak and must not keep blocking controls (CarPlay taps would otherwise
-// dead-end until app restart, and the phone's transport controls would jam).
-// Kept just above the streamed timeout so a slow-but-valid start is not
-// preempted, and below the CarPlay selection retry window (~28s) so a leaked
-// intent self-heals before the retry loop gives up.
-const PLAYBACK_CONTROL_INTENT_STALE_MS = 22_000;
 const LOCAL_SESSION_ID = "local";
 const PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS = 5;
 const LOCAL_PLAYBACK_PROGRESS_TIMEOUT_MS = 4000;
@@ -253,7 +248,7 @@ class PlayerService {
       const settleExpired =
         typeof activeIntent.finishedAt === "number" &&
         now - activeIntent.finishedAt >= PLAYBACK_CONTROL_SETTLE_MS;
-      if (!settleExpired && ageMs < PLAYBACK_CONTROL_INTENT_STALE_MS) {
+      if (isPlaybackControlIntentBlocking(activeIntent, now)) {
         return {
           status: "ignored",
           reason: "intent_active",
@@ -280,6 +275,15 @@ class PlayerService {
       startedAt: Date.now(),
     });
     return { status: "accepted", intentId };
+  }
+
+  private hasBlockingPlaybackControlIntent() {
+    const intent = playbackStore.getState().playbackControlIntent;
+    if (!intent) return false;
+    if (isPlaybackControlIntentBlocking(intent, Date.now())) return true;
+
+    playbackStore.getState().actions.setPlaybackControlIntent(null);
+    return false;
   }
 
   private finishPlaybackControlIntent(intentId: string) {
@@ -2543,8 +2547,13 @@ class PlayerService {
       progressSyncReason?: Extract<ProgressSyncReason, "seek" | "auto_rewind">;
     },
   ) {
+    if (
+      !options?.allowDuringPlaybackControlIntent &&
+      this.hasBlockingPlaybackControlIntent()
+    ) {
+      return;
+    }
     const state = playbackStore.getState();
-    if (state.playbackControlIntent && !options?.allowDuringPlaybackControlIntent) return;
     if (!state.queue.length) return;
     this.logDebug(`seekTo: ${positionMs}`);
 
@@ -2627,7 +2636,7 @@ class PlayerService {
 
   async skipBy(seconds: number, goBackwards: boolean = false) {
     const state = playbackStore.getState();
-    if (state.playbackControlIntent) return;
+    if (this.hasBlockingPlaybackControlIntent()) return;
     if (!state.queue.length || !state.libraryItemId) return;
     deviceBooksStore.getState().actions.clearListeningInterruption(state.libraryItemId, {
       userKey: this.resolveUserKeyForLibraryItem(state.libraryItemId),
@@ -2958,7 +2967,7 @@ class PlayerService {
 
   async jumpToChapter(chapterId: number) {
     const state = playbackStore.getState();
-    if (state.playbackControlIntent) return;
+    if (this.hasBlockingPlaybackControlIntent()) return;
     const chapter = state.chapterIndex.find((item) => item.id === chapterId);
     if (!chapter) return;
     await this.seekTo(chapter.startMs);
@@ -2966,7 +2975,7 @@ class PlayerService {
 
   async nextChapter() {
     const state = playbackStore.getState();
-    if (state.playbackControlIntent) return;
+    if (this.hasBlockingPlaybackControlIntent()) return;
     if (!state.queue.length) return;
 
     if (!state.chapterIndex.length) return;
@@ -2985,7 +2994,7 @@ class PlayerService {
 
   async previousChapter() {
     const state = playbackStore.getState();
-    if (state.playbackControlIntent) return;
+    if (this.hasBlockingPlaybackControlIntent()) return;
     if (!state.queue.length) return;
 
     if (!state.chapterIndex.length) return;

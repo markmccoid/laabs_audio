@@ -602,8 +602,9 @@ again. Earlier attempts to reinstall the system rate button regressed picker eve
 
 **Fix.** The Now Playing rate control is now a `CPNowPlayingImageButton` whose image is rendered
 from the current app rate (`1x`, `1.25x`, `2x`, etc.) whenever `carPlaySetRates` changes the
-current option. Tapping it still opens the existing Speed list, so rate selection continues to
-flow through `RATE_SELECTED` → `playerService.setRate`. `AudioPro.swift` keeps paused now-playing
+current option. At the time of this change, tapping it opened the existing Speed list; Change 16
+replaced that interaction with direct cycling. Rate selection continues to flow through
+`RATE_SELECTED` → `playerService.setRate`. `AudioPro.swift` keeps paused now-playing
 metadata semantically correct: momentary playback rate is `0` while paused, and
 `MPNowPlayingInfoPropertyDefaultPlaybackRate` carries the selected speed.
 
@@ -613,3 +614,25 @@ Switch books with different saved rates: the button should never show `0x`.
 
 **Upgrade check.** Keep the custom image button in `CarPlaySceneDelegate.swift`; do not restore
 `CPNowPlayingPlaybackRateButton` unless Apple exposes a reliable current-label invalidation API.
+
+---
+
+## Change 16 — CarPlay rate button cycles compact exact presets
+
+**File:** `ios/CarPlaySceneDelegate.swift` (+ app-side `src/carplay/carplay-rate-options.ts`)
+**Date:** 2026-07-22
+
+The app-rendered Now Playing rate button now advances directly through the exact CarPlay
+presets `1x`, `1.2x`, `1.5x`, `1.7x`, and `2x` instead of opening a Speed list. Presets outside
+the user's configured Playback Rate Range are omitted. A legacy/custom phone rate remains
+visible, rounded to one decimal, but is not inserted into the cycle; the first tap advances to
+the next exact preset.
+
+The full label, including `x`, is rendered in a condensed font using the available
+`CPNowPlayingButtonMaximumImageSize` width and the connected vehicle's display scale. The
+native coordinator updates its selected value optimistically before sending `RATE_SELECTED`,
+so rapid taps continue advancing while JavaScript applies and republishes the rate.
+
+**Verify on hardware.** From `1x`, repeatedly tap the Now Playing rate button and confirm the
+visible value and audible speed advance through `1.2x`, `1.5x`, `1.7x`, `2x`, then wrap to
+`1x`. Pause and repeat the cycle; the button must never show `0x` or resume playback.

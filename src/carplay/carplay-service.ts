@@ -22,6 +22,7 @@ import {
 	recordCarPlayResumeSnapshot,
 	type CarPlayResumeRecord,
 } from "./carplay-resume-snapshot";
+import { buildCarPlayRateOptions } from "./carplay-rate-options";
 import {
 	buildCarPlayShelves,
 	formatCarPlayTimeLabel,
@@ -57,15 +58,12 @@ type CarPlayEvent = {
 	rate?: number;
 };
 
-// Same presets the phone's rate surfaces offer, filtered by Playback Rate Range.
-const RATE_PRESETS = [0.75, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0];
-
 const CARPLAY_EVENT_NAME = "AudioProCarPlayEvent";
 const SNAPSHOT_KEY = "carplay-shelves-snapshot-v1";
 // Logged at init so a device capture proves WHICH build is running — a stale
 // install burned a whole hardware test session on 2026-07-03. Bump on every
 // CarPlay-affecting change.
-const CARPLAY_SERVICE_BUILD = "attempt-m-20260707";
+const CARPLAY_SERVICE_BUILD = "attempt-o-20260722";
 
 let initialized = false;
 let isConnected = false;
@@ -135,18 +133,11 @@ const pushRatesToNative = () => {
 		min: playbackRateRangeMin,
 		max: playbackRateRangeMax,
 	});
-	const presetValues = RATE_PRESETS.filter(
-		(preset) => preset >= playbackRateRangeMin && preset <= playbackRateRangeMax,
-	);
-	// Include a non-preset custom rate (set via the phone slider) as its own row.
-	const values = presetValues.some((preset) => Math.abs(preset - currentRate) < 0.01)
-		? presetValues
-		: [...presetValues, currentRate].sort((a, b) => a - b);
-	const rates = values.map((value) => ({
-		value,
-		label: `${Number(value.toFixed(2))}×`,
-		isCurrent: Math.abs(value - currentRate) < 0.01,
-	}));
+	const rates = buildCarPlayRateOptions({
+		currentRate,
+		minimumRate: playbackRateRangeMin,
+		maximumRate: playbackRateRangeMax,
+	});
 	const json = JSON.stringify(rates);
 	if (json === lastPushedRatesJson) return;
 	lastPushedRatesJson = json;

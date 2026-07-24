@@ -3,6 +3,28 @@
 This tracks CarPlay hardware findings, attempted fixes, and the next logs to capture so fixes do
 not reintroduce earlier regressions.
 
+## 2026-07-22 — Compact cycling playback-rate button
+
+The custom Now Playing rate image now draws its complete label and cycles directly through
+`1x`, `1.2x`, `1.5x`, `1.7x`, and `2x` instead of pushing a Speed list. Rendering uses a
+condensed font, the full CarPlay button-image width, and the connected vehicle's display scale.
+The selected value updates optimistically before the existing `RATE_SELECTED` bridge event so
+rapid taps advance instead of repeatedly selecting the same rate. Build marker:
+`attempt-o-20260722`.
+
+## 2026-07-22 — Chapter selections did not seek
+
+A captured hardware trace showed the complete selection path through
+`emit CHAPTER_SELECTED` and the JavaScript `chapter selected` handler, followed by no
+`seekTo` trace. The chapter ID was valid; the request was silently rejected by
+`playerService.jumpToChapter` because `playbackControlIntent` was still present.
+
+Headless CarPlay freezes JavaScript timers, so a completed intent's 350 ms cleanup timer may
+never remove it. Book-start requests already treated a completed intent past its settle window
+(or an intent older than the stale threshold) as inactive, but chapter jumps used a raw
+presence check. Intent blocking rules now live in one tested helper, and chapter seeking clears
+a completed/stale intent before proceeding. Build marker: `attempt-n-20260722`.
+
 ## Status (2026-07-03, end of Attempt F) — verified working on hardware
 
 Verified with CarPlay Simulator + physical iPhone (workflow section below): headless cold
