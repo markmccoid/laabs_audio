@@ -337,7 +337,28 @@ export interface Media {
   numChapters?: number;
   /** Podcast minified item episode count. */
   numEpisodes?: number;
+  /** Podcast expanded item episodes (`?expanded=1`). */
+  episodes?: PodcastEpisode[];
   ebookFormat?: string | null;
+}
+
+/** Audiobookshelf podcast episode from expanded item detail. */
+export interface PodcastEpisode {
+  id: string;
+  libraryItemId: string;
+  index?: number;
+  season?: string;
+  episode?: string;
+  episodeType?: string;
+  title: string;
+  subtitle?: string | null;
+  description?: string | null;
+  pubDate?: string | null;
+  duration?: number;
+  size?: number;
+  publishedAt?: number | null;
+  audioFile?: AudioFile | null;
+  audioTrack?: AudioTrack | null;
 }
 
 export interface UserMediaProgress {

@@ -1,5 +1,7 @@
 import { Host, Picker, Text as SwiftText } from "@expo/ui/swift-ui";
 import { lineLimit, minimumScaleFactor, pickerStyle, tag } from "@expo/ui/swift-ui/modifiers";
+import { useAuthStore } from "@/auth/auth-store";
+import { PodcastShowsBrowser } from "@/components/podcast/podcast-shows-browser";
 import {
   useListsPreferencesActions,
   useListsSeriesSortBy,
@@ -7,9 +9,12 @@ import {
   useListsViewMode,
   type LibraryViewMode,
 } from "@/library/lists-preferences-store";
+import { isPodcastLibraryMediaType } from "@/podcast/series-index-readiness";
+import { resolveActiveLibraryMediaType } from "@/podcast/resolve-active-library-media-type";
+import { usePodcastSeriesByTitle } from "@/podcast/use-podcast-series";
 import { SERIES_SORT_OPTIONS } from "@/sort/series-sort";
 import { Stack } from "expo-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { View } from "react-native";
 import { CollectionsSegment } from "./collections-segment";
 import { PlaylistsSegment } from "./playlists-segment";
@@ -17,7 +22,71 @@ import { SeriesSegment } from "./series-segment";
 
 const LIBRARY_SEGMENTS = ["Series", "Collections", "Playlists"] as const;
 
-export const LibraryTabScreen = () => {
+const PodcastListsBrowser = () => {
+  const viewMode = useListsViewMode("series");
+  const preferencesActions = useListsPreferencesActions();
+  const [searchText, setSearchText] = useState("");
+  const seriesQuery = usePodcastSeriesByTitle();
+  const shows = useMemo(() => {
+    const all = seriesQuery.data ?? [];
+    const needle = searchText.trim().toLowerCase();
+    if (!needle) return all;
+    return all.filter(
+      (show) =>
+        show.title.toLowerCase().includes(needle) ||
+        (show.author ?? "").toLowerCase().includes(needle),
+    );
+  }, [searchText, seriesQuery.data]);
+
+  return (
+    <>
+      <Stack.Screen
+        options={{
+          headerSearchBarOptions: {
+            placeholder: "Search Podcasts",
+            autoCapitalize: "none",
+            hideWhenScrolling: searchText.length === 0,
+            onChangeText: (event) => setSearchText(event.nativeEvent.text),
+            onCancelButtonPress: () => setSearchText(""),
+          },
+        }}
+      />
+      <Stack.Screen.Title>Podcasts</Stack.Screen.Title>
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Menu icon="ellipsis">
+          <Stack.Toolbar.Menu inline>
+            <Stack.Toolbar.MenuAction
+              icon="list.bullet"
+              isOn={viewMode === "list"}
+              onPress={() => preferencesActions.setViewMode("series", "list")}
+            >
+              List
+            </Stack.Toolbar.MenuAction>
+            <Stack.Toolbar.MenuAction
+              icon="square.grid.3x3"
+              isOn={viewMode === "grid"}
+              onPress={() => preferencesActions.setViewMode("series", "grid")}
+            >
+              Grid
+            </Stack.Toolbar.MenuAction>
+          </Stack.Toolbar.Menu>
+        </Stack.Toolbar.Menu>
+      </Stack.Toolbar>
+      <PodcastShowsBrowser
+        shows={shows}
+        isLoading={seriesQuery.isLoading}
+        viewMode={viewMode}
+        emptyMessage="No podcasts in the series index yet. Pull to refresh on Home."
+        detailHref={(libraryItemId) => ({
+          pathname: "/(tabs)/library/[libraryItemId]",
+          params: { libraryItemId },
+        })}
+      />
+    </>
+  );
+};
+
+const BookLibraryTabScreen = () => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [seriesSearchText, setSeriesSearchText] = useState("");
   const seriesViewMode = useListsViewMode("series");
@@ -137,4 +206,16 @@ export const LibraryTabScreen = () => {
       </View>
     </>
   );
+};
+
+export const LibraryTabScreen = () => {
+  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryMediaType = useAuthStore((state) => state.activeLibraryMediaType);
+  const mediaType = resolveActiveLibraryMediaType(activeLibraryId, activeLibraryMediaType);
+
+  if (isPodcastLibraryMediaType(mediaType)) {
+    return <PodcastListsBrowser />;
+  }
+
+  return <BookLibraryTabScreen />;
 };

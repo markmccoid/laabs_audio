@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-23` `pending` - Browse Podcasts from the series index on Home, Lists, and Search; open Current Podcast with live episodes, order, reverse, and title filter.
+  Tester focus: activate a podcast Library and verify Home shows a Podcasts shelf (newest-added first); Lists browses shows (not Series/Collections/Playlists); Search finds shows by title/author with no book filter rail; opening a show loads episodes ordered by podcast type, reverse toggle and title filter work, and offline keeps the header while hiding episodes until the show was opened online; audiobook Libraries keep prior Home/Lists/Search behavior.
+
 - `2026-07-23` `pending` - Podcast Library Activation waits for Podcast Series Index readiness (empty OK; offline uses remembered index).
   Tester focus: switch to a podcast Library online and confirm Activation completes into Home; try offline with no prior podcast index and confirm Activation fails without switching; with a previously loaded podcast Library offline, confirm Activation still succeeds; verify audiobook Library Activation/Search still work and podcast Activation does not run book catalog ingest.
 

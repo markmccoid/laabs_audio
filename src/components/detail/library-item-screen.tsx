@@ -1,17 +1,22 @@
-import HomeShelvesScreen from "@/components/Home/home-shelves-screen";
-import { PodcastHomeShelvesScreen } from "@/components/podcast/podcast-home-shelves-screen";
+import BookContainer from "@/components/bookComponents/BookContainer";
+import { CurrentPodcastScreen } from "@/components/podcast/current-podcast-screen";
 import { useAuthStore } from "@/auth/auth-store";
 import { isPodcastLibraryMediaType } from "@/podcast/series-index-readiness";
 import { resolveActiveLibraryMediaType } from "@/podcast/resolve-active-library-media-type";
 
-export default function HomeIndex() {
+type Props = {
+  libraryItemId: string | undefined;
+};
+
+/** Route shell: book detail vs Current Podcast based on Active Library mediaType. */
+export const LibraryItemScreen = ({ libraryItemId }: Props) => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryMediaType = useAuthStore((state) => state.activeLibraryMediaType);
   const mediaType = resolveActiveLibraryMediaType(activeLibraryId, activeLibraryMediaType);
 
   if (isPodcastLibraryMediaType(mediaType)) {
-    return <PodcastHomeShelvesScreen />;
+    return <CurrentPodcastScreen libraryItemId={libraryItemId} />;
   }
 
-  return <HomeShelvesScreen />;
-}
+  return <BookContainer libraryItemId={libraryItemId} />;
+};

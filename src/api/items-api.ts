@@ -1,7 +1,7 @@
 import { absClient } from "./abs-client";
 import { authorsApi } from "./authors-api";
 import { buildCoverUrls } from "./cover-urls";
-import type { LibraryItem, UserMediaProgress } from "../types/absTypes";
+import type { LibraryItem, PodcastEpisode, UserMediaProgress } from "../types/absTypes";
 
 export type ItemDetails = {
   id: string;
@@ -13,6 +13,19 @@ export type ItemDetails = {
   authorBookCount: number;
   updatedAt: number;
   libraryFiles: LibraryItem["libraryFiles"];
+};
+
+export type PodcastItemDetails = {
+  id: string;
+  media: LibraryItem["media"];
+  episodes: PodcastEpisode[];
+  podcastType: string | null;
+  title: string;
+  author: string | null;
+  description: string | null;
+  coverUri: string;
+  numEpisodes: number | null;
+  updatedAt: number;
 };
 
 export const itemsApi = {
@@ -45,6 +58,33 @@ export const itemsApi = {
       authorBookCount,
       updatedAt: response.updatedAt,
       libraryFiles: response.libraryFiles,
+    };
+  },
+
+  async getPodcastItemDetails(itemId: string): Promise<PodcastItemDetails> {
+    const response = await absClient.get<LibraryItem>(
+      `/api/items/${itemId}?expanded=1&include=progress`,
+    );
+
+    if (!response?.media) {
+      throw new Error("No podcast media found");
+    }
+
+    const metadata = response.media.metadata;
+    const episodes = Array.isArray(response.media.episodes) ? response.media.episodes : [];
+    const coverUrls = buildCoverUrls(response.id, { version: response.updatedAt });
+
+    return {
+      id: response.id,
+      media: response.media,
+      episodes,
+      podcastType: metadata?.type ?? null,
+      title: metadata?.title ?? "Podcast",
+      author: metadata?.author ?? metadata?.authorName ?? null,
+      description: metadata?.descriptionPlain ?? metadata?.description ?? null,
+      coverUri: coverUrls.full,
+      numEpisodes: response.media.numEpisodes ?? episodes.length,
+      updatedAt: response.updatedAt,
     };
   },
 
