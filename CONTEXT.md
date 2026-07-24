@@ -1,6 +1,6 @@
 # LAABS Audio
 
-LAABS Audio is an audiobook listening app that works with Audiobookshelf libraries while preserving local user experience details that Audiobookshelf does not model directly.
+LAABS Audio is a spoken-word listening app for Audiobookshelf audiobook and podcast libraries, while preserving local user experience details that Audiobookshelf does not model directly.
 
 ## Language
 
@@ -52,6 +52,26 @@ _Avoid_: Login result, navigation result
 An Audiobookshelf collection of media that the user may browse and play.
 _Avoid_: Bookshelf, catalog
 
+**Podcast**:
+The series / container in a podcast Library — an Audiobookshelf library item that groups Episodes. A Podcast is not itself playable.
+_Avoid_: Show, feed, series, podcast item
+
+**Episode**:
+One broadcast belonging to a Podcast. An Episode is the playable unit for podcast listening.
+_Avoid_: Track, chapter (for podcasts), “podcast” when meaning one broadcast
+
+**Podcast Episode Order**:
+The default Episode list ordering for a Podcast: chronological (oldest→newest) when the Podcast is serial, or reverse-chronological (newest→oldest) when it is episodic.
+_Avoid_: Episode sort mode, feed order, podcast type alone as a UI label
+
+**Podcast Series Index**:
+The thin durable local projection of Podcasts in a podcast Library used for browse and Search of shows — not a store of Episodes.
+_Avoid_: Podcast catalog mirror, full podcast SQLite catalog, series cache when meaning episodes
+
+**Touched Episode**:
+An Episode that has durable local listening or download-related state (progress overlay, Progress Sync Intent, or download eligibility), as opposed to Episodes known only from live server discovery.
+_Avoid_: Cached episode, indexed episode, mirrored episode
+
 **Collection**:
 A server-defined, library-scoped group of Audiobooks that the user may browse as a read-only grouping. Its membership and metadata are owned by the Audiobookshelf Server.
 _Avoid_: Collection shelf, local collection
@@ -77,7 +97,7 @@ The transition that makes a chosen Library ready for browsing after Library Sele
 _Avoid_: Library load, library warmup
 
 **Home Shelf Display**:
-The first visible Home surface that shows the Active Library's small shelf projections, such as Continue Listening, Recently Added, Discover, Downloaded, custom shelves, or playlist shelves.
+The first visible Home surface that shows the Active Library's small shelf projections. For an audiobook Active Library this includes shelves such as Continue Listening, Recently Added, Discover, Downloaded, custom shelves, or playlist shelves. For a podcast Active Library this is Continue Listening (Episodes), Recent Episodes, Podcasts (recently-added shows), and Downloaded (Episodes).
 _Avoid_: Home bookshelf display, catalog display, Library display
 
 **Shelf Membership**:
@@ -105,8 +125,8 @@ The app state with no usable User Session where sign-in is required before any a
 _Avoid_: Downloaded-only mode, offline mode
 
 **Downloaded Audio Asset**:
-The local audio and cover files for an audiobook from a known Audiobookshelf Server stored on the device.
-_Avoid_: Downloaded book
+The local audio and cover files for a playable (audiobook or Episode) from a known Audiobookshelf Server stored on the device.
+_Avoid_: Downloaded book (when meaning an Episode)
 
 **Downloaded Audio Asset Owner**:
 The Audiobookshelf User Identity whose local listening state should change when a Downloaded Audio Asset is used while no User Session is signed in.
@@ -125,7 +145,7 @@ A user-facing explanation that LAABS Audio must discard old local user-scoped da
 _Avoid_: migration prompt, repair flow
 
 **Download Availability**:
-The condition where a signed-in User Session may use a Downloaded Audio Asset because the User Session can access the same Audiobook Identity on the Audiobookshelf Server.
+The condition where a signed-in User Session may use a Downloaded Audio Asset because the User Session can access the same Audiobook Identity or Episode Identity on the Audiobookshelf Server.
 _Avoid_: Download owner, download entitlement
 
 **Offline User Session**:
@@ -152,6 +172,14 @@ _Avoid_: Global favorite, app-only favorite
 The audiobook whose detail context the user is presently viewing.
 _Avoid_: Selected book, current book
 
+**Current Podcast**:
+The Podcast whose show detail and episode list the user is presently viewing.
+_Avoid_: Selected podcast, current show, Current Episode
+
+**Episode Detail Sheet**:
+A transient surface for reviewing an Episode without making that Episode a durable browse “current” context.
+_Avoid_: Episode detail page, Current Episode, episode screen
+
 **Book Action**:
 A user-invoked command available for an Audiobook Identity from a book presentation, such as Play/Pause, Bookshelves, Favorite, Read/Unread, or Share.
 _Avoid_: Menu item, row action
@@ -165,12 +193,12 @@ A user-facing visual representation of an Audiobook Identity, such as a vertical
 _Avoid_: Book item, book component
 
 **Active Playback**:
-The audiobook currently owned by the player for listening.
-_Avoid_: Current audiobook, selected playback, global player book
+The playable currently owned by the player for listening — either an audiobook or an Episode, never a Podcast. At most one Active Playback exists at a time.
+_Avoid_: Current audiobook, selected playback, global player book, active episode playback
 
-**Player Display Audiobook**:
-The audiobook whose title, author, and cover should be shown by player surfaces while playback is idle, loading, playing, paused, or failed. During a Playback Start Attempt, this is the attempted audiobook; otherwise it is Active Playback when one exists.
-_Avoid_: Now playing, current player book, selected playback book
+**Player Display**:
+The playable (audiobook or Episode) whose title, author or host, and cover should be shown by player surfaces while playback is idle, loading, playing, paused, or failed. During a Playback Start Attempt, this is the attempted playable; otherwise it is Active Playback when one exists.
+_Avoid_: Now playing, Player Display Audiobook, current player book, selected playback book
 
 **Startup Active Playback Restore**:
 The reopen-time attempt to bring the user's most recent Active Playback back as a loaded, paused Active Playback so the user can resume where they left off. It is governed by a user preference and never starts audio on its own.
@@ -189,11 +217,11 @@ A LAABS Audio local preference for an Audiobook Identity that remembers which im
 _Avoid_: Ambient book metadata, global ambient settings, per-track volume
 
 **Playback Start Attempt**:
-A user-requested attempt to make an audiobook become Active Playback.
+A user-requested attempt to make an audiobook or Episode become Active Playback.
 _Avoid_: Pending load, playback request, loading state
 
 **Playback Control Intent**:
-A user-requested play, pause, or start action whose requested Audible Playback State has not yet been reached. A Playback Start Attempt is the start-audiobook form of Playback Control Intent.
+A user-requested play, pause, or start action whose requested Audible Playback State has not yet been reached. A Playback Start Attempt is the start-playable form of Playback Control Intent.
 _Avoid_: Transition, touch guard, pending command
 
 **Audible Playback State**:
@@ -256,11 +284,11 @@ The small step controls for adjusting a Clip Bookmark's Starting Position by fix
 _Avoid_: Starting Position buttons
 
 **Listening Position**:
-The audiobook position where normal listening should continue.
-_Avoid_: Playback cursor
+The position in the current playable (audiobook or Episode) where normal listening should continue.
+_Avoid_: Playback cursor, episode cursor
 
 **Displayed Listening Position**:
-The audiobook position shown by player and browsing surfaces while LAABS Audio is resolving, starting, or playing an audiobook.
+The playable position shown by player and browsing surfaces while LAABS Audio is resolving, starting, or playing an audiobook or Episode.
 _Avoid_: Slider position, UI progress, playback cursor
 
 **Skip Burst**:
@@ -272,12 +300,16 @@ The decision that chooses the Listening Position when opening an audiobook from 
 _Avoid_: Truth, resume merge
 
 **Progress Sync Intent**:
-A local audiobook progress change that LAABS Audio still needs to apply to the Audiobookshelf Server.
-_Avoid_: Pending progress, queued progress
+A local progress change for an audiobook or Episode that LAABS Audio still needs to apply to the Audiobookshelf Server.
+_Avoid_: Pending progress, queued progress, episode progress intent
 
 **Audiobook Identity**:
 The server-scoped identity used to match local progress and server progress for the same audiobook.
 _Avoid_: Book key, item match
+
+**Episode Identity**:
+The server-scoped identity used to match local progress and server progress for the same Episode, combining the Episode's server id with its parent Podcast's identity.
+_Avoid_: Episode key, podcast item match, Audiobook Identity (for episodes)
 
 **Unmatched Progress Sync Intent**:
 A Progress Sync Intent whose audiobook is no longer present on the Audiobookshelf Server it belongs to.
@@ -406,6 +438,19 @@ _Avoid_: Five minute window, scrubber window
 - A **User Session** may have access to zero, one, or many **Libraries**.
 - A **User Session** has at most one **Active Library**.
 - A **Library** is a separate scope under a **User Session**, not part of the User Session identity.
+- A **Podcast** belongs to a podcast **Library**.
+- An **Episode** belongs to exactly one **Podcast**.
+- A **Podcast** has a **Podcast Episode Order** derived from whether it is serial or episodic.
+- A **Podcast** is not a playable for **Active Playback**.
+- An **Episode** is identified by an **Episode Identity**.
+- An **Episode Identity** includes its parent **Podcast**'s identity and is not an **Audiobook Identity**.
+- A podcast **Library** has a **Podcast Series Index** of its **Podcast**s.
+- A **Podcast Series Index** does not contain **Episode** lists; episode discovery for a **Podcast** is live server data.
+- A **Touched Episode** is scoped by **Episode Identity**.
+- Not every **Episode** is a **Touched Episode**.
+- **Listening Position** and **Progress Sync Intent** for an audiobook are scoped by **Audiobook Identity**.
+- **Listening Position** and **Progress Sync Intent** for an **Episode** are scoped by **Episode Identity**.
+- **Active Playback** owns either an audiobook or an **Episode**, never a **Podcast**.
 - **Library Resolution** happens before a User Session becomes browsable.
 - An **Active Library** is chosen through **Library Selection**.
 - A first-time **User Session** is not browsable until **Library Resolution** succeeds.
@@ -417,7 +462,22 @@ _Avoid_: Five minute window, scrubber window
 - **Library Selection** chooses the Active Library; Library-scoped audiobook, shelf, progress, and playlist data belong to the Active Library after it is chosen.
 - **Library Activation** happens after **Library Selection** and before the chosen Library is treated as browsable.
 - **Library Activation** requires enough Library-scoped catalog data and User Session listening state to make browsing coherent.
+- For a podcast **Library**, **Library Activation** requires **Podcast Series Index** readiness for that **User Session** and **Library**.
+- For a podcast **Library**, **Episode** lists, Recent Episodes, and **Touched Episode** overlay refresh are not required for **Library Activation**.
+- When the **Active Library** is a podcast **Library**, **Home Shelf Display** shows Continue Listening (**Episode**s), Recent Episodes, Podcasts from the **Podcast Series Index**, then Downloaded (**Episode**s), in that order.
+- Podcast **Home Shelf Display** Continue Listening is projected from **Touched Episode** durable progress.
+- Podcast **Home Shelf Display** Downloaded is projected from locally downloaded **Episode** **Downloaded Audio Asset**s.
+- Podcast **Home Shelf Display** does not include Discover, custom shelves, playlist shelves, or audiobook Downloaded rows.
+- **Progress Sync Intent** and **Resume Resolution** for an **Episode** are scoped by **Episode Identity**.
+- A downloaded **Episode** is a **Downloaded Audio Asset** scoped by **Episode Identity**.
+- Downloading an **Episode** makes it a **Touched Episode**.
+- When the **Active Library** is a podcast **Library**, the Lists tab browses the **Podcast Series Index** (not book Series, Collections, or Playlist Shelves).
+- Podcast Search browses **Podcast**s from the **Podcast Series Index**, not audiobook Search Result Sets.
+- Podcast Search readiness follows **Podcast Series Index** readiness for the **Active Library**.
+- Choosing a **Podcast** from podcast Search opens **Current Podcast**.
+- Podcast Search does not search **Episode**s across the **Library**; **Episode** filtering belongs on **Current Podcast**.
 - Remembered Library data may satisfy **Library Activation**.
+- A remembered **Podcast Series Index** may satisfy podcast **Library Activation** when a fresh refresh is unavailable.
 - **Library Activation** blocks other app interactions while it is in progress.
 - After user-requested **Library Activation**, Home is the safe browsing surface for the newly Active Library.
 - A return to a specific audiobook after **Library Activation** is valid only when that audiobook belongs to the newly Active Library.
@@ -430,10 +490,17 @@ _Avoid_: Five minute window, scrubber window
 - Library-scoped book lists may use User Session scoped Favorites as an overlay.
 - A **Current Audiobook** may belong to an Audiobookshelf series with other audiobooks.
 - A **Current Audiobook** may differ from **Active Playback**.
-- A **Player Display Audiobook** may differ from **Active Playback** during a **Playback Start Attempt**.
-- Player surfaces may show the **Player Display Audiobook** before it becomes **Active Playback**, but loaded-only player actions still belong to **Active Playback**.
+- A **Current Podcast** may differ from **Active Playback**.
+- **Active Playback** may be an audiobook or an **Episode**.
+- **Current Podcast** Episode lists are live server data for that **Podcast**, not part of the **Podcast Series Index**.
+- **Current Podcast** presents **Episode**s in **Podcast Episode Order** by default.
+- Filtering **Episode**s on **Current Podcast** uses the already-loaded list and does not create a separate search context.
+- Reviewing an **Episode** on an **Episode Detail Sheet** does not create a Current Episode browse context.
+- Choosing an **Episode** from **Current Podcast** may start a **Playback Start Attempt** for that **Episode**.
+- A **Player Display** may differ from **Active Playback** during a **Playback Start Attempt**.
+- Player surfaces may show the **Player Display** before it becomes **Active Playback**, but loaded-only player actions still belong to **Active Playback**.
 - A **Playback Start Attempt** may become **Active Playback** only after playable audio is confirmed.
-- A **Playback Start Attempt** for one audiobook may replace existing **Active Playback** for another audiobook before playable audio is confirmed.
+- A **Playback Start Attempt** for one playable may replace existing **Active Playback** for another playable before playable audio is confirmed.
 - A failed **Playback Start Attempt** may leave no **Active Playback**.
 - **Startup Active Playback Restore** brings back the most recent **Active Playback** as a loaded, paused Active Playback and never auto-plays.
 - **Startup Active Playback Restore** is governed by a user preference and does nothing when the preference is disabled.
@@ -463,10 +530,10 @@ _Avoid_: Five minute window, scrubber window
 - A user in **Session Needs Sign-In** may explicitly log out and enter **Signed-Out Required Sign-In**.
 - **Session Needs Sign-In** may use remembered downloaded content because progress and bookmarks still have a known **User Session** owner.
 - A **Downloaded Audio Asset** may be available to multiple **User Sessions** through **Download Availability**.
-- A **Downloaded Audio Asset** identity includes its **Audiobookshelf Server** and **Audiobook Identity**.
+- A **Downloaded Audio Asset** identity includes its **Audiobookshelf Server** and either an **Audiobook Identity** or an **Episode Identity**.
 - A **Downloaded Audio Asset** has a **Downloaded Audio Asset Owner** when LAABS Audio knows which **Audiobookshelf User Identity** should receive its logged-out listening state.
 - A **Downloaded Audio Asset** may have multiple **Downloaded Audio Asset Owners** when multiple **Audiobookshelf User Identities** can use the same local media.
-- A signed-in **User Session** may become a **Downloaded Audio Asset Owner** only after Audiobookshelf shows that it can access the same **Audiobook Identity**.
+- A signed-in **User Session** may become a **Downloaded Audio Asset Owner** only after Audiobookshelf shows that it can access the same **Audiobook Identity** or **Episode Identity**.
 - A **Legacy Downloaded Audio Asset** is discarded after a **Local Data Reset Notice** rather than migrated or reassigned.
 - A signed-in **User Session** sees **Downloaded Audio Assets** through **Download Availability**.
 - A **Downloaded Audio Asset** may be shared as local media, but listening state such as **Listening Position**, **Bookmark**, and **Playback Rate** belongs to the current **User Session**.
@@ -586,6 +653,8 @@ _Avoid_: Five minute window, scrubber window
 - Skip interval controls on system playback surfaces follow the same **Skip Burst** rules as in-app skip interval controls.
 - When **Remote Command Mode** exposes next and previous controls, those controls change the **Listening Position** through chapter navigation only.
 - If **Active Playback** has no chapter data, next and previous remote commands do not change the **Listening Position**.
+- When **Active Playback** is an **Episode**, system Now Playing chapter / Up Next browse is not offered; show **Episode** lists stay in browse templates, not chapter navigation.
+- System Now Playing for an **Episode** uses **Player Display**: **Episode** title with its parent **Podcast** as the secondary label.
 - During a **Playback Start Attempt**, player surfaces may show the attempted audiobook's **Displayed Listening Position** before it becomes **Active Playback**.
 - During a **Playback Start Attempt**, browsing surfaces should keep using **Active Playback** for live **Displayed Listening Position** until the attempted audiobook becomes **Active Playback**.
 - For inactive audiobooks, an **Automatic Progress Sample** is display evidence but not an automatic winner over farther server progress.
@@ -604,6 +673,8 @@ _Avoid_: Five minute window, scrubber window
 - An **Automatic Progress Sample** at zero position must not erase meaningful **Listening Position** evidence.
 - Downloaded and streamed audiobooks share **Resume Resolution** and **Progress Sync Intent** rules.
 - Downloaded and streamed audiobooks may use different server sync paths for the same **Progress Sync Intent**.
+- Downloaded and streamed **Episode**s share **Resume Resolution** and **Progress Sync Intent** rules scoped by **Episode Identity**.
+- A **Playback Start Attempt** for an **Episode** prefers a local **Downloaded Audio Asset** when one exists, otherwise streams.
 - A **Progress Sync Intent** makes direct progress sync take precedence over streamed session sync until the intent is resolved.
 - A **Progress Sync Intent** remains pending until the Audiobookshelf Server confirms the intended progress state.
 - App backgrounding or playback interruption creates a local **Progress Sync Intent** before any server sync attempt.
@@ -670,10 +741,19 @@ _Avoid_: Five minute window, scrubber window
 > **Dev:** "When the user shares transcribed clip text, is that the same as the temporary audio used for recognition?"
 > **Domain expert:** "No, sharing transcribed text creates a **Clip Transcript Export File** from a **Clip Transcription**."
 
+> **Dev:** "Is the podcast series itself what becomes Active Playback?"
+> **Domain expert:** "No. A **Podcast** is the container. Only an **Episode** (or an audiobook) can be **Active Playback**."
+
+> **Dev:** "When the user opens episode info from a list, is that a Current Episode?"
+> **Domain expert:** "No. That is an **Episode Detail Sheet**. Browse current context for shows is **Current Podcast** only."
+
 ## Flagged ambiguities
 
 - "login" can mean either the credential submission or the broader **User Session** entry flow; resolved: use **User Session** for the authenticated relationship and describe credential submission separately when needed.
 - "library picker" refers to the implementation surface; resolved: the domain action is **Library Selection**.
+- "show" or "feed" for a podcast series; resolved: the canonical term is **Podcast**.
+- "podcast" used for a single broadcast; resolved: that is an **Episode**.
+- "Player Display Audiobook" for player chrome metadata; resolved: the canonical term is **Player Display** (audiobook or Episode).
 - "advanced bookmark" was used to mean a bookmark with a start and end position; resolved: the canonical term is **Clip Bookmark**.
 - "orphaned bookmark" was used to mean a local bookmark whose server counterpart is missing; resolved: the canonical term is **Unmatched Bookmark**.
 - "clip name" and "bookmark name" were used for the user-facing label; resolved: the canonical term is **Bookmark Title**.

@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-23` `pending` - Record podcast Library architecture decisions (ADRs 0024–0030, reuse inventory, glossary).
+  Tester focus: no app behavior change; docs only for upcoming podcast Library work.
+
 - `2026-07-20` `pending` - Reset Home to the top after bookshelf reordering and make the first shelf's book cards larger with a configurable multiplier.
   Tester focus: scroll Home down, reorder shelves in Settings, return Home, and verify the first shelf is correctly inset at the top without a UI pause; verify its cards are 25% larger than the selected Small, Medium, or Large size and adjust `FIRST_SHELF_BOOK_SIZE_MULTIPLIER` to test other differences.
 
