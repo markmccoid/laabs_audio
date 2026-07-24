@@ -1,7 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 const DATABASE_NAME = "laabs-shadow-library.db";
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -426,6 +426,47 @@ CREATE INDEX IF NOT EXISTS idx_library_series_name
   ON library_series(user_id, library_id, name_sort, series_id);
 CREATE INDEX IF NOT EXISTS idx_series_memberships_sequence
   ON library_series_memberships(user_id, library_id, series_id, sequence_number, sequence, source_position);
+
+CREATE TABLE IF NOT EXISTS touched_episodes (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  episode_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  podcast_title TEXT NOT NULL,
+  cover TEXT,
+  current_time REAL NOT NULL DEFAULT 0,
+  duration REAL NOT NULL DEFAULT 0,
+  is_finished INTEGER NOT NULL DEFAULT 0,
+  hide_from_continue_listening INTEGER NOT NULL DEFAULT 0,
+  last_update INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, library_item_id, episode_id)
+);
+
+CREATE TABLE IF NOT EXISTS episode_pending_progress_sync_intents (
+  user_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  episode_id TEXT NOT NULL,
+  intent_id TEXT,
+  duration REAL NOT NULL DEFAULT 0,
+  current_time REAL NOT NULL DEFAULT 0,
+  is_finished INTEGER NOT NULL DEFAULT 0,
+  intent_kind TEXT,
+  updated_at INTEGER NOT NULL,
+  title TEXT,
+  podcast_title TEXT,
+  trigger TEXT,
+  status TEXT,
+  payload_json TEXT NOT NULL,
+  PRIMARY KEY (user_id, library_item_id, episode_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_touched_episodes_continue
+  ON touched_episodes(user_id, library_id, is_finished, hide_from_continue_listening, last_update);
+CREATE INDEX IF NOT EXISTS idx_episode_pending_progress
+  ON episode_pending_progress_sync_intents(user_id, library_item_id, episode_id);
 
 CREATE TABLE IF NOT EXISTS timing_logs (
   id TEXT PRIMARY KEY NOT NULL,

@@ -14,4 +14,17 @@ export const playbackApi = {
       forceTranscode: false,
     });
   },
+
+  getEpisodePlayInfo(itemId: string, episodeId: string) {
+    return absClient.post<AudiobookSession>(`/api/items/${itemId}/play/${episodeId}`, {
+      deviceInfo: {
+        id: "react-native-player",
+        name: "laabs audio",
+        version: "1.0.0",
+      },
+      supportedMimeTypes: ["audio/flac", "audio/mpeg", "audio/mp4"],
+      forceDirectPlay: false,
+      forceTranscode: false,
+    });
+  },
 };

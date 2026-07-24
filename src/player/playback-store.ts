@@ -8,6 +8,7 @@ export type PlaybackControlIntent = {
   id: string;
   kind: "start" | "play" | "pause";
   libraryItemId: string | null;
+  episodeId?: string | null;
   requestedAudibleState: "playing" | "paused";
   startedAt: number;
   // Set when the owning request finished and the intent entered its settle
@@ -21,7 +22,11 @@ export type PlaybackStoreState = {
   playbackState: PlaybackState;
   playbackControlIntent: PlaybackControlIntent | null;
   libraryItemId: string | null;
+  /** Episode title when Active Playback is an Episode; otherwise audiobook title. */
   bookTitle: string | null;
+  /** Podcast title secondary label for Episode Active Playback. */
+  secondaryTitle: string | null;
+  episodeId: string | null;
   sessionId: string | null;
   queue: PlaybackQueueItem[];
   chapterIndex: ResolvedChapter[];
@@ -61,6 +66,8 @@ export type PlaybackStoreState = {
     setSession: (payload: {
       libraryItemId: string;
       bookTitle: string | null;
+      secondaryTitle?: string | null;
+      episodeId?: string | null;
       sessionId: string;
       queue: PlaybackQueueItem[];
       durationMs: number;
@@ -69,6 +76,8 @@ export type PlaybackStoreState = {
     commitStartedSession: (payload: {
       libraryItemId: string;
       bookTitle: string | null;
+      secondaryTitle?: string | null;
+      episodeId?: string | null;
       sessionId: string;
       queue: PlaybackQueueItem[];
       durationMs: number;
@@ -112,6 +121,8 @@ const getBaseState = () => ({
   playbackControlIntent: null as PlaybackControlIntent | null,
   libraryItemId: null,
   bookTitle: null,
+  secondaryTitle: null,
+  episodeId: null,
   sessionId: null,
   queue: [] as PlaybackQueueItem[],
   chapterIndex: [] as ResolvedChapter[],
@@ -153,6 +164,8 @@ export const playbackStore = createStore<PlaybackStoreState>()(
             playbackControlIntent: null,
             libraryItemId,
             bookTitle,
+            secondaryTitle: null,
+            episodeId: null,
             sessionId: null,
             queue: [],
             chapterIndex: [],
@@ -165,10 +178,21 @@ export const playbackStore = createStore<PlaybackStoreState>()(
             error: null,
             debugStatus: null,
           }),
-        setSession: ({ libraryItemId, bookTitle, sessionId, queue, durationMs, chapterIndex }) =>
+        setSession: ({
+          libraryItemId,
+          bookTitle,
+          secondaryTitle = null,
+          episodeId = null,
+          sessionId,
+          queue,
+          durationMs,
+          chapterIndex,
+        }) =>
           set({
             libraryItemId,
             bookTitle,
+            secondaryTitle,
+            episodeId,
             sessionId,
             queue,
             durationMs,
@@ -183,6 +207,8 @@ export const playbackStore = createStore<PlaybackStoreState>()(
         commitStartedSession: ({
           libraryItemId,
           bookTitle,
+          secondaryTitle = null,
+          episodeId = null,
           sessionId,
           queue,
           durationMs,
@@ -198,6 +224,8 @@ export const playbackStore = createStore<PlaybackStoreState>()(
             playbackState: "playing",
             libraryItemId,
             bookTitle,
+            secondaryTitle,
+            episodeId,
             sessionId,
             queue,
             durationMs,
@@ -239,7 +267,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
     {
       name: "playback-store",
       storage: createJSONStorage(() => mmkvStorage),
-      version: 2,
+      version: 3,
       migrate: (persistedState) => {
         if (
           persistedState &&
@@ -258,6 +286,8 @@ export const playbackStore = createStore<PlaybackStoreState>()(
       partialize: (state) => ({
         libraryItemId: state.libraryItemId,
         bookTitle: state.bookTitle,
+        secondaryTitle: state.secondaryTitle,
+        episodeId: state.episodeId,
         currentTrackIndex: state.currentTrackIndex,
         positionMs: state.positionMs,
         rate: state.rate,

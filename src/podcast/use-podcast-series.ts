@@ -1,7 +1,9 @@
 import { itemsApi, type PodcastItemDetails } from "@/api/items-api";
+import type { PodcastSeriesIndexSummary } from "@/api/library-items-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { podcastSeriesIndexRepository } from "@/data/sqlite/podcast-series-index-repository";
-import type { PodcastSeriesIndexSummary } from "@/api/library-items-api";
+import { listTouchedEpisodesForContinue } from "@/data/sqlite/touched-episodes";
+import { orderContinueEpisodes } from "@/podcast/episode-continue-eligibility";
 import { queryKeys } from "@/query/query-keys";
 import { useQuery } from "@tanstack/react-query";
 
@@ -44,6 +46,19 @@ export const usePodcastSeriesSearchHits = (query: string) => {
   });
 };
 
+export const usePodcastContinueEpisodes = () => {
+  const status = useAuthStore((state) => state.status);
+  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const enabled = status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
+
+  return useQuery({
+    queryKey: queryKeys.podcastContinueEpisodes(activeLibraryUserKey, activeLibraryId),
+    queryFn: async () => orderContinueEpisodes(await listTouchedEpisodesForContinue()),
+    enabled,
+  });
+};
+
 export const usePodcastSeriesIndexShow = (libraryItemId?: string) => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
@@ -79,7 +94,6 @@ export const usePodcastItemDetails = (libraryItemId?: string) => {
     queryKey: queryKeys.podcastItemDetails(activeLibraryUserKey, libraryItemId),
     queryFn: () => itemsApi.getPodcastItemDetails(libraryItemId!),
     enabled,
-    // Keep prior expanded payload so offline Current Podcast can still show episodes.
     staleTime: 5 * 60 * 1000,
   });
 };

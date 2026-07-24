@@ -8,6 +8,7 @@ import {
   usePodcastItemDetails,
   usePodcastSeriesIndexShow,
 } from "@/podcast/use-podcast-series";
+import { playerService } from "@/player";
 import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { PodcastEpisode } from "@/types/absTypes";
@@ -113,6 +114,7 @@ export const CurrentPodcastScreen = ({ libraryItemId }: Props) => {
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       <Stack.Screen.Title>{headerTitle}</Stack.Screen.Title>
       <FlashList
+        contentInsetAdjustmentBehavior="automatic"
         data={visibleEpisodes}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={
@@ -229,10 +231,23 @@ export const CurrentPodcastScreen = ({ libraryItemId }: Props) => {
           const duration = formatDuration(item.duration);
           const meta = [published, duration].filter(Boolean).join(" · ");
           return (
-            <View
-              style={[
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Play ${item.title}`}
+              onPress={() => {
+                if (!libraryItemId) return;
+                void playerService.requestStartEpisode(libraryItemId, item.id, {
+                  episodeTitle: item.title,
+                  podcastTitle: headerTitle,
+                });
+              }}
+              style={({ pressed }) => [
                 styles.episodeRow,
-                { borderColor: themeColors.border, backgroundColor: themeColors.surface },
+                {
+                  borderColor: themeColors.border,
+                  backgroundColor: themeColors.surface,
+                  opacity: pressed ? 0.72 : 1,
+                },
               ]}
             >
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -253,7 +268,8 @@ export const CurrentPodcastScreen = ({ libraryItemId }: Props) => {
                   </Text>
                 ) : null}
               </View>
-            </View>
+              <SymbolView name="play.fill" size={16} tintColor={themeColors.accent} />
+            </Pressable>
           );
         }}
         contentContainerStyle={{ paddingBottom: 32 }}
@@ -328,5 +344,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
 });

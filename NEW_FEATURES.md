@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-24` `pending` - Stream Episode play with Episode-scoped Progress Sync Intent and Continue Listening.
+  Tester focus: from Current Podcast tap an episode and verify streamed playback starts with episode title + podcast secondary on mini/main player; pause/seek creates local progress that syncs; Home Continue Listening appears for unfinished episodes (newest first) and hides when empty; chapter UI / CarPlay Up Next stay empty for episodes; audiobook play/progress unchanged.
+
 - `2026-07-23` `pending` - Browse Podcasts from the series index on Home, Lists, and Search; open Current Podcast with live episodes, order, reverse, and title filter.
   Tester focus: activate a podcast Library and verify Home shows a Podcasts shelf (newest-added first); Lists browses shows (not Series/Collections/Playlists); Search finds shows by title/author with no book filter rail; opening a show loads episodes ordered by podcast type, reverse toggle and title filter work, and offline keeps the header while hiding episodes until the show was opened online; audiobook Libraries keep prior Home/Lists/Search behavior.
 

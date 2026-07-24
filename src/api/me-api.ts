@@ -163,6 +163,10 @@ export const meApi = {
     return absClient.get<MediaProgress>(`/api/me/progress/${itemId}`);
   },
 
+  getEpisodeProgress(itemId: string, episodeId: string) {
+    return absClient.get<MediaProgress>(`/api/me/progress/${itemId}/${episodeId}`);
+  },
+
   updateProgress(
     itemId: string,
     payload: {
@@ -172,6 +176,18 @@ export const meApi = {
     },
   ) {
     return absClient.patch<void>(`/api/me/progress/${itemId}`, payload);
+  },
+
+  updateEpisodeProgress(
+    itemId: string,
+    episodeId: string,
+    payload: {
+      currentTime?: number;
+      isFinished?: boolean;
+      hideFromContinueListening?: boolean;
+    },
+  ) {
+    return absClient.patch<void>(`/api/me/progress/${itemId}/${episodeId}`, payload);
   },
 
   saveBookmark(libraryItemId: string, bookmark: Bookmark) {
@@ -199,6 +215,9 @@ export const meApi = {
     );
     const progressByLibraryItemId = ownedProgress.reduce<Record<string, UserBookProgress>>(
       (acc, progress) => {
+        // Episode progress is scoped by Episode Identity — never overload book maps.
+        if (progress.episodeId) return acc;
+
         const normalizedProgress: UserBookProgress = {
           progressId: progress.id,
           libraryItemId: progress.libraryItemId,

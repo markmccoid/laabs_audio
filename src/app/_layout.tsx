@@ -521,10 +521,24 @@ export default function RootLayout() {
     if (!isRestorableIdlePlaybackState(state.playbackState)) return;
 
     const restoreLibraryItemId = state.libraryItemId;
-    logStartupEvent("startup restore begin", { libraryItemId: restoreLibraryItemId });
+    const restoreEpisodeId = state.episodeId;
+    logStartupEvent("startup restore begin", {
+      libraryItemId: restoreLibraryItemId,
+      episodeId: restoreEpisodeId,
+    });
     const interactionTask = InteractionManager.runAfterInteractions(() => {
-      void playerService
-        .loadBook(restoreLibraryItemId, { autoPlay: false, suppressErrorState: true })
+      const restorePromise = restoreEpisodeId
+        ? playerService.loadEpisode(restoreLibraryItemId, restoreEpisodeId, {
+            autoPlay: false,
+            suppressErrorState: true,
+            episodeTitle: state.bookTitle,
+            podcastTitle: state.secondaryTitle,
+          })
+        : playerService.loadBook(restoreLibraryItemId, {
+            autoPlay: false,
+            suppressErrorState: true,
+          });
+      void restorePromise
         .then(() => logStartupEvent("startup restore complete"))
         .catch(() => logStartupEvent("startup restore failed"));
     });

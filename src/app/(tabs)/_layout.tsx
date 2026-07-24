@@ -11,16 +11,26 @@ export default function TabLayout() {
   const playerDisplayAudiobook = usePlayerDisplayAudiobook();
   const miniPlayerLibraryItemId = playerDisplayAudiobook.displayLibraryItemId;
   const isMiniPlayerLoading = playerDisplayAudiobook.isPlaybackStartAttempt;
+  const isEpisodePlayback = playerDisplayAudiobook.isEpisodePlayback;
   const localCoverUri = useDeviceBooksStore((state) =>
-    miniPlayerLibraryItemId
+    !isEpisodePlayback && miniPlayerLibraryItemId
       ? resolveStoredDownloadCoverUri(state.downloadedBookData[miniPlayerLibraryItemId])
       : null,
   );
-  const { data: currentBook } = useGetItemDetails(miniPlayerLibraryItemId || undefined);
+  const { data: currentBook } = useGetItemDetails(
+    isEpisodePlayback ? undefined : miniPlayerLibraryItemId || undefined,
+  );
   const themeColors = useThemeColors();
   const isPlaying = playbackState === "playing";
   const hasLoadedBook = playerDisplayAudiobook.hasLoadedBook;
   const shouldShowMiniPlayer = hasLoadedBook || playerDisplayAudiobook.isPlaybackStartAttempt;
+  const title = isEpisodePlayback
+    ? (playerDisplayAudiobook.displayTitle ?? "Episode")
+    : currentBook?.title;
+  const author = isEpisodePlayback
+    ? (playerDisplayAudiobook.displaySecondaryTitle ?? "Podcast")
+    : currentBook?.author;
+  const coverUri = isEpisodePlayback ? undefined : currentBook?.coverFull;
   const handleToggle = async () => {
     if (playbackControlIntent) return;
     if (isPlaying) {
@@ -33,7 +43,6 @@ export default function TabLayout() {
   return (
     <NativeTabs
       minimizeBehavior="onScrollDown"
-      // disableTransparentOnScrollEdge={true}
       backgroundColor={themeColors.surface}
       tintColor={themeColors.accent}
       iconColor={{ default: themeColors.textMuted, selected: themeColors.accent }}
@@ -61,15 +70,15 @@ export default function TabLayout() {
       {shouldShowMiniPlayer && (
         <NativeTabs.BottomAccessory>
           <MiniPlayerBottomAccessory
-            author={currentBook?.author}
-            coverUri={currentBook?.coverFull}
+            author={author}
+            coverUri={coverUri}
             isLoading={isMiniPlayerLoading}
             isPlaying={isPlaying}
             libraryItemId={miniPlayerLibraryItemId}
             localCoverUri={localCoverUri}
             playbackControlIntent={playbackControlIntent}
             themeColors={themeColors}
-            title={currentBook?.title}
+            title={title}
             onToggle={handleToggle}
           />
         </NativeTabs.BottomAccessory>

@@ -5,7 +5,8 @@ import { refreshPodcastSeriesIndex } from "@/data/sqlite/podcast-series-index-re
 import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
 import { useLibrarySelection } from "@/hooks/use-library-selection";
 import { podcastShowToShelfSummary } from "@/podcast/podcast-show-to-shelf-summary";
-import { usePodcastSeriesByAddedAt } from "@/podcast/use-podcast-series";
+import { usePodcastContinueEpisodes, usePodcastSeriesByAddedAt } from "@/podcast/use-podcast-series";
+import { PodcastContinueShelf } from "@/components/podcast/podcast-continue-shelf";
 import { queryKeys } from "@/query/query-keys";
 import {
   HOME_PREVIEW_SIZE_LARGE,
@@ -34,6 +35,7 @@ const AnimatedFlashList = Animated.createAnimatedComponent(FlashList) as unknown
 
 type PodcastHomeListItem =
   | { type: "refresh-message"; id: "refresh-message"; message: string }
+  | { type: "continue"; id: "continue" }
   | { type: "shelf"; id: "podcasts" }
   | { type: "footer"; id: "footer" };
 
@@ -55,6 +57,7 @@ export const PodcastHomeShelvesScreen = () => {
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const scrollY = useSharedValue(0);
   const seriesQuery = usePodcastSeriesByAddedAt();
+  const continueQuery = usePodcastContinueEpisodes();
   const activateLibrarySelection = useActivateLibrarySelection();
   const {
     libraries,
@@ -76,16 +79,20 @@ export const PodcastHomeShelvesScreen = () => {
 
   const shows = seriesQuery.data ?? [];
   const shelfBooks = useMemo(() => shows.map(podcastShowToShelfSummary), [shows]);
+  const continueEpisodes = continueQuery.data ?? [];
 
   const listData = useMemo<PodcastHomeListItem[]>(() => {
     return [
       ...(refreshMessage
         ? [{ type: "refresh-message" as const, id: "refresh-message" as const, message: refreshMessage }]
         : []),
+      ...(continueEpisodes.length > 0
+        ? [{ type: "continue" as const, id: "continue" as const }]
+        : []),
       { type: "shelf", id: "podcasts" },
       { type: "footer", id: "footer" },
     ];
-  }, [refreshMessage]);
+  }, [continueEpisodes.length, refreshMessage]);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -117,6 +124,9 @@ export const PodcastHomeShelvesScreen = () => {
       });
       await queryClient.invalidateQueries({
         queryKey: queryKeys.podcastSeriesIndex(activeLibraryUserKey, activeLibraryId, "titleAsc"),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.podcastContinueEpisodes(activeLibraryUserKey, activeLibraryId),
       });
     } catch {
       setRefreshMessage("Refresh failed. Pull down to try again.");
@@ -173,8 +183,14 @@ export const PodcastHomeShelvesScreen = () => {
               paddingHorizontal: 18,
             }}
           >
-            Continue Listening, Recent Episodes, and Downloads land in upcoming podcast work.
+            Recent Episodes and Downloads land in upcoming podcast work.
           </Text>
+        );
+      }
+
+      if (item.type === "continue") {
+        return (
+          <PodcastContinueShelf episodes={continueEpisodes} bookSizeMultiplier={1.25} />
         );
       }
 
@@ -200,6 +216,7 @@ export const PodcastHomeShelvesScreen = () => {
       );
     },
     [
+      continueEpisodes,
       headerHeight,
       isOnline,
       scrollY,
@@ -257,67 +274,87 @@ export const PodcastHomeShelvesScreen = () => {
       ) : null}
 
       <Stack.Toolbar placement="right">
-        {canChangeLibrary ? (
-          <Stack.Toolbar.Menu icon="books.vertical">
-            {isLibrariesLoading ? (
-              <Stack.Toolbar.MenuAction disabled>Loading libraries…</Stack.Toolbar.MenuAction>
-            ) : isLibrariesError ? (
-              <Stack.Toolbar.MenuAction onPress={() => void refetchLibraries()}>
-                Retry libraries
-              </Stack.Toolbar.MenuAction>
-            ) : (
-              libraries.map((library) => (
+        <Stack.Toolbar.Menu icon="ellipsis">
+          {canChangeLibrary ? (
+            <Stack.Toolbar.Menu icon="books.vertical.fill" title="Change Library">
+              {isLibrariesLoading && libraries.length === 0 ? (
+                <Stack.Toolbar.MenuAction disabled icon="ellipsis">
+                  Loading libraries...
+                </Stack.Toolbar.MenuAction>
+              ) : null}
+              {isLibrariesError && libraries.length === 0 ? (
+                <Stack.Toolbar.MenuAction icon="arrow.clockwise" onPress={() => refetchLibraries()}>
+                  Retry loading libraries
+                </Stack.Toolbar.MenuAction>
+              ) : null}
+              {!isLibrariesLoading && !isLibrariesError && libraries.length === 0 ? (
+                <Stack.Toolbar.MenuAction disabled icon="books.vertical">
+                  No libraries available
+                </Stack.Toolbar.MenuAction>
+              ) : null}
+              {libraries.map((library) => (
                 <Stack.Toolbar.MenuAction
                   key={library.id}
+                  icon="text.book.closed.fill"
                   isOn={library.id === activeLibraryId}
                   onPress={() => handleLibraryChange(library)}
+                  subtitle={`${library.mediaType} • ${library.icon || library.provider}`}
                 >
                   {library.name}
                 </Stack.Toolbar.MenuAction>
-              ))
-            )}
-          </Stack.Toolbar.Menu>
-        ) : null}
-        <Stack.Toolbar.Menu icon="ellipsis">
-          <Stack.Toolbar.Menu inline>
+              ))}
+            </Stack.Toolbar.Menu>
+          ) : null}
+          <Stack.Toolbar.Menu icon="square.grid.2x2" title="View">
             <Stack.Toolbar.MenuAction
+              icon="square.grid.2x2"
               isOn={homePreviewSize === HOME_PREVIEW_SIZE_SMALL}
               onPress={() => setHomePreviewSize(HOME_PREVIEW_SIZE_SMALL)}
             >
-              Small covers
+              Small
             </Stack.Toolbar.MenuAction>
             <Stack.Toolbar.MenuAction
+              icon="square.grid.2x2"
               isOn={homePreviewSize === HOME_PREVIEW_SIZE_MEDIUM}
               onPress={() => setHomePreviewSize(HOME_PREVIEW_SIZE_MEDIUM)}
             >
-              Medium covers
+              Medium
             </Stack.Toolbar.MenuAction>
             <Stack.Toolbar.MenuAction
+              icon="square.grid.2x2"
               isOn={homePreviewSize === HOME_PREVIEW_SIZE_LARGE}
               onPress={() => setHomePreviewSize(HOME_PREVIEW_SIZE_LARGE)}
             >
-              Large covers
+              Large
             </Stack.Toolbar.MenuAction>
           </Stack.Toolbar.Menu>
           <Stack.Toolbar.MenuAction
-            isOn={homeShowTitles}
+            icon={homeShowTitles ? "textformat" : "textformat.size"}
             onPress={() => setHomeShowTitles(!homeShowTitles)}
           >
-            Show titles
+            {homeShowTitles ? "Hide Titles" : "Show Titles"}
           </Stack.Toolbar.MenuAction>
         </Stack.Toolbar.Menu>
       </Stack.Toolbar>
 
       <AnimatedFlashList
+        contentInsetAdjustmentBehavior="automatic"
         data={listData}
         keyExtractor={(item) => item.id}
+        getItemType={(item) => item.type}
         renderItem={renderItem}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
-        contentContainerStyle={{ paddingTop: 8, paddingBottom: 28 }}
+        contentContainerStyle={{ paddingTop: 16, paddingBottom: 24 }}
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={() => void handleRefresh()} />
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => {
+              void handleRefresh();
+            }}
+            tintColor={themeColors.accent}
+          />
         }
       />
     </View>

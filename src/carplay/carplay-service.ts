@@ -145,12 +145,15 @@ const pushRatesToNative = () => {
 };
 
 const pushChaptersToNative = () => {
-	const { chapterIndex, currentChapterId } = playbackStore.getState();
-	const chapters = chapterIndex.map((chapter) => ({
-		id: chapter.id,
-		title: chapter.title ?? `Chapter ${chapter.id}`,
-		isCurrent: chapter.id === currentChapterId,
-	}));
+	const { chapterIndex, currentChapterId, episodeId } = playbackStore.getState();
+	// Episodes do not offer CarPlay Up Next / Chapters (ADR 0028).
+	const chapters = episodeId
+		? []
+		: chapterIndex.map((chapter) => ({
+				id: chapter.id,
+				title: chapter.title ?? `Chapter ${chapter.id}`,
+				isCurrent: chapter.id === currentChapterId,
+			}));
 	const json = JSON.stringify(chapters);
 	if (json === lastPushedChaptersJson) return;
 	lastPushedChaptersJson = json;

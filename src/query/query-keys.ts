@@ -144,6 +144,19 @@ export const queryKeys = {
       "podcastSeriesSearchHits",
       query,
     ] as const,
+  podcastContinueEpisodes: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+  ) =>
+    [
+      "sqlite",
+      "overlay",
+      "user",
+      userKey ?? null,
+      "library",
+      libraryId ?? null,
+      "podcastContinueEpisodes",
+    ] as const,
   seriesProgress: (seriesId: string | null | undefined) =>
     ["series", seriesId ?? null, "progress"] as const,
 };

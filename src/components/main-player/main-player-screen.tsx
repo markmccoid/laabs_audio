@@ -1,7 +1,7 @@
 import { useCoverImageSource } from "@/components/images/cover-image";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
-import { usePlayerDisplayAudiobook, useSleepTimerActions, useSleepTimerStatus } from "@/player";
+import { usePlayerDisplayAudiobook, useSleepTimerActions, useSleepTimerStatus, usePlaybackStore } from "@/player";
 import { resolveStoredDownloadCoverUri, useDeviceBooksStore } from "@/store/device-books-store";
 import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -39,7 +39,11 @@ const MainPlayerScreen = () => {
   );
   const sleepTimerStatus = useSleepTimerStatus();
   const sleepTimeActions = useSleepTimerActions();
-  const { data: bookData, isLoading } = useGetItemDetails(currentLibraryItemId);
+  const { data: bookData, isLoading } = useGetItemDetails(
+    playerDisplayAudiobook.isEpisodePlayback ? undefined : currentLibraryItemId,
+  );
+  const storeTitle = usePlaybackStore((state) => state.bookTitle);
+  const storeSecondaryTitle = usePlaybackStore((state) => state.secondaryTitle);
 
   const metadata = bookData?.media?.metadata;
   const authorFromList = metadata?.authors
@@ -47,8 +51,14 @@ const MainPlayerScreen = () => {
     .filter(Boolean)
     .join(", ");
   const resolvedAuthorName = metadata?.authorName ?? authorFromList ?? bookData?.author ?? "";
-  const authorName = resolvedAuthorName.trim().length > 0 ? resolvedAuthorName : "Unknown author";
-  const title = bookData?.title ?? "No book selected";
+  const authorName = playerDisplayAudiobook.isEpisodePlayback
+    ? (storeSecondaryTitle?.trim() || "Podcast")
+    : resolvedAuthorName.trim().length > 0
+      ? resolvedAuthorName
+      : "Unknown author";
+  const title = playerDisplayAudiobook.isEpisodePlayback
+    ? (storeTitle?.trim() || "Episode")
+    : (bookData?.title ?? "No book selected");
   const coverURL = bookData?.coverUri;
   const backgroundImage = useCoverImageSource({
     libraryItemId: currentLibraryItemId,
@@ -57,11 +67,15 @@ const MainPlayerScreen = () => {
     variant: "full",
   });
   const backgroundSource = currentLibraryItemId ? backgroundImage.source : DEFAULT_BOOK_COVER;
-  const chapters = bookData?.media?.chapters ?? [];
-  const fallbackDurationMs = Math.max(
-    0,
-    Math.round((bookData?.media?.duration ?? bookData?.duration ?? 0) * 1000),
-  );
+  const chapters = playerDisplayAudiobook.isEpisodePlayback
+    ? []
+    : (bookData?.media?.chapters ?? []);
+  const fallbackDurationMs = playerDisplayAudiobook.isEpisodePlayback
+    ? 0
+    : Math.max(
+        0,
+        Math.round((bookData?.media?.duration ?? bookData?.duration ?? 0) * 1000),
+      );
   const isDarkTheme = useMemo(() => {
     if (theme === "dark") return true;
     if (theme === "light") return false;
