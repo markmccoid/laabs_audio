@@ -7,8 +7,8 @@ import { selectAccessMode, useAuthStore } from "../auth/auth-store";
 import { sqliteHomeRepository } from "../data/sqlite/home-repository";
 import { sqliteRefreshCoordinator } from "../data/sqlite/refresh-coordinator";
 import { sqliteSearchRepository } from "../data/sqlite/search-repository";
-import { useLibrariesQuery } from "./use-libraries-query";
 import { isPodcastLibraryMediaType } from "../podcast/series-index-readiness";
+import { resolveActiveLibraryMediaType } from "../podcast/resolve-active-library-media-type";
 import { useDisplayedListeningPositionRecord } from "../progress/displayed-listening-position";
 import { usePlaybackStore } from "../player/playback-store";
 import { queryKeys } from "../query/query-keys";
@@ -179,7 +179,6 @@ export const useHomeShelves = () => {
   const authStatus = useAuthStore((state) => state.status);
   const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
-  const librariesQuery = useLibrariesQuery();
   const homeScopeKey = toHomeShelfScopeKey(activeLibraryUserKey, activeLibraryId);
   const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const displayedListeningPosition = useDisplayedListeningPositionRecord(
@@ -589,10 +588,7 @@ export const useHomeShelves = () => {
   useEffect(() => {
     if (!authStatus || authStatus !== "authenticated") return;
     if (!activeLibraryId || !activeLibraryUserKey) return;
-    const mediaTypeFromList = librariesQuery.data?.libraries?.find(
-      (library) => library.id === activeLibraryId,
-    )?.mediaType;
-    const mediaType = activeLibraryMediaType ?? mediaTypeFromList ?? null;
+    const mediaType = resolveActiveLibraryMediaType(activeLibraryId, activeLibraryMediaType);
     if (isPodcastLibraryMediaType(mediaType)) return;
     if (!readiness) return;
     if (readiness.hasCatalogRows && readiness.lastOverlayRefreshAt) return;
@@ -616,7 +612,6 @@ export const useHomeShelves = () => {
     activeLibraryMediaType,
     activeLibraryUserKey,
     authStatus,
-    librariesQuery.data?.libraries,
     queryClient,
     readiness,
   ]);
