@@ -1,12 +1,18 @@
 import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
 import { HomeShelfSection } from "@/components/Home/home-shelf-section";
 import { useHomeSignInSwitcher } from "@/components/Home/home-sign-in-switcher";
-import { refreshPodcastSeriesIndex } from "@/data/sqlite/podcast-series-index-refresh";
+import { PodcastContinueShelf } from "@/components/podcast/podcast-continue-shelf";
 import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
 import { useLibrarySelection } from "@/hooks/use-library-selection";
+import { usePlaybackStore } from "@/player/playback-store";
+import { applyActiveEpisodePlaybackOverlay, toContinueShelfItemFromRecent } from "@/podcast/recent-episodes-shelf";
 import { podcastShowToShelfSummary } from "@/podcast/podcast-show-to-shelf-summary";
-import { usePodcastContinueEpisodes, usePodcastSeriesByAddedAt } from "@/podcast/use-podcast-series";
-import { PodcastContinueShelf } from "@/components/podcast/podcast-continue-shelf";
+import { refreshPodcastHomeShelvesDefault } from "@/podcast/podcast-library-experience-default";
+import {
+  usePodcastContinueEpisodes,
+  usePodcastRecentEpisodes,
+  usePodcastSeriesByAddedAt,
+} from "@/podcast/use-podcast-series";
 import { queryKeys } from "@/query/query-keys";
 import {
   HOME_PREVIEW_SIZE_LARGE,
@@ -36,6 +42,7 @@ const AnimatedFlashList = Animated.createAnimatedComponent(FlashList) as unknown
 type PodcastHomeListItem =
   | { type: "refresh-message"; id: "refresh-message"; message: string }
   | { type: "continue"; id: "continue" }
+  | { type: "recent"; id: "recent" }
   | { type: "shelf"; id: "podcasts" }
   | { type: "footer"; id: "footer" };
 
@@ -58,6 +65,11 @@ export const PodcastHomeShelvesScreen = () => {
   const scrollY = useSharedValue(0);
   const seriesQuery = usePodcastSeriesByAddedAt();
   const continueQuery = usePodcastContinueEpisodes();
+  const recentQuery = usePodcastRecentEpisodes();
+  const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const playbackEpisodeId = usePlaybackStore((state) => state.episodeId);
+  const playbackPositionMs = usePlaybackStore((state) => state.positionMs);
+  const playbackDurationMs = usePlaybackStore((state) => state.durationMs);
   const activateLibrarySelection = useActivateLibrarySelection();
   const {
     libraries,
@@ -79,7 +91,27 @@ export const PodcastHomeShelvesScreen = () => {
 
   const shows = seriesQuery.data ?? [];
   const shelfBooks = useMemo(() => shows.map(podcastShowToShelfSummary), [shows]);
-  const continueEpisodes = continueQuery.data ?? [];
+
+  const activePlaybackOverlay = useMemo(() => {
+    if (!playbackLibraryItemId || !playbackEpisodeId) return null;
+    return {
+      libraryItemId: playbackLibraryItemId,
+      episodeId: playbackEpisodeId,
+      currentTimeSeconds: Math.max(0, playbackPositionMs / 1000),
+      durationSeconds: Math.max(0, playbackDurationMs / 1000),
+    };
+  }, [playbackDurationMs, playbackEpisodeId, playbackLibraryItemId, playbackPositionMs]);
+
+  const continueEpisodes = useMemo(
+    () => applyActiveEpisodePlaybackOverlay(continueQuery.data ?? [], activePlaybackOverlay),
+    [activePlaybackOverlay, continueQuery.data],
+  );
+
+  const recentEpisodes = useMemo(() => {
+    const assembled = recentQuery.data ?? [];
+    const withOverlay = applyActiveEpisodePlaybackOverlay(assembled, activePlaybackOverlay);
+    return withOverlay.map(toContinueShelfItemFromRecent);
+  }, [activePlaybackOverlay, recentQuery.data]);
 
   const listData = useMemo<PodcastHomeListItem[]>(() => {
     return [
@@ -89,10 +121,11 @@ export const PodcastHomeShelvesScreen = () => {
       ...(continueEpisodes.length > 0
         ? [{ type: "continue" as const, id: "continue" as const }]
         : []),
+      ...(recentEpisodes.length > 0 ? [{ type: "recent" as const, id: "recent" as const }] : []),
       { type: "shelf", id: "podcasts" },
       { type: "footer", id: "footer" },
     ];
-  }, [continueEpisodes.length, refreshMessage]);
+  }, [continueEpisodes.length, recentEpisodes.length, refreshMessage]);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -114,20 +147,28 @@ export const PodcastHomeShelvesScreen = () => {
     setIsRefreshing(true);
     setRefreshMessage(null);
     try {
-      await refreshPodcastSeriesIndex({
+      const result = await refreshPodcastHomeShelvesDefault({
         userId: activeLibraryUserKey,
         libraryId: activeLibraryId,
         libraryName: activeLibraryName ?? "Podcast Library",
       });
+      if (result.recent.source === "snapshot" || result.recent.source === "empty") {
+        setRefreshMessage("Could not refresh Recent Episodes. Showing the last saved shelf.");
+      }
       await queryClient.invalidateQueries({
-        queryKey: queryKeys.podcastSeriesIndex(activeLibraryUserKey, activeLibraryId, "addedAtDesc"),
-      });
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.podcastSeriesIndex(activeLibraryUserKey, activeLibraryId, "titleAsc"),
+        queryKey: queryKeys.podcastRecentEpisodes(activeLibraryUserKey, activeLibraryId),
       });
       await queryClient.invalidateQueries({
         queryKey: queryKeys.podcastContinueEpisodes(activeLibraryUserKey, activeLibraryId),
       });
+      if (result.seriesIndexRefreshed) {
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.podcastSeriesIndex(activeLibraryUserKey, activeLibraryId, "addedAtDesc"),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.podcastSeriesIndex(activeLibraryUserKey, activeLibraryId, "titleAsc"),
+        });
+      }
     } catch {
       setRefreshMessage("Refresh failed. Pull down to try again.");
     } finally {
@@ -183,7 +224,7 @@ export const PodcastHomeShelvesScreen = () => {
               paddingHorizontal: 18,
             }}
           >
-            Recent Episodes and Downloads land in upcoming podcast work.
+            Downloads land in upcoming podcast work.
           </Text>
         );
       }
@@ -191,6 +232,16 @@ export const PodcastHomeShelvesScreen = () => {
       if (item.type === "continue") {
         return (
           <PodcastContinueShelf episodes={continueEpisodes} bookSizeMultiplier={1.25} />
+        );
+      }
+
+      if (item.type === "recent") {
+        return (
+          <PodcastContinueShelf
+            title="Recent Episodes"
+            episodes={recentEpisodes}
+            bookSizeMultiplier={1.25}
+          />
         );
       }
 
@@ -219,6 +270,7 @@ export const PodcastHomeShelvesScreen = () => {
       continueEpisodes,
       headerHeight,
       isOnline,
+      recentEpisodes,
       scrollY,
       seriesQuery.isLoading,
       shelfBooks,

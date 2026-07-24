@@ -1,7 +1,38 @@
-import type { GetLibraryItemsResponse, LibraryItem } from "../types/absTypes";
+import type { GetLibraryItemsResponse, LibraryItem, MediaProgress } from "../types/absTypes";
 import { absClient } from "./abs-client";
 import { buildCoverUrls } from "./cover-urls";
 import { favoritesApi } from "./favorites-api";
+
+type AbsRecentEpisodePodcast = {
+  metadata?: {
+    title?: string | null;
+    author?: string | null;
+  } | null;
+  coverPath?: string | null;
+  numEpisodes?: number | null;
+};
+
+type AbsRecentEpisodePayload = {
+  id?: string;
+  libraryItemId?: string;
+  title?: string | null;
+  publishedAt?: number | null;
+  duration?: number | null;
+  size?: number | null;
+  audioFile?: { duration?: number | null } | null;
+  podcast?: AbsRecentEpisodePodcast | null;
+  /** Some ABS builds may leave association progress on the JSON payload. */
+  mediaProgresses?: MediaProgress[] | null;
+  mediaProgress?: MediaProgress | null;
+  userMediaProgress?: MediaProgress | null;
+};
+
+type AbsRecentEpisodesResponse = {
+  episodes?: AbsRecentEpisodePayload[];
+  total?: number;
+  limit?: number;
+  page?: number;
+};
 
 export type FilterType = "genres" | "tags" | "authors" | "series" | "progress";
 
@@ -67,6 +98,58 @@ export type PodcastSeriesIndexPage = {
   limit: number;
   page: number;
 };
+
+/** First-page Home shelf size for ABS recent-episodes (server publish order). */
+export const RECENT_EPISODES_HOME_PAGE_LIMIT = 25;
+
+export type RecentEpisodeProgressOverlay = {
+  currentTimeSeconds: number;
+  durationSeconds: number;
+  isFinished: boolean;
+  hideFromContinueListening: boolean;
+  lastUpdate: number;
+};
+
+/** Podcast Episode Expanded from GET /libraries/:id/recent-episodes (display fields). */
+export type RecentEpisodeSummary = {
+  libraryItemId: string;
+  episodeId: string;
+  title: string;
+  podcastTitle: string;
+  cover: string | null;
+  coverFull: string | null;
+  durationSeconds: number;
+  publishedAt: number | null;
+  /** Present when ABS (or a fake) attaches progress on the episode payload. */
+  progress: RecentEpisodeProgressOverlay | null;
+};
+
+export type RecentEpisodesPage = {
+  episodes: RecentEpisodeSummary[];
+  total: number;
+  limit: number;
+  page: number;
+};
+
+const toRecentProgressOverlay = (
+  progress: MediaProgress | null | undefined,
+): RecentEpisodeProgressOverlay | null => {
+  if (!progress) return null;
+  return {
+    currentTimeSeconds: Math.max(0, progress.currentTime ?? 0),
+    durationSeconds: Math.max(0, progress.duration ?? 0),
+    isFinished: Boolean(progress.isFinished),
+    hideFromContinueListening: Boolean(progress.hideFromContinueListening),
+    lastUpdate: Math.max(0, progress.lastUpdate ?? 0),
+  };
+};
+
+const pickRecentEpisodeProgress = (
+  episode: AbsRecentEpisodePayload,
+): RecentEpisodeProgressOverlay | null =>
+  toRecentProgressOverlay(episode.userMediaProgress) ??
+  toRecentProgressOverlay(episode.mediaProgress) ??
+  toRecentProgressOverlay(episode.mediaProgresses?.[0] ?? null);
 
 export type FavoriteOrFinishedItem = {
   itemId: string;
@@ -191,6 +274,68 @@ export const libraryItemsApi = {
       total: responseData.total,
       limit: responseData.limit,
       page: responseData.page,
+    };
+  },
+
+  toRecentEpisodeSummary(episode: AbsRecentEpisodePayload): RecentEpisodeSummary | null {
+    const libraryItemId = episode.libraryItemId?.trim();
+    const episodeId = episode.id?.trim();
+    if (!libraryItemId || !episodeId) return null;
+
+    let cover: string | null = null;
+    let coverFull: string | null = null;
+    try {
+      const covers = buildCoverUrls(libraryItemId, {
+        version: episode.publishedAt ?? episode.podcast?.numEpisodes ?? null,
+      });
+      cover = covers.thumb;
+      coverFull = covers.full;
+    } catch {
+      cover = null;
+      coverFull = null;
+    }
+
+    return {
+      libraryItemId,
+      episodeId,
+      title: episode.title?.trim() || "Episode",
+      podcastTitle: episode.podcast?.metadata?.title?.trim() || "Podcast",
+      cover,
+      coverFull,
+      durationSeconds: Math.max(
+        0,
+        episode.duration ?? episode.audioFile?.duration ?? 0,
+      ),
+      publishedAt: episode.publishedAt ?? null,
+      progress: pickRecentEpisodeProgress(episode),
+    };
+  },
+
+  async getRecentEpisodesPage(params: {
+    libraryId: string;
+    page?: number;
+    limit?: number;
+  }): Promise<RecentEpisodesPage> {
+    const libraryId = requireLibraryId(params.libraryId, "libraryItemsApi.getRecentEpisodesPage");
+    const query = new URLSearchParams();
+    const page = params.page ?? 0;
+    const limit = params.limit ?? RECENT_EPISODES_HOME_PAGE_LIMIT;
+    query.set("page", String(page));
+    query.set("limit", String(limit));
+
+    const responseData = await absClient.get<AbsRecentEpisodesResponse>(
+      `/api/libraries/${libraryId}/recent-episodes?${query.toString()}`,
+    );
+
+    const episodes = (responseData.episodes ?? [])
+      .map((episode) => libraryItemsApi.toRecentEpisodeSummary(episode))
+      .filter((episode): episode is RecentEpisodeSummary => episode != null);
+
+    return {
+      episodes,
+      total: responseData.total ?? episodes.length,
+      limit: responseData.limit ?? limit,
+      page: responseData.page ?? page,
     };
   },
 

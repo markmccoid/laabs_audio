@@ -3,7 +3,9 @@ import {
   initializeShadowDatabaseInternal,
 } from "./shadow-db-core";
 import type { PodcastSeriesIndexScope } from "@/podcast/podcast-library-experience";
+import { SQLITE_CATALOG_STALE_MS } from "./refresh-coordinator";
 import { requireAuthenticatedLibraryScope } from "./shadow-scope";
+import { now } from "./shadow-shared";
 
 /**
  * A remembered Podcast Series Index exists when a prior refresh completed for
@@ -33,4 +35,24 @@ export const hasRememberedPodcastSeriesIndex = async (
     [context.userId, context.libraryId],
   );
   return Boolean(completedRun?.id);
+};
+
+/** True when series index has never refreshed or is older than catalog stale window. */
+export const isPodcastSeriesIndexStale = async (
+  scope: PodcastSeriesIndexScope,
+  staleMs = SQLITE_CATALOG_STALE_MS,
+): Promise<boolean> => {
+  const context = requireAuthenticatedLibraryScope(scope);
+  await initializeShadowDatabaseInternal();
+  const db = await getDb();
+
+  const libraryRow = await db.getFirstAsync<{ last_podcast_series_index_refresh_at: number | null }>(
+    `SELECT last_podcast_series_index_refresh_at
+     FROM libraries
+     WHERE user_id = ? AND library_id = ?`,
+    [context.userId, context.libraryId],
+  );
+  const lastRefreshAt = libraryRow?.last_podcast_series_index_refresh_at ?? null;
+  if (!lastRefreshAt) return true;
+  return now() - lastRefreshAt >= staleMs;
 };

@@ -157,6 +157,19 @@ export const queryKeys = {
       libraryId ?? null,
       "podcastContinueEpisodes",
     ] as const,
+  podcastRecentEpisodes: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+  ) =>
+    [
+      "sqlite",
+      "overlay",
+      "user",
+      userKey ?? null,
+      "library",
+      libraryId ?? null,
+      "podcastRecentEpisodes",
+    ] as const,
   seriesProgress: (seriesId: string | null | undefined) =>
     ["series", seriesId ?? null, "progress"] as const,
 };

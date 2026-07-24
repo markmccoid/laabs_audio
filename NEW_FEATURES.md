@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-24` `pending` - Recent Episodes Home shelf from ABS recent-episodes with offline snapshot.
+  Tester focus: on a podcast Library Home, verify Continue → Recent Episodes → Podcasts order; Recent loads after Home is already browsable; the same episode may appear in Continue and Recent; pull-to-refresh updates Recent (and Continue overlays from that feed) plus a stale Podcasts index without touching audiobook catalog refresh; go offline after a successful load and confirm Recent still shows the last snapshot; while an episode plays, Home tiles for that episode reflect live position.
+
 - `2026-07-24` `pending` - Stream Episode play with Episode-scoped Progress Sync Intent and Continue Listening.
   Tester focus: from Current Podcast tap an episode and verify streamed playback starts with episode title + podcast secondary on mini/main player; pause/seek creates local progress that syncs; Home Continue Listening appears for unfinished episodes (newest first) and hides when empty; chapter UI / CarPlay Up Next stay empty for episodes; audiobook play/progress unchanged.
 

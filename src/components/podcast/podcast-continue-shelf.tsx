@@ -8,11 +8,16 @@ import { SymbolView } from "expo-symbols";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 type Props = {
+  title?: string;
   episodes: readonly TouchedEpisodeProgress[];
   bookSizeMultiplier?: number;
 };
 
-export const PodcastContinueShelf = ({ episodes, bookSizeMultiplier = 1 }: Props) => {
+export const PodcastContinueShelf = ({
+  title = "Continue Listening",
+  episodes,
+  bookSizeMultiplier = 1,
+}: Props) => {
   const themeColors = useThemeColors();
   const homePreviewSize = useSettingsStore((state) => state.homePreviewSize);
   const homeShowTitles = useSettingsStore((state) => state.homeShowTitles);
@@ -32,7 +37,7 @@ export const PodcastContinueShelf = ({ episodes, bookSizeMultiplier = 1 }: Props
             numberOfLines={1}
             style={{ color: themeColors.text, fontSize: 20, fontWeight: "700" }}
           >
-            Continue Listening
+            {title}
           </Text>
         </View>
       </View>

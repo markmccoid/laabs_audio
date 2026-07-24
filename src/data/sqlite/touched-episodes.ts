@@ -96,6 +96,90 @@ export const listTouchedEpisodesForContinue = async (): Promise<TouchedEpisodePr
   }));
 };
 
+type TouchedLookupRow = {
+  library_item_id: string;
+  episode_id: string;
+  last_update: number;
+};
+
+/**
+ * Import Touched Episode progress overlays from a recent-episodes page.
+ * Only episodes that carry progress are written. Newer local rows win.
+ */
+export const importTouchedOverlaysFromRecentEpisodes = async (payload: {
+  userId: string;
+  libraryId: string;
+  episodes: readonly {
+    libraryItemId: string;
+    episodeId: string;
+    title: string;
+    podcastTitle: string;
+    cover: string | null;
+    durationSeconds: number;
+    progress: {
+      currentTimeSeconds: number;
+      durationSeconds: number;
+      isFinished: boolean;
+      hideFromContinueListening: boolean;
+      lastUpdate: number;
+    } | null;
+  }[];
+}): Promise<{ imported: number; skipped: number }> => {
+  if (!payload.libraryId.trim()) return { imported: 0, skipped: 0 };
+  await initializeShadowDatabaseInternal();
+  const db = await getDb();
+
+  const existing = await db.getAllAsync<TouchedLookupRow>(
+    `SELECT library_item_id, episode_id, last_update
+     FROM touched_episodes
+     WHERE user_id = ? AND library_id = ?`,
+    [payload.userId, payload.libraryId],
+  );
+  const existingByKey = new Map(
+    existing.map((row) => [`${row.library_item_id}::${row.episode_id}`, row.last_update]),
+  );
+
+  let imported = 0;
+  let skipped = 0;
+  for (const episode of payload.episodes) {
+    const progress = episode.progress;
+    if (!progress) {
+      skipped += 1;
+      continue;
+    }
+    // Unstarted / no meaningful overlay — leave Touched alone.
+    if (progress.currentTimeSeconds <= 0 && !progress.isFinished) {
+      skipped += 1;
+      continue;
+    }
+
+    const key = `${episode.libraryItemId}::${episode.episodeId}`;
+    const localLastUpdate = existingByKey.get(key) ?? 0;
+    if (localLastUpdate > progress.lastUpdate) {
+      skipped += 1;
+      continue;
+    }
+
+    await upsertTouchedEpisodeProgress({
+      userId: payload.userId,
+      libraryId: payload.libraryId,
+      libraryItemId: episode.libraryItemId,
+      episodeId: episode.episodeId,
+      title: episode.title,
+      podcastTitle: episode.podcastTitle,
+      cover: episode.cover,
+      currentTimeSeconds: progress.currentTimeSeconds,
+      durationSeconds: Math.max(progress.durationSeconds, episode.durationSeconds, 0),
+      isFinished: progress.isFinished,
+      hideFromContinueListening: progress.hideFromContinueListening,
+      lastUpdate: progress.lastUpdate,
+    });
+    imported += 1;
+  }
+
+  return { imported, skipped };
+};
+
 export const upsertEpisodePendingProgressIntent = async (
   userId: string,
   intent: EpisodeProgressSyncIntentRecord,

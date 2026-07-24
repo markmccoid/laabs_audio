@@ -1,7 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 const DATABASE_NAME = "laabs-shadow-library.db";
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -467,6 +467,25 @@ CREATE INDEX IF NOT EXISTS idx_touched_episodes_continue
   ON touched_episodes(user_id, library_id, is_finished, hide_from_continue_listening, last_update);
 CREATE INDEX IF NOT EXISTS idx_episode_pending_progress
   ON episode_pending_progress_sync_intents(user_id, library_item_id, episode_id);
+
+CREATE TABLE IF NOT EXISTS recent_episodes_snapshot (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  library_item_id TEXT NOT NULL,
+  episode_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  podcast_title TEXT NOT NULL,
+  cover TEXT,
+  cover_full TEXT,
+  duration REAL NOT NULL DEFAULT 0,
+  published_at INTEGER,
+  fetched_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_recent_episodes_snapshot_lookup
+  ON recent_episodes_snapshot(user_id, library_id, position);
 
 CREATE TABLE IF NOT EXISTS timing_logs (
   id TEXT PRIMARY KEY NOT NULL,
