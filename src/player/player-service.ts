@@ -35,6 +35,11 @@ import {
   type DownloadTrack,
 } from "../store/device-books-store";
 import {
+  resolveDownloadedEpisodePlayback,
+  resolveStoredEpisodeDownloadTrackUri,
+} from "../store/device-episode-downloads-store";
+import { resolveEpisodePlaybackSource } from "../podcast/episode-download-facade";
+import {
   progressLogStore,
   type ProgressLogSessionKind,
   type ProgressResolutionCandidate,
@@ -2386,20 +2391,36 @@ class PlayerService {
       episodeTitle?: string | null;
       podcastTitle?: string | null;
     },
+    internalOptions?: { preferDownloaded?: boolean },
   ) {
     const suppressErrorState = options?.suppressErrorState ?? false;
+    const preferDownloaded = internalOptions?.preferDownloaded ?? true;
     let tornDownExistingPlayback = false;
+    let attemptedDownloadedAudio = false;
 
     try {
-      if (!this.canUseServer()) {
+      const downloadedEpisode =
+        preferDownloaded
+          ? resolveDownloadedEpisodePlayback({ libraryItemId, episodeId })
+          : null;
+      const playbackSource = resolveEpisodePlaybackSource({
+        hasPlayableLocalDownload: Boolean(downloadedEpisode),
+        canStream: this.canUseServer(),
+      });
+      if (playbackSource === "unavailable") {
         throw new StreamedPlaybackStartFailureError(
-          "Audiobookshelf is unreachable. Episode streaming requires a server connection.",
+          "Audiobookshelf is unreachable. Only downloaded Episodes can play.",
         );
       }
 
-      const streamedSession = await withPlaybackStartTimeout(
-        playbackApi.getEpisodePlayInfo(libraryItemId, episodeId),
-      );
+      attemptedDownloadedAudio = playbackSource === "local";
+      let streamedSession: Awaited<ReturnType<typeof playbackApi.getEpisodePlayInfo>> | null =
+        null;
+      if (playbackSource === "stream") {
+        streamedSession = await withPlaybackStartTimeout(
+          playbackApi.getEpisodePlayInfo(libraryItemId, episodeId),
+        );
+      }
 
       const stateBeforeTransition = playbackStore.getState();
       if (
@@ -2414,31 +2435,68 @@ class PlayerService {
       playbackStore.getState().actions.setPlaybackState("loading");
       playbackStore.getState().actions.setError(null);
 
-      const episodeTitle =
-        options?.episodeTitle?.trim() ||
-        streamedSession.displayTitle ||
-        "Episode";
-      const podcastTitle =
-        options?.podcastTitle?.trim() ||
-        streamedSession.displayAuthor ||
-        streamedSession.libraryItem.media.metadata.title ||
-        "Podcast";
-      const builtQueue = buildPlaybackQueue(streamedSession);
-      const queue = builtQueue.queue;
-      const durationMs = builtQueue.durationMs;
       // Episodes do not offer chapter list / CarPlay Up Next (ADR 0028).
       const chapterIndex: ReturnType<typeof buildChapterIndex> = [];
-      const resolvedSessionId = streamedSession.id;
+      let episodeTitle = options?.episodeTitle?.trim() || "Episode";
+      let podcastTitle = options?.podcastTitle?.trim() || "Podcast";
+      let queue: ReturnType<typeof buildPlaybackQueue>["queue"] = [];
+      let durationMs = 0;
+      let resolvedSessionId = LOCAL_SESSION_ID;
+
+      if (downloadedEpisode) {
+        episodeTitle =
+          options?.episodeTitle?.trim() || downloadedEpisode.episodeTitle || episodeTitle;
+        podcastTitle =
+          options?.podcastTitle?.trim() || downloadedEpisode.podcastTitle || podcastTitle;
+        durationMs = secondsToMs(downloadedEpisode.durationSeconds);
+        const trackUri =
+          resolveStoredEpisodeDownloadTrackUri(downloadedEpisode.track) ??
+          downloadedEpisode.trackUri;
+        queue = [
+          {
+            id: `${libraryItemId}-${episodeId}-download-0`,
+            libraryItemId,
+            sessionId: LOCAL_SESSION_ID,
+            trackIndex: 0,
+            title: episodeTitle,
+            author: podcastTitle,
+            artworkUri: downloadedEpisode.artworkUri ?? undefined,
+            durationMs,
+            startOffsetMs: 0,
+            source: {
+              uri: trackUri,
+              mimeType: downloadedEpisode.mimeType ?? undefined,
+              isLocal: true,
+            },
+          },
+        ];
+      } else if (streamedSession) {
+        episodeTitle =
+          options?.episodeTitle?.trim() ||
+          streamedSession.displayTitle ||
+          episodeTitle;
+        podcastTitle =
+          options?.podcastTitle?.trim() ||
+          streamedSession.displayAuthor ||
+          streamedSession.libraryItem.media.metadata.title ||
+          podcastTitle;
+        const builtQueue = buildPlaybackQueue(streamedSession);
+        queue = builtQueue.queue;
+        durationMs = builtQueue.durationMs;
+        resolvedSessionId = streamedSession.id;
+      }
 
       const localIntent = getEpisodeProgressSyncIntent(libraryItemId, episodeId);
       let serverCurrentTimeSeconds: number | null = null;
       let serverIsFinished = false;
-      try {
-        const serverProgress = await meApi.getEpisodeProgress(libraryItemId, episodeId);
-        serverCurrentTimeSeconds = serverProgress.currentTime;
-        serverIsFinished = serverProgress.isFinished;
-      } catch {
-        // Offline / missing progress — Resume Resolution falls back to local intent.
+      if (this.canUseServer()) {
+        try {
+          const serverProgress = await meApi.getEpisodeProgress(libraryItemId, episodeId);
+          serverCurrentTimeSeconds = serverProgress.currentTime;
+          serverIsFinished = serverProgress.isFinished;
+        } catch {
+          // Offline / missing progress — Resume Resolution falls back to local intent.
+        }
       }
 
       const resumeSeconds = resolveEpisodeResumePositionSeconds({
@@ -2462,7 +2520,7 @@ class PlayerService {
       this.lastSyncAt = 0;
       this.lastTrackedPositionMs = 0;
 
-      if (options?.autoPlay) {
+      if (playbackSource === "stream" && options?.autoPlay) {
         await this.startProvisionalStreamedPlayback({
           libraryItemId,
           bookTitle: episodeTitle,
@@ -2494,7 +2552,21 @@ class PlayerService {
       const targetIndex = queue.indexOf(targetTrack);
       const trackPositionMs = Math.max(0, resumePositionMs - targetTrack.startOffsetMs);
       await this.loadTrack(targetIndex, { initialPositionMs: trackPositionMs });
-      playbackStore.getState().actions.setPlaybackState("ready");
+
+      if (options?.autoPlay) {
+        await this.performPlay();
+        if (attemptedDownloadedAudio) {
+          const postPlayState = playbackStore.getState();
+          if (postPlayState.playbackState !== "playing" && this.canUseServer()) {
+            await this.loadEpisode(libraryItemId, episodeId, options, {
+              preferDownloaded: false,
+            });
+            return;
+          }
+        }
+      } else {
+        playbackStore.getState().actions.setPlaybackState("ready");
+      }
     } catch (error) {
       if (!tornDownExistingPlayback) {
         if (suppressErrorState) return;

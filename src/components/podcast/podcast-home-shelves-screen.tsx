@@ -5,6 +5,7 @@ import { PodcastContinueShelf } from "@/components/podcast/podcast-continue-shel
 import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
 import { useLibrarySelection } from "@/hooks/use-library-selection";
 import { usePlaybackStore } from "@/player/playback-store";
+import type { TouchedEpisodeProgress } from "@/podcast/episode-continue-eligibility";
 import { applyActiveEpisodePlaybackOverlay, toContinueShelfItemFromRecent } from "@/podcast/recent-episodes-shelf";
 import { podcastShowToShelfSummary } from "@/podcast/podcast-show-to-shelf-summary";
 import { refreshPodcastHomeShelvesDefault } from "@/podcast/podcast-library-experience-default";
@@ -14,6 +15,10 @@ import {
   usePodcastSeriesByAddedAt,
 } from "@/podcast/use-podcast-series";
 import { queryKeys } from "@/query/query-keys";
+import {
+  selectDownloadedEpisodesShelf,
+  useDeviceEpisodeDownloadsStore,
+} from "@/store/device-episode-downloads-store";
 import {
   HOME_PREVIEW_SIZE_LARGE,
   HOME_PREVIEW_SIZE_MEDIUM,
@@ -44,7 +49,7 @@ type PodcastHomeListItem =
   | { type: "continue"; id: "continue" }
   | { type: "recent"; id: "recent" }
   | { type: "shelf"; id: "podcasts" }
-  | { type: "footer"; id: "footer" };
+  | { type: "downloaded"; id: "downloaded" };
 
 export const PodcastHomeShelvesScreen = () => {
   const headerHeight = useHeaderHeight();
@@ -113,6 +118,25 @@ export const PodcastHomeShelvesScreen = () => {
     return withOverlay.map(toContinueShelfItemFromRecent);
   }, [activePlaybackOverlay, recentQuery.data]);
 
+  const downloadedEpisodes = useDeviceEpisodeDownloadsStore((state) =>
+    selectDownloadedEpisodesShelf(state, activeLibraryUserKey),
+  );
+
+  const downloadedShelfEpisodes = useMemo((): TouchedEpisodeProgress[] => {
+    return downloadedEpisodes.map((episode) => ({
+      libraryItemId: episode.libraryItemId,
+      episodeId: episode.episodeId,
+      title: episode.title,
+      podcastTitle: episode.podcastTitle,
+      cover: episode.cover,
+      currentTimeSeconds: 0,
+      durationSeconds: episode.durationSeconds,
+      isFinished: false,
+      hideFromContinueListening: false,
+      lastUpdate: episode.downloadedAt,
+    }));
+  }, [downloadedEpisodes]);
+
   const listData = useMemo<PodcastHomeListItem[]>(() => {
     return [
       ...(refreshMessage
@@ -123,9 +147,16 @@ export const PodcastHomeShelvesScreen = () => {
         : []),
       ...(recentEpisodes.length > 0 ? [{ type: "recent" as const, id: "recent" as const }] : []),
       { type: "shelf", id: "podcasts" },
-      { type: "footer", id: "footer" },
+      ...(downloadedShelfEpisodes.length > 0
+        ? [{ type: "downloaded" as const, id: "downloaded" as const }]
+        : []),
     ];
-  }, [continueEpisodes.length, recentEpisodes.length, refreshMessage]);
+  }, [
+    continueEpisodes.length,
+    downloadedShelfEpisodes.length,
+    recentEpisodes.length,
+    refreshMessage,
+  ]);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -214,21 +245,6 @@ export const PodcastHomeShelvesScreen = () => {
         );
       }
 
-      if (item.type === "footer") {
-        return (
-          <Text
-            selectable
-            style={{
-              color: themeColors.textMuted,
-              fontSize: 13,
-              paddingHorizontal: 18,
-            }}
-          >
-            Downloads land in upcoming podcast work.
-          </Text>
-        );
-      }
-
       if (item.type === "continue") {
         return (
           <PodcastContinueShelf episodes={continueEpisodes} bookSizeMultiplier={1.25} />
@@ -240,6 +256,16 @@ export const PodcastHomeShelvesScreen = () => {
           <PodcastContinueShelf
             title="Recent Episodes"
             episodes={recentEpisodes}
+            bookSizeMultiplier={1.25}
+          />
+        );
+      }
+
+      if (item.type === "downloaded") {
+        return (
+          <PodcastContinueShelf
+            title="Downloaded"
+            episodes={downloadedShelfEpisodes}
             bookSizeMultiplier={1.25}
           />
         );
@@ -268,6 +294,7 @@ export const PodcastHomeShelvesScreen = () => {
     },
     [
       continueEpisodes,
+      downloadedShelfEpisodes,
       headerHeight,
       isOnline,
       recentEpisodes,

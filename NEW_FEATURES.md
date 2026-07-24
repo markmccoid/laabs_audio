@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-24` `pending` - Episode downloads and Home Downloaded shelf.
+  Tester focus: from Current Podcast, download an episode via the row Download control and via the info Episode Detail Sheet; confirm the row shows Downloaded, Home order is Continue → Recent → Podcasts → Downloaded, and playing a downloaded episode works offline from the Downloaded shelf (prefers local file online too); audiobook downloads/maps stay unchanged.
+
 - `2026-07-24` `b6fb1ca` - Recent Episodes Home shelf from ABS recent-episodes with offline snapshot.
   Tester focus: on a podcast Library Home, verify Continue → Recent Episodes → Podcasts order; Recent loads after Home is already browsable; the same episode may appear in Continue and Recent; pull-to-refresh updates Recent (and Continue overlays from that feed) plus a stale Podcasts index without touching audiobook catalog refresh; go offline after a successful load and confirm Recent still shows the last snapshot; while an episode plays, Home tiles for that episode reflect live position.
 

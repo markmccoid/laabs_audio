@@ -1,5 +1,6 @@
 import { useAuthStore } from "@/auth/auth-store";
 import { CoverImage } from "@/components/images/cover-image";
+import { EpisodeDownloadControls } from "@/components/podcast/episode-download-controls";
 import {
   filterEpisodesByTitle,
   orderPodcastEpisodes,
@@ -13,7 +14,7 @@ import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { PodcastEpisode } from "@/types/absTypes";
 import { FlashList } from "@shopify/flash-list";
-import { Stack } from "expo-router";
+import { Stack, router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
 import {
@@ -57,9 +58,114 @@ const toListItem = (episode: PodcastEpisode) => ({
   publishedAt: episode.publishedAt ?? null,
   duration: episode.duration ?? null,
   subtitle: episode.subtitle ?? null,
+  description: episode.description ?? null,
 });
 
 type VisibleEpisode = ReturnType<typeof toListItem>;
+
+type EpisodeRowProps = {
+  libraryItemId: string;
+  item: VisibleEpisode;
+  headerTitle: string;
+  headerCover: string | null;
+  themeColors: ReturnType<typeof useThemeColors>;
+};
+
+const CurrentPodcastEpisodeRow = ({
+  libraryItemId,
+  item,
+  headerTitle,
+  headerCover,
+  themeColors,
+}: EpisodeRowProps) => {
+  const published = formatPublishedAt(item.publishedAt);
+  const duration = formatDuration(item.duration);
+  const meta = [published, duration].filter(Boolean).join(" · ");
+
+  const playEpisode = () => {
+    void playerService.requestStartEpisode(libraryItemId, item.id, {
+      episodeTitle: item.title,
+      podcastTitle: headerTitle,
+    });
+  };
+
+  const openEpisodeDetail = () => {
+    router.push({
+      pathname: "/episode-detail",
+      params: {
+        libraryItemId,
+        episodeId: item.id,
+        episodeTitle: item.title,
+        podcastTitle: headerTitle,
+        coverUri: headerCover ?? undefined,
+        description: item.description ?? undefined,
+        publishedAt: item.publishedAt != null ? String(item.publishedAt) : undefined,
+        durationSeconds: item.duration != null ? String(item.duration) : undefined,
+      },
+    });
+  };
+
+  return (
+    <View
+      style={[
+        styles.episodeRow,
+        {
+          borderColor: themeColors.border,
+          backgroundColor: themeColors.surface,
+        },
+      ]}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Play ${item.title}`}
+        onPress={playEpisode}
+        style={({ pressed }) => [{ flex: 1, minWidth: 0, opacity: pressed ? 0.72 : 1 }]}
+      >
+        <Text
+          maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          numberOfLines={2}
+          selectable
+          style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
+        >
+          {item.title}
+        </Text>
+        {meta ? (
+          <Text
+            maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+            style={{ color: themeColors.textMuted, fontSize: 12, marginTop: 4 }}
+          >
+            {meta}
+          </Text>
+        ) : null}
+      </Pressable>
+      <EpisodeDownloadControls
+        libraryItemId={libraryItemId}
+        episodeId={item.id}
+        episodeTitle={item.title}
+        podcastTitle={headerTitle}
+        coverUri={headerCover}
+        compact
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Episode details for ${item.title}`}
+        hitSlop={8}
+        onPress={openEpisodeDetail}
+        style={styles.infoButton}
+      >
+        <SymbolView name="info.circle" size={18} tintColor={themeColors.textMuted} />
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Play ${item.title}`}
+        hitSlop={8}
+        onPress={playEpisode}
+      >
+        <SymbolView name="play.fill" size={16} tintColor={themeColors.accent} />
+      </Pressable>
+    </View>
+  );
+};
 
 export const CurrentPodcastScreen = ({ libraryItemId }: Props) => {
   const themeColors = useThemeColors();
@@ -226,52 +332,15 @@ export const CurrentPodcastScreen = ({ libraryItemId }: Props) => {
             </Text>
           ) : null
         }
-        renderItem={({ item }) => {
-          const published = formatPublishedAt(item.publishedAt);
-          const duration = formatDuration(item.duration);
-          const meta = [published, duration].filter(Boolean).join(" · ");
-          return (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Play ${item.title}`}
-              onPress={() => {
-                if (!libraryItemId) return;
-                void playerService.requestStartEpisode(libraryItemId, item.id, {
-                  episodeTitle: item.title,
-                  podcastTitle: headerTitle,
-                });
-              }}
-              style={({ pressed }) => [
-                styles.episodeRow,
-                {
-                  borderColor: themeColors.border,
-                  backgroundColor: themeColors.surface,
-                  opacity: pressed ? 0.72 : 1,
-                },
-              ]}
-            >
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text
-                  maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                  numberOfLines={2}
-                  selectable
-                  style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
-                >
-                  {item.title}
-                </Text>
-                {meta ? (
-                  <Text
-                    maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                    style={{ color: themeColors.textMuted, fontSize: 12, marginTop: 4 }}
-                  >
-                    {meta}
-                  </Text>
-                ) : null}
-              </View>
-              <SymbolView name="play.fill" size={16} tintColor={themeColors.accent} />
-            </Pressable>
-          );
-        }}
+        renderItem={({ item }) => (
+          <CurrentPodcastEpisodeRow
+            libraryItemId={libraryItemId!}
+            item={item}
+            headerTitle={headerTitle}
+            headerCover={headerCover}
+            themeColors={themeColors}
+          />
+        )}
         contentContainerStyle={{ paddingBottom: 32 }}
       />
     </View>
@@ -347,5 +416,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+  },
+  infoButton: {
+    padding: 2,
   },
 });

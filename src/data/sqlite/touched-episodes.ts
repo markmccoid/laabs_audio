@@ -17,6 +17,53 @@ type TouchedRow = {
   last_update: number;
 };
 
+/**
+ * Mark an Episode Touched after download without stomping Listening Position.
+ * New rows start at zero progress (eligible for Downloaded shelf, not Continue).
+ */
+export const markEpisodeTouchedFromDownload = async (payload: {
+  userId: string;
+  libraryId: string;
+  libraryItemId: string;
+  episodeId: string;
+  title: string;
+  podcastTitle: string;
+  cover: string | null;
+  durationSeconds: number;
+}) => {
+  if (!payload.libraryId.trim()) return;
+  await initializeShadowDatabaseInternal();
+  const db = await getDb();
+  const timestamp = now();
+  const existing = await db.getFirstAsync<{
+    current_time: number;
+    is_finished: number;
+    hide_from_continue_listening: number;
+    last_update: number;
+    duration: number;
+  }>(
+    `SELECT current_time, is_finished, hide_from_continue_listening, last_update, duration
+     FROM touched_episodes
+     WHERE user_id = ? AND library_id = ? AND library_item_id = ? AND episode_id = ?`,
+    [payload.userId, payload.libraryId, payload.libraryItemId, payload.episodeId],
+  );
+
+  await upsertTouchedEpisodeProgress({
+    userId: payload.userId,
+    libraryId: payload.libraryId,
+    libraryItemId: payload.libraryItemId,
+    episodeId: payload.episodeId,
+    title: payload.title,
+    podcastTitle: payload.podcastTitle,
+    cover: payload.cover,
+    currentTimeSeconds: existing?.current_time ?? 0,
+    durationSeconds: Math.max(payload.durationSeconds, existing?.duration ?? 0, 0),
+    isFinished: existing ? existing.is_finished === 1 : false,
+    hideFromContinueListening: existing ? existing.hide_from_continue_listening === 1 : false,
+    lastUpdate: existing?.last_update ?? timestamp,
+  });
+};
+
 export const upsertTouchedEpisodeProgress = async (payload: {
   userId: string;
   libraryId: string;
