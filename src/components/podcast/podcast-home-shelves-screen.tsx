@@ -15,8 +15,9 @@ import {
   usePodcastSeriesByAddedAt,
 } from "@/podcast/use-podcast-series";
 import { queryKeys } from "@/query/query-keys";
+import { assembleDownloadedEpisodesShelf } from "@/podcast/episode-download-facade";
 import {
-  selectDownloadedEpisodesShelf,
+  listEpisodeDownloadedAssetRecords,
   useDeviceEpisodeDownloadsStore,
 } from "@/store/device-episode-downloads-store";
 import {
@@ -118,12 +119,27 @@ export const PodcastHomeShelvesScreen = () => {
     return withOverlay.map(toContinueShelfItemFromRecent);
   }, [activePlaybackOverlay, recentQuery.data]);
 
-  const downloadedEpisodes = useDeviceEpisodeDownloadsStore((state) =>
-    selectDownloadedEpisodesShelf(state, activeLibraryUserKey),
+  // Subscribe to stable map references — assembling in the selector returns a new
+  // array every call and trips Zustand's Object.is check into an update loop.
+  const downloadedEpisodeDetailsById = useDeviceEpisodeDownloadsStore(
+    (state) => state.downloadedEpisodeDetailsById,
+  );
+  const downloadedEpisodeData = useDeviceEpisodeDownloadsStore(
+    (state) => state.downloadedEpisodeData,
+  );
+  const downloadedEpisodeOwnerUserIdsById = useDeviceEpisodeDownloadsStore(
+    (state) => state.downloadedEpisodeOwnerUserIdsById,
   );
 
   const downloadedShelfEpisodes = useMemo((): TouchedEpisodeProgress[] => {
-    return downloadedEpisodes.map((episode) => ({
+    const records = listEpisodeDownloadedAssetRecords({
+      downloadedEpisodeDetailsById,
+      downloadedEpisodeData,
+      downloadedEpisodeOwnerUserIdsById,
+    });
+    return assembleDownloadedEpisodesShelf(records, {
+      sessionUserId: activeLibraryUserKey,
+    }).map((episode) => ({
       libraryItemId: episode.libraryItemId,
       episodeId: episode.episodeId,
       title: episode.title,
@@ -135,7 +151,12 @@ export const PodcastHomeShelvesScreen = () => {
       hideFromContinueListening: false,
       lastUpdate: episode.downloadedAt,
     }));
-  }, [downloadedEpisodes]);
+  }, [
+    activeLibraryUserKey,
+    downloadedEpisodeData,
+    downloadedEpisodeDetailsById,
+    downloadedEpisodeOwnerUserIdsById,
+  ]);
 
   const listData = useMemo<PodcastHomeListItem[]>(() => {
     return [

@@ -647,7 +647,12 @@ export const selectHasPlayableEpisodeDownloadForSession = (
 };
 
 export const listEpisodeDownloadedAssetRecords = (
-  state: EpisodeDownloadsState,
+  state: Pick<
+    EpisodeDownloadsState,
+    | "downloadedEpisodeDetailsById"
+    | "downloadedEpisodeData"
+    | "downloadedEpisodeOwnerUserIdsById"
+  >,
 ): EpisodeDownloadedAssetRecord[] =>
   Object.entries(state.downloadedEpisodeDetailsById).flatMap(([key, details]) => {
     const identity = parseEpisodeIdentityKey(key);
