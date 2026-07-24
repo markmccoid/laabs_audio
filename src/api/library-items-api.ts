@@ -13,6 +13,7 @@ export type GetLibraryItemsParams = {
   sortDesc?: boolean;
   page?: number;
   limit?: number;
+  minified?: boolean;
 };
 
 export type LibraryItemSummary = {
@@ -43,6 +44,25 @@ export type LibraryItemsSummary = LibraryItemSummary[];
 
 export type LibraryItemsSummaryPage = {
   results: LibraryItemsSummary;
+  total: number;
+  limit: number;
+  page: number;
+};
+
+export type PodcastSeriesIndexSummary = {
+  id: string;
+  title: string;
+  author?: string | null;
+  cover: string;
+  coverFull: string;
+  numEpisodes?: number | null;
+  addedAt: number;
+  updatedAt: number;
+  podcastType?: string | null;
+};
+
+export type PodcastSeriesIndexPage = {
+  results: PodcastSeriesIndexSummary[];
   total: number;
   limit: number;
   page: number;
@@ -92,8 +112,24 @@ export const libraryItemsApi = {
     };
   },
 
+  toPodcastSeriesSummary(item: LibraryItem): PodcastSeriesIndexSummary {
+    const coverUrls = buildCoverUrls(item.id, { version: item.updatedAt });
+    const metadata = item.media?.metadata;
+    return {
+      id: item.id,
+      title: metadata?.title ?? "Untitled",
+      author: metadata?.author ?? metadata?.authorName ?? null,
+      cover: coverUrls.thumb,
+      coverFull: coverUrls.full,
+      numEpisodes: item.media?.numEpisodes ?? null,
+      addedAt: item.addedAt ?? 0,
+      updatedAt: item.updatedAt ?? 0,
+      podcastType: metadata?.type ?? null,
+    };
+  },
+
   async getItemsPage(params: GetLibraryItemsParams): Promise<LibraryItemsSummaryPage> {
-    const { filterType, filterValue, sortBy, page, limit } = params;
+    const { filterType, filterValue, sortBy, page, limit, minified } = params;
     const libraryId = requireLibraryId(params.libraryId, "libraryItemsApi.getItemsPage");
 
     const query = new URLSearchParams();
@@ -117,12 +153,41 @@ export const libraryItemsApi = {
       query.set("limit", String(limit));
     }
 
+    if (minified) {
+      query.set("minified", "1");
+    }
+
     const suffix = query.toString();
     const url = `/api/libraries/${libraryId}/items${suffix ? `?${suffix}` : ""}`;
     const responseData = await absClient.get<GetLibraryItemsResponse>(url);
 
     return {
       results: responseData.results.map(libraryItemsApi.toSummary),
+      total: responseData.total,
+      limit: responseData.limit,
+      page: responseData.page,
+    };
+  },
+
+  async getPodcastSeriesIndexPage(params: {
+    libraryId: string;
+    page?: number;
+    limit?: number;
+  }): Promise<PodcastSeriesIndexPage> {
+    const libraryId = requireLibraryId(params.libraryId, "libraryItemsApi.getPodcastSeriesIndexPage");
+    const query = new URLSearchParams();
+    query.set("minified", "1");
+    if (typeof params.page === "number") query.set("page", String(params.page));
+    if (typeof params.limit === "number") query.set("limit", String(params.limit));
+    query.set("sort", "addedAt");
+    query.set("desc", "1");
+
+    const responseData = await absClient.get<GetLibraryItemsResponse>(
+      `/api/libraries/${libraryId}/items?${query.toString()}`,
+    );
+
+    return {
+      results: responseData.results.map(libraryItemsApi.toPodcastSeriesSummary),
       total: responseData.total,
       limit: responseData.limit,
       page: responseData.page,

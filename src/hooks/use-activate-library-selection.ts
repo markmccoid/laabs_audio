@@ -60,7 +60,11 @@ export const runLibraryActivationSelection = async (
     });
 
     await playerService.endActivePlaybackForLibrarySwitch();
-    authState.actions.setActiveLibrary({ id: library.id, name: library.name });
+    authState.actions.setActiveLibrary({
+      id: library.id,
+      name: library.name,
+      mediaType: library.mediaType,
+    });
 
     const returnToLibraryItemId = options.returnToLibraryItemId;
     if (

@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-23` `pending` - Podcast Library Activation waits for Podcast Series Index readiness (empty OK; offline uses remembered index).
+  Tester focus: switch to a podcast Library online and confirm Activation completes into Home; try offline with no prior podcast index and confirm Activation fails without switching; with a previously loaded podcast Library offline, confirm Activation still succeeds; verify audiobook Library Activation/Search still work and podcast Activation does not run book catalog ingest.
+
 - `2026-07-23` `pending` - Fix CarPlay chapter seeking and replace the Speed picker with a compact cycling playback-rate button.
   Tester focus: start a book from CarPlay, select a different chapter and verify playback moves there; then repeatedly tap the Now Playing rate button and verify it cycles `1x` → `1.2x` → `1.5x` → `1.7x` → `2x` → `1x`, remains readable, preserves paused playback, and never displays `0x`.
 

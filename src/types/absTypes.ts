@@ -236,6 +236,10 @@ export interface MediaMetadata {
   narratorName?: string;
   seriesName?: string;
   descriptionPlain?: string;
+  /** Podcast host/author (ABS podcast metadata). */
+  author?: string;
+  /** Podcast itunes type: `episodic` | `serial`. */
+  type?: string;
 }
 
 export interface MetaTags {
@@ -331,6 +335,8 @@ export interface Media {
   numTracks?: number;
   numAudioFiles?: number;
   numChapters?: number;
+  /** Podcast minified item episode count. */
+  numEpisodes?: number;
   ebookFormat?: string | null;
 }
 

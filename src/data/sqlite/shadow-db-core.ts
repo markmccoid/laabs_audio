@@ -1,7 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 const DATABASE_NAME = "laabs-shadow-library.db";
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS libraries (
   last_overlay_refresh_at INTEGER,
   last_collections_refresh_at INTEGER,
   last_series_refresh_at INTEGER,
+  last_podcast_series_index_refresh_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, library_id)
@@ -342,6 +343,57 @@ CREATE TABLE IF NOT EXISTS library_series_memberships (
   PRIMARY KEY (user_id, library_id, series_id, library_item_id)
 );
 
+CREATE TABLE IF NOT EXISTS podcast_series_index_items (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  author TEXT,
+  cover TEXT,
+  cover_full TEXT,
+  num_episodes INTEGER,
+  added_at INTEGER NOT NULL DEFAULT 0,
+  server_updated_at INTEGER NOT NULL DEFAULT 0,
+  podcast_type TEXT,
+  summary_json TEXT NOT NULL,
+  is_missing INTEGER NOT NULL DEFAULT 0,
+  missing_since INTEGER,
+  last_seen_at INTEGER NOT NULL,
+  last_seen_refresh_run_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, library_item_id)
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS podcast_series_index_fts USING fts5(
+  user_id UNINDEXED,
+  library_id UNINDEXED,
+  library_item_id UNINDEXED,
+  title,
+  author
+);
+
+CREATE TABLE IF NOT EXISTS podcast_series_index_refresh_runs (
+  id TEXT PRIMARY KEY NOT NULL,
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  status TEXT NOT NULL,
+  page_size INTEGER NOT NULL,
+  total_expected INTEGER NOT NULL DEFAULT 0,
+  total_seen INTEGER NOT NULL DEFAULT 0,
+  inserted_count INTEGER NOT NULL DEFAULT 0,
+  updated_count INTEGER NOT NULL DEFAULT 0,
+  unchanged_count INTEGER NOT NULL DEFAULT 0,
+  missing_marked_count INTEGER NOT NULL DEFAULT 0,
+  elapsed_ms INTEGER,
+  network_elapsed_ms INTEGER,
+  write_elapsed_ms INTEGER,
+  finalize_elapsed_ms INTEGER,
+  error TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_catalog_added
   ON library_catalog_items(user_id, library_id, is_missing, added_at);
 CREATE INDEX IF NOT EXISTS idx_catalog_title
@@ -415,6 +467,9 @@ export const initializeShadowDatabaseInternal = async () => {
   `).catch(() => undefined);
   await db.execAsync(`
     ALTER TABLE libraries ADD COLUMN last_series_refresh_at INTEGER;
+  `).catch(() => undefined);
+  await db.execAsync(`
+    ALTER TABLE libraries ADD COLUMN last_podcast_series_index_refresh_at INTEGER;
   `).catch(() => undefined);
   if (!shadowSqliteRuntimeState.didEnsureEffectiveProgressView) {
     await db.execAsync(`

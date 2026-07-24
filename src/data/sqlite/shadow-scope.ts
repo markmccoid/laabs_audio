@@ -34,3 +34,38 @@ export const requireActiveLibraryContext = (
 
   return { userId, libraryId, libraryName };
 };
+
+/**
+ * Scope for podcast series-index refresh before Active Library commit.
+ * Requires an authenticated User Session matching `scope.userId`, but does not
+ * require the target Library to already be the Active Library.
+ */
+export const requireAuthenticatedLibraryScope = (scope: {
+  userId: string;
+  libraryId: string;
+  libraryName: string;
+}): ActiveLibraryContext => {
+  const state = authStore.getState();
+  const sessionUserId = state.activeLibraryUserKey?.trim();
+
+  if (state.status !== "authenticated" || !sessionUserId) {
+    throw new Error(
+      "Shadow SQLite requires an authenticated User Session for Podcast Series Index refresh.",
+    );
+  }
+
+  if (sessionUserId !== scope.userId.trim()) {
+    throw new Error("Shadow SQLite scope mismatch: User Session does not match refresh scope.");
+  }
+
+  const libraryId = scope.libraryId.trim();
+  if (!libraryId) {
+    throw new Error("Shadow SQLite requires a libraryId for Podcast Series Index refresh.");
+  }
+
+  return {
+    userId: scope.userId.trim(),
+    libraryId,
+    libraryName: scope.libraryName.trim() || "Podcast Library",
+  };
+};
