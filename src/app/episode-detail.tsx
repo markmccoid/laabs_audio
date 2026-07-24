@@ -1,7 +1,7 @@
-import { EpisodeDetailSheet } from "@/components/podcast/episode-detail-sheet";
+import { EpisodeDetailContainer } from "@/components/podcast/episode-detail-container";
 
 const EpisodeDetailRoute = () => {
-  return <EpisodeDetailSheet />;
+  return <EpisodeDetailContainer />;
 };
 
 export default EpisodeDetailRoute;

@@ -1,20 +1,22 @@
 import { useAuthStore } from "@/auth/auth-store";
 import { CoverImage } from "@/components/images/cover-image";
+import { EpisodeActionMenu } from "@/components/podcast/episode-action-menu";
+import { useEpisodeActionController } from "@/components/podcast/episode-action-controller";
 import { EpisodeDownloadControls } from "@/components/podcast/episode-download-controls";
 import {
   filterEpisodesByTitle,
   orderPodcastEpisodes,
 } from "@/podcast/podcast-episode-browse";
+import { CURRENT_PODCAST_EPISODE_ACTIONS } from "@/podcast/episode-action-eligibility";
 import {
   usePodcastItemDetails,
   usePodcastSeriesIndexShow,
 } from "@/podcast/use-podcast-series";
-import { playerService } from "@/player";
 import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { PodcastEpisode } from "@/types/absTypes";
 import { FlashList } from "@shopify/flash-list";
-import { Stack, router } from "expo-router";
+import { Stack } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo, useState } from "react";
 import {
@@ -81,89 +83,62 @@ const CurrentPodcastEpisodeRow = ({
   const published = formatPublishedAt(item.publishedAt);
   const duration = formatDuration(item.duration);
   const meta = [published, duration].filter(Boolean).join(" · ");
-
-  const playEpisode = () => {
-    void playerService.requestStartEpisode(libraryItemId, item.id, {
-      episodeTitle: item.title,
-      podcastTitle: headerTitle,
-    });
-  };
-
-  const openEpisodeDetail = () => {
-    router.push({
-      pathname: "/episode-detail",
-      params: {
-        libraryItemId,
-        episodeId: item.id,
-        episodeTitle: item.title,
-        podcastTitle: headerTitle,
-        coverUri: headerCover ?? undefined,
-        description: item.description ?? undefined,
-        publishedAt: item.publishedAt != null ? String(item.publishedAt) : undefined,
-        durationSeconds: item.duration != null ? String(item.duration) : undefined,
-      },
-    });
-  };
+  const { resolvedActions, openEpisodeDetail } = useEpisodeActionController({
+    identity: { libraryItemId, episodeId: item.id },
+    episodeTitle: item.title,
+    podcastTitle: headerTitle,
+    coverUri: headerCover,
+    description: item.description,
+    publishedAt: item.publishedAt,
+    durationSeconds: item.duration,
+    actionIds: CURRENT_PODCAST_EPISODE_ACTIONS,
+    isOnCurrentPodcast: true,
+  });
 
   return (
-    <View
-      style={[
-        styles.episodeRow,
-        {
-          borderColor: themeColors.border,
-          backgroundColor: themeColors.surface,
-        },
-      ]}
-    >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Play ${item.title}`}
-        onPress={playEpisode}
-        style={({ pressed }) => [{ flex: 1, minWidth: 0, opacity: pressed ? 0.72 : 1 }]}
+    <EpisodeActionMenu title={item.title} actions={resolvedActions}>
+      <View
+        style={[
+          styles.episodeRow,
+          {
+            borderColor: themeColors.border,
+            backgroundColor: themeColors.surface,
+          },
+        ]}
       >
-        <Text
-          maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          numberOfLines={2}
-          selectable
-          style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Episode details for ${item.title}`}
+          onPress={openEpisodeDetail}
+          style={({ pressed }) => [{ flex: 1, minWidth: 0, opacity: pressed ? 0.72 : 1 }]}
         >
-          {item.title}
-        </Text>
-        {meta ? (
           <Text
             maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-            style={{ color: themeColors.textMuted, fontSize: 12, marginTop: 4 }}
+            numberOfLines={2}
+            selectable
+            style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
           >
-            {meta}
+            {item.title}
           </Text>
-        ) : null}
-      </Pressable>
-      <EpisodeDownloadControls
-        libraryItemId={libraryItemId}
-        episodeId={item.id}
-        episodeTitle={item.title}
-        podcastTitle={headerTitle}
-        coverUri={headerCover}
-        compact
-      />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Episode details for ${item.title}`}
-        hitSlop={8}
-        onPress={openEpisodeDetail}
-        style={styles.infoButton}
-      >
-        <SymbolView name="info.circle" size={18} tintColor={themeColors.textMuted} />
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Play ${item.title}`}
-        hitSlop={8}
-        onPress={playEpisode}
-      >
-        <SymbolView name="play.fill" size={16} tintColor={themeColors.accent} />
-      </Pressable>
-    </View>
+          {meta ? (
+            <Text
+              maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+              style={{ color: themeColors.textMuted, fontSize: 12, marginTop: 4 }}
+            >
+              {meta}
+            </Text>
+          ) : null}
+        </Pressable>
+        <EpisodeDownloadControls
+          libraryItemId={libraryItemId}
+          episodeId={item.id}
+          episodeTitle={item.title}
+          podcastTitle={headerTitle}
+          coverUri={headerCover}
+          compact
+        />
+      </View>
+    </EpisodeActionMenu>
   );
 };
 
@@ -416,8 +391,5 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-  },
-  infoButton: {
-    padding: 2,
   },
 });

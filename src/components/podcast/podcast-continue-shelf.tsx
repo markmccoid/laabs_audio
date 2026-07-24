@@ -1,16 +1,87 @@
 import { CoverImage } from "@/components/images/cover-image";
+import { EpisodeActionMenu } from "@/components/podcast/episode-action-menu";
+import { useEpisodeActionController } from "@/components/podcast/episode-action-controller";
 import type { TouchedEpisodeProgress } from "@/podcast/episode-continue-eligibility";
-import { playerService } from "@/player";
+import { HOME_EPISODE_ACTIONS } from "@/podcast/episode-action-eligibility";
 import { getHomePreviewCoverSize, useSettingsStore } from "@/store/settings-store";
 import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { SymbolView } from "expo-symbols";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 type Props = {
   title?: string;
   episodes: readonly TouchedEpisodeProgress[];
   bookSizeMultiplier?: number;
+};
+
+type EpisodeTileProps = {
+  episode: TouchedEpisodeProgress;
+  coverSize: number;
+  homeShowTitles: boolean;
+  themeColors: ReturnType<typeof useThemeColors>;
+};
+
+const PodcastEpisodeShelfTile = ({
+  episode,
+  coverSize,
+  homeShowTitles,
+  themeColors,
+}: EpisodeTileProps) => {
+  const { resolvedActions, openEpisodeDetail } = useEpisodeActionController({
+    identity: {
+      libraryItemId: episode.libraryItemId,
+      episodeId: episode.episodeId,
+    },
+    episodeTitle: episode.title,
+    podcastTitle: episode.podcastTitle,
+    coverUri: episode.cover,
+    durationSeconds: episode.durationSeconds > 0 ? episode.durationSeconds : null,
+    currentTimeSeconds:
+      episode.currentTimeSeconds > 0 ? episode.currentTimeSeconds : null,
+    actionIds: HOME_EPISODE_ACTIONS,
+    isOnCurrentPodcast: false,
+  });
+
+  return (
+    <EpisodeActionMenu title={episode.title} actions={resolvedActions}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Episode details for ${episode.title}`}
+        onPress={openEpisodeDetail}
+        style={({ pressed }) => ({ width: coverSize, opacity: pressed ? 0.8 : 1 })}
+      >
+        <CoverImage
+          libraryItemId={episode.libraryItemId}
+          coverUri={episode.cover}
+          variant="thumb"
+          style={{
+            width: coverSize,
+            height: coverSize,
+            borderRadius: 10,
+            backgroundColor: themeColors.surface,
+          }}
+        />
+        {homeShowTitles ? (
+          <View style={{ marginTop: 6, gap: 2 }}>
+            <Text
+              maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+              numberOfLines={2}
+              style={{ color: themeColors.text, fontSize: 12, fontWeight: "600" }}
+            >
+              {episode.title}
+            </Text>
+            <Text
+              maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+              numberOfLines={1}
+              style={{ color: themeColors.textMuted, fontSize: 11 }}
+            >
+              {episode.podcastTitle}
+            </Text>
+          </View>
+        ) : null}
+      </Pressable>
+    </EpisodeActionMenu>
+  );
 };
 
 export const PodcastContinueShelf = ({
@@ -41,65 +112,19 @@ export const PodcastContinueShelf = ({
           </Text>
         </View>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, gap: 10 }}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 12, gap: 10 }}
+      >
         {episodes.map((episode) => (
-          <Pressable
+          <PodcastEpisodeShelfTile
             key={`${episode.libraryItemId}:${episode.episodeId}`}
-            accessibilityRole="button"
-            accessibilityLabel={`Play ${episode.title}`}
-            onPress={() => {
-              void playerService.requestStartEpisode(episode.libraryItemId, episode.episodeId, {
-                episodeTitle: episode.title,
-                podcastTitle: episode.podcastTitle,
-              });
-            }}
-            style={({ pressed }) => ({ width: coverSize, opacity: pressed ? 0.8 : 1 })}
-          >
-            <CoverImage
-              libraryItemId={episode.libraryItemId}
-              coverUri={episode.cover}
-              variant="thumb"
-              style={{
-                width: coverSize,
-                height: coverSize,
-                borderRadius: 10,
-                backgroundColor: themeColors.surface,
-              }}
-            />
-            {homeShowTitles ? (
-              <View style={{ marginTop: 6, gap: 2 }}>
-                <Text
-                  maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                  numberOfLines={2}
-                  style={{ color: themeColors.text, fontSize: 12, fontWeight: "600" }}
-                >
-                  {episode.title}
-                </Text>
-                <Text
-                  maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                  numberOfLines={1}
-                  style={{ color: themeColors.textMuted, fontSize: 11 }}
-                >
-                  {episode.podcastTitle}
-                </Text>
-              </View>
-            ) : null}
-            <View
-              style={{
-                position: "absolute",
-                right: 6,
-                bottom: homeShowTitles ? 48 : 6,
-                width: 28,
-                height: 28,
-                borderRadius: 14,
-                backgroundColor: themeColors.surface,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <SymbolView name="play.fill" size={12} tintColor={themeColors.accent} />
-            </View>
-          </Pressable>
+            episode={episode}
+            coverSize={coverSize}
+            homeShowTitles={homeShowTitles}
+            themeColors={themeColors}
+          />
         ))}
       </ScrollView>
     </View>

@@ -63,7 +63,6 @@ const BOOK_UTILITY_SHEETS = new Set([
   "book-addbookmark",
   "book-series",
   "book-filter-results",
-  "episode-detail",
 ]);
 
 const logStartupDebug = (event: string, payload?: Record<string, unknown>) => {
@@ -728,11 +727,15 @@ export default function RootLayout() {
               />
               <Stack.Screen
                 name="episode-detail"
-                options={sheetScreenOptions(themeColors.surface, {
-                  headerTitle: "Episode",
+                options={{
+                  presentation: "card",
+                  animation: "slide_from_right",
                   headerShown: true,
-                  sheetAllowedDetents: [0.55, 0.92],
-                })}
+                  headerTitle: "Episode",
+                  contentStyle: {
+                    backgroundColor: themeColors.bg,
+                  },
+                }}
               />
               <Stack.Screen
                 name="book-bookmarks"
