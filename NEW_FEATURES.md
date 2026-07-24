@@ -4,7 +4,7 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
-- `2026-07-24` `pending` - Episode Detail stack presentation and phone Episode Action Set.
+- `2026-07-24` `883f33e` - Episode Detail stack presentation and phone Episode Action Set.
   Tester focus: tap a Current Podcast episode row or a Home Continue / Recent / Downloaded tile and confirm full-screen Episode Detail opens (not a sheet); Play/Pause, download, and Open Podcast work on Detail; long-press the same presentations for Play/Pause, Download/Remove Download, and Open Podcast (Open Podcast omitted on Current Podcast); confirm info and trailing play glyphs are gone; CarPlay episode taps still play.
 
 - `2026-07-24` `4b568fa` - Episode downloads and Home Downloaded shelf.
