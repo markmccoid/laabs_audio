@@ -96,49 +96,55 @@ const CurrentPodcastEpisodeRow = ({
   });
 
   return (
-    <EpisodeActionMenu title={item.title} actions={resolvedActions}>
-      <View
-        style={[
-          styles.episodeRow,
-          {
-            borderColor: themeColors.border,
-            backgroundColor: themeColors.surface,
-          },
-        ]}
+    <View style={styles.episodeRowFrame}>
+      <EpisodeActionMenu
+        title={item.title}
+        actions={resolvedActions}
+        style={styles.episodeActionMenu}
       >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Episode details for ${item.title}`}
-          onPress={openEpisodeDetail}
-          style={({ pressed }) => [{ flex: 1, minWidth: 0, opacity: pressed ? 0.72 : 1 }]}
+        <View
+          style={[
+            styles.episodeRow,
+            {
+              borderColor: themeColors.border,
+              backgroundColor: themeColors.surface,
+            },
+          ]}
         >
-          <Text
-            maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-            numberOfLines={2}
-            selectable
-            style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Episode details for ${item.title}`}
+            onPress={openEpisodeDetail}
+            style={({ pressed }) => [{ flex: 1, minWidth: 0, opacity: pressed ? 0.72 : 1 }]}
           >
-            {item.title}
-          </Text>
-          {meta ? (
             <Text
               maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-              style={{ color: themeColors.textMuted, fontSize: 12, marginTop: 4 }}
+              numberOfLines={2}
+              selectable
+              style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
             >
-              {meta}
+              {item.title}
             </Text>
-          ) : null}
-        </Pressable>
-        <EpisodeDownloadControls
-          libraryItemId={libraryItemId}
-          episodeId={item.id}
-          episodeTitle={item.title}
-          podcastTitle={headerTitle}
-          coverUri={headerCover}
-          compact
-        />
-      </View>
-    </EpisodeActionMenu>
+            {meta ? (
+              <Text
+                maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                style={{ color: themeColors.textMuted, fontSize: 12, marginTop: 4 }}
+              >
+                {meta}
+              </Text>
+            ) : null}
+          </Pressable>
+          <EpisodeDownloadControls
+            libraryItemId={libraryItemId}
+            episodeId={item.id}
+            episodeTitle={item.title}
+            podcastTitle={headerTitle}
+            coverUri={headerCover}
+            compact
+          />
+        </View>
+      </EpisodeActionMenu>
+    </View>
   );
 };
 
@@ -381,9 +387,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
-  episodeRow: {
+  episodeRowFrame: {
     marginHorizontal: 16,
     marginBottom: 8,
+    alignSelf: "stretch",
+  },
+  episodeActionMenu: {
+    alignSelf: "stretch",
+    width: "100%",
+  },
+  episodeRow: {
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 12,
@@ -391,5 +404,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+    width: "100%",
   },
 });

@@ -4,7 +4,10 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
-- `2026-07-25` `8103f2b` - Episode Detail Book-shaped UI nested in tab stacks (mini player stays visible).
+- `2026-07-25` `32c8274` - Stretch Current Podcast episode rows to full list width.
+  Tester focus: open a Current Podcast show and confirm each episode row spans the content width (title + compact download control), with long-press actions still available.
+
+- `2026-07-25` `a8ce925` - Episode Detail Book-shaped UI nested in tab stacks (mini player stays visible).
   Tester focus: open Episode Detail from Home Continue/Recent/Downloaded or Current Podcast and confirm Book-like layout (blurred cover, large artwork, download rail → sheet, Book-style play button, HTML description); mini player remains above Episode Detail; Open Podcast stays in the toolbar menu; offline shows known metadata and plays downloaded episodes only.
 
 - `2026-07-24` `883f33e` - Episode Detail stack presentation and phone Episode Action Set.
