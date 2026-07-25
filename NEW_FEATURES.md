@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Scope the Podcast Downloaded shelf to its Active Library.
+  Tester focus: with the same sign-in and two podcast Libraries, download an episode in each and verify each Home Downloaded shelf shows only its own Library's episode; existing legacy downloads remain directly playable but stay off Library shelves.
+
 - `2026-07-25` `pending` - Keep Podcast Search on podcast-native show presentations.
   Tester focus: in a podcast Library, search in list and grid modes and verify tapping a result only opens Current Podcast; long-press must not expose audiobook Play, Favorite, Finished, Bookshelves, Share, or download actions.
 

@@ -49,6 +49,11 @@ export type EpisodeDownloadInfo = {
 };
 
 export type EpisodeDownloadDetails = {
+  /**
+   * Library shelf scope. Null identifies a legacy record: it remains directly
+   * playable by Episode Identity, but is excluded from every Library shelf.
+   */
+  libraryId: string | null;
   libraryItemId: string;
   episodeId: string;
   title: string;
@@ -183,6 +188,28 @@ const normalizePersistedEpisodeData = (
   return normalized;
 };
 
+export const normalizePersistedEpisodeDetails = (
+  details?: Record<string, EpisodeDownloadDetails>,
+): Record<string, EpisodeDownloadDetails> =>
+  Object.fromEntries(
+    Object.entries(details ?? {}).flatMap(([key, value]) => {
+      if (!value || typeof value !== "object") return [];
+      const candidate = value as EpisodeDownloadDetails & { libraryId?: unknown };
+      return [
+        [
+          key,
+          {
+            ...candidate,
+            libraryId:
+              typeof candidate.libraryId === "string" && candidate.libraryId.trim()
+                ? candidate.libraryId.trim()
+                : null,
+          },
+        ],
+      ];
+    }),
+  );
+
 const downloadEpisodeCoverImage = async (
   identity: EpisodeIdentity,
   version?: number | null,
@@ -278,6 +305,7 @@ export const deviceEpisodeDownloadsStore = createStore<EpisodeDownloadsState>()(
           if (!key) return;
 
           const { libraryItemId, episodeId } = identity;
+          const downloadLibraryId = authStore.getState().activeLibraryId?.trim() || null;
           const activeSession = get().activeDownloadSession;
           if (
             activeSession &&
@@ -445,6 +473,7 @@ export const deviceEpisodeDownloadsStore = createStore<EpisodeDownloadsState>()(
               coverRelativePath,
             });
             get().actions.setDownloadedEpisodeDetails(key, {
+              libraryId: downloadLibraryId,
               libraryItemId,
               episodeId,
               title: resolvedTitle,
@@ -462,11 +491,10 @@ export const deviceEpisodeDownloadsStore = createStore<EpisodeDownloadsState>()(
             });
 
             const userId = resolveAuthUserKey();
-            const libraryId = authStore.getState().activeLibraryId;
-            if (userId && libraryId) {
+            if (userId && downloadLibraryId) {
               await markEpisodeTouchedFromDownload({
                 userId,
-                libraryId,
+                libraryId: downloadLibraryId,
                 libraryItemId,
                 episodeId,
                 title: resolvedTitle,
@@ -478,7 +506,7 @@ export const deviceEpisodeDownloadsStore = createStore<EpisodeDownloadsState>()(
             } else if (__DEV__) {
               console.warn(
                 "[episode-downloads] skipped Touched mark — missing user/library scope",
-                { userId, libraryId, libraryItemId, episodeId },
+                { userId, libraryId: downloadLibraryId, libraryItemId, episodeId },
               );
             }
 
@@ -571,12 +599,24 @@ export const deviceEpisodeDownloadsStore = createStore<EpisodeDownloadsState>()(
         downloadedEpisodeDetailsById: state.downloadedEpisodeDetailsById,
         downloadedEpisodeOwnerUserIdsById: state.downloadedEpisodeOwnerUserIdsById,
       }),
+      version: 1,
+      migrate: (persisted) => {
+        const typed = (persisted ?? {}) as Partial<EpisodeDownloadsPersistedState>;
+        return {
+          ...typed,
+          downloadedEpisodeDetailsById: normalizePersistedEpisodeDetails(
+            typed.downloadedEpisodeDetailsById,
+          ),
+        };
+      },
       merge: (persisted, current) => {
         const typed = (persisted ?? {}) as Partial<EpisodeDownloadsPersistedState>;
         return {
           ...current,
           downloadedEpisodeData: normalizePersistedEpisodeData(typed.downloadedEpisodeData),
-          downloadedEpisodeDetailsById: typed.downloadedEpisodeDetailsById ?? {},
+          downloadedEpisodeDetailsById: normalizePersistedEpisodeDetails(
+            typed.downloadedEpisodeDetailsById,
+          ),
           downloadedEpisodeOwnerUserIdsById: typed.downloadedEpisodeOwnerUserIdsById ?? {},
         };
       },
@@ -659,6 +699,7 @@ export const listEpisodeDownloadedAssetRecords = (
     if (!identity) return [];
     return [
       {
+        libraryId: details.libraryId,
         libraryItemId: details.libraryItemId,
         episodeId: details.episodeId,
         title: details.title,
@@ -677,6 +718,7 @@ export const selectDownloadedEpisodesShelf = (
   sessionUserId?: string | null,
 ) =>
   assembleDownloadedEpisodesShelf(listEpisodeDownloadedAssetRecords(state), {
+    activeLibraryId: authStore.getState().activeLibraryId,
     sessionUserId: sessionUserId ?? resolveAuthUserKey(),
   });
 
