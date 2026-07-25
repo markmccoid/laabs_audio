@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Route Active Libraries through one safe Book, Podcast, or unresolved experience.
+  Tester focus: switch and restore both Library types, confirming Home, Search, Lists, and details show only the matching experience; during unresolved/failed podcast activation, confirm no Book UI or catalog refresh appears.
+
 - `2026-07-25` `pending` - Require remembered podcast Libraries to finish activation before browsing.
   Tester focus: relaunch into a remembered podcast Library and confirm its Podcast Series Index prepares before Home appears; cancel a failed offline activation and verify no book catalog is shown, while remembered book Libraries still open immediately.
 

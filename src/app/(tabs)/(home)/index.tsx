@@ -1,17 +1,13 @@
 import HomeShelvesScreen from "@/components/Home/home-shelves-screen";
 import { PodcastHomeShelvesScreen } from "@/components/podcast/podcast-home-shelves-screen";
-import { useAuthStore } from "@/auth/auth-store";
-import { isPodcastLibraryMediaType } from "@/podcast/series-index-readiness";
-import { resolveActiveLibraryMediaType } from "@/podcast/resolve-active-library-media-type";
+import { useActiveLibraryExperience } from "@/auth/active-library-experience";
 
 export default function HomeIndex() {
-  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryMediaType = useAuthStore((state) => state.activeLibraryMediaType);
-  const mediaType = resolveActiveLibraryMediaType(activeLibraryId, activeLibraryMediaType);
+  const experience = useActiveLibraryExperience();
 
-  if (isPodcastLibraryMediaType(mediaType)) {
+  if (experience === "podcast") {
     return <PodcastHomeShelvesScreen />;
   }
 
-  return <HomeShelvesScreen />;
+  return experience === "book" ? <HomeShelvesScreen /> : null;
 }

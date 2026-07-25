@@ -1,6 +1,6 @@
 import { Host, Picker, Text as SwiftText } from "@expo/ui/swift-ui";
 import { lineLimit, minimumScaleFactor, pickerStyle, tag } from "@expo/ui/swift-ui/modifiers";
-import { useAuthStore } from "@/auth/auth-store";
+import { useActiveLibraryExperience } from "@/auth/active-library-experience";
 import { PodcastShowsBrowser } from "@/components/podcast/podcast-shows-browser";
 import {
   useListsPreferencesActions,
@@ -9,8 +9,6 @@ import {
   useListsViewMode,
   type LibraryViewMode,
 } from "@/library/lists-preferences-store";
-import { isPodcastLibraryMediaType } from "@/podcast/series-index-readiness";
-import { resolveActiveLibraryMediaType } from "@/podcast/resolve-active-library-media-type";
 import { usePodcastSeriesByTitle } from "@/podcast/use-podcast-series";
 import { SERIES_SORT_OPTIONS } from "@/sort/series-sort";
 import { Stack } from "expo-router";
@@ -209,13 +207,11 @@ const BookLibraryTabScreen = () => {
 };
 
 export const LibraryTabScreen = () => {
-  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryMediaType = useAuthStore((state) => state.activeLibraryMediaType);
-  const mediaType = resolveActiveLibraryMediaType(activeLibraryId, activeLibraryMediaType);
+  const experience = useActiveLibraryExperience();
 
-  if (isPodcastLibraryMediaType(mediaType)) {
+  if (experience === "podcast") {
     return <PodcastListsBrowser />;
   }
 
-  return <BookLibraryTabScreen />;
+  return experience === "book" ? <BookLibraryTabScreen /> : null;
 };

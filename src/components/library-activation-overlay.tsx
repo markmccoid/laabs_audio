@@ -6,11 +6,12 @@ import { useAuthStore } from "@/auth/auth-store";
 import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
 export const LibraryActivationOverlay = () => {
   const themeColors = useThemeColors();
   const previousActiveLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const previousActiveLibraryReady = useAuthStore((state) => state.activeLibraryReady);
   const status = useLibraryActivationStore((state) => state.status);
   const library = useLibraryActivationStore((state) => state.library);
   const errorMessage = useLibraryActivationStore((state) => state.errorMessage);
@@ -26,7 +27,7 @@ export const LibraryActivationOverlay = () => {
 
   const handleCancel = () => {
     clear();
-    if (!previousActiveLibraryId) {
+    if (!previousActiveLibraryId || !previousActiveLibraryReady) {
       router.replace({ pathname: "/library-picker", params: { mode: "setup" } });
     }
   };

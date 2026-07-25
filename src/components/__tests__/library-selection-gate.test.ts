@@ -18,7 +18,7 @@ const mockAuthState = {
 };
 
 const mockLibrarySelection = {
-  libraries: [] as Array<{ id: string; name: string; mediaType: string }>,
+  libraries: [] as { id: string; name: string; mediaType: string }[],
   isLoading: false,
   isFetching: false,
   isFetched: true,
