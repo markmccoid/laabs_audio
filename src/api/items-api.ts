@@ -17,7 +17,6 @@ export type ItemDetails = {
 
 export type PodcastItemDetails = {
   id: string;
-  media: LibraryItem["media"];
   episodes: PodcastEpisode[];
   podcastType: string | null;
   title: string;
@@ -76,7 +75,6 @@ export const itemsApi = {
 
     return {
       id: response.id,
-      media: response.media,
       episodes,
       podcastType: metadata?.type ?? null,
       title: metadata?.title ?? "Podcast",

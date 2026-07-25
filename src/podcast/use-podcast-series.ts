@@ -4,6 +4,7 @@ import { useAuthStore } from "@/auth/auth-store";
 import { podcastSeriesIndexRepository } from "@/data/sqlite/podcast-series-index-repository";
 import { listTouchedEpisodesForContinue } from "@/data/sqlite/touched-episodes";
 import { orderContinueEpisodes } from "@/podcast/episode-continue-eligibility";
+import { buildPodcastItemDetailsQueryOptions } from "@/podcast/podcast-item-details-query";
 import { assembleRecentEpisodesForHomeDefault } from "@/podcast/podcast-library-experience-default";
 import { queryKeys } from "@/query/query-keys";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -119,12 +120,13 @@ export const usePodcastItemDetails = (libraryItemId?: string) => {
     !!libraryItemId?.trim() &&
     isOnline !== false;
 
-  return useQuery<PodcastItemDetails>({
-    queryKey: queryKeys.podcastItemDetails(activeLibraryUserKey, libraryItemId),
-    queryFn: () => itemsApi.getPodcastItemDetails(libraryItemId!),
-    enabled,
-    staleTime: 5 * 60 * 1000,
-  });
+  return useQuery<PodcastItemDetails>(
+    buildPodcastItemDetailsQueryOptions({
+      queryKey: queryKeys.podcastItemDetails(activeLibraryUserKey, libraryItemId),
+      queryFn: () => itemsApi.getPodcastItemDetails(libraryItemId!),
+      canFetch: enabled,
+    }),
+  );
 };
 
 export type { PodcastItemDetails, PodcastSeriesIndexSummary };

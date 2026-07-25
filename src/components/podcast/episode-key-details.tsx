@@ -1,7 +1,7 @@
 import type { BookProgressTimeDisplay } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView, type SFSymbol } from "expo-symbols";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 
 type Props = {
@@ -41,13 +41,20 @@ export const EpisodeKeyDetails = ({
 }: Props) => {
   const themeColors = useThemeColors();
   const durationLabel = formatDurationBadge(durationSeconds);
-  const [progressDisplay, setProgressDisplay] = useState<BookProgressTimeDisplay>(
-    defaultProgressTimeDisplay,
-  );
-
-  useEffect(() => {
-    setProgressDisplay(defaultProgressTimeDisplay);
-  }, [defaultProgressTimeDisplay, progressResetKey]);
+  const [progressSelection, setProgressSelection] = useState<{
+    defaultDisplay: BookProgressTimeDisplay;
+    display: BookProgressTimeDisplay;
+    resetKey?: string;
+  }>(() => ({
+    defaultDisplay: defaultProgressTimeDisplay,
+    display: defaultProgressTimeDisplay,
+    resetKey: progressResetKey,
+  }));
+  const progressDisplay =
+    progressSelection.defaultDisplay === defaultProgressTimeDisplay &&
+    progressSelection.resetKey === progressResetKey
+      ? progressSelection.display
+      : defaultProgressTimeDisplay;
 
   const rows = useMemo(() => {
     const values: {
@@ -105,7 +112,11 @@ export const EpisodeKeyDetails = ({
             accessibilityRole="button"
             accessibilityLabel="Toggle progress display"
             onPress={() =>
-              setProgressDisplay((current) => (current === "elapsed" ? "remaining" : "elapsed"))
+              setProgressSelection({
+                defaultDisplay: defaultProgressTimeDisplay,
+                display: progressDisplay === "elapsed" ? "remaining" : "elapsed",
+                resetKey: progressResetKey,
+              })
             }
             style={({ pressed }) => ({
               borderRadius: 999,
