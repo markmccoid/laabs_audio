@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Add Book Library regression contracts before podcast hardening.
+  Tester focus: no intended behavior change; verify audiobook queue metadata and Book progress synchronization continue using the existing Book-only paths while podcast isolation fixes are integrated.
+
 - `2026-07-25` `32c8274` - Stretch Current Podcast episode rows to full list width.
   Tester focus: open a Current Podcast show and confirm each episode row spans the content width (title + compact download control), with long-press actions still available.
 
