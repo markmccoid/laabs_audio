@@ -14,6 +14,7 @@ import {
   resolveBackgroundProgressIntent,
   routeBackgroundProgressIntent,
 } from "../progress/background-progress-routing";
+import { syncPendingEpisodeProgressIntents } from "../podcast/episode-progress-sync-service";
 
 export const useAuthBootstrap = () => {
   const status = useAuthStore((state) => state.status);
@@ -100,6 +101,11 @@ export const useAuthBootstrap = () => {
     if (status !== "authenticated") return;
     const syncPending = async () => {
       await syncPendingProgress().catch(() => undefined);
+      if (resolvedUserKey) {
+        await syncPendingEpisodeProgressIntents({ userKey: resolvedUserKey }).catch(
+          () => undefined,
+        );
+      }
       await syncPendingBookmarkDeletes().catch(() => undefined);
       await syncPendingBookmarks().catch(() => undefined);
       await syncPendingPlaylistOps().catch(() => undefined);
@@ -112,6 +118,7 @@ export const useAuthBootstrap = () => {
     syncPendingBookmarks,
     syncPendingPlaylistOps,
     syncPendingProgress,
+    resolvedUserKey,
   ]);
 
   return { status };

@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Retry durable Episode progress after startup or reconnect.
+  Tester focus: record Episode progress offline, restart or reconnect, and confirm it reaches Audiobookshelf once; a newer local update must remain queued during an older sync, transient failures must retry later, and deleted server Episodes must be retained locally as unmatched.
+
 - `2026-07-25` `pending` - Keep background Episode progress out of the audiobook sync queue.
   Tester focus: play or pause an Episode, background the app, and confirm Episode progress resumes/syncs independently; repeat with an audiobook and confirm its existing background progress behavior is unchanged.
 
