@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Preserve Episode intent library scope and protect its SQLite mirror from sync races.
+  Tester focus: switch or reconnect while Episode progress is being recorded and confirm the newest Episode position remains queued with its originating Library scope rather than being removed by an older sync completion.
+
 - `2026-07-25` `pending` - Retry durable Episode progress after startup or reconnect.
   Tester focus: record Episode progress offline, restart or reconnect, and confirm it reaches Audiobookshelf once; a newer local update must remain queued during an older sync, transient failures must retry later, and deleted server Episodes must be retained locally as unmatched.
 

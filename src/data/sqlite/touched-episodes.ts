@@ -249,7 +249,8 @@ export const upsertEpisodePendingProgressIntent = async (
       podcast_title = excluded.podcast_title,
       trigger = excluded.trigger,
       status = excluded.status,
-      payload_json = excluded.payload_json`,
+      payload_json = excluded.payload_json
+    WHERE excluded.updated_at >= episode_pending_progress_sync_intents.updated_at`,
     [
       userId,
       intent.libraryItemId,
@@ -273,12 +274,20 @@ export const deleteEpisodePendingProgressIntent = async (
   userId: string,
   libraryItemId: string,
   episodeId: string,
+  syncedThroughUpdatedAt?: number,
 ) => {
   await initializeShadowDatabaseInternal();
   const db = await getDb();
   await db.runAsync(
     `DELETE FROM episode_pending_progress_sync_intents
-     WHERE user_id = ? AND library_item_id = ? AND episode_id = ?`,
-    [userId, libraryItemId, episodeId],
+     WHERE user_id = ? AND library_item_id = ? AND episode_id = ?
+       AND (? IS NULL OR updated_at <= ?)`,
+    [
+      userId,
+      libraryItemId,
+      episodeId,
+      syncedThroughUpdatedAt ?? null,
+      syncedThroughUpdatedAt ?? null,
+    ],
   );
 };
