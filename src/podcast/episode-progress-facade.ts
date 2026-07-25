@@ -14,6 +14,7 @@ export type EpisodeProgressSyncIntentKind =
 
 export type EpisodeProgressSyncIntentRecord = EpisodeIdentity & {
   intentId: string;
+  libraryId?: string | null;
   currentTimeSeconds: number;
   durationSeconds?: number;
   isFinished: boolean;

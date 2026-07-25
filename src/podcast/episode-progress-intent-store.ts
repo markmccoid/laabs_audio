@@ -44,6 +44,7 @@ export const recordEpisodeProgressSyncIntent = (payload: {
     intentId: previous?.intentId ?? createIntentId(),
     libraryItemId: payload.libraryItemId,
     episodeId: payload.episodeId,
+    libraryId: payload.libraryId ?? authStore.getState().activeLibraryId,
     currentTimeSeconds: payload.currentTimeSeconds,
     durationSeconds: payload.durationSeconds,
     isFinished: payload.isFinished,
@@ -99,6 +100,7 @@ export const clearEpisodeProgressSyncIntent = (payload: {
       userKey,
       payload.libraryItemId,
       payload.episodeId,
+      payload.syncedThroughUpdatedAt,
     );
   }
 };
