@@ -1,6 +1,8 @@
 import { useAuthStore } from "@/auth/auth-store";
+import { useActiveLibraryExperience } from "@/auth/active-library-experience";
 import LibraryContainer from "@/components/Library/LibraryContainer";
 import { SearchFilterRail } from "@/components/Library/search-filter-rail";
+import { PodcastSearchContainer } from "@/components/podcast/podcast-search-container";
 import { useSearchSessionActions } from "@/search/search-session-store";
 import { router, Stack } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -9,6 +11,7 @@ const SEARCH_COMMIT_DELAY_MS = 300;
 
 export default function SearchIndex() {
   const status = useAuthStore((state) => state.status);
+  const experience = useActiveLibraryExperience();
   const searchActions = useSearchSessionActions();
   const searchCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isSearchActive, setIsSearchActive] = useState(false);
@@ -39,6 +42,7 @@ export default function SearchIndex() {
   if (status !== "authenticated") {
     return null;
   }
+  if (experience === "unresolved") return null;
 
   return (
     <>
@@ -55,8 +59,14 @@ export default function SearchIndex() {
         }}
       />
 
-      <LibraryContainer padForStatusBar={isSearchActive} />
-      <SearchFilterRail />
+      {experience === "podcast" ? (
+        <PodcastSearchContainer padForStatusBar={isSearchActive} />
+      ) : (
+        <>
+          <LibraryContainer padForStatusBar={isSearchActive} />
+          <SearchFilterRail />
+        </>
+      )}
     </>
   );
 }

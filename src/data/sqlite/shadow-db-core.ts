@@ -1,7 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 const DATABASE_NAME = "laabs-shadow-library.db";
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 5;
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS libraries (
   last_overlay_refresh_at INTEGER,
   last_collections_refresh_at INTEGER,
   last_series_refresh_at INTEGER,
+  last_podcast_series_index_refresh_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, library_id)
@@ -342,6 +343,57 @@ CREATE TABLE IF NOT EXISTS library_series_memberships (
   PRIMARY KEY (user_id, library_id, series_id, library_item_id)
 );
 
+CREATE TABLE IF NOT EXISTS podcast_series_index_items (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  author TEXT,
+  cover TEXT,
+  cover_full TEXT,
+  num_episodes INTEGER,
+  added_at INTEGER NOT NULL DEFAULT 0,
+  server_updated_at INTEGER NOT NULL DEFAULT 0,
+  podcast_type TEXT,
+  summary_json TEXT NOT NULL,
+  is_missing INTEGER NOT NULL DEFAULT 0,
+  missing_since INTEGER,
+  last_seen_at INTEGER NOT NULL,
+  last_seen_refresh_run_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, library_item_id)
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS podcast_series_index_fts USING fts5(
+  user_id UNINDEXED,
+  library_id UNINDEXED,
+  library_item_id UNINDEXED,
+  title,
+  author
+);
+
+CREATE TABLE IF NOT EXISTS podcast_series_index_refresh_runs (
+  id TEXT PRIMARY KEY NOT NULL,
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  status TEXT NOT NULL,
+  page_size INTEGER NOT NULL,
+  total_expected INTEGER NOT NULL DEFAULT 0,
+  total_seen INTEGER NOT NULL DEFAULT 0,
+  inserted_count INTEGER NOT NULL DEFAULT 0,
+  updated_count INTEGER NOT NULL DEFAULT 0,
+  unchanged_count INTEGER NOT NULL DEFAULT 0,
+  missing_marked_count INTEGER NOT NULL DEFAULT 0,
+  elapsed_ms INTEGER,
+  network_elapsed_ms INTEGER,
+  write_elapsed_ms INTEGER,
+  finalize_elapsed_ms INTEGER,
+  error TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_catalog_added
   ON library_catalog_items(user_id, library_id, is_missing, added_at);
 CREATE INDEX IF NOT EXISTS idx_catalog_title
@@ -374,6 +426,66 @@ CREATE INDEX IF NOT EXISTS idx_library_series_name
   ON library_series(user_id, library_id, name_sort, series_id);
 CREATE INDEX IF NOT EXISTS idx_series_memberships_sequence
   ON library_series_memberships(user_id, library_id, series_id, sequence_number, sequence, source_position);
+
+CREATE TABLE IF NOT EXISTS touched_episodes (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  episode_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  podcast_title TEXT NOT NULL,
+  cover TEXT,
+  current_time REAL NOT NULL DEFAULT 0,
+  duration REAL NOT NULL DEFAULT 0,
+  is_finished INTEGER NOT NULL DEFAULT 0,
+  hide_from_continue_listening INTEGER NOT NULL DEFAULT 0,
+  last_update INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, library_item_id, episode_id)
+);
+
+CREATE TABLE IF NOT EXISTS episode_pending_progress_sync_intents (
+  user_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  episode_id TEXT NOT NULL,
+  intent_id TEXT,
+  duration REAL NOT NULL DEFAULT 0,
+  current_time REAL NOT NULL DEFAULT 0,
+  is_finished INTEGER NOT NULL DEFAULT 0,
+  intent_kind TEXT,
+  updated_at INTEGER NOT NULL,
+  title TEXT,
+  podcast_title TEXT,
+  trigger TEXT,
+  status TEXT,
+  payload_json TEXT NOT NULL,
+  PRIMARY KEY (user_id, library_item_id, episode_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_touched_episodes_continue
+  ON touched_episodes(user_id, library_id, is_finished, hide_from_continue_listening, last_update);
+CREATE INDEX IF NOT EXISTS idx_episode_pending_progress
+  ON episode_pending_progress_sync_intents(user_id, library_item_id, episode_id);
+
+CREATE TABLE IF NOT EXISTS recent_episodes_snapshot (
+  user_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  library_item_id TEXT NOT NULL,
+  episode_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  podcast_title TEXT NOT NULL,
+  cover TEXT,
+  cover_full TEXT,
+  duration REAL NOT NULL DEFAULT 0,
+  published_at INTEGER,
+  fetched_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_recent_episodes_snapshot_lookup
+  ON recent_episodes_snapshot(user_id, library_id, position);
 
 CREATE TABLE IF NOT EXISTS timing_logs (
   id TEXT PRIMARY KEY NOT NULL,
@@ -415,6 +527,9 @@ export const initializeShadowDatabaseInternal = async () => {
   `).catch(() => undefined);
   await db.execAsync(`
     ALTER TABLE libraries ADD COLUMN last_series_refresh_at INTEGER;
+  `).catch(() => undefined);
+  await db.execAsync(`
+    ALTER TABLE libraries ADD COLUMN last_podcast_series_index_refresh_at INTEGER;
   `).catch(() => undefined);
   if (!shadowSqliteRuntimeState.didEnsureEffectiveProgressView) {
     await db.execAsync(`

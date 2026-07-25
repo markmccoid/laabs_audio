@@ -52,6 +52,7 @@ const RESERVED_ROOT_SEGMENTS = new Set([
   "book-addbookmark",
   "book-series",
   "book-filter-results",
+  "episode-detail",
 ]);
 // Matches the internal Expo Router path form used during navigation state, e.g.
 // `/(tabs)/(home)/12345`, and captures the trailing `libraryItemId`.

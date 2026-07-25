@@ -1,5 +1,6 @@
-import BookContainer from "@/components/bookComponents/BookContainer";
+import { LibraryItemScreen } from "@/components/detail/library-item-screen";
 import { OPEN_DOWNLOAD_SHEET_PARAM } from "@/navigation/book-links";
+import { useActiveLibraryExperience } from "@/auth/active-library-experience";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef } from "react";
 
@@ -14,9 +15,10 @@ const LibraryItem = () => {
   const { libraryItemId } = params;
   const openDownloadSheet = resolveParam(params[OPEN_DOWNLOAD_SHEET_PARAM]);
   const openedDownloadSheetForRef = useRef<string | null>(null);
+  const experience = useActiveLibraryExperience();
 
   useEffect(() => {
-    if (!libraryItemId || !openDownloadSheet) return;
+    if (experience !== "book" || !libraryItemId || !openDownloadSheet) return;
 
     const openToken = `${libraryItemId}:${openDownloadSheet}`;
     if (openedDownloadSheetForRef.current === openToken) return;
@@ -31,9 +33,9 @@ const LibraryItem = () => {
     }, 0);
 
     return () => clearTimeout(timeout);
-  }, [libraryItemId, openDownloadSheet]);
+  }, [experience, libraryItemId, openDownloadSheet]);
 
-  return <BookContainer libraryItemId={libraryItemId} />;
+  return <LibraryItemScreen libraryItemId={libraryItemId} />;
 };
 
 export default LibraryItem;

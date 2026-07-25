@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { LibraryItemSummary, LibraryItemsSummary } from "../api/library-items-api";
 import { type UserBookProgress } from "../api/me-api";
 import { playlistsApi } from "../api/playlists-api";
+import { useActiveLibraryExperience } from "../auth/active-library-experience";
 import { selectAccessMode, useAuthStore } from "../auth/auth-store";
 import { sqliteHomeRepository } from "../data/sqlite/home-repository";
 import { sqliteRefreshCoordinator } from "../data/sqlite/refresh-coordinator";
@@ -173,6 +174,7 @@ export const useHomeShelves = () => {
 
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryExperience = useActiveLibraryExperience();
   const authStatus = useAuthStore((state) => state.status);
   const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
@@ -195,6 +197,7 @@ export const useHomeShelves = () => {
     },
     enabled:
       authStatus === "authenticated" &&
+      activeLibraryExperience === "book" &&
       Boolean(activeLibraryId) &&
       Boolean(activeLibraryUserKey) &&
       isOnline !== false,
@@ -284,6 +287,7 @@ export const useHomeShelves = () => {
     queryFn: () => sqliteSearchRepository.getReadiness(),
     enabled:
       authStatus === "authenticated" &&
+      activeLibraryExperience === "book" &&
       Boolean(activeLibraryId) &&
       Boolean(activeLibraryUserKey),
   });
@@ -302,6 +306,7 @@ export const useHomeShelves = () => {
     queryFn: () => sqliteHomeRepository.getHomeProjection(homeProjectionParams),
     enabled:
       authStatus === "authenticated" &&
+      activeLibraryExperience === "book" &&
       Boolean(activeLibraryId) &&
       Boolean(activeLibraryUserKey) &&
       hasReadySqliteHome,
@@ -512,6 +517,7 @@ export const useHomeShelves = () => {
     if (!homeScopeKey || !activeLibraryId || !activeLibraryUserKey) return;
     if (
       authStatus !== "authenticated" ||
+      activeLibraryExperience !== "book" ||
       !hasReadySqliteHome
     ) {
       return;
@@ -542,6 +548,7 @@ export const useHomeShelves = () => {
     await refreshPromise;
   }, [
     activeLibraryId,
+    activeLibraryExperience,
     activeLibraryUserKey,
     authStatus,
     discoverHomeItemCount,
@@ -559,6 +566,7 @@ export const useHomeShelves = () => {
   ]);
 
   useEffect(() => {
+    if (activeLibraryExperience !== "book") return;
     if (!homeScopeKey || !activeLibraryId || !activeLibraryUserKey) return;
     if (!libraryPlaylists) return;
     upsertPlaylistsFromServer(libraryPlaylists, {
@@ -574,6 +582,7 @@ export const useHomeShelves = () => {
     );
   }, [
     activeLibraryId,
+    activeLibraryExperience,
     activeLibraryUserKey,
     homeScopeKey,
     libraryPlaylists,
@@ -585,6 +594,7 @@ export const useHomeShelves = () => {
   useEffect(() => {
     if (!authStatus || authStatus !== "authenticated") return;
     if (!activeLibraryId || !activeLibraryUserKey) return;
+    if (activeLibraryExperience !== "book") return;
     if (!readiness) return;
     if (readiness.hasCatalogRows && readiness.lastOverlayRefreshAt) return;
 
@@ -602,7 +612,14 @@ export const useHomeShelves = () => {
           queryKey: queryKeys.sqliteLibraryReadiness(activeLibraryUserKey, activeLibraryId),
         });
       });
-  }, [activeLibraryId, activeLibraryUserKey, authStatus, queryClient, readiness]);
+  }, [
+    activeLibraryId,
+    activeLibraryExperience,
+    activeLibraryUserKey,
+    authStatus,
+    queryClient,
+    readiness,
+  ]);
 
   const refreshDiscover = useCallback(() => {
     void loadDiscoverSnapshot();

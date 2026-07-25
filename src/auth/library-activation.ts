@@ -5,6 +5,8 @@ import { queryKeys } from "../query/query-keys";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
 import type { Library } from "../types/absTypes";
 import { recordTimingLog } from "../data/sqlite/timing-logger";
+import { ensurePodcastSeriesIndexReadyForActivation } from "../podcast/podcast-library-experience-default";
+import { isPodcastLibraryMediaType } from "../podcast/series-index-readiness";
 
 type ActivateLibraryOptions = {
   library: Library;
@@ -62,12 +64,13 @@ const refreshActivationQueriesIfStale = (
   backgroundRefreshIfStale(queryClient, queryKeys.userServerState(activeLibraryUserKey), () =>
     fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
   );
-  prefetchPlaylistsIfStale(queryClient, activeLibraryUserKey, library.id);
+  if (!isPodcastLibraryMediaType(library.mediaType)) {
+    prefetchPlaylistsIfStale(queryClient, activeLibraryUserKey, library.id);
+  }
 };
 
-// Catalog data lives in the SQLite shadow database; the home/search hooks
-// trigger a catalog refresh via sqliteLibraryReadiness once the library
-// becomes active. Activation only warms the compact per-user queries.
+// Book libraries: warm compact per-user queries; catalog refresh runs after Active Library commit.
+// Podcast libraries: await Podcast Series Index readiness before commit (ADR 0025); never run book catalog ingest.
 export const activateLibrary = async ({
   library,
   activeLibraryUserKey,
@@ -78,6 +81,24 @@ export const activateLibrary = async ({
   }
 
   const startedAt = Date.now();
+
+  if (isPodcastLibraryMediaType(library.mediaType)) {
+    await ensurePodcastSeriesIndexReadyForActivation({
+      userId: activeLibraryUserKey,
+      libraryId: library.id,
+      libraryName: library.name,
+    });
+    backgroundRefreshIfStale(queryClient, queryKeys.userServerState(activeLibraryUserKey), () =>
+      fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
+    );
+    void recordTimingLog("library_switch", "activate_library_fetch", startedAt, {
+      libraryId: library.id,
+      libraryName: library.name,
+      mediaType: library.mediaType,
+      success: true,
+    });
+    return;
+  }
 
   backgroundRefreshIfStale(queryClient, queryKeys.userServerState(activeLibraryUserKey), () =>
     fetchReconciledUserServerState(queryClient, activeLibraryUserKey),

@@ -43,7 +43,11 @@ export const useLibraries = () => {
       if (!match) {
         return;
       }
-      setActiveLibrary({ id: match.id, name: match.name });
+      setActiveLibrary({
+        id: match.id,
+        name: match.name,
+        mediaType: match.mediaType,
+      });
     },
     [libraries, setActiveLibrary],
   );

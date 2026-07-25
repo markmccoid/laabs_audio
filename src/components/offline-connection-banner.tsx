@@ -6,6 +6,7 @@ import { useCallback, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { librariesApi } from "../api/libraries-api";
+import { useActiveLibraryExperience } from "../auth/active-library-experience";
 import { useAuthActions, useAuthStore } from "../auth/auth-store";
 import { sqliteRefreshCoordinator } from "../data/sqlite/refresh-coordinator";
 import { queryKeys } from "../query/query-keys";
@@ -24,6 +25,7 @@ export const OfflineConnectionBanner = () => {
   const loginRequired = useAuthStore((state) => state.loginRequired);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryExperience = useActiveLibraryExperience();
   const { refreshSession, setOnlineStatus, setServerConnectionStatus } = useAuthActions();
   const [isRetrying, setIsRetrying] = useState(false);
 
@@ -54,7 +56,11 @@ export const OfflineConnectionBanner = () => {
         );
       }
 
-      if (activeLibraryId && activeLibraryUserKey) {
+      if (
+        activeLibraryExperience === "book" &&
+        activeLibraryId &&
+        activeLibraryUserKey
+      ) {
         refreshes.push(
           sqliteRefreshCoordinator
             .refreshActiveLibrary(
@@ -81,6 +87,7 @@ export const OfflineConnectionBanner = () => {
     }
   }, [
     activeLibraryId,
+    activeLibraryExperience,
     activeLibraryUserKey,
     isRetrying,
     loginRequired,

@@ -176,9 +176,9 @@ _Avoid_: Selected book, current book
 The Podcast whose show detail and episode list the user is presently viewing.
 _Avoid_: Selected podcast, current show, Current Episode
 
-**Episode Detail Sheet**:
-A transient surface for reviewing an Episode without making that Episode a durable browse “current” context.
-_Avoid_: Episode detail page, Current Episode, episode screen
+**Episode Detail**:
+The full-screen stack surface for reviewing an Episode without making that Episode a durable browse “current” context. On phone, primary tap of an Episode presentation opens Episode Detail; it is parallel in chrome to Current Audiobook detail, not a Current Episode.
+_Avoid_: Episode Detail Sheet, Episode detail page, Current Episode, episode screen
 
 **Book Action**:
 A user-invoked command available for an Audiobook Identity from a book presentation, such as Play/Pause, Bookshelves, Favorite, Read/Unread, or Share.
@@ -188,9 +188,21 @@ _Avoid_: Menu item, row action
 The context-specific collection of Book Actions offered from a book presentation, such as a Home Shelf Display or a library list.
 _Avoid_: Book menu, universal menu
 
+**Episode Action**:
+A user-invoked command available for an Episode Identity from an Episode presentation, such as Play/Pause, Download/Remove Download, or Open Podcast.
+_Avoid_: Menu item, row action, Book Action
+
+**Episode Action Set**:
+The context-specific collection of Episode Actions offered from an Episode presentation, such as a Home episode shelf long-press menu or Current Podcast episode row long-press menu.
+_Avoid_: Episode menu, universal menu, Book Action Set
+
 **Book Presentation**:
 A user-facing visual representation of an Audiobook Identity, such as a vertical list row, Home shelf card, or sortable grid tile.
 _Avoid_: Book item, book component
+
+**Episode Presentation**:
+A user-facing visual representation of an Episode Identity, such as a Current Podcast episode row or a Home Continue / Recent / Downloaded episode tile.
+_Avoid_: Episode item, episode card as a domain type
 
 **Active Playback**:
 The playable currently owned by the player for listening — either an audiobook or an Episode, never a Podcast. At most one Active Playback exists at a time.
@@ -495,8 +507,9 @@ _Avoid_: Five minute window, scrubber window
 - **Current Podcast** Episode lists are live server data for that **Podcast**, not part of the **Podcast Series Index**.
 - **Current Podcast** presents **Episode**s in **Podcast Episode Order** by default.
 - Filtering **Episode**s on **Current Podcast** uses the already-loaded list and does not create a separate search context.
-- Reviewing an **Episode** on an **Episode Detail Sheet** does not create a Current Episode browse context.
-- Choosing an **Episode** from **Current Podcast** may start a **Playback Start Attempt** for that **Episode**.
+- Reviewing an **Episode** on **Episode Detail** does not create a Current Episode browse context.
+- On phone, primary tap of an **Episode** presentation opens **Episode Detail**; a **Playback Start Attempt** for that **Episode** is started from Episode Detail or from a long-press Play/Pause action, not from the primary tap.
+- Choosing Play for an **Episode** (from **Episode Detail** or a long-press menu) may start a **Playback Start Attempt** for that **Episode**.
 - A **Player Display** may differ from **Active Playback** during a **Playback Start Attempt**.
 - Player surfaces may show the **Player Display** before it becomes **Active Playback**, but loaded-only player actions still belong to **Active Playback**.
 - A **Playback Start Attempt** may become **Active Playback** only after playable audio is confirmed.
@@ -745,7 +758,7 @@ _Avoid_: Five minute window, scrubber window
 > **Domain expert:** "No. A **Podcast** is the container. Only an **Episode** (or an audiobook) can be **Active Playback**."
 
 > **Dev:** "When the user opens episode info from a list, is that a Current Episode?"
-> **Domain expert:** "No. That is an **Episode Detail Sheet**. Browse current context for shows is **Current Podcast** only."
+> **Domain expert:** "No. That is **Episode Detail**. Browse current context for shows is **Current Podcast** only."
 
 ## Flagged ambiguities
 

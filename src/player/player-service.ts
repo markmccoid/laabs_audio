@@ -22,6 +22,8 @@ import { fetchReconciledUserServerState } from "../query/user-server-state-recon
 import { displayedListeningPositionStore } from "../progress/displayed-listening-position";
 import { syncListeningPosition } from "../progress/listening-position-sync";
 import { chooseResumeResolutionCandidate } from "../progress/resume-resolution";
+import { getEpisodeProgressSyncIntent } from "../podcast/episode-progress-intent-store";
+import { resolveEpisodeResumePositionSeconds } from "../podcast/episode-progress-facade";
 import {
   DEFAULT_BOOK_PLAYBACK_RATE,
   deviceBooksStore,
@@ -32,6 +34,11 @@ import {
   type PendingProgressSync,
   type DownloadTrack,
 } from "../store/device-books-store";
+import {
+  resolveDownloadedEpisodePlayback,
+  resolveStoredEpisodeDownloadTrackUri,
+} from "../store/device-episode-downloads-store";
+import { resolveEpisodePlaybackSource } from "../podcast/episode-download-facade";
 import {
   progressLogStore,
   type ProgressLogSessionKind,
@@ -235,6 +242,7 @@ class PlayerService {
   private beginPlaybackControlIntent(payload: {
     kind: "start" | "play" | "pause";
     libraryItemId: string | null;
+    episodeId?: string | null;
     requestedAudibleState: "playing" | "paused";
   }): PlaybackControlResult {
     const activeIntent = playbackStore.getState().playbackControlIntent;
@@ -271,6 +279,7 @@ class PlayerService {
       id: intentId,
       kind: payload.kind,
       libraryItemId: payload.libraryItemId,
+      episodeId: payload.episodeId ?? null,
       requestedAudibleState: payload.requestedAudibleState,
       startedAt: Date.now(),
     });
@@ -782,6 +791,8 @@ class PlayerService {
   private async startProvisionalStreamedPlayback(payload: {
     libraryItemId: string;
     bookTitle: string | null;
+    secondaryTitle?: string | null;
+    episodeId?: string | null;
     sessionId: string;
     queue: PlaybackQueueItem[];
     durationMs: number;
@@ -832,6 +843,8 @@ class PlayerService {
       playbackStore.getState().actions.commitStartedSession({
         libraryItemId: payload.libraryItemId,
         bookTitle: payload.bookTitle,
+        secondaryTitle: payload.secondaryTitle ?? null,
+        episodeId: payload.episodeId ?? null,
         sessionId: payload.sessionId,
         queue: payload.queue,
         durationMs: payload.durationMs,
@@ -859,7 +872,9 @@ class PlayerService {
           }),
         );
       }
-      this.touchUserServerStateCacheForPlayStart();
+      if (!payload.episodeId) {
+        this.touchUserServerStateCacheForPlayStart();
+      }
       this.logPlaybackResult("started");
     } catch (error) {
       this.playbackStartAttemptId += 1;
@@ -2295,7 +2310,7 @@ class PlayerService {
     });
     if (accepted.status !== "accepted") return accepted;
 
-    if (state.libraryItemId === libraryItemId && state.queue.length > 0) {
+    if (state.libraryItemId === libraryItemId && !state.episodeId && state.queue.length > 0) {
       if (state.playbackState === "playing") {
         this.finishPlaybackControlIntent(accepted.intentId);
         return { status: "already_satisfied", state: "playing" };
@@ -2324,6 +2339,253 @@ class PlayerService {
     }
   }
 
+  async requestStartEpisode(
+    libraryItemId: string,
+    episodeId: string,
+    options?: { episodeTitle?: string | null; podcastTitle?: string | null },
+  ): Promise<PlaybackControlResult> {
+    const state = playbackStore.getState();
+    const accepted = this.beginPlaybackControlIntent({
+      kind: "start",
+      libraryItemId,
+      episodeId,
+      requestedAudibleState: "playing",
+    });
+    if (accepted.status !== "accepted") return accepted;
+
+    if (
+      state.libraryItemId === libraryItemId &&
+      state.episodeId === episodeId &&
+      state.queue.length > 0
+    ) {
+      if (state.playbackState === "playing") {
+        this.finishPlaybackControlIntent(accepted.intentId);
+        return { status: "already_satisfied", state: "playing" };
+      }
+      try {
+        await this.performPlay();
+        return accepted;
+      } finally {
+        this.finishPlaybackControlIntent(accepted.intentId);
+      }
+    }
+
+    try {
+      await this.loadEpisode(libraryItemId, episodeId, {
+        autoPlay: true,
+        episodeTitle: options?.episodeTitle,
+        podcastTitle: options?.podcastTitle,
+      });
+      return accepted;
+    } finally {
+      this.finishPlaybackControlIntent(accepted.intentId);
+    }
+  }
+
+  async loadEpisode(
+    libraryItemId: string,
+    episodeId: string,
+    options?: {
+      autoPlay?: boolean;
+      suppressErrorState?: boolean;
+      episodeTitle?: string | null;
+      podcastTitle?: string | null;
+    },
+    internalOptions?: { preferDownloaded?: boolean },
+  ) {
+    const suppressErrorState = options?.suppressErrorState ?? false;
+    const preferDownloaded = internalOptions?.preferDownloaded ?? true;
+    let tornDownExistingPlayback = false;
+    let attemptedDownloadedAudio = false;
+
+    try {
+      const downloadedEpisode =
+        preferDownloaded
+          ? resolveDownloadedEpisodePlayback({ libraryItemId, episodeId })
+          : null;
+      const playbackSource = resolveEpisodePlaybackSource({
+        hasPlayableLocalDownload: Boolean(downloadedEpisode),
+        canStream: this.canUseServer(),
+      });
+      if (playbackSource === "unavailable") {
+        throw new StreamedPlaybackStartFailureError(
+          "Audiobookshelf is unreachable. Only downloaded Episodes can play.",
+        );
+      }
+
+      attemptedDownloadedAudio = playbackSource === "local";
+      let streamedSession: Awaited<ReturnType<typeof playbackApi.getEpisodePlayInfo>> | null =
+        null;
+      if (playbackSource === "stream") {
+        streamedSession = await withPlaybackStartTimeout(
+          playbackApi.getEpisodePlayInfo(libraryItemId, episodeId),
+        );
+      }
+
+      const stateBeforeTransition = playbackStore.getState();
+      if (
+        stateBeforeTransition.queue.length > 0 &&
+        (stateBeforeTransition.libraryItemId !== libraryItemId ||
+          stateBeforeTransition.episodeId !== episodeId)
+      ) {
+        await this.closeActiveBookForTransition();
+      }
+      tornDownExistingPlayback = true;
+
+      playbackStore.getState().actions.setPlaybackState("loading");
+      playbackStore.getState().actions.setError(null);
+
+      // Episodes do not offer chapter list / CarPlay Up Next (ADR 0028).
+      const chapterIndex: ReturnType<typeof buildChapterIndex> = [];
+      let episodeTitle = options?.episodeTitle?.trim() || "Episode";
+      let podcastTitle = options?.podcastTitle?.trim() || "Podcast";
+      let queue: ReturnType<typeof buildPlaybackQueue>["queue"] = [];
+      let durationMs = 0;
+      let resolvedSessionId = LOCAL_SESSION_ID;
+
+      if (downloadedEpisode) {
+        episodeTitle =
+          options?.episodeTitle?.trim() || downloadedEpisode.episodeTitle || episodeTitle;
+        podcastTitle =
+          options?.podcastTitle?.trim() || downloadedEpisode.podcastTitle || podcastTitle;
+        durationMs = secondsToMs(downloadedEpisode.durationSeconds);
+        const trackUri =
+          resolveStoredEpisodeDownloadTrackUri(downloadedEpisode.track) ??
+          downloadedEpisode.trackUri;
+        queue = [
+          {
+            id: `${libraryItemId}-${episodeId}-download-0`,
+            libraryItemId,
+            sessionId: LOCAL_SESSION_ID,
+            trackIndex: 0,
+            title: episodeTitle,
+            author: podcastTitle,
+            artworkUri: downloadedEpisode.artworkUri ?? undefined,
+            durationMs,
+            startOffsetMs: 0,
+            source: {
+              uri: trackUri,
+              mimeType: downloadedEpisode.mimeType ?? undefined,
+              isLocal: true,
+            },
+          },
+        ];
+      } else if (streamedSession) {
+        episodeTitle =
+          options?.episodeTitle?.trim() ||
+          streamedSession.displayTitle ||
+          episodeTitle;
+        podcastTitle =
+          options?.podcastTitle?.trim() ||
+          streamedSession.displayAuthor ||
+          streamedSession.libraryItem.media.metadata.title ||
+          podcastTitle;
+        const builtQueue = buildPlaybackQueue(streamedSession);
+        queue = builtQueue.queue;
+        durationMs = builtQueue.durationMs;
+        resolvedSessionId = streamedSession.id;
+      }
+
+      const localIntent = getEpisodeProgressSyncIntent(libraryItemId, episodeId);
+      let serverCurrentTimeSeconds: number | null = null;
+      let serverIsFinished = false;
+      if (this.canUseServer()) {
+        try {
+          const serverProgress = await meApi.getEpisodeProgress(libraryItemId, episodeId);
+          serverCurrentTimeSeconds = serverProgress.currentTime;
+          serverIsFinished = serverProgress.isFinished;
+        } catch {
+          // Offline / missing progress — Resume Resolution falls back to local intent.
+        }
+      }
+
+      const resumeSeconds = resolveEpisodeResumePositionSeconds({
+        localIntent,
+        serverCurrentTimeSeconds,
+        serverIsFinished,
+      });
+      const resumePositionMs = secondsToMs(resumeSeconds);
+      const storedBookRate = this.resolveStoredBookRate(
+        this.buildCandidateIds(libraryItemId),
+      );
+
+      displayedListeningPositionStore.getState().actions.setResumeResolution({
+        libraryItemId,
+        positionMs: resumePositionMs,
+        durationMs,
+      });
+
+      this.listenedMs = 0;
+      this.lastSyncAttemptAt = 0;
+      this.lastSyncAt = 0;
+      this.lastTrackedPositionMs = 0;
+
+      if (playbackSource === "stream" && options?.autoPlay) {
+        await this.startProvisionalStreamedPlayback({
+          libraryItemId,
+          bookTitle: episodeTitle,
+          secondaryTitle: podcastTitle,
+          episodeId,
+          sessionId: resolvedSessionId,
+          queue,
+          durationMs,
+          chapterIndex,
+          resumePositionMs,
+          rate: storedBookRate,
+        });
+        return;
+      }
+
+      playbackStore.getState().actions.setSession({
+        libraryItemId,
+        bookTitle: episodeTitle,
+        secondaryTitle: podcastTitle,
+        episodeId,
+        sessionId: resolvedSessionId,
+        queue,
+        durationMs,
+        chapterIndex,
+      });
+      playbackStore.getState().actions.setRate(storedBookRate);
+
+      const targetTrack = findTrackForPosition(queue, resumePositionMs) ?? queue[0];
+      const targetIndex = queue.indexOf(targetTrack);
+      const trackPositionMs = Math.max(0, resumePositionMs - targetTrack.startOffsetMs);
+      await this.loadTrack(targetIndex, { initialPositionMs: trackPositionMs });
+
+      if (options?.autoPlay) {
+        await this.performPlay();
+        if (attemptedDownloadedAudio) {
+          const postPlayState = playbackStore.getState();
+          if (postPlayState.playbackState !== "playing" && this.canUseServer()) {
+            await this.loadEpisode(libraryItemId, episodeId, options, {
+              preferDownloaded: false,
+            });
+            return;
+          }
+        }
+      } else {
+        playbackStore.getState().actions.setPlaybackState("ready");
+      }
+    } catch (error) {
+      if (!tornDownExistingPlayback) {
+        if (suppressErrorState) return;
+        throw error;
+      }
+      if (suppressErrorState) {
+        playbackStore.getState().actions.resetAfterFailedStart({
+          libraryItemId,
+          bookTitle: options?.episodeTitle ?? null,
+          positionMs: 0,
+          rate: 1,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      throw error;
+    }
+  }
+
   async requestPlay(): Promise<PlaybackControlResult> {
     const state = playbackStore.getState();
     const accepted = this.beginPlaybackControlIntent({
@@ -2339,7 +2601,9 @@ class PlayerService {
 
     try {
       if (!state.queue.length) {
-        if (state.libraryItemId) {
+        if (state.libraryItemId && state.episodeId) {
+          await this.loadEpisode(state.libraryItemId, state.episodeId, { autoPlay: true });
+        } else if (state.libraryItemId) {
           await this.loadBook(state.libraryItemId, { autoPlay: true });
         }
       } else {
@@ -2500,7 +2764,11 @@ class PlayerService {
       closeStreamSession: true,
       forceDirectProgressUpdate: true,
       intentKind: "mark_finished",
-      updateLocalProgress: (progress) => this.updateUserServerStateCache(progress),
+      updateLocalProgress: (progress) => {
+        // Episode Listening Position is durable on Touched Episode rows — never book maps.
+        if (state.episodeId) return;
+        this.updateUserServerStateCache(progress);
+      },
       setLastSyncAt: (timestamp) => {
         this.lastSyncAt = timestamp;
         playbackStore.getState().actions.setLastSyncAt(timestamp);
@@ -3439,7 +3707,11 @@ class PlayerService {
       sessionKind: this.resolveSessionKind(state.sessionId),
       closeStreamSession: options?.closeStreamSession,
       forceDirectProgressUpdate: options?.forceDirectProgressUpdate,
-      updateLocalProgress: (progress) => this.updateUserServerStateCache(progress),
+      updateLocalProgress: (progress) => {
+        // Episode Listening Position is durable on Touched Episode rows — never book maps.
+        if (state.episodeId) return;
+        this.updateUserServerStateCache(progress);
+      },
       setLastSyncAt: (timestamp) => {
         this.lastSyncAt = timestamp;
         playbackStore.getState().actions.setLastSyncAt(timestamp);

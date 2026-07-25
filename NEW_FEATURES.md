@@ -4,6 +4,69 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Complete the podcast-slice hardening pass without changing Book behavior.
+  Tester focus: run the Book activation, browsing, playback, background sync, and Episode-to-Book handoff checks alongside podcast activation, offline playback, Search, downloads, and reconnect progress tests.
+
+- `2026-07-25` `pending` - Route Active Libraries through one safe Book, Podcast, or unresolved experience.
+  Tester focus: switch and restore both Library types, confirming Home, Search, Lists, and details show only the matching experience; during unresolved/failed podcast activation, confirm no Book UI or catalog refresh appears.
+
+- `2026-07-25` `pending` - Require remembered podcast Libraries to finish activation before browsing.
+  Tester focus: relaunch into a remembered podcast Library and confirm its Podcast Series Index prepares before Home appears; cancel a failed offline activation and verify no book catalog is shown, while remembered book Libraries still open immediately.
+
+- `2026-07-25` `pending` - Remember the Active Library media type with each sign-in.
+  Tester focus: restart the app and switch among remembered sign-ins, confirming book Libraries still open as books and podcast Libraries retain their podcast browsing mode.
+
+- `2026-07-25` `pending` - Preserve Episode intent library scope and protect its SQLite mirror from sync races.
+  Tester focus: switch or reconnect while Episode progress is being recorded and confirm the newest Episode position remains queued with its originating Library scope rather than being removed by an older sync completion.
+
+- `2026-07-25` `pending` - Retry durable Episode progress after startup or reconnect.
+  Tester focus: record Episode progress offline, restart or reconnect, and confirm it reaches Audiobookshelf once; a newer local update must remain queued during an older sync, transient failures must retry later, and deleted server Episodes must be retained locally as unmatched.
+
+- `2026-07-25` `pending` - Keep background Episode progress out of the audiobook sync queue.
+  Tester focus: play or pause an Episode, background the app, and confirm Episode progress resumes/syncs independently; repeat with an audiobook and confirm its existing background progress behavior is unchanged.
+
+- `2026-07-25` `pending` - Give Episodes dedicated main-player controls and actions.
+  Tester focus: play a downloaded Episode offline and confirm main-player play/pause and skip controls work; confirm Episode playback shows only Sleep Timer and Rate actions, while audiobook chapter controls and bookmark actions remain unchanged.
+
+- `2026-07-25` `pending` - Keep Book identity authoritative when playback starts after an Episode.
+  Tester focus: play a Podcast Episode, then start an audiobook and confirm the main player immediately switches to Book artwork/metadata while loading instead of retaining the prior Episode identity.
+
+- `2026-07-25` `pending` - Persist lean expanded Podcast details for offline restarts.
+  Tester focus: open a Podcast while online, fully close the app, relaunch offline, and verify its header and Episode list remain browsable without duplicating the expanded server media payload in the cache.
+
+- `2026-07-25` `pending` - Scope the Podcast Downloaded shelf to its Active Library.
+  Tester focus: with the same sign-in and two podcast Libraries, download an episode in each and verify each Home Downloaded shelf shows only its own Library's episode; existing legacy downloads remain directly playable but stay off Library shelves.
+
+- `2026-07-25` `pending` - Keep Podcast Search on podcast-native show presentations.
+  Tester focus: in a podcast Library, search in list and grid modes and verify tapping a result only opens Current Podcast; long-press must not expose audiobook Play, Favorite, Finished, Bookshelves, Share, or download actions.
+
+- `2026-07-25` `pending` - Add Book Library regression contracts before podcast hardening.
+  Tester focus: no intended behavior change; verify audiobook queue metadata and Book progress synchronization continue using the existing Book-only paths while podcast isolation fixes are integrated.
+
+- `2026-07-25` `32c8274` - Stretch Current Podcast episode rows to full list width.
+  Tester focus: open a Current Podcast show and confirm each episode row spans the content width (title + compact download control), with long-press actions still available.
+
+- `2026-07-25` `a8ce925` - Episode Detail Book-shaped UI nested in tab stacks (mini player stays visible).
+  Tester focus: open Episode Detail from Home Continue/Recent/Downloaded or Current Podcast and confirm Book-like layout (blurred cover, large artwork, download rail → sheet, Book-style play button, HTML description); mini player remains above Episode Detail; Open Podcast stays in the toolbar menu; offline shows known metadata and plays downloaded episodes only.
+
+- `2026-07-24` `883f33e` - Episode Detail stack presentation and phone Episode Action Set.
+  Tester focus: tap a Current Podcast episode row or a Home Continue / Recent / Downloaded tile and confirm full-screen Episode Detail opens (not a sheet); Play/Pause, download, and Open Podcast work on Detail; long-press the same presentations for Play/Pause, Download/Remove Download, and Open Podcast (Open Podcast omitted on Current Podcast); confirm info and trailing play glyphs are gone; CarPlay episode taps still play.
+
+- `2026-07-24` `4b568fa` - Episode downloads and Home Downloaded shelf.
+  Tester focus: from Current Podcast, download an episode via the row Download control and via the info Episode Detail Sheet; confirm the row shows Downloaded, Home order is Continue → Recent → Podcasts → Downloaded, and playing a downloaded episode works offline from the Downloaded shelf (prefers local file online too); audiobook downloads/maps stay unchanged.
+
+- `2026-07-24` `b6fb1ca` - Recent Episodes Home shelf from ABS recent-episodes with offline snapshot.
+  Tester focus: on a podcast Library Home, verify Continue → Recent Episodes → Podcasts order; Recent loads after Home is already browsable; the same episode may appear in Continue and Recent; pull-to-refresh updates Recent (and Continue overlays from that feed) plus a stale Podcasts index without touching audiobook catalog refresh; go offline after a successful load and confirm Recent still shows the last snapshot; while an episode plays, Home tiles for that episode reflect live position.
+
+- `2026-07-24` `pending` - Stream Episode play with Episode-scoped Progress Sync Intent and Continue Listening.
+  Tester focus: from Current Podcast tap an episode and verify streamed playback starts with episode title + podcast secondary on mini/main player; pause/seek creates local progress that syncs; Home Continue Listening appears for unfinished episodes (newest first) and hides when empty; chapter UI / CarPlay Up Next stay empty for episodes; audiobook play/progress unchanged.
+
+- `2026-07-23` `pending` - Browse Podcasts from the series index on Home, Lists, and Search; open Current Podcast with live episodes, order, reverse, and title filter.
+  Tester focus: activate a podcast Library and verify Home shows a Podcasts shelf (newest-added first); Lists browses shows (not Series/Collections/Playlists); Search finds shows by title/author with no book filter rail; opening a show loads episodes ordered by podcast type, reverse toggle and title filter work, and offline keeps the header while hiding episodes until the show was opened online; audiobook Libraries keep prior Home/Lists/Search behavior.
+
+- `2026-07-23` `pending` - Podcast Library Activation waits for Podcast Series Index readiness (empty OK; offline uses remembered index).
+  Tester focus: switch to a podcast Library online and confirm Activation completes into Home; try offline with no prior podcast index and confirm Activation fails without switching; with a previously loaded podcast Library offline, confirm Activation still succeeds; verify audiobook Library Activation/Search still work and podcast Activation does not run book catalog ingest.
+
 - `2026-07-23` `pending` - Fix CarPlay chapter seeking and replace the Speed picker with a compact cycling playback-rate button.
   Tester focus: start a book from CarPlay, select a different chapter and verify playback moves there; then repeatedly tap the Now Playing rate button and verify it cycles `1x` → `1.2x` → `1.5x` → `1.7x` → `2x` → `1x`, remains readable, preserves paused playback, and never displays `0x`.
 

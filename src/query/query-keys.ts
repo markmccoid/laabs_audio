@@ -110,6 +110,66 @@ export const queryKeys = {
     userKey: string | null | undefined,
     itemId: string | null | undefined,
   ) => ["user", userKey ?? null, "itemDetails", itemId ?? null] as const,
+  podcastItemDetails: (
+    userKey: string | null | undefined,
+    itemId: string | null | undefined,
+  ) => ["user", userKey ?? null, "podcastItemDetails", itemId ?? null] as const,
+  podcastSeriesIndex: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+    sort: "addedAtDesc" | "titleAsc",
+  ) =>
+    [
+      "sqlite",
+      "catalog",
+      "user",
+      userKey ?? null,
+      "library",
+      libraryId ?? null,
+      "podcastSeriesIndex",
+      sort,
+    ] as const,
+  podcastSeriesSearchHits: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+    query: string,
+  ) =>
+    [
+      "sqlite",
+      "catalog",
+      "user",
+      userKey ?? null,
+      "library",
+      libraryId ?? null,
+      "podcastSeriesSearchHits",
+      query,
+    ] as const,
+  podcastContinueEpisodes: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+  ) =>
+    [
+      "sqlite",
+      "overlay",
+      "user",
+      userKey ?? null,
+      "library",
+      libraryId ?? null,
+      "podcastContinueEpisodes",
+    ] as const,
+  podcastRecentEpisodes: (
+    userKey: string | null | undefined,
+    libraryId: string | null | undefined,
+  ) =>
+    [
+      "sqlite",
+      "overlay",
+      "user",
+      userKey ?? null,
+      "library",
+      libraryId ?? null,
+      "podcastRecentEpisodes",
+    ] as const,
   seriesProgress: (seriesId: string | null | undefined) =>
     ["series", seriesId ?? null, "progress"] as const,
 };

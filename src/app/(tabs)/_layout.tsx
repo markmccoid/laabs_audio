@@ -1,6 +1,6 @@
 import { MiniPlayerBottomAccessory } from "@/components/main-player/mini-player-bottom-accessory";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
-import { playerService, usePlaybackStore, usePlayerDisplayAudiobook } from "@/player";
+import { playerService, usePlaybackStore, usePlayerDisplayMedia } from "@/player";
 import { resolveStoredDownloadCoverUri, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
@@ -8,19 +8,29 @@ import { NativeTabs } from "expo-router/unstable-native-tabs";
 export default function TabLayout() {
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const playbackControlIntent = usePlaybackStore((state) => state.playbackControlIntent);
-  const playerDisplayAudiobook = usePlayerDisplayAudiobook();
-  const miniPlayerLibraryItemId = playerDisplayAudiobook.displayLibraryItemId;
-  const isMiniPlayerLoading = playerDisplayAudiobook.isPlaybackStartAttempt;
+  const playerDisplayMedia = usePlayerDisplayMedia();
+  const miniPlayerLibraryItemId = playerDisplayMedia.displayLibraryItemId;
+  const isMiniPlayerLoading = playerDisplayMedia.isPlaybackStartAttempt;
+  const isEpisodePlayback = playerDisplayMedia.isEpisodePlayback;
   const localCoverUri = useDeviceBooksStore((state) =>
-    miniPlayerLibraryItemId
+    !isEpisodePlayback && miniPlayerLibraryItemId
       ? resolveStoredDownloadCoverUri(state.downloadedBookData[miniPlayerLibraryItemId])
       : null,
   );
-  const { data: currentBook } = useGetItemDetails(miniPlayerLibraryItemId || undefined);
+  const { data: currentBook } = useGetItemDetails(
+    isEpisodePlayback ? undefined : miniPlayerLibraryItemId || undefined,
+  );
   const themeColors = useThemeColors();
   const isPlaying = playbackState === "playing";
-  const hasLoadedBook = playerDisplayAudiobook.hasLoadedBook;
-  const shouldShowMiniPlayer = hasLoadedBook || playerDisplayAudiobook.isPlaybackStartAttempt;
+  const hasLoadedMedia = playerDisplayMedia.hasLoadedMedia;
+  const shouldShowMiniPlayer = hasLoadedMedia || playerDisplayMedia.isPlaybackStartAttempt;
+  const title = isEpisodePlayback
+    ? (playerDisplayMedia.displayTitle ?? "Episode")
+    : currentBook?.title;
+  const author = isEpisodePlayback
+    ? (playerDisplayMedia.displaySecondaryTitle ?? "Podcast")
+    : currentBook?.author;
+  const coverUri = isEpisodePlayback ? undefined : currentBook?.coverFull;
   const handleToggle = async () => {
     if (playbackControlIntent) return;
     if (isPlaying) {
@@ -33,7 +43,6 @@ export default function TabLayout() {
   return (
     <NativeTabs
       minimizeBehavior="onScrollDown"
-      // disableTransparentOnScrollEdge={true}
       backgroundColor={themeColors.surface}
       tintColor={themeColors.accent}
       iconColor={{ default: themeColors.textMuted, selected: themeColors.accent }}
@@ -61,15 +70,15 @@ export default function TabLayout() {
       {shouldShowMiniPlayer && (
         <NativeTabs.BottomAccessory>
           <MiniPlayerBottomAccessory
-            author={currentBook?.author}
-            coverUri={currentBook?.coverFull}
+            author={author}
+            coverUri={coverUri}
             isLoading={isMiniPlayerLoading}
             isPlaying={isPlaying}
             libraryItemId={miniPlayerLibraryItemId}
             localCoverUri={localCoverUri}
             playbackControlIntent={playbackControlIntent}
             themeColors={themeColors}
-            title={currentBook?.title}
+            title={title}
             onToggle={handleToggle}
           />
         </NativeTabs.BottomAccessory>

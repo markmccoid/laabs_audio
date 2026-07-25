@@ -2,7 +2,7 @@
 
 Architecture handoff inventory from [Reuse inventory for book vs podcast surfaces](https://github.com/markmccoid/laabs_audio/issues/13). Not an implementation plan — what to share vs fork.
 
-Related ADRs: 0024 (storage), 0025 (Activation), 0026 (Home), 0027 (show detail), 0028 (CarPlay).
+Related ADRs: 0024 (storage), 0025 (Activation), 0026 (Home), 0027 (show detail), 0028 (CarPlay), 0031 (Episode Detail).
 
 ## Reuse as-is (shell)
 
@@ -23,7 +23,7 @@ Related ADRs: 0024 (storage), 0025 (Activation), 0026 (Home), 0027 (show detail)
 | Lists tab | Series / Collections / Playlists | Podcast Series Index browser → Current Podcast |
 | Search data | Book Search Expression, facets | Series-index FTS (title/author); hide book facets for v1 |
 | Search chrome | Tab + search field + results shell | Reuse tab chrome; swap data path |
-| Detail | `BookContainer` / book routes | Current Podcast + Episode Detail Sheet (ADR 0027) |
+| Detail | `BookContainer` / book routes | Current Podcast + Episode Detail stack container (ADR 0027, 0031) |
 | SQLite catalog / progress | `library_catalog_*`, book progress tables | Parallel series-index + Touched Episode tables/modules (ADR 0024) |
 | CarPlay publish | Book shelves from book Home | Parallel podcast shelves; no Chapters Up Next for Episodes (ADR 0028) |
 | Book-only sheets | Bookshelves, book series, bookmarks, clips | Not on podcast browse path |

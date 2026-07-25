@@ -10,7 +10,6 @@ import {
   type RememberedSessionRecord,
 } from "./auth-storage";
 import { getJwtExpiry, isTokenExpired } from "./auth-token";
-import { recordTimingLog } from "../data/sqlite/timing-logger";
 import { setAuthErrorHandler } from "../api/abs-client";
 import { setAuthProvider } from "../api/auth-fetch";
 import type { ServerConnectionStatus } from "./server-connection";
@@ -49,13 +48,24 @@ export type AuthState = {
   activeLibraryId: string | null;
   activeLibraryName: string | null;
   activeLibraryUserKey: string | null;
+  /** ABS library mediaType for the Active Library (`book` | `podcast`). */
+  activeLibraryMediaType: string | null;
+  /**
+   * True after media-specific activation has completed. Remembered podcast
+   * Libraries deliberately re-enter as unready until their index is usable.
+   */
+  activeLibraryReady: boolean;
   actions: {
     hydrateFromStorage: (initialOfflineContent?: boolean) => Promise<void>;
     setOnlineStatus: (isOnline: boolean) => void;
     setServerConnectionStatus: (status: ServerConnectionStatus) => void;
     setHasOfflineContent: (hasOfflineContent: boolean) => void;
     setLoginRequired: (required: boolean, message?: string | null) => void;
-    setActiveLibrary: (library: { id: string; name: string }) => void;
+    setActiveLibrary: (library: {
+      id: string;
+      name: string;
+      mediaType?: string | null;
+    }) => void;
     clearActiveLibrary: () => void;
     commitActiveSession: (
       sessionKey: string,
@@ -115,6 +125,8 @@ export const authStore = createStore<AuthState>()(
       activeLibraryId: null,
       activeLibraryName: null,
       activeLibraryUserKey: null,
+      activeLibraryMediaType: null,
+      activeLibraryReady: false,
       actions: {
         hydrateFromStorage: async (initialOfflineContent) => {
           if (hydratePromise) return hydratePromise;
@@ -153,6 +165,8 @@ export const authStore = createStore<AuthState>()(
             userKey && get().activeLibraryUserKey === userKey ? get().activeLibraryId : null;
           const persistedActiveLibraryName =
             userKey && get().activeLibraryUserKey === userKey ? get().activeLibraryName : null;
+          const persistedActiveLibraryMediaType =
+            userKey && get().activeLibraryUserKey === userKey ? get().activeLibraryMediaType : null;
           if (
             activeSession &&
             persistedActiveLibraryId &&
@@ -162,14 +176,20 @@ export const authStore = createStore<AuthState>()(
             authStorage.updateSession(activeSession.key, {
               activeLibraryId: persistedActiveLibraryId,
               activeLibraryName: persistedActiveLibraryName,
+              activeLibraryMediaType: persistedActiveLibraryMediaType,
             });
             activeSession.activeLibraryId = persistedActiveLibraryId;
             activeSession.activeLibraryName = persistedActiveLibraryName;
+            activeSession.activeLibraryMediaType = persistedActiveLibraryMediaType;
           }
           const hasMatchingLibrary =
             Boolean(userKey) &&
             (get().activeLibraryUserKey === userKey ||
               Boolean(activeSession?.activeLibraryId && activeSession?.activeLibraryName));
+          const hydratedActiveLibraryMediaType =
+            activeSession?.activeLibraryMediaType ??
+            persistedActiveLibraryMediaType ??
+            get().activeLibraryMediaType;
 
           log("hydrate:computed", {
             hasStoredCredentials,
@@ -202,6 +222,13 @@ export const authStore = createStore<AuthState>()(
               ? (activeSession?.activeLibraryName ?? state.activeLibraryName)
               : null,
             activeLibraryUserKey: hasMatchingLibrary ? userKey : null,
+            activeLibraryMediaType: hasMatchingLibrary
+              ? hydratedActiveLibraryMediaType
+              : null,
+            activeLibraryReady: Boolean(
+              hasMatchingLibrary &&
+                hydratedActiveLibraryMediaType?.trim().toLowerCase() === "book",
+            ),
           }));
 
           log("hydrate:done", {
@@ -242,6 +269,8 @@ export const authStore = createStore<AuthState>()(
               activeLibraryId: null,
               activeLibraryName: null,
               activeLibraryUserKey: null,
+              activeLibraryMediaType: null,
+              activeLibraryReady: false,
             });
             if (isInitialHydrate) {
               logStartupDuration("auth hydrate failed", hydrateStartedAtMs, {
@@ -303,11 +332,13 @@ export const authStore = createStore<AuthState>()(
         setActiveLibrary: (library) => {
           const trimmedId = library.id.trim();
           const trimmedName = library.name.trim();
+          const mediaType = library.mediaType?.trim() || null;
           const userKey = getUserKey(get().storedUserId);
           const activeSessionKey = get().activeSessionKey;
           log("setActiveLibrary", {
             id: trimmedId,
             name: trimmedName,
+            mediaType,
             userKey,
             previousId: get().activeLibraryId,
             previousName: get().activeLibraryName,
@@ -316,6 +347,7 @@ export const authStore = createStore<AuthState>()(
             authStorage.updateSession(activeSessionKey, {
               activeLibraryId: trimmedId,
               activeLibraryName: trimmedName,
+              activeLibraryMediaType: mediaType,
             });
           }
           set({
@@ -323,6 +355,8 @@ export const authStore = createStore<AuthState>()(
             activeLibraryId: trimmedId,
             activeLibraryName: trimmedName,
             activeLibraryUserKey: userKey,
+            activeLibraryMediaType: mediaType,
+            activeLibraryReady: true,
           });
         },
 
@@ -331,6 +365,8 @@ export const authStore = createStore<AuthState>()(
             activeLibraryId: null,
             activeLibraryName: null,
             activeLibraryUserKey: null,
+            activeLibraryMediaType: null,
+            activeLibraryReady: false,
           });
         },
 
@@ -365,6 +401,11 @@ export const authStore = createStore<AuthState>()(
             activeLibraryId: session.activeLibraryId ?? null,
             activeLibraryName: session.activeLibraryName ?? null,
             activeLibraryUserKey: userKey,
+            activeLibraryMediaType: session.activeLibraryMediaType ?? null,
+            activeLibraryReady: Boolean(
+              session.activeLibraryId &&
+                session.activeLibraryMediaType?.trim().toLowerCase() === "book",
+            ),
           }));
           log("commitActiveSession:done", { sessionKey });
         },
@@ -424,6 +465,10 @@ export const authStore = createStore<AuthState>()(
               state.activeSessionKey === sessionKey ? null : state.activeLibraryName,
             activeLibraryUserKey:
               state.activeSessionKey === sessionKey ? null : state.activeLibraryUserKey,
+            activeLibraryMediaType:
+              state.activeSessionKey === sessionKey ? null : state.activeLibraryMediaType,
+            activeLibraryReady:
+              state.activeSessionKey === sessionKey ? false : state.activeLibraryReady,
             status:
               state.activeSessionKey === sessionKey
                 ? computeEntryStatus(false, state.hasOfflineContent)
@@ -619,6 +664,8 @@ export const authStore = createStore<AuthState>()(
             activeLibraryId: null,
             activeLibraryName: null,
             activeLibraryUserKey: null,
+            activeLibraryMediaType: null,
+            activeLibraryReady: false,
             status: computeEntryStatus(false, current.hasOfflineContent),
             lastAuthError: null,
             loginRequired: false,
@@ -634,6 +681,7 @@ export const authStore = createStore<AuthState>()(
         activeLibraryId: state.activeLibraryId,
         activeLibraryName: state.activeLibraryName,
         activeLibraryUserKey: state.activeLibraryUserKey,
+        activeLibraryMediaType: state.activeLibraryMediaType,
         storedUserId: state.storedUserId,
       }),
     },
@@ -668,7 +716,7 @@ export const selectAccessMode = (state: AuthState): AccessMode => {
   if (state.status === "hydrating") return "hydrating";
 
   if (state.status === "authenticated") {
-    return state.activeLibraryId ? "serverBrowsing" : "serverSetup";
+    return state.activeLibraryId && state.activeLibraryReady ? "serverBrowsing" : "serverSetup";
   }
 
   if (state.status === "offlineOnly") {

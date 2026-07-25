@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useActiveLibraryExperience } from "@/auth/active-library-experience";
 import { useAuthStore } from "@/auth/auth-store";
 import { queryClient } from "@/query/query-client";
 import { sqliteRefreshCoordinator } from "./refresh-coordinator";
@@ -8,6 +9,7 @@ export const useSqliteActiveLibraryRefresh = () => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const experience = useActiveLibraryExperience();
 
   useEffect(() => {
     void sqliteSearchRepository.initialize().catch((error) => {
@@ -16,7 +18,14 @@ export const useSqliteActiveLibraryRefresh = () => {
   }, []);
 
   useEffect(() => {
-    if (status !== "authenticated" || !activeLibraryUserKey || !activeLibraryId) return;
+    if (
+      status !== "authenticated" ||
+      experience !== "book" ||
+      !activeLibraryUserKey ||
+      !activeLibraryId
+    ) {
+      return;
+    }
 
     void sqliteRefreshCoordinator
       .refreshActiveLibrary(
@@ -26,5 +35,5 @@ export const useSqliteActiveLibraryRefresh = () => {
       .catch((error) => {
         console.warn("[sqlite] active library refresh failed", error);
       });
-  }, [activeLibraryId, activeLibraryUserKey, status]);
+  }, [activeLibraryId, activeLibraryUserKey, experience, status]);
 };
