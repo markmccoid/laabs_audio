@@ -86,7 +86,7 @@ export const clearEpisodeProgressSyncIntent = (payload: {
 }) => {
   const userKey = payload.userKey ?? authStore.getState().activeLibraryUserKey;
   if (!userKey) return;
-  episodeProgressStore
+  const didClear = episodeProgressStore
     .getState()
     .actions.clearIntent(
       userKey,
@@ -94,11 +94,13 @@ export const clearEpisodeProgressSyncIntent = (payload: {
       payload.episodeId,
       payload.syncedThroughUpdatedAt,
     );
-  void deleteEpisodePendingProgressIntent(
-    userKey,
-    payload.libraryItemId,
-    payload.episodeId,
-  );
+  if (didClear) {
+    void deleteEpisodePendingProgressIntent(
+      userKey,
+      payload.libraryItemId,
+      payload.episodeId,
+    );
+  }
 };
 
 export const getEpisodeProgressSyncIntent = (
@@ -111,6 +113,11 @@ export const getEpisodeProgressSyncIntent = (
   return episodeProgressStore.getState().actions.getIntent(resolved, libraryItemId, episodeId);
 };
 
+export const listEpisodeProgressSyncIntents = (
+  userKey: string,
+): EpisodeProgressSyncIntentRecord[] =>
+  Object.values(episodeProgressStore.getState().pendingByUser[userKey] ?? {});
+
 export const markEpisodeProgressSyncUnmatched = (payload: {
   libraryItemId: string;
   episodeId: string;
@@ -121,4 +128,10 @@ export const markEpisodeProgressSyncUnmatched = (payload: {
   episodeProgressStore
     .getState()
     .actions.markUnmatched(userKey, payload.libraryItemId, payload.episodeId);
+  const unmatched = episodeProgressStore
+    .getState()
+    .actions.getIntent(userKey, payload.libraryItemId, payload.episodeId);
+  if (unmatched) {
+    void upsertEpisodePendingProgressIntent(userKey, unmatched);
+  }
 };

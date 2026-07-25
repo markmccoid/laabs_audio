@@ -4,6 +4,18 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Retry durable Episode progress after startup or reconnect.
+  Tester focus: record Episode progress offline, restart or reconnect, and confirm it reaches Audiobookshelf once; a newer local update must remain queued during an older sync, transient failures must retry later, and deleted server Episodes must be retained locally as unmatched.
+
+- `2026-07-25` `pending` - Keep background Episode progress out of the audiobook sync queue.
+  Tester focus: play or pause an Episode, background the app, and confirm Episode progress resumes/syncs independently; repeat with an audiobook and confirm its existing background progress behavior is unchanged.
+
+- `2026-07-25` `pending` - Give Episodes dedicated main-player controls and actions.
+  Tester focus: play a downloaded Episode offline and confirm main-player play/pause and skip controls work; confirm Episode playback shows only Sleep Timer and Rate actions, while audiobook chapter controls and bookmark actions remain unchanged.
+
+- `2026-07-25` `pending` - Keep Book identity authoritative when playback starts after an Episode.
+  Tester focus: play a Podcast Episode, then start an audiobook and confirm the main player immediately switches to Book artwork/metadata while loading instead of retaining the prior Episode identity.
+
 - `2026-07-25` `pending` - Persist lean expanded Podcast details for offline restarts.
   Tester focus: open a Podcast while online, fully close the app, relaunch offline, and verify its header and Episode list remain browsable without duplicating the expanded server media payload in the cache.
 

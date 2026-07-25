@@ -3,13 +3,16 @@ import { canUseAudiobookshelfServer } from "@/auth/server-connection";
 import PlayPauseAnimation, {
   type PlaybackControlVisualState,
 } from "@/components/bookComponents/play-pause-animation";
+import { canToggleEpisodePlayback } from "@/components/main-player/main-player-media-policy";
 import type { EpisodeIdentity } from "@/podcast/episode-identity";
 import { isStreamedPlaybackStartFailure, playerService, usePlaybackStore } from "@/player";
 import {
   selectHasPlayableEpisodeDownloadForSession,
   useDeviceEpisodeDownloadsStore,
 } from "@/store/device-episode-downloads-store";
+import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 import { toast } from "react-native-sonner";
@@ -18,6 +21,7 @@ type Props = {
   identity: EpisodeIdentity;
   episodeTitle?: string | null;
   podcastTitle?: string | null;
+  variant?: "play-only" | "full";
 };
 
 const showStreamedPlaybackStartFailureToast = () => {
@@ -27,10 +31,89 @@ const showStreamedPlaybackStartFailureToast = () => {
   });
 };
 
-export const EpisodeControls = ({ identity, episodeTitle, podcastTitle }: Props) => {
+const resolveSeekBackwardIcon = (seconds: number): SFSymbol => {
+  switch (Math.round(seconds)) {
+    case 10:
+      return "gobackward.10";
+    case 15:
+      return "gobackward.15";
+    case 30:
+      return "gobackward.30";
+    case 45:
+      return "gobackward.45";
+    case 60:
+      return "gobackward.60";
+    default:
+      return "gobackward";
+  }
+};
+
+const resolveSeekForwardIcon = (seconds: number): SFSymbol => {
+  switch (Math.round(seconds)) {
+    case 10:
+      return "goforward.10";
+    case 15:
+      return "goforward.15";
+    case 30:
+      return "goforward.30";
+    case 45:
+      return "goforward.45";
+    case 60:
+      return "goforward.60";
+    default:
+      return "goforward";
+  }
+};
+
+const SeekButton = ({
+  accessibilityLabel,
+  icon,
+  onPress,
+  disabled,
+}: {
+  accessibilityLabel: string;
+  icon: SFSymbol;
+  onPress: () => void;
+  disabled: boolean;
+}) => {
+  const themeColors = useThemeColors();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => ({
+        width: 52,
+        height: 52,
+        borderRadius: 26,
+        borderCurve: "continuous",
+        alignItems: "center",
+        justifyContent: "center",
+        opacity: disabled ? 0.4 : pressed ? 0.7 : 1,
+        backgroundColor: pressed ? themeColors.bg : "transparent",
+      })}
+    >
+      <SymbolView
+        name={icon}
+        size={30}
+        tintColor={disabled ? themeColors.textMuted : themeColors.text}
+      />
+    </Pressable>
+  );
+};
+
+export const EpisodeControls = ({
+  identity,
+  episodeTitle,
+  podcastTitle,
+  variant = "play-only",
+}: Props) => {
   const themeColors = useThemeColors();
   const isOnline = useAuthStore((state) => state.isOnline);
   const serverConnectionStatus = useAuthStore((state) => state.serverConnectionStatus);
+  const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
+  const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const playbackControlIntent = usePlaybackStore((state) => state.playbackControlIntent);
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
@@ -89,11 +172,18 @@ export const EpisodeControls = ({ identity, episodeTitle, podcastTitle }: Props)
 
   const isLoading = viewedEpisodeState === "loading";
   const isPlaying = viewedEpisodeState === "playing";
-  const canToggle =
-    hasIdentity &&
+  const canToggle = canToggleEpisodePlayback({
+    hasIdentity,
+    isLoading,
+    hasActivePlaybackControlIntent,
+    canUseServer,
+    hasPlayableLocalDownload,
+  });
+  const canSeek =
+    isEpisodeLoaded &&
     !isLoading &&
     !hasActivePlaybackControlIntent &&
-    (canUseServer || hasPlayableLocalDownload);
+    (playbackState === "playing" || playbackState === "paused" || playbackState === "ready");
 
   const handleToggle = async () => {
     if (!hasIdentity || isLoading || hasActivePlaybackControlIntent) return;
@@ -133,7 +223,7 @@ export const EpisodeControls = ({ identity, episodeTitle, podcastTitle }: Props)
     }
   };
 
-  return (
+  const playButton = (
     <View style={{ alignItems: "center", justifyContent: "center", paddingBottom: 2 }}>
       <Pressable
         accessibilityRole="button"
@@ -162,6 +252,51 @@ export const EpisodeControls = ({ identity, episodeTitle, podcastTitle }: Props)
           tintColor="#f8fafc"
         />
       </Pressable>
+    </View>
+  );
+
+  if (variant === "play-only") return playButton;
+
+  return (
+    <View
+      style={{
+        width: "100%",
+        borderRadius: 28,
+        borderCurve: "continuous",
+        backgroundColor: themeColors.surface,
+        paddingVertical: 16,
+        paddingHorizontal: 12,
+        boxShadow: "0 18px 30px rgba(15, 23, 42, 0.12)",
+        borderWidth: 1,
+        borderColor: themeColors.border,
+      }}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 18,
+        }}
+      >
+        <SeekButton
+          accessibilityLabel={`Skip back ${seekBackwardSeconds} seconds`}
+          icon={resolveSeekBackwardIcon(seekBackwardSeconds)}
+          onPress={() => {
+            void playerService.skipBy(seekBackwardSeconds, true);
+          }}
+          disabled={!canSeek}
+        />
+        {playButton}
+        <SeekButton
+          accessibilityLabel={`Skip forward ${seekForwardSeconds} seconds`}
+          icon={resolveSeekForwardIcon(seekForwardSeconds)}
+          onPress={() => {
+            void playerService.skipBy(seekForwardSeconds);
+          }}
+          disabled={!canSeek}
+        />
+      </View>
     </View>
   );
 };

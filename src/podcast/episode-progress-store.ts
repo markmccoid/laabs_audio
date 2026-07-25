@@ -16,7 +16,7 @@ type EpisodeProgressState = {
       libraryItemId: string,
       episodeId: string,
       syncedThroughUpdatedAt?: number,
-    ) => void;
+    ) => boolean;
     getIntent: (
       userKey: string,
       libraryItemId: string,
@@ -56,14 +56,14 @@ export const episodeProgressStore = createStore<EpisodeProgressState>()(
         },
         clearIntent: (userKey, libraryItemId, episodeId, syncedThroughUpdatedAt) => {
           const key = episodeIdentityKey({ libraryItemId, episodeId });
-          if (!key) return;
+          if (!key) return false;
           const existing = get().pendingByUser[userKey]?.[key];
-          if (!existing) return;
+          if (!existing) return true;
           if (
             typeof syncedThroughUpdatedAt === "number" &&
             existing.updatedAt > syncedThroughUpdatedAt
           ) {
-            return;
+            return false;
           }
           set((state) => {
             const queue = { ...(state.pendingByUser[userKey] ?? {}) };
@@ -75,6 +75,7 @@ export const episodeProgressStore = createStore<EpisodeProgressState>()(
               },
             };
           });
+          return true;
         },
         getIntent: (userKey, libraryItemId, episodeId) => {
           const key = episodeIdentityKey({ libraryItemId, episodeId });
