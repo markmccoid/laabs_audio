@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Require remembered podcast Libraries to finish activation before browsing.
+  Tester focus: relaunch into a remembered podcast Library and confirm its Podcast Series Index prepares before Home appears; cancel a failed offline activation and verify no book catalog is shown, while remembered book Libraries still open immediately.
+
 - `2026-07-25` `pending` - Remember the Active Library media type with each sign-in.
   Tester focus: restart the app and switch among remembered sign-ins, confirming book Libraries still open as books and podcast Libraries retain their podcast browsing mode.
 

@@ -1,6 +1,6 @@
 import { activateLibrary } from "@/auth/library-activation";
 import { libraryActivationStore } from "@/auth/library-activation-store";
-import { authStore, useAuthStore } from "@/auth/auth-store";
+import { authStore, type AuthState } from "@/auth/auth-store";
 import { queryClient } from "@/query/query-client";
 import { sqliteSearchRepository } from "@/data/sqlite/search-repository";
 import { recordTimingLog } from "@/data/sqlite/timing-logger";
@@ -14,6 +14,21 @@ type ActivateLibrarySelectionOptions = {
   mode?: "default" | "setup";
   returnToLibraryItemId?: string | null;
 };
+
+const normalizedMediaType = (value: string | null | undefined) =>
+  value?.trim().toLowerCase() || null;
+
+export const canReuseActiveLibrary = (
+  library: Library,
+  activeLibrary: Pick<
+    AuthState,
+    "activeLibraryId" | "activeLibraryMediaType" | "activeLibraryReady"
+  >,
+) =>
+  library.id === activeLibrary.activeLibraryId &&
+  activeLibrary.activeLibraryReady &&
+  normalizedMediaType(library.mediaType) ===
+    normalizedMediaType(activeLibrary.activeLibraryMediaType);
 
 // Requires the target library to already be active (auth store) so the
 // SQLite lookup is scoped to the right catalog.
@@ -42,7 +57,7 @@ export const runLibraryActivationSelection = async (
   const authState = authStore.getState();
 
   if (activationState.status === "activating") return;
-  if (library.id === authState.activeLibraryId) {
+  if (canReuseActiveLibrary(library, authState)) {
     router.replace("/(tabs)/(home)");
     return;
   }
@@ -107,16 +122,11 @@ export const runLibraryActivationSelection = async (
 };
 
 export const useActivateLibrarySelection = () => {
-  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activateSelection = useCallback(
     async (library: Library, options: ActivateLibrarySelectionOptions = {}) => {
-      if (library.id === activeLibraryId) {
-        router.replace("/(tabs)/(home)");
-        return;
-      }
       await runLibraryActivationSelection(library, options);
     },
-    [activeLibraryId],
+    [],
   );
 
   return activateSelection;

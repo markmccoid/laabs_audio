@@ -5,6 +5,7 @@ import { LibrarySelectionGate } from "../library-selection-gate";
 const mockClearActiveLibrary = jest.fn();
 const mockRefetch = jest.fn();
 const mockSelectLibrary = jest.fn();
+const mockActivateLibrarySelection = jest.fn();
 
 const mockAuthState = {
   status: "authenticated",
@@ -12,10 +13,12 @@ const mockAuthState = {
   storedUserId: "user-1",
   activeLibraryId: "library-1",
   activeLibraryName: "Books",
+  activeLibraryMediaType: "book",
+  activeLibraryReady: true,
 };
 
 const mockLibrarySelection = {
-  libraries: [],
+  libraries: [] as Array<{ id: string; name: string; mediaType: string }>,
   isLoading: false,
   isFetching: false,
   isFetched: true,
@@ -44,7 +47,7 @@ jest.mock("../../auth/library-activation-store", () => ({
 }));
 
 jest.mock("../../hooks/use-activate-library-selection", () => ({
-  useActivateLibrarySelection: () => jest.fn(),
+  useActivateLibrarySelection: () => mockActivateLibrarySelection,
 }));
 
 jest.mock("../../hooks/use-library-selection", () => ({
@@ -54,6 +57,12 @@ jest.mock("../../hooks/use-library-selection", () => ({
 describe("LibrarySelectionGate", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAuthState.activeLibraryId = "library-1";
+    mockAuthState.activeLibraryName = "Books";
+    mockAuthState.activeLibraryMediaType = "book";
+    mockAuthState.activeLibraryReady = true;
+    mockLibrarySelection.libraries = [];
+    mockLibrarySelection.isError = true;
   });
 
   it("keeps the remembered Active Library when ABS is unreachable", async () => {
@@ -64,6 +73,31 @@ describe("LibrarySelectionGate", () => {
     });
 
     expect(mockClearActiveLibrary).not.toHaveBeenCalled();
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it("activates a remembered same-ID podcast before treating it as ready", async () => {
+    mockAuthState.activeLibraryName = "Podcasts";
+    mockAuthState.activeLibraryMediaType = "podcast";
+    mockAuthState.activeLibraryReady = false;
+    mockLibrarySelection.isError = false;
+    mockLibrarySelection.libraries = [
+      { id: "library-1", name: "Podcasts", mediaType: "podcast" },
+    ];
+
+    let renderer: ReactTestRenderer | null = null;
+    await act(async () => {
+      renderer = create(React.createElement(LibrarySelectionGate));
+    });
+
+    expect(mockActivateLibrarySelection).toHaveBeenCalledWith(
+      mockLibrarySelection.libraries[0],
+      { mode: "setup" },
+    );
+    expect(mockSelectLibrary).not.toHaveBeenCalled();
 
     await act(async () => {
       renderer?.unmount();
