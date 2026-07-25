@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Keep Book identity authoritative when playback starts after an Episode.
+  Tester focus: play a Podcast Episode, then start an audiobook and confirm the main player immediately switches to Book artwork/metadata while loading instead of retaining the prior Episode identity.
+
 - `2026-07-25` `32c8274` - Stretch Current Podcast episode rows to full list width.
   Tester focus: open a Current Podcast show and confirm each episode row spans the content width (title + compact download control), with long-press actions still available.
 

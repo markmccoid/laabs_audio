@@ -1,6 +1,6 @@
 import { MiniPlayerBottomAccessory } from "@/components/main-player/mini-player-bottom-accessory";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
-import { playerService, usePlaybackStore, usePlayerDisplayAudiobook } from "@/player";
+import { playerService, usePlaybackStore, usePlayerDisplayMedia } from "@/player";
 import { resolveStoredDownloadCoverUri, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
@@ -8,10 +8,10 @@ import { NativeTabs } from "expo-router/unstable-native-tabs";
 export default function TabLayout() {
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const playbackControlIntent = usePlaybackStore((state) => state.playbackControlIntent);
-  const playerDisplayAudiobook = usePlayerDisplayAudiobook();
-  const miniPlayerLibraryItemId = playerDisplayAudiobook.displayLibraryItemId;
-  const isMiniPlayerLoading = playerDisplayAudiobook.isPlaybackStartAttempt;
-  const isEpisodePlayback = playerDisplayAudiobook.isEpisodePlayback;
+  const playerDisplayMedia = usePlayerDisplayMedia();
+  const miniPlayerLibraryItemId = playerDisplayMedia.displayLibraryItemId;
+  const isMiniPlayerLoading = playerDisplayMedia.isPlaybackStartAttempt;
+  const isEpisodePlayback = playerDisplayMedia.isEpisodePlayback;
   const localCoverUri = useDeviceBooksStore((state) =>
     !isEpisodePlayback && miniPlayerLibraryItemId
       ? resolveStoredDownloadCoverUri(state.downloadedBookData[miniPlayerLibraryItemId])
@@ -22,13 +22,13 @@ export default function TabLayout() {
   );
   const themeColors = useThemeColors();
   const isPlaying = playbackState === "playing";
-  const hasLoadedBook = playerDisplayAudiobook.hasLoadedBook;
-  const shouldShowMiniPlayer = hasLoadedBook || playerDisplayAudiobook.isPlaybackStartAttempt;
+  const hasLoadedMedia = playerDisplayMedia.hasLoadedMedia;
+  const shouldShowMiniPlayer = hasLoadedMedia || playerDisplayMedia.isPlaybackStartAttempt;
   const title = isEpisodePlayback
-    ? (playerDisplayAudiobook.displayTitle ?? "Episode")
+    ? (playerDisplayMedia.displayTitle ?? "Episode")
     : currentBook?.title;
   const author = isEpisodePlayback
-    ? (playerDisplayAudiobook.displaySecondaryTitle ?? "Podcast")
+    ? (playerDisplayMedia.displaySecondaryTitle ?? "Podcast")
     : currentBook?.author;
   const coverUri = isEpisodePlayback ? undefined : currentBook?.coverFull;
   const handleToggle = async () => {

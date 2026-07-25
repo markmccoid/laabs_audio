@@ -1,7 +1,7 @@
 import { useCoverImageSource } from "@/components/images/cover-image";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
-import { usePlayerDisplayAudiobook, useSleepTimerActions, useSleepTimerStatus, usePlaybackStore } from "@/player";
+import { usePlayerDisplayMedia, useSleepTimerActions, useSleepTimerStatus, usePlaybackStore } from "@/player";
 import { resolveStoredDownloadCoverUri, useDeviceBooksStore } from "@/store/device-books-store";
 import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -26,12 +26,12 @@ const MainPlayerScreen = () => {
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const playerDisplayAudiobook = usePlayerDisplayAudiobook();
-  const currentLibraryItemId = playerDisplayAudiobook.displayLibraryItemId;
-  const loadedActionLibraryItemId = playerDisplayAudiobook.canUseLoadedPlayerActions
-    ? playerDisplayAudiobook.activeLibraryItemId
+  const playerDisplayMedia = usePlayerDisplayMedia();
+  const currentLibraryItemId = playerDisplayMedia.displayLibraryItemId;
+  const loadedActionLibraryItemId = playerDisplayMedia.canUseLoadedPlayerActions
+    ? playerDisplayMedia.activeLibraryItemId
     : undefined;
-  const hasLoadedBook = playerDisplayAudiobook.hasLoadedBook;
+  const hasLoadedMedia = playerDisplayMedia.hasLoadedMedia;
   const localCoverUri = useDeviceBooksStore((state) =>
     currentLibraryItemId
       ? resolveStoredDownloadCoverUri(state.downloadedBookData[currentLibraryItemId])
@@ -40,7 +40,7 @@ const MainPlayerScreen = () => {
   const sleepTimerStatus = useSleepTimerStatus();
   const sleepTimeActions = useSleepTimerActions();
   const { data: bookData, isLoading } = useGetItemDetails(
-    playerDisplayAudiobook.isEpisodePlayback ? undefined : currentLibraryItemId,
+    playerDisplayMedia.isEpisodePlayback ? undefined : currentLibraryItemId,
   );
   const storeTitle = usePlaybackStore((state) => state.bookTitle);
   const storeSecondaryTitle = usePlaybackStore((state) => state.secondaryTitle);
@@ -51,12 +51,12 @@ const MainPlayerScreen = () => {
     .filter(Boolean)
     .join(", ");
   const resolvedAuthorName = metadata?.authorName ?? authorFromList ?? bookData?.author ?? "";
-  const authorName = playerDisplayAudiobook.isEpisodePlayback
+  const authorName = playerDisplayMedia.isEpisodePlayback
     ? (storeSecondaryTitle?.trim() || "Podcast")
     : resolvedAuthorName.trim().length > 0
       ? resolvedAuthorName
       : "Unknown author";
-  const title = playerDisplayAudiobook.isEpisodePlayback
+  const title = playerDisplayMedia.isEpisodePlayback
     ? (storeTitle?.trim() || "Episode")
     : (bookData?.title ?? "No book selected");
   const coverURL = bookData?.coverUri;
@@ -67,10 +67,10 @@ const MainPlayerScreen = () => {
     variant: "full",
   });
   const backgroundSource = currentLibraryItemId ? backgroundImage.source : DEFAULT_BOOK_COVER;
-  const chapters = playerDisplayAudiobook.isEpisodePlayback
+  const chapters = playerDisplayMedia.isEpisodePlayback
     ? []
     : (bookData?.media?.chapters ?? []);
-  const fallbackDurationMs = playerDisplayAudiobook.isEpisodePlayback
+  const fallbackDurationMs = playerDisplayMedia.isEpisodePlayback
     ? 0
     : Math.max(
         0,
@@ -217,11 +217,11 @@ const MainPlayerScreen = () => {
                 Loading details...
               </Text>
             ) : null}
-            {playerDisplayAudiobook.isPlaybackStartAttempt ? (
+            {playerDisplayMedia.isPlaybackStartAttempt ? (
               <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
                 Starting playback...
               </Text>
-            ) : !hasLoadedBook ? (
+            ) : !hasLoadedMedia ? (
               <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
                 Start playback from Home to load a book.
               </Text>
