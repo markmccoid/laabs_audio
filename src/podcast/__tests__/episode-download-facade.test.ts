@@ -9,6 +9,7 @@ const asset = (
   overrides: Partial<EpisodeDownloadedAssetRecord> &
     Pick<EpisodeDownloadedAssetRecord, "episodeId">,
 ): EpisodeDownloadedAssetRecord => ({
+  libraryId: overrides.libraryId === undefined ? "library-1" : overrides.libraryId,
   libraryItemId: overrides.libraryItemId ?? "show-1",
   episodeId: overrides.episodeId,
   title: overrides.title ?? `Episode ${overrides.episodeId}`,
@@ -113,7 +114,7 @@ describe("assembleDownloadedEpisodesShelf", () => {
         asset({ episodeId: "new", downloadedAt: 50 }),
         asset({ episodeId: "broken", hasPlayableAudio: false, downloadedAt: 80 }),
       ],
-      { sessionUserId: "user-1" },
+      { activeLibraryId: "library-1", sessionUserId: "user-1" },
     );
 
     expect(rows.map((row) => row.episodeId)).toEqual(["new", "old"]);
@@ -123,7 +124,30 @@ describe("assembleDownloadedEpisodesShelf", () => {
     expect(
       assembleDownloadedEpisodesShelf(
         [asset({ episodeId: "a", ownerUserIds: ["other"] })],
-        { sessionUserId: "user-1" },
+        { activeLibraryId: "library-1", sessionUserId: "user-1" },
+      ),
+    ).toEqual([]);
+  });
+
+  it("shows only downloads scoped to the Active Library", () => {
+    const rows = assembleDownloadedEpisodesShelf(
+      [
+        asset({ episodeId: "library-one", libraryId: "library-1" }),
+        asset({ episodeId: "library-two", libraryId: "library-2" }),
+        asset({ episodeId: "legacy", libraryId: null }),
+      ],
+      { activeLibraryId: "library-2", sessionUserId: "user-1" },
+    );
+
+    expect(rows.map((row) => row.episodeId)).toEqual(["library-two"]);
+    expect(rows[0]?.libraryId).toBe("library-2");
+  });
+
+  it("hides all downloads when there is no Active Library scope", () => {
+    expect(
+      assembleDownloadedEpisodesShelf(
+        [asset({ episodeId: "scoped" }), asset({ episodeId: "legacy", libraryId: null })],
+        { activeLibraryId: null, sessionUserId: "user-1" },
       ),
     ).toEqual([]);
   });

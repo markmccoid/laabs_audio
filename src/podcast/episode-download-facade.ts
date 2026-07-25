@@ -4,6 +4,8 @@
  */
 
 export type EpisodeDownloadedAssetRecord = {
+  /** Active ABS Library that owned the Podcast when this asset was downloaded. */
+  libraryId: string | null;
   libraryItemId: string;
   episodeId: string;
   title: string;
@@ -16,6 +18,7 @@ export type EpisodeDownloadedAssetRecord = {
 };
 
 export type EpisodeDownloadedShelfItem = {
+  libraryId: string;
   libraryItemId: string;
   episodeId: string;
   title: string;
@@ -56,18 +59,25 @@ export const isEpisodeDownloadAvailable = (payload: {
 /** Newest download first; drops unavailable assets. Empty → hide shelf. */
 export const assembleDownloadedEpisodesShelf = (
   records: readonly EpisodeDownloadedAssetRecord[],
-  options?: { sessionUserId?: string | null },
+  options: {
+    activeLibraryId: string | null | undefined;
+    sessionUserId?: string | null;
+  },
 ): EpisodeDownloadedShelfItem[] =>
   [...records]
-    .filter((record) =>
-      isEpisodeDownloadAvailable({
-        hasPlayableAudio: record.hasPlayableAudio,
-        ownerUserIds: record.ownerUserIds,
-        sessionUserId: options?.sessionUserId,
-      }),
+    .filter(
+      (record) =>
+        Boolean(options.activeLibraryId) &&
+        record.libraryId === options.activeLibraryId &&
+        isEpisodeDownloadAvailable({
+          hasPlayableAudio: record.hasPlayableAudio,
+          ownerUserIds: record.ownerUserIds,
+          sessionUserId: options.sessionUserId,
+        }),
     )
     .sort((a, b) => b.downloadedAt - a.downloadedAt)
     .map((record) => ({
+      libraryId: record.libraryId!,
       libraryItemId: record.libraryItemId,
       episodeId: record.episodeId,
       title: record.title,

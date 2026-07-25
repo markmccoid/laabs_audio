@@ -20,12 +20,19 @@ const COVER_SIZE = 72;
 const GRID_GAP = 12;
 const GRID_HORIZONTAL_PADDING = 16;
 
+type PodcastShowPresentation = Pick<
+  PodcastSeriesIndexSummary,
+  "id" | "title" | "author" | "cover" | "numEpisodes"
+>;
+
 type PodcastShowsBrowserProps = {
-  shows: readonly PodcastSeriesIndexSummary[];
+  shows: readonly PodcastShowPresentation[];
   isLoading: boolean;
   viewMode: "list" | "grid";
   emptyMessage: string;
   detailHref: (libraryItemId: string) => Href;
+  refreshing?: boolean;
+  onRefresh?: () => void;
 };
 
 const episodeCountLabel = (count: number | null | undefined) => {
@@ -37,7 +44,7 @@ const PodcastShowRow = memo(function PodcastShowRow({
   show,
   detailHref,
 }: {
-  show: PodcastSeriesIndexSummary;
+  show: PodcastShowPresentation;
   detailHref: (libraryItemId: string) => Href;
 }) {
   const themeColors = useThemeColors();
@@ -109,7 +116,7 @@ const PodcastShowGridItem = memo(function PodcastShowGridItem({
   coverSize,
   detailHref,
 }: {
-  show: PodcastSeriesIndexSummary;
+  show: PodcastShowPresentation;
   coverSize: number;
   detailHref: (libraryItemId: string) => Href;
 }) {
@@ -153,6 +160,8 @@ export const PodcastShowsBrowser = ({
   viewMode,
   emptyMessage,
   detailHref,
+  refreshing = false,
+  onRefresh,
 }: PodcastShowsBrowserProps) => {
   const themeColors = useThemeColors();
   const { width } = useWindowDimensions();
@@ -186,6 +195,8 @@ export const PodcastShowsBrowser = ({
         data={[...shows]}
         keyExtractor={(item) => item.id}
         numColumns={gridColumns}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
         contentContainerStyle={{ paddingHorizontal: GRID_HORIZONTAL_PADDING, paddingVertical: 12 }}
         renderItem={({ item }) => (
           <PodcastShowGridItem show={item} coverSize={coverSize} detailHref={detailHref} />
@@ -198,6 +209,8 @@ export const PodcastShowsBrowser = ({
     <FlashList
       data={[...shows]}
       keyExtractor={(item) => item.id}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
       contentContainerStyle={{ paddingVertical: 4 }}
       ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
       renderItem={({ item }) => <PodcastShowRow show={item} detailHref={detailHref} />}

@@ -95,8 +95,10 @@ export const PodcastHomeShelvesScreen = () => {
     openManage,
   } = useHomeSignInSwitcher();
 
-  const shows = seriesQuery.data ?? [];
-  const shelfBooks = useMemo(() => shows.map(podcastShowToShelfSummary), [shows]);
+  const shelfBooks = useMemo(
+    () => (seriesQuery.data ?? []).map(podcastShowToShelfSummary),
+    [seriesQuery.data],
+  );
 
   const activePlaybackOverlay = useMemo(() => {
     if (!playbackLibraryItemId || !playbackEpisodeId) return null;
@@ -138,6 +140,7 @@ export const PodcastHomeShelvesScreen = () => {
       downloadedEpisodeOwnerUserIdsById,
     });
     return assembleDownloadedEpisodesShelf(records, {
+      activeLibraryId,
       sessionUserId: activeLibraryUserKey,
     }).map((episode) => ({
       libraryItemId: episode.libraryItemId,
@@ -152,6 +155,7 @@ export const PodcastHomeShelvesScreen = () => {
       lastUpdate: episode.downloadedAt,
     }));
   }, [
+    activeLibraryId,
     activeLibraryUserKey,
     downloadedEpisodeData,
     downloadedEpisodeDetailsById,
