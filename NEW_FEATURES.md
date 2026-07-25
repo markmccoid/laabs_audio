@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Keep Podcast Search on podcast-native show presentations.
+  Tester focus: in a podcast Library, search in list and grid modes and verify tapping a result only opens Current Podcast; long-press must not expose audiobook Play, Favorite, Finished, Bookshelves, Share, or download actions.
+
 - `2026-07-25` `32c8274` - Stretch Current Podcast episode rows to full list width.
   Tester focus: open a Current Podcast show and confirm each episode row spans the content width (title + compact download control), with long-press actions still available.
 
