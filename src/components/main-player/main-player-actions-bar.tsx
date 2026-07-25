@@ -10,7 +10,7 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
@@ -247,11 +247,57 @@ const RateActionButton = ({ libraryItemId, onPress }: RateActionButtonProps) => 
   );
 };
 
-const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
+const PlayerActionsFrame = ({ children }: { children: ReactNode }) => {
   const themeColors = useThemeColors();
+  return (
+    <View
+      style={{
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 18,
+        borderCurve: "continuous",
+        backgroundColor: themeColors.surface,
+        borderWidth: 1,
+        borderColor: themeColors.border,
+        boxShadow: "0 10px 18px rgba(15, 23, 42, 0.08)",
+      }}
+    >
+      <View style={{ flexDirection: "row", justifyContent: "space-around", alignItems: "center" }}>
+        {children}
+      </View>
+    </View>
+  );
+};
+
+const SleepTimerAction = () => {
+  const sleepTimerStatus = useSleepTimerStatus();
+  return (
+    <ActionIconButton
+      icon="powersleep"
+      label={sleepTimerStatus.isActive ? "Sleep timer active" : "Sleep timer"}
+      onPress={() => {
+        router.push("/player-sleep-timer");
+      }}
+      isActive={sleepTimerStatus.isActive}
+    />
+  );
+};
+
+export const EpisodeMainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => (
+  <PlayerActionsFrame>
+    <SleepTimerAction />
+    <RateActionButton
+      libraryItemId={libraryItemId}
+      onPress={() => {
+        router.push("/player-rate");
+      }}
+    />
+  </PlayerActionsFrame>
+);
+
+const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
   useGetUserServerState();
   const resolvedUserKey = useResolvedListeningOwnerKey(libraryItemId);
-  const sleepTimerStatus = useSleepTimerStatus();
   const bookmarkCount = useDeviceBooksStore((state) => {
     if (!libraryItemId) return 0;
     return selectLocalBookmarksForBook(state, libraryItemId, resolvedUserKey).length;
@@ -277,48 +323,26 @@ const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
     });
   };
 
-  const openSleepTimer = () => {
-    router.push("/player-sleep-timer");
-  };
-
   return (
-    <View
-      style={{
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        borderRadius: 18,
-        borderCurve: "continuous",
-        backgroundColor: themeColors.surface,
-        borderWidth: 1,
-        borderColor: themeColors.border,
-        boxShadow: "0 10px 18px rgba(15, 23, 42, 0.08)",
-      }}
-    >
-      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-        <ActionIconButton
-          icon="powersleep"
-          label={sleepTimerStatus.isActive ? "Sleep timer active" : "Sleep timer"}
-          onPress={openSleepTimer}
-          isActive={sleepTimerStatus.isActive}
-        />
-        <ActionIconButton
-          icon="bookmark.fill"
-          label={
-            bookmarkCount > 0 ? `Open bookmarks, ${bookmarkCount} available` : "Open bookmarks"
-          }
-          onPress={openBookmarks}
-          disabled={!libraryItemId}
-          badgeCount={bookmarkCount}
-        />
-        <ActionIconButton
-          icon="book.badge.plus.fill"
-          label="Add bookmark"
-          onPress={openAddBookmark}
-          disabled={!libraryItemId}
-        />
-        <RateActionButton libraryItemId={libraryItemId} onPress={openRate} />
-      </View>
-    </View>
+    <PlayerActionsFrame>
+      <SleepTimerAction />
+      <ActionIconButton
+        icon="bookmark.fill"
+        label={
+          bookmarkCount > 0 ? `Open bookmarks, ${bookmarkCount} available` : "Open bookmarks"
+        }
+        onPress={openBookmarks}
+        disabled={!libraryItemId}
+        badgeCount={bookmarkCount}
+      />
+      <ActionIconButton
+        icon="book.badge.plus.fill"
+        label="Add bookmark"
+        onPress={openAddBookmark}
+        disabled={!libraryItemId}
+      />
+      <RateActionButton libraryItemId={libraryItemId} onPress={openRate} />
+    </PlayerActionsFrame>
   );
 };
 

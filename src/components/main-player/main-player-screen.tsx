@@ -17,7 +17,10 @@ import { useUniwind } from "uniwind";
 import BookControls from "../bookComponents/book-controls";
 import BookImage from "../bookComponents/book-image";
 import BookTimeSlider from "../bookComponents/book-time-slider";
-import MainPlayerActionsBar from "./main-player-actions-bar";
+import { EpisodeControls } from "../podcast/episode-controls";
+import MainPlayerActionsBar, {
+  EpisodeMainPlayerActionsBar,
+} from "./main-player-actions-bar";
 import MainPlayerAmbientControl from "./main-player-ambient-control";
 
 const MainPlayerScreen = () => {
@@ -235,10 +238,26 @@ const MainPlayerScreen = () => {
             fallbackDurationMs={fallbackDurationMs}
             chapters={chapters}
           />
-          <BookControls libraryItemId={currentLibraryItemId} />
+          {playerDisplayMedia.isEpisodePlayback && playerDisplayMedia.displayEpisodeId ? (
+            <EpisodeControls
+              identity={{
+                libraryItemId: currentLibraryItemId ?? "",
+                episodeId: playerDisplayMedia.displayEpisodeId,
+              }}
+              episodeTitle={title}
+              podcastTitle={authorName}
+              variant="full"
+            />
+          ) : (
+            <BookControls libraryItemId={currentLibraryItemId} />
+          )}
         </View>
 
-        <MainPlayerActionsBar libraryItemId={loadedActionLibraryItemId} />
+        {playerDisplayMedia.isEpisodePlayback ? (
+          <EpisodeMainPlayerActionsBar libraryItemId={loadedActionLibraryItemId} />
+        ) : (
+          <MainPlayerActionsBar libraryItemId={loadedActionLibraryItemId} />
+        )}
       </View>
     </View>
   );
