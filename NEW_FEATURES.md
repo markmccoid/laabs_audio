@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Remember the Active Library media type with each sign-in.
+  Tester focus: restart the app and switch among remembered sign-ins, confirming book Libraries still open as books and podcast Libraries retain their podcast browsing mode.
+
 - `2026-07-25` `32c8274` - Stretch Current Podcast episode rows to full list width.
   Tester focus: open a Current Podcast show and confirm each episode row spans the content width (title + compact download control), with long-press actions still available.
 

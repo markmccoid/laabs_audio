@@ -49,7 +49,7 @@ export type AuthState = {
   activeLibraryId: string | null;
   activeLibraryName: string | null;
   activeLibraryUserKey: string | null;
-  /** ABS library mediaType for the Active Library (`book` | `podcast`); in-memory only. */
+  /** ABS library mediaType for the Active Library (`book` | `podcast`). */
   activeLibraryMediaType: string | null;
   actions: {
     hydrateFromStorage: (initialOfflineContent?: boolean) => Promise<void>;
@@ -171,9 +171,11 @@ export const authStore = createStore<AuthState>()(
             authStorage.updateSession(activeSession.key, {
               activeLibraryId: persistedActiveLibraryId,
               activeLibraryName: persistedActiveLibraryName,
+              activeLibraryMediaType: persistedActiveLibraryMediaType,
             });
             activeSession.activeLibraryId = persistedActiveLibraryId;
             activeSession.activeLibraryName = persistedActiveLibraryName;
+            activeSession.activeLibraryMediaType = persistedActiveLibraryMediaType;
           }
           const hasMatchingLibrary =
             Boolean(userKey) &&
@@ -212,7 +214,9 @@ export const authStore = createStore<AuthState>()(
               : null,
             activeLibraryUserKey: hasMatchingLibrary ? userKey : null,
             activeLibraryMediaType: hasMatchingLibrary
-              ? (persistedActiveLibraryMediaType ?? state.activeLibraryMediaType)
+              ? (activeSession?.activeLibraryMediaType ??
+                persistedActiveLibraryMediaType ??
+                state.activeLibraryMediaType)
               : null,
           }));
 
@@ -331,6 +335,7 @@ export const authStore = createStore<AuthState>()(
             authStorage.updateSession(activeSessionKey, {
               activeLibraryId: trimmedId,
               activeLibraryName: trimmedName,
+              activeLibraryMediaType: mediaType,
             });
           }
           set({
@@ -382,7 +387,7 @@ export const authStore = createStore<AuthState>()(
             activeLibraryId: session.activeLibraryId ?? null,
             activeLibraryName: session.activeLibraryName ?? null,
             activeLibraryUserKey: userKey,
-            activeLibraryMediaType: null,
+            activeLibraryMediaType: session.activeLibraryMediaType ?? null,
           }));
           log("commitActiveSession:done", { sessionKey });
         },
