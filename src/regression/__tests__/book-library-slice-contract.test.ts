@@ -1,3 +1,9 @@
+import { meApi } from "@/api/me-api";
+import type { PlaybackStoreState } from "@/player/playback-store";
+import { buildPlaybackQueue } from "@/player/queue";
+import { syncListeningPosition } from "@/progress/listening-position-sync";
+import type { AudiobookSession } from "@/types/absTypes";
+
 jest.mock("@/auth/auth-store", () => ({
   authStore: {
     getState: jest.fn(() => ({
@@ -39,12 +45,6 @@ jest.mock("@/progress/progress-sync-intent-store", () => ({
     updatedAt: 100,
   })),
 }));
-
-import { meApi } from "@/api/me-api";
-import type { PlaybackStoreState } from "@/player/playback-store";
-import { buildPlaybackQueue } from "@/player/queue";
-import { syncListeningPosition } from "@/progress/listening-position-sync";
-import type { AudiobookSession } from "@/types/absTypes";
 
 const createBookSession = (): AudiobookSession =>
   ({

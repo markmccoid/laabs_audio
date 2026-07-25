@@ -10,7 +10,6 @@ import {
   type RememberedSessionRecord,
 } from "./auth-storage";
 import { getJwtExpiry, isTokenExpired } from "./auth-token";
-import { recordTimingLog } from "../data/sqlite/timing-logger";
 import { setAuthErrorHandler } from "../api/abs-client";
 import { setAuthProvider } from "../api/auth-fetch";
 import type { ServerConnectionStatus } from "./server-connection";

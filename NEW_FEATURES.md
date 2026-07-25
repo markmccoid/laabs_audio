@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Complete the podcast-slice hardening pass without changing Book behavior.
+  Tester focus: run the Book activation, browsing, playback, background sync, and Episode-to-Book handoff checks alongside podcast activation, offline playback, Search, downloads, and reconnect progress tests.
+
 - `2026-07-25` `pending` - Route Active Libraries through one safe Book, Podcast, or unresolved experience.
   Tester focus: switch and restore both Library types, confirming Home, Search, Lists, and details show only the matching experience; during unresolved/failed podcast activation, confirm no Book UI or catalog refresh appears.
 
