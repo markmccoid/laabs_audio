@@ -7,6 +7,7 @@ import {
 } from "@/store/device-episode-downloads-store";
 import { selectIsAnyDownloadActive, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { router } from "expo-router";
 import { Pressable, Text, View } from "react-native";
 import { toast } from "react-native-sonner";
 
@@ -17,6 +18,7 @@ type Props = {
   podcastTitle?: string | null;
   coverUri?: string | null;
   compact?: boolean;
+  context?: "inline" | "sheet";
 };
 
 const formatPercent = (value: number | undefined) => {
@@ -31,6 +33,7 @@ export const EpisodeDownloadControls = ({
   podcastTitle,
   coverUri,
   compact = false,
+  context = "inline",
 }: Props) => {
   const themeColors = useThemeColors();
   const identity = { libraryItemId, episodeId };
@@ -50,6 +53,7 @@ export const EpisodeDownloadControls = ({
   const activeSession = useDeviceEpisodeDownloadsStore((state) => state.activeDownloadSession);
   const showDownloadingState = isDownloading && !isDownloaded;
   const blockedByOther = isAnotherEpisodeDownloadActive || isBookDownloadActive;
+  const isEpisodeDownloadsSheet = context === "sheet";
 
   const handleDownload = () => {
     void downloadEpisode(identity, {
@@ -64,7 +68,11 @@ export const EpisodeDownloadControls = ({
   };
 
   const handleDelete = () => {
-    void deleteDownloadedEpisode(identity);
+    void deleteDownloadedEpisode(identity).then(() => {
+      if (isEpisodeDownloadsSheet) {
+        router.back();
+      }
+    });
   };
 
   if (compact) {

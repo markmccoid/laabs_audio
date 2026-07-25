@@ -1,5 +1,8 @@
-import { getBookDetailHref } from "@/navigation/book-links";
-import { getEpisodeDetailHref } from "@/navigation/episode-links";
+import { getBookDetailHref, type BookDetailRouteSource } from "@/navigation/book-links";
+import {
+  getEpisodeDetailHref,
+  type EpisodeDetailRouteSource,
+} from "@/navigation/episode-links";
 import { playerService, usePlaybackStore } from "@/player";
 import {
   resolveEpisodeActionSet,
@@ -12,8 +15,8 @@ import {
   useDeviceEpisodeDownloadsActions,
   useDeviceEpisodeDownloadsStore,
 } from "@/store/device-episode-downloads-store";
-import { router } from "expo-router";
-import { useState } from "react";
+import { router, useSegments } from "expo-router";
+import { useMemo, useState } from "react";
 import { toast } from "react-native-sonner";
 import type { SFSymbols7_0 } from "sf-symbols-typescript";
 import type { ResolvedEpisodeAction } from "./episode-action-menu";
@@ -47,6 +50,12 @@ const systemImageFor = (
   }
 };
 
+const resolveRouteSource = (segments: readonly string[]): EpisodeDetailRouteSource => {
+  if (segments.some((segment) => segment === "search")) return "search";
+  if (segments.some((segment) => segment === "library")) return "library";
+  return "home";
+};
+
 export const useEpisodeActionController = ({
   identity,
   episodeTitle,
@@ -59,6 +68,9 @@ export const useEpisodeActionController = ({
   actionIds,
   isOnCurrentPodcast = false,
 }: EpisodeActionControllerProps) => {
+  const segments = useSegments();
+  const routeSource = useMemo(() => resolveRouteSource(segments), [segments]);
+  const bookRouteSource = routeSource as BookDetailRouteSource;
   const [busyAction, setBusyAction] = useState<EpisodeActionId | null>(null);
   const { downloadEpisode, deleteDownloadedEpisode } = useDeviceEpisodeDownloadsActions();
   const hasPlayableLocalDownload = useDeviceEpisodeDownloadsStore((state) =>
@@ -90,12 +102,13 @@ export const useEpisodeActionController = ({
         publishedAt,
         durationSeconds,
         currentTimeSeconds,
+        routeSource,
       }),
     );
   };
 
   const openPodcast = () => {
-    router.push(getBookDetailHref(identity.libraryItemId, { routeSource: "home" }));
+    router.push(getBookDetailHref(identity.libraryItemId, { routeSource: bookRouteSource }));
   };
 
   const handlePlayPause = async () => {

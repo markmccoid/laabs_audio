@@ -26,6 +26,10 @@ import { LibrarySelectionGate } from "../components/library-selection-gate";
 import { OfflineConnectionBanner } from "../components/offline-connection-banner";
 import "../global.css";
 import { extractBookDetailIdFromUrl } from "../navigation/book-links";
+import {
+  getAuthenticatedRouteState,
+  isKnownAuthenticatedRoute,
+} from "../navigation/authenticated-route-state";
 import { playerService } from "../player/player-service";
 import { playbackStore, usePlaybackStore } from "../player/playback-store";
 import { settingsStore } from "../store/settings-store";
@@ -48,22 +52,6 @@ import {
   getStartupPresentationState,
   subscribeStartupPresentation,
 } from "../utils/startup-presentation";
-
-const PLAYER_UTILITY_SHEETS = new Set([
-  "player-rate",
-  "player-bookmarks",
-  "player-sleep-timer",
-  "player-ambient",
-]);
-const BOOK_UTILITY_SHEETS = new Set([
-  "book-bookshelves",
-  "book-downloads",
-  "book-bookmarks",
-  "book-bookmark-detail",
-  "book-addbookmark",
-  "book-series",
-  "book-filter-results",
-]);
 
 const logStartupDebug = (event: string, payload?: Record<string, unknown>) => {
   void event;
@@ -102,22 +90,6 @@ const getWarmQueryState = (queryKey: QueryKey) => {
     isStale,
     dataUpdatedAt: state.dataUpdatedAt || null,
   } as const;
-};
-
-// Collapse the current top-level route into flags the navigation guard can reason about.
-const getRouteState = (segments: string[]) => {
-  const rootSegment = segments[0];
-
-  return {
-    rootSegment,
-    inLogin: rootSegment === "login",
-    inTabs: rootSegment === "(tabs)",
-    inLibraryPicker: rootSegment === "library-picker",
-    inChapterViewer: rootSegment === "chapter-viewer",
-    inMainPlayer: rootSegment === "main-player",
-    inPlayerUtilitySheet: Boolean(rootSegment && PLAYER_UTILITY_SHEETS.has(rootSegment)),
-    inBookUtilitySheet: Boolean(rootSegment && BOOK_UTILITY_SHEETS.has(rootSegment)),
-  };
 };
 
 // Recover the viewed book id when the router is already sitting on the Home detail route.
@@ -187,7 +159,7 @@ export default function RootLayout() {
     () => getStartupPresentationState().hasPresentedInitialContent,
   );
   const [queryRestoreReady, setQueryRestoreReady] = useState(false);
-  const routeState = useMemo(() => getRouteState(segments), [segments]);
+  const routeState = useMemo(() => getAuthenticatedRouteState(segments), [segments]);
   const returnToLibraryItemId = useMemo(
     () => getReturnToLibraryItemId(segments, globalParams),
     [globalParams, segments],
@@ -450,16 +422,9 @@ export default function RootLayout() {
       return;
     }
 
-    const isKnownAuthenticatedRoute =
-      routeState.inLogin ||
-      routeState.inTabs ||
-      routeState.inLibraryPicker ||
-      routeState.inChapterViewer ||
-      routeState.inMainPlayer ||
-      routeState.inPlayerUtilitySheet ||
-      routeState.inBookUtilitySheet;
+    const isKnownRoute = isKnownAuthenticatedRoute(routeState);
 
-    if (accessMode !== "firstRunSignInRequired" && !isKnownAuthenticatedRoute) {
+    if (accessMode !== "firstRunSignInRequired" && !isKnownRoute) {
       if (startupBookLinkId) {
         logStartupDebug("routeGate:holding-for-deeplink", {
           startupBookLinkId,
@@ -726,16 +691,8 @@ export default function RootLayout() {
                 options={sheetScreenOptions(themeColors.surface)}
               />
               <Stack.Screen
-                name="episode-detail"
-                options={{
-                  presentation: "card",
-                  animation: "slide_from_right",
-                  headerShown: true,
-                  headerTitle: "Episode",
-                  contentStyle: {
-                    backgroundColor: themeColors.bg,
-                  },
-                }}
+                name="episode-downloads"
+                options={sheetScreenOptions(themeColors.surface)}
               />
               <Stack.Screen
                 name="book-bookmarks"

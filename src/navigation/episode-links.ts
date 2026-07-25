@@ -1,6 +1,9 @@
 import type { EpisodeIdentity } from "@/podcast/episode-identity";
 import type { Href } from "expo-router";
 
+/** Same tab sources as Book Detail so Episode Detail stays inside NativeTabs (mini player). */
+export type EpisodeDetailRouteSource = "home" | "search" | "library";
+
 export type EpisodeDetailDisplayParams = {
   episodeTitle?: string | null;
   podcastTitle?: string | null;
@@ -9,6 +12,7 @@ export type EpisodeDetailDisplayParams = {
   publishedAt?: number | null;
   durationSeconds?: number | null;
   currentTimeSeconds?: number | null;
+  routeSource?: EpisodeDetailRouteSource | null;
 };
 
 const optionalString = (value: string | null | undefined) => {
@@ -21,12 +25,17 @@ const optionalNumberString = (value: number | null | undefined) => {
   return String(value);
 };
 
-/** Stack href for Episode Detail keyed by Episode Identity (ADR 0031). */
+/** Tab-stack href for Episode Detail keyed by Episode Identity (ADR 0031). */
 export const getEpisodeDetailHref = (
   identity: EpisodeIdentity,
   display?: EpisodeDetailDisplayParams,
 ): Href => ({
-  pathname: "/episode-detail",
+  pathname:
+    display?.routeSource === "search"
+      ? "/(tabs)/search/episode-detail"
+      : display?.routeSource === "library"
+        ? "/(tabs)/library/episode-detail"
+        : "/(tabs)/(home)/episode-detail",
   params: {
     libraryItemId: identity.libraryItemId,
     episodeId: identity.episodeId,

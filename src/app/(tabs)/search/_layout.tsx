@@ -15,6 +15,14 @@ const SearchLayout = () => {
         options={{ headerLargeTitleEnabled: false, headerTransparent: true, headerTitle: "" }}
       />
       <Stack.Screen
+        name="episode-detail"
+        options={{
+          headerLargeTitleEnabled: false,
+          headerTransparent: true,
+          headerTitle: "Episode",
+        }}
+      />
+      <Stack.Screen
         name="filter-sheet"
         options={{
           headerShown: false,

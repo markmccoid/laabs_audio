@@ -14,6 +14,10 @@ const HomeLayout = () => {
         options={{ headerTransparent: true, headerShadowVisible: false, headerTitle: "Bookshelf" }}
       />
       <Stack.Screen name="[libraryItemId]" options={{ headerTransparent: true, headerTitle: "" }} />
+      <Stack.Screen
+        name="episode-detail"
+        options={{ headerTransparent: true, headerTitle: "Episode" }}
+      />
     </Stack>
   );
 };

@@ -12,7 +12,7 @@ describe("resolveEpisodePrimaryTapIntent", () => {
 });
 
 describe("getEpisodeDetailHref", () => {
-  it("builds a stack href keyed by Episode Identity", () => {
+  it("builds a Home tab-stack href keyed by Episode Identity", () => {
     expect(
       getEpisodeDetailHref(
         { libraryItemId: "show-1", episodeId: "ep-9" },
@@ -26,7 +26,7 @@ describe("getEpisodeDetailHref", () => {
         },
       ),
     ).toEqual({
-      pathname: "/episode-detail",
+      pathname: "/(tabs)/(home)/episode-detail",
       params: {
         libraryItemId: "show-1",
         episodeId: "ep-9",
@@ -40,9 +40,30 @@ describe("getEpisodeDetailHref", () => {
     });
   });
 
+  it("routes into the active tab stack when routeSource is set", () => {
+    expect(
+      getEpisodeDetailHref(
+        { libraryItemId: "show-1", episodeId: "ep-9" },
+        { routeSource: "library" },
+      ),
+    ).toEqual({
+      pathname: "/(tabs)/library/episode-detail",
+      params: {
+        libraryItemId: "show-1",
+        episodeId: "ep-9",
+      },
+    });
+    expect(
+      getEpisodeDetailHref(
+        { libraryItemId: "show-1", episodeId: "ep-9" },
+        { routeSource: "search" },
+      ).pathname,
+    ).toBe("/(tabs)/search/episode-detail");
+  });
+
   it("omits unknown optional display fields", () => {
     expect(getEpisodeDetailHref({ libraryItemId: "show-1", episodeId: "ep-9" })).toEqual({
-      pathname: "/episode-detail",
+      pathname: "/(tabs)/(home)/episode-detail",
       params: {
         libraryItemId: "show-1",
         episodeId: "ep-9",

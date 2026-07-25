@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `8103f2b` - Episode Detail Book-shaped UI nested in tab stacks (mini player stays visible).
+  Tester focus: open Episode Detail from Home Continue/Recent/Downloaded or Current Podcast and confirm Book-like layout (blurred cover, large artwork, download rail → sheet, Book-style play button, HTML description); mini player remains above Episode Detail; Open Podcast stays in the toolbar menu; offline shows known metadata and plays downloaded episodes only.
+
 - `2026-07-24` `883f33e` - Episode Detail stack presentation and phone Episode Action Set.
   Tester focus: tap a Current Podcast episode row or a Home Continue / Recent / Downloaded tile and confirm full-screen Episode Detail opens (not a sheet); Play/Pause, download, and Open Podcast work on Detail; long-press the same presentations for Play/Pause, Download/Remove Download, and Open Podcast (Open Podcast omitted on Current Podcast); confirm info and trailing play glyphs are gone; CarPlay episode taps still play.
 

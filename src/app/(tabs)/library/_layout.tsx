@@ -6,6 +6,10 @@ const LibraryLayout = () => {
       <Stack.Screen name="index" options={{ title: "", headerTransparent: true }} />
       <Stack.Screen name="[libraryItemId]" options={{ headerTransparent: true, headerTitle: "" }} />
       <Stack.Screen
+        name="episode-detail"
+        options={{ headerTransparent: true, headerTitle: "Episode" }}
+      />
+      <Stack.Screen
         name="collection/[collectionId]"
         options={{ headerTransparent: true }}
       />

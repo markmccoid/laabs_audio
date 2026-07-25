@@ -1,20 +1,40 @@
 import { useAuthStore } from "@/auth/auth-store";
-import { CoverImage } from "@/components/images/cover-image";
-import { EpisodeDownloadControls } from "@/components/podcast/episode-download-controls";
-import { useEpisodeActionController } from "@/components/podcast/episode-action-controller";
+import BookImage from "@/components/bookComponents/book-image";
+import { useCoverImageSource } from "@/components/images/cover-image";
+import { EpisodeControls } from "@/components/podcast/episode-controls";
+import { EpisodeDetails } from "@/components/podcast/episode-details";
+import { EpisodeKeyDetails } from "@/components/podcast/episode-key-details";
+import { EpisodeQuickActions } from "@/components/podcast/episode-quick-actions";
+import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { getEpisodeProgressSyncIntent } from "@/podcast/episode-progress-intent-store";
 import { episodeIdentityKey } from "@/podcast/episode-identity";
 import { usePodcastItemDetails } from "@/podcast/use-podcast-series";
 import { usePlaybackStore } from "@/player";
+import { getBookDetailHref } from "@/navigation/book-links";
 import {
   resolveStoredEpisodeDownloadCoverUri,
+  selectHasPlayableEpisodeDownloadForSession,
   useDeviceEpisodeDownloadsStore,
 } from "@/store/device-episode-downloads-store";
-import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
+import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { formatSeconds } from "@/utils/formatUtils";
-import { Stack, useLocalSearchParams } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { BlurView } from "expo-blur";
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
+import { Stack, router, useLocalSearchParams, useSegments } from "expo-router";
+import { SymbolView } from "expo-symbols";
+import { useMemo } from "react";
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useColorScheme,
+  useWindowDimensions,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useUniwind } from "uniwind";
+import type { EpisodeDetailRouteSource } from "@/navigation/episode-links";
 
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
@@ -32,9 +52,10 @@ const formatPublishedAt = (publishedAt: number | null | undefined) => {
   }
 };
 
-const formatDurationLabel = (durationSeconds: number | null | undefined) => {
-  if (durationSeconds == null || durationSeconds <= 0) return null;
-  return formatSeconds(durationSeconds, "verbose_no_seconds") ?? null;
+const resolveRouteSource = (segments: readonly string[]): EpisodeDetailRouteSource => {
+  if (segments.some((segment) => segment === "search")) return "search";
+  if (segments.some((segment) => segment === "library")) return "library";
+  return "home";
 };
 
 /**
@@ -43,6 +64,12 @@ const formatDurationLabel = (durationSeconds: number | null | undefined) => {
  */
 export const EpisodeDetailContainer = () => {
   const themeColors = useThemeColors();
+  const { theme } = useUniwind();
+  const colorScheme = useColorScheme();
+  const segments = useSegments();
+  const routeSource = useMemo(() => resolveRouteSource(segments), [segments]);
+  const { width: viewportWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     libraryItemId?: string | string[];
     episodeId?: string | string[];
@@ -85,12 +112,19 @@ export const EpisodeDetailContainer = () => {
       ? resolveStoredEpisodeDownloadCoverUri(state.downloadedEpisodeData[downloadKey])
       : null,
   );
+  const isFullyDownloaded = useDeviceEpisodeDownloadsStore((state) =>
+    libraryItemId && episodeId
+      ? selectHasPlayableEpisodeDownloadForSession(state, identity)
+      : false,
+  );
+  const hasPlayableLocalDownload = isFullyDownloaded;
+  const isOffline = useAuthStore((state) => state.isOnline === false);
+  const defaultProgressTimeDisplay = useSettingsStore(
+    (state) => state.defaultBookProgressTimeDisplay,
+  );
 
   const episodeTitle =
-    paramTitle ||
-    matchedEpisode?.title ||
-    downloadDetails?.title ||
-    "Episode";
+    paramTitle || matchedEpisode?.title || downloadDetails?.title || "Episode";
   const podcastTitle =
     paramPodcastTitle ||
     detailsQuery.data?.title ||
@@ -115,6 +149,8 @@ export const EpisodeDetailContainer = () => {
   const playbackEpisodeId = usePlaybackStore((state) => state.episodeId);
   const positionMs = usePlaybackStore((state) => state.positionMs);
   const durationMs = usePlaybackStore((state) => state.durationMs);
+  const currentTrackIndex = usePlaybackStore((state) => state.currentTrackIndex);
+  const queue = usePlaybackStore((state) => state.queue);
   const isEpisodeLoaded =
     playbackLibraryItemId === libraryItemId && playbackEpisodeId === episodeId;
 
@@ -130,39 +166,66 @@ export const EpisodeDetailContainer = () => {
   const progressDurationSeconds = isEpisodeLoaded
     ? Math.max(0, durationMs / 1000) || durationSeconds
     : (localIntent?.durationSeconds ?? durationSeconds);
-  const progressLabel =
-    progressCurrentSeconds != null && progressCurrentSeconds > 0
-      ? [
-          formatSeconds(progressCurrentSeconds, "minimal-no-seconds"),
-          progressDurationSeconds && progressDurationSeconds > 0
-            ? formatSeconds(progressDurationSeconds, "minimal-no-seconds")
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" / ")
-      : null;
-
-  const {
-    handlePlayPause,
-    openPodcast,
-    isEpisodePlaying,
-    isBusy,
-  } = useEpisodeActionController({
-    identity,
-    episodeTitle,
-    podcastTitle,
-    coverUri,
-    description,
-    publishedAt,
-    durationSeconds,
-    currentTimeSeconds: paramCurrentTimeSeconds,
-    actionIds: ["playPause", "download", "removeDownload", "openPodcast"],
-    isOnCurrentPodcast: false,
-  });
+  const resolvedDurationSeconds = progressDurationSeconds ?? durationSeconds ?? 0;
+  const progressSeconds = progressCurrentSeconds ?? 0;
+  const remainingSeconds = Math.max(0, resolvedDurationSeconds - progressSeconds);
+  const isInProgress = progressSeconds > 0 && progressSeconds < resolvedDurationSeconds;
+  const visualProgressPercent =
+    resolvedDurationSeconds > 0
+      ? Math.min(1, Math.max(0, progressSeconds / resolvedDurationSeconds))
+      : 0;
 
   const publishedLabel = formatPublishedAt(publishedAt);
-  const durationLabel = formatDurationLabel(durationSeconds);
-  const metaLabel = [publishedLabel, durationLabel].filter(Boolean).join(" · ");
+  const backgroundImage = useCoverImageSource({
+    libraryItemId,
+    coverUri,
+    localCoverUri,
+    variant: "full",
+  });
+  const backgroundSource = coverUri || localCoverUri ? backgroundImage.source : DEFAULT_BOOK_COVER;
+
+  const isDarkTheme = useMemo(() => {
+    if (theme === "dark") return true;
+    if (theme === "light") return false;
+    return colorScheme === "dark";
+  }, [colorScheme, theme]);
+
+  const gradientColors = useMemo<[string, string, string]>(
+    () =>
+      isDarkTheme
+        ? ["rgba(6, 10, 11, 0.16)", "rgba(6, 10, 11, 0.5)", "rgba(6, 10, 11, 0.78)"]
+        : ["rgba(248, 250, 252, 0.12)", "rgba(248, 250, 252, 0.56)", "rgba(248, 250, 252, 0.84)"],
+    [isDarkTheme],
+  );
+  const coverMaxSize = useMemo(() => {
+    const availableWidth = viewportWidth - 40;
+    const reservedActionRailWidth = 76;
+    return Math.max(180, Math.min(320, availableWidth - reservedActionRailWidth));
+  }, [viewportWidth]);
+
+  const playbackSourceLabel = useMemo(() => {
+    if (isOffline && !hasPlayableLocalDownload) {
+      return "Offline";
+    }
+    if (isEpisodeLoaded) {
+      const activeTrack = queue[currentTrackIndex];
+      if (activeTrack) {
+        return activeTrack.source.isLocal ? "Local" : "Stream";
+      }
+    }
+    return hasPlayableLocalDownload ? "Local" : "Stream";
+  }, [
+    currentTrackIndex,
+    hasPlayableLocalDownload,
+    isEpisodeLoaded,
+    isOffline,
+    queue,
+  ]);
+
+  const openPodcast = () => {
+    if (!libraryItemId) return;
+    router.push(getBookDetailHref(libraryItemId, { routeSource }));
+  };
 
   if (!libraryItemId || !episodeId) {
     return (
@@ -174,125 +237,150 @@ export const EpisodeDetailContainer = () => {
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          headerTitle: "Episode",
-          headerBackTitle: "Back",
-        }}
-      />
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <Image
+          source={backgroundSource}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          transition={280}
+        />
+        <BlurView
+          tint={isDarkTheme ? "dark" : "light"}
+          intensity={95}
+          experimentalBlurMethod="dimezisBlurView"
+          style={StyleSheet.absoluteFill}
+        />
+        <LinearGradient
+          colors={gradientColors}
+          locations={[0, 0.5, 1]}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+      </View>
+
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={styles.content}
+        style={{ flex: 1, backgroundColor: "transparent" }}
+        contentContainerStyle={{
+          paddingHorizontal: 20,
+          paddingTop: 0,
+          paddingBottom: Math.max(28, insets.bottom + 16),
+        }}
       >
-        <View style={styles.heroRow}>
-          {coverUri ? (
-            <CoverImage
-              libraryItemId={libraryItemId}
-              coverUri={coverUri}
-              variant="full"
-              style={styles.cover}
-            />
-          ) : (
-            <View style={[styles.cover, { backgroundColor: themeColors.surface }]} />
-          )}
-          <View style={styles.heroDetails}>
-            <Text
-              maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-              selectable
-              style={[styles.title, { color: themeColors.text }]}
+        <Stack.Screen
+          options={{
+            headerShown: true,
+            headerTitle: episodeTitle,
+            headerBackTitle: "Back",
+          }}
+        />
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Menu icon="ellipsis">
+            <Stack.Toolbar.MenuAction
+              icon="mic.fill"
+              onPress={() => {
+                openPodcast();
+              }}
             >
-              {episodeTitle}
-            </Text>
-            <Text
-              maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-              selectable
-              style={{ color: themeColors.textMuted, fontSize: 15, marginTop: 6 }}
-            >
-              {podcastTitle}
-            </Text>
-            {metaLabel ? (
-              <Text
-                maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                style={{ color: themeColors.textMuted, fontSize: 13, marginTop: 8 }}
-              >
-                {metaLabel}
-              </Text>
-            ) : null}
-            {progressLabel ? (
-              <Text
-                maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                style={{ color: themeColors.textMuted, fontSize: 13, marginTop: 6 }}
-              >
-                Progress {progressLabel}
-              </Text>
-            ) : null}
-          </View>
-        </View>
+              Open Podcast
+            </Stack.Toolbar.MenuAction>
+          </Stack.Toolbar.Menu>
+        </Stack.Toolbar>
 
-        {description ? (
-          <Text
-            selectable
-            style={{
-              color: themeColors.text,
-              fontSize: 14,
-              lineHeight: 20,
-              marginTop: 18,
-            }}
-          >
-            {description}
-          </Text>
+        {detailsQuery.isLoading && !paramTitle ? (
+          <View style={{ alignItems: "center", gap: 6 }}>
+            <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
+              Loading details...
+            </Text>
+          </View>
         ) : null}
 
-        <View style={{ marginTop: 22, gap: 12 }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${isEpisodePlaying ? "Pause" : "Play"} ${episodeTitle}`}
-            disabled={isBusy}
-            onPress={() => {
-              void handlePlayPause();
-            }}
+        {isOffline ? (
+          <View
             style={{
-              paddingHorizontal: 14,
-              paddingVertical: 12,
+              marginTop: 10,
+              marginBottom: 12,
+              borderWidth: 1,
+              borderColor: themeColors.border,
               borderRadius: 12,
-              backgroundColor: themeColors.accent,
+              borderCurve: "continuous",
+              backgroundColor: themeColors.surface,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              flexDirection: "row",
               alignItems: "center",
-              opacity: isBusy ? 0.7 : 1,
+              gap: 8,
             }}
           >
-            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>
-              {isEpisodePlaying ? "Pause" : "Play"}
+            <SymbolView name="wifi.slash" size={14} tintColor={themeColors.textMuted} />
+            <Text style={{ color: themeColors.textMuted, fontSize: 12, flexShrink: 1 }}>
+              {hasPlayableLocalDownload
+                ? "Offline. Downloaded audio can still play."
+                : "Offline. Streaming is unavailable until connection returns."}
             </Text>
-          </Pressable>
+          </View>
+        ) : null}
 
-          <EpisodeDownloadControls
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "center",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
+          <BookImage
             libraryItemId={libraryItemId}
-            episodeId={episodeId}
+            coverURL={coverUri ?? undefined}
+            localCoverUri={localCoverUri}
+            showDownloadedIndicator={isFullyDownloaded}
+            showProgressLine={progressSeconds > 0}
+            progressPercent={visualProgressPercent}
+            maxSize={coverMaxSize}
+          />
+          <EpisodeQuickActions
+            identity={identity}
             episodeTitle={episodeTitle}
             podcastTitle={podcastTitle}
             coverUri={coverUri}
           />
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Open Podcast ${podcastTitle}`}
-            onPress={openPodcast}
-            style={{
-              paddingHorizontal: 14,
-              paddingVertical: 12,
-              borderRadius: 12,
-              borderWidth: StyleSheet.hairlineWidth,
-              borderColor: themeColors.border,
-              backgroundColor: themeColors.surface,
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ color: themeColors.text, fontWeight: "600", fontSize: 15 }}>
-              Open Podcast
-            </Text>
-          </Pressable>
         </View>
+
+        <View className="h-[12]" />
+
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <EpisodeKeyDetails
+              podcastTitle={podcastTitle}
+              publishedLabel={publishedLabel}
+              durationSeconds={resolvedDurationSeconds}
+              progressSeconds={progressSeconds}
+              remainingSeconds={remainingSeconds}
+              isInProgress={isInProgress}
+              defaultProgressTimeDisplay={defaultProgressTimeDisplay}
+              progressResetKey={`${libraryItemId}:${episodeId}`}
+              onPodcastPress={openPodcast}
+            />
+          </View>
+          <View style={{ alignItems: "center", gap: 6 }}>
+            <EpisodeControls
+              identity={identity}
+              episodeTitle={episodeTitle}
+              podcastTitle={podcastTitle}
+            />
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 11, fontWeight: "500" }}
+            >
+              {playbackSourceLabel}
+            </Text>
+          </View>
+        </View>
+
+        <View className="h-[10]" />
+
+        <EpisodeDetails title={episodeTitle} description={description} />
       </ScrollView>
     </View>
   );
@@ -303,28 +391,5 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-  },
-  content: {
-    paddingHorizontal: 18,
-    paddingTop: 12,
-    paddingBottom: 36,
-  },
-  heroRow: {
-    flexDirection: "row",
-    gap: 14,
-  },
-  cover: {
-    width: 120,
-    height: 120,
-    borderRadius: 14,
-  },
-  heroDetails: {
-    flex: 1,
-    minWidth: 0,
-    justifyContent: "center",
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: "700",
   },
 });
