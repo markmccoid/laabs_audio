@@ -14,6 +14,8 @@ export const LibrarySelectionGate = () => {
   const storedUserId = useAuthStore((state) => state.storedUserId);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryName = useAuthStore((state) => state.activeLibraryName);
+  const activeLibraryMediaType = useAuthStore((state) => state.activeLibraryMediaType);
+  const activeLibraryReady = useAuthStore((state) => state.activeLibraryReady);
   const { clearActiveLibrary } = useAuthActions();
   const logout = useExplicitLogout();
   const activationStatus = useLibraryActivationStore((state) => state.status);
@@ -29,12 +31,14 @@ export const LibrarySelectionGate = () => {
   // Track whether we've prompted or requested for the current user key.
   const promptRef = useRef<string | null>(null);
   const requestedRef = useRef<string | null>(null);
+  const activationAttemptedRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Reset prompt/request guards whenever auth resets or user changes.
     if (status !== "authenticated") {
       promptRef.current = null;
       requestedRef.current = null;
+      activationAttemptedRef.current = null;
       return;
     }
 
@@ -77,8 +81,28 @@ export const LibrarySelectionGate = () => {
     const canOpenPicker = rootSegment !== "library-picker" && rootSegment !== "login";
     const active = libraries.find((library) => library.id === activeLibraryId);
     if (active) {
-      // Backfill missing display name if we have a valid ID.
-      if (!activeLibraryName) {
+      const actualMediaType = active.mediaType.trim().toLowerCase();
+      const rememberedMediaType = activeLibraryMediaType?.trim().toLowerCase() || null;
+      const needsPodcastReadiness =
+        actualMediaType === "podcast" &&
+        (!activeLibraryReady || rememberedMediaType !== actualMediaType);
+
+      if (needsPodcastReadiness) {
+        const activationKey = `${userKey ?? "unknown"}:${active.id}:${actualMediaType}`;
+        if (activationAttemptedRef.current !== activationKey) {
+          activationAttemptedRef.current = activationKey;
+          void activateLibrarySelection(active, { mode: "setup" });
+        }
+        return;
+      }
+
+      // Legacy Book sessions can be committed immediately after the libraries
+      // response identifies their media type; no Book activation behavior changes.
+      if (
+        !activeLibraryReady ||
+        !activeLibraryName ||
+        rememberedMediaType !== actualMediaType
+      ) {
         selectLibrary(active);
       }
       return;
@@ -101,7 +125,9 @@ export const LibrarySelectionGate = () => {
     promptRef.current = userKey;
   }, [
     activeLibraryId,
+    activeLibraryMediaType,
     activeLibraryName,
+    activeLibraryReady,
     activateLibrarySelection,
     activationStatus,
     clearActiveLibrary,

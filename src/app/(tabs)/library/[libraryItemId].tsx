@@ -1,8 +1,6 @@
 import { LibraryItemScreen } from "@/components/detail/library-item-screen";
 import { OPEN_DOWNLOAD_SHEET_PARAM } from "@/navigation/book-links";
-import { useAuthStore } from "@/auth/auth-store";
-import { isPodcastLibraryMediaType } from "@/podcast/series-index-readiness";
-import { resolveActiveLibraryMediaType } from "@/podcast/resolve-active-library-media-type";
+import { useActiveLibraryExperience } from "@/auth/active-library-experience";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef } from "react";
 
@@ -17,14 +15,10 @@ const LibraryItem = () => {
   const { libraryItemId } = params;
   const openDownloadSheet = resolveParam(params[OPEN_DOWNLOAD_SHEET_PARAM]);
   const openedDownloadSheetForRef = useRef<string | null>(null);
-  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryMediaType = useAuthStore((state) => state.activeLibraryMediaType);
-  const isPodcast = isPodcastLibraryMediaType(
-    resolveActiveLibraryMediaType(activeLibraryId, activeLibraryMediaType),
-  );
+  const experience = useActiveLibraryExperience();
 
   useEffect(() => {
-    if (isPodcast || !libraryItemId || !openDownloadSheet) return;
+    if (experience !== "book" || !libraryItemId || !openDownloadSheet) return;
 
     const openToken = `${libraryItemId}:${openDownloadSheet}`;
     if (openedDownloadSheetForRef.current === openToken) return;
@@ -39,7 +33,7 @@ const LibraryItem = () => {
     }, 0);
 
     return () => clearTimeout(timeout);
-  }, [isPodcast, libraryItemId, openDownloadSheet]);
+  }, [experience, libraryItemId, openDownloadSheet]);
 
   return <LibraryItemScreen libraryItemId={libraryItemId} />;
 };

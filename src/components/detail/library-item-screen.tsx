@@ -1,8 +1,6 @@
 import BookContainer from "@/components/bookComponents/BookContainer";
 import { CurrentPodcastScreen } from "@/components/podcast/current-podcast-screen";
-import { useAuthStore } from "@/auth/auth-store";
-import { isPodcastLibraryMediaType } from "@/podcast/series-index-readiness";
-import { resolveActiveLibraryMediaType } from "@/podcast/resolve-active-library-media-type";
+import { useActiveLibraryExperience } from "@/auth/active-library-experience";
 
 type Props = {
   libraryItemId: string | undefined;
@@ -10,13 +8,11 @@ type Props = {
 
 /** Route shell: book detail vs Current Podcast based on Active Library mediaType. */
 export const LibraryItemScreen = ({ libraryItemId }: Props) => {
-  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryMediaType = useAuthStore((state) => state.activeLibraryMediaType);
-  const mediaType = resolveActiveLibraryMediaType(activeLibraryId, activeLibraryMediaType);
+  const experience = useActiveLibraryExperience();
 
-  if (isPodcastLibraryMediaType(mediaType)) {
+  if (experience === "podcast") {
     return <CurrentPodcastScreen libraryItemId={libraryItemId} />;
   }
 
-  return <BookContainer libraryItemId={libraryItemId} />;
+  return experience === "book" ? <BookContainer libraryItemId={libraryItemId} /> : null;
 };

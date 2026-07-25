@@ -49,8 +49,13 @@ export type AuthState = {
   activeLibraryId: string | null;
   activeLibraryName: string | null;
   activeLibraryUserKey: string | null;
-  /** ABS library mediaType for the Active Library (`book` | `podcast`); in-memory only. */
+  /** ABS library mediaType for the Active Library (`book` | `podcast`). */
   activeLibraryMediaType: string | null;
+  /**
+   * True after media-specific activation has completed. Remembered podcast
+   * Libraries deliberately re-enter as unready until their index is usable.
+   */
+  activeLibraryReady: boolean;
   actions: {
     hydrateFromStorage: (initialOfflineContent?: boolean) => Promise<void>;
     setOnlineStatus: (isOnline: boolean) => void;
@@ -122,6 +127,7 @@ export const authStore = createStore<AuthState>()(
       activeLibraryName: null,
       activeLibraryUserKey: null,
       activeLibraryMediaType: null,
+      activeLibraryReady: false,
       actions: {
         hydrateFromStorage: async (initialOfflineContent) => {
           if (hydratePromise) return hydratePromise;
@@ -171,14 +177,20 @@ export const authStore = createStore<AuthState>()(
             authStorage.updateSession(activeSession.key, {
               activeLibraryId: persistedActiveLibraryId,
               activeLibraryName: persistedActiveLibraryName,
+              activeLibraryMediaType: persistedActiveLibraryMediaType,
             });
             activeSession.activeLibraryId = persistedActiveLibraryId;
             activeSession.activeLibraryName = persistedActiveLibraryName;
+            activeSession.activeLibraryMediaType = persistedActiveLibraryMediaType;
           }
           const hasMatchingLibrary =
             Boolean(userKey) &&
             (get().activeLibraryUserKey === userKey ||
               Boolean(activeSession?.activeLibraryId && activeSession?.activeLibraryName));
+          const hydratedActiveLibraryMediaType =
+            activeSession?.activeLibraryMediaType ??
+            persistedActiveLibraryMediaType ??
+            get().activeLibraryMediaType;
 
           log("hydrate:computed", {
             hasStoredCredentials,
@@ -212,8 +224,12 @@ export const authStore = createStore<AuthState>()(
               : null,
             activeLibraryUserKey: hasMatchingLibrary ? userKey : null,
             activeLibraryMediaType: hasMatchingLibrary
-              ? (persistedActiveLibraryMediaType ?? state.activeLibraryMediaType)
+              ? hydratedActiveLibraryMediaType
               : null,
+            activeLibraryReady: Boolean(
+              hasMatchingLibrary &&
+                hydratedActiveLibraryMediaType?.trim().toLowerCase() === "book",
+            ),
           }));
 
           log("hydrate:done", {
@@ -255,6 +271,7 @@ export const authStore = createStore<AuthState>()(
               activeLibraryName: null,
               activeLibraryUserKey: null,
               activeLibraryMediaType: null,
+              activeLibraryReady: false,
             });
             if (isInitialHydrate) {
               logStartupDuration("auth hydrate failed", hydrateStartedAtMs, {
@@ -331,6 +348,7 @@ export const authStore = createStore<AuthState>()(
             authStorage.updateSession(activeSessionKey, {
               activeLibraryId: trimmedId,
               activeLibraryName: trimmedName,
+              activeLibraryMediaType: mediaType,
             });
           }
           set({
@@ -339,6 +357,7 @@ export const authStore = createStore<AuthState>()(
             activeLibraryName: trimmedName,
             activeLibraryUserKey: userKey,
             activeLibraryMediaType: mediaType,
+            activeLibraryReady: true,
           });
         },
 
@@ -348,6 +367,7 @@ export const authStore = createStore<AuthState>()(
             activeLibraryName: null,
             activeLibraryUserKey: null,
             activeLibraryMediaType: null,
+            activeLibraryReady: false,
           });
         },
 
@@ -382,7 +402,11 @@ export const authStore = createStore<AuthState>()(
             activeLibraryId: session.activeLibraryId ?? null,
             activeLibraryName: session.activeLibraryName ?? null,
             activeLibraryUserKey: userKey,
-            activeLibraryMediaType: null,
+            activeLibraryMediaType: session.activeLibraryMediaType ?? null,
+            activeLibraryReady: Boolean(
+              session.activeLibraryId &&
+                session.activeLibraryMediaType?.trim().toLowerCase() === "book",
+            ),
           }));
           log("commitActiveSession:done", { sessionKey });
         },
@@ -444,6 +468,8 @@ export const authStore = createStore<AuthState>()(
               state.activeSessionKey === sessionKey ? null : state.activeLibraryUserKey,
             activeLibraryMediaType:
               state.activeSessionKey === sessionKey ? null : state.activeLibraryMediaType,
+            activeLibraryReady:
+              state.activeSessionKey === sessionKey ? false : state.activeLibraryReady,
             status:
               state.activeSessionKey === sessionKey
                 ? computeEntryStatus(false, state.hasOfflineContent)
@@ -640,6 +666,7 @@ export const authStore = createStore<AuthState>()(
             activeLibraryName: null,
             activeLibraryUserKey: null,
             activeLibraryMediaType: null,
+            activeLibraryReady: false,
             status: computeEntryStatus(false, current.hasOfflineContent),
             lastAuthError: null,
             loginRequired: false,
@@ -690,7 +717,7 @@ export const selectAccessMode = (state: AuthState): AccessMode => {
   if (state.status === "hydrating") return "hydrating";
 
   if (state.status === "authenticated") {
-    return state.activeLibraryId ? "serverBrowsing" : "serverSetup";
+    return state.activeLibraryId && state.activeLibraryReady ? "serverBrowsing" : "serverSetup";
   }
 
   if (state.status === "offlineOnly") {

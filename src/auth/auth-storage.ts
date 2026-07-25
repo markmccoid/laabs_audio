@@ -12,6 +12,8 @@ export type RememberedSessionRecord = {
   color: string | null;
   activeLibraryId: string | null;
   activeLibraryName: string | null;
+  /** ABS media type for the remembered Active Library. Missing in legacy snapshots. */
+  activeLibraryMediaType: string | null;
   needsAttention: boolean;
   lastError: string | null;
   createdAt: number;
@@ -143,6 +145,7 @@ const normalizeSnapshot = (value: unknown): AuthSessionsSnapshot => {
       color: normalizeAccentHex(session.color),
       activeLibraryId: session.activeLibraryId ?? null,
       activeLibraryName: session.activeLibraryName ?? null,
+      activeLibraryMediaType: session.activeLibraryMediaType?.trim() || null,
       needsAttention: Boolean(session.needsAttention),
       lastError: session.lastError ?? null,
       createdAt: typeof session.createdAt === "number" ? session.createdAt : Date.now(),
@@ -224,6 +227,7 @@ export const authStorage = {
       color?: string | null;
       activeLibraryId?: string | null;
       activeLibraryName?: string | null;
+      activeLibraryMediaType?: string | null;
       needsAttention?: boolean;
       lastError?: string | null;
     },
@@ -248,6 +252,10 @@ export const authStorage = {
           : (existing?.color ?? null),
       activeLibraryId: values.activeLibraryId ?? existing?.activeLibraryId ?? null,
       activeLibraryName: values.activeLibraryName ?? existing?.activeLibraryName ?? null,
+      activeLibraryMediaType:
+        values.activeLibraryMediaType !== undefined
+          ? values.activeLibraryMediaType?.trim() || null
+          : (existing?.activeLibraryMediaType ?? null),
       needsAttention: values.needsAttention ?? existing?.needsAttention ?? false,
       lastError: values.lastError ?? existing?.lastError ?? null,
       createdAt: existing?.createdAt ?? now,

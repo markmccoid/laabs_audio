@@ -18,7 +18,11 @@ export const useLibrarySelection = () => {
 
   const selectLibrary = useCallback(
     (library: Library) => {
-      setActiveLibrary({ id: library.id, name: library.name });
+      setActiveLibrary({
+        id: library.id,
+        name: library.name,
+        mediaType: library.mediaType,
+      });
     },
     [setActiveLibrary],
   );

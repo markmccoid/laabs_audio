@@ -4,6 +4,15 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-25` `pending` - Route Active Libraries through one safe Book, Podcast, or unresolved experience.
+  Tester focus: switch and restore both Library types, confirming Home, Search, Lists, and details show only the matching experience; during unresolved/failed podcast activation, confirm no Book UI or catalog refresh appears.
+
+- `2026-07-25` `pending` - Require remembered podcast Libraries to finish activation before browsing.
+  Tester focus: relaunch into a remembered podcast Library and confirm its Podcast Series Index prepares before Home appears; cancel a failed offline activation and verify no book catalog is shown, while remembered book Libraries still open immediately.
+
+- `2026-07-25` `pending` - Remember the Active Library media type with each sign-in.
+  Tester focus: restart the app and switch among remembered sign-ins, confirming book Libraries still open as books and podcast Libraries retain their podcast browsing mode.
+
 - `2026-07-25` `pending` - Preserve Episode intent library scope and protect its SQLite mirror from sync races.
   Tester focus: switch or reconnect while Episode progress is being recorded and confirm the newest Episode position remains queued with its originating Library scope rather than being removed by an older sync completion.
 

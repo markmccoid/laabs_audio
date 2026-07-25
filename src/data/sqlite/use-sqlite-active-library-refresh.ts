@@ -1,8 +1,7 @@
 import { useEffect } from "react";
+import { useActiveLibraryExperience } from "@/auth/active-library-experience";
 import { useAuthStore } from "@/auth/auth-store";
 import { queryClient } from "@/query/query-client";
-import { isPodcastLibraryMediaType } from "@/podcast/series-index-readiness";
-import { resolveActiveLibraryMediaType } from "@/podcast/resolve-active-library-media-type";
 import { sqliteRefreshCoordinator } from "./refresh-coordinator";
 import { sqliteSearchRepository } from "./search-repository";
 
@@ -10,7 +9,7 @@ export const useSqliteActiveLibraryRefresh = () => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryMediaType = useAuthStore((state) => state.activeLibraryMediaType);
+  const experience = useActiveLibraryExperience();
 
   useEffect(() => {
     void sqliteSearchRepository.initialize().catch((error) => {
@@ -19,12 +18,12 @@ export const useSqliteActiveLibraryRefresh = () => {
   }, []);
 
   useEffect(() => {
-    if (status !== "authenticated" || !activeLibraryUserKey || !activeLibraryId) return;
-
-    const mediaType = resolveActiveLibraryMediaType(activeLibraryId, activeLibraryMediaType);
-
-    // Podcast Active Libraries use the Podcast Series Index path — never book full-catalog ingest.
-    if (isPodcastLibraryMediaType(mediaType)) {
+    if (
+      status !== "authenticated" ||
+      experience !== "book" ||
+      !activeLibraryUserKey ||
+      !activeLibraryId
+    ) {
       return;
     }
 
@@ -36,5 +35,5 @@ export const useSqliteActiveLibraryRefresh = () => {
       .catch((error) => {
         console.warn("[sqlite] active library refresh failed", error);
       });
-  }, [activeLibraryId, activeLibraryMediaType, activeLibraryUserKey, status]);
+  }, [activeLibraryId, activeLibraryUserKey, experience, status]);
 };
