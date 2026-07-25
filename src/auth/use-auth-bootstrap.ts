@@ -9,14 +9,18 @@ import {
 } from "../store/device-books-store";
 import { playbackStore } from "../player/playback-store";
 import { recordProgressSyncIntent } from "../progress/progress-sync-intent-store";
-
-const MIN_BACKGROUND_PROGRESS_SECONDS_TO_QUEUE = 1;
+import { recordEpisodeProgressSyncIntent } from "../podcast/episode-progress-intent-store";
+import {
+  resolveBackgroundProgressIntent,
+  routeBackgroundProgressIntent,
+} from "../progress/background-progress-routing";
 
 export const useAuthBootstrap = () => {
   const status = useAuthStore((state) => state.status);
   const isOnline = useAuthStore((state) => state.isOnline);
   const refreshToken = useAuthStore((state) => state.refreshToken);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const storedUserId = useAuthStore((state) => state.storedUserId);
   const resolvedUserKey = activeLibraryUserKey ?? storedUserId;
   const hasOfflineContent = useDeviceBooksStore((state) =>
@@ -76,30 +80,20 @@ export const useAuthBootstrap = () => {
       if (nextState === "active") return;
 
       const playbackState = playbackStore.getState();
-      if (!playbackState.libraryItemId) return;
-      if (!playbackState.queue.length) return;
-      const isPlayableState =
-        playbackState.playbackState === "playing" || playbackState.playbackState === "paused";
-      if (!isPlayableState) return;
-
-      const currentTime = Math.max(0, Math.floor(playbackState.positionMs / 1000));
-      const isFinished =
-        playbackState.durationMs > 0 && playbackState.positionMs >= playbackState.durationMs - 3000;
-      if (currentTime < MIN_BACKGROUND_PROGRESS_SECONDS_TO_QUEUE && !isFinished) return;
-
-      recordProgressSyncIntent({
-        libraryItemId: playbackState.libraryItemId,
-        currentTimeSeconds: currentTime,
-        isFinished,
-        title: playbackState.bookTitle,
-        sessionKind: playbackState.sessionId === "local" ? "downloaded" : "streamed",
-        trigger: "background_app_state",
-        intentKind: isFinished ? "mark_finished" : "position_sample",
+      const intent = resolveBackgroundProgressIntent({
+        playback: playbackState,
+        userKey: resolvedUserKey,
+        libraryId: activeLibraryId,
+      });
+      if (!intent) return;
+      routeBackgroundProgressIntent(intent, {
+        recordBook: recordProgressSyncIntent,
+        recordEpisode: recordEpisodeProgressSyncIntent,
       });
     });
 
     return () => subscription.remove();
-  }, []);
+  }, [activeLibraryId, resolvedUserKey]);
 
   useEffect(() => {
     if (!isOnline) return;
