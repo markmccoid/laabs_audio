@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-29` `pending` - Define the privacy-safe, versioned state and minute timeline used by iOS audio widgets.
+  Tester focus: no visible widget change yet; verify widget snapshot tests cover empty, playing, paused, playback-rate, duration-clamping, and minute-update behavior.
+
 - `2026-07-29` `pending` - Scaffold the iOS Home Screen widget extension without publishing placeholder playback data.
   Tester focus: create an iOS development build and confirm the LAABS Audio widget is available in the Home Screen widget gallery without changing audiobook playback or app startup behavior.
 
