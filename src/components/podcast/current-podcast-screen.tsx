@@ -2,7 +2,6 @@ import { useAuthStore } from "@/auth/auth-store";
 import { CoverImage } from "@/components/images/cover-image";
 import { EpisodeActionMenu } from "@/components/podcast/episode-action-menu";
 import { useEpisodeActionController } from "@/components/podcast/episode-action-controller";
-import { EpisodeDownloadControls } from "@/components/podcast/episode-download-controls";
 import {
   filterEpisodesByTitle,
   orderPodcastEpisodes,
@@ -98,7 +97,6 @@ const CurrentPodcastEpisodeRow = ({
   return (
     <View style={styles.episodeRowFrame}>
       <EpisodeActionMenu
-        title={item.title}
         actions={resolvedActions}
         style={styles.episodeActionMenu}
       >
@@ -115,7 +113,10 @@ const CurrentPodcastEpisodeRow = ({
             accessibilityRole="button"
             accessibilityLabel={`Episode details for ${item.title}`}
             onPress={openEpisodeDetail}
-            style={({ pressed }) => [{ flex: 1, minWidth: 0, opacity: pressed ? 0.72 : 1 }]}
+            style={({ pressed }) => [
+              styles.episodeRowPressable,
+              { opacity: pressed ? 0.72 : 1 },
+            ]}
           >
             <Text
               maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
@@ -134,14 +135,6 @@ const CurrentPodcastEpisodeRow = ({
               </Text>
             ) : null}
           </Pressable>
-          <EpisodeDownloadControls
-            libraryItemId={libraryItemId}
-            episodeId={item.id}
-            episodeTitle={item.title}
-            podcastTitle={headerTitle}
-            coverUri={headerCover}
-            compact
-          />
         </View>
       </EpisodeActionMenu>
     </View>
@@ -397,13 +390,14 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   episodeRow: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
     width: "100%",
+    overflow: "hidden",
+  },
+  episodeRowPressable: {
+    minWidth: 0,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
 });

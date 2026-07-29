@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-28` `21f87e5` - Clean up Current Podcast episode rows and move episode actions to the long-press menu.
+  Tester focus: open a Current Podcast and confirm rows show only episode information, tapping a row opens Episode Detail, and long-press offers Play plus Download or Remove Download without an episode title header.
+
 - `2026-07-28` `pending` - Add local Episode bookmark/clip workflows and keep loaded playback aligned with download state changes.
   Tester focus: create, edit, view, and export Episode bookmarks/clips; while an Episode or audiobook is loaded, download/remove its local audio and confirm playback reloads with the same position and playing/paused state.
 
