@@ -5,9 +5,11 @@ import {
   type PodcastHomeRefreshDeps,
   type PodcastSeriesIndexScope,
 } from "../podcast-library-experience";
+import type { TouchedEpisodeProgress } from "../episode-continue-eligibility";
 import {
   applyActiveEpisodePlaybackOverlay,
   assembleRecentEpisodesShelf,
+  promoteActiveEpisodeInContinueShelf,
   resolveRecentEpisodesShelfSource,
 } from "../recent-episodes-shelf";
 
@@ -108,6 +110,74 @@ describe("applyActiveEpisodePlaybackOverlay", () => {
     expect(overlaid[0]?.currentTimeSeconds).toBe(0);
     expect(overlaid[1]?.currentTimeSeconds).toBe(99);
     expect(overlaid[1]?.durationSeconds).toBe(2000);
+  });
+});
+
+describe("promoteActiveEpisodeInContinueShelf", () => {
+  const continueRow = (
+    overrides: Partial<TouchedEpisodeProgress> & Pick<TouchedEpisodeProgress, "episodeId">,
+  ): TouchedEpisodeProgress => ({
+    libraryItemId: "show-1",
+    episodeId: overrides.episodeId,
+    title: overrides.title ?? `Episode ${overrides.episodeId}`,
+    podcastTitle: overrides.podcastTitle ?? "Show One",
+    cover: overrides.cover ?? "thumb",
+    currentTimeSeconds: overrides.currentTimeSeconds ?? 30,
+    durationSeconds: overrides.durationSeconds ?? 1800,
+    isFinished: overrides.isFinished ?? false,
+    hideFromContinueListening: overrides.hideFromContinueListening ?? false,
+    lastUpdate: overrides.lastUpdate ?? 1000,
+  });
+
+  it("moves an existing Continue Episode to the front with live position", () => {
+    const rows = [
+      continueRow({ episodeId: "older", lastUpdate: 50 }),
+      continueRow({ episodeId: "playing", currentTimeSeconds: 10, lastUpdate: 10 }),
+    ];
+    const next = promoteActiveEpisodeInContinueShelf(rows, {
+      libraryItemId: "show-1",
+      episodeId: "playing",
+      currentTimeSeconds: 99,
+      durationSeconds: 2000,
+      title: "Playing Title",
+      podcastTitle: "Show One",
+      cover: "live-cover",
+    });
+    expect(next.map((row) => row.episodeId)).toEqual(["playing", "older"]);
+    expect(next[0]?.currentTimeSeconds).toBe(99);
+    expect(next[0]?.title).toBe("Playing Title");
+    expect(next[0]?.cover).toBe("live-cover");
+  });
+
+  it("inserts a newly started Episode at the front when absent from durable Continue", () => {
+    const rows = [continueRow({ episodeId: "older" })];
+    const next = promoteActiveEpisodeInContinueShelf(rows, {
+      libraryItemId: "show-2",
+      episodeId: "brand-new",
+      currentTimeSeconds: 0,
+      durationSeconds: 1200,
+      title: "Just Started",
+      podcastTitle: "New Show",
+      cover: null,
+    });
+    expect(next.map((row) => row.episodeId)).toEqual(["brand-new", "older"]);
+    expect(next[0]?.title).toBe("Just Started");
+    expect(next[0]?.currentTimeSeconds).toBe(0);
+  });
+
+  it("does not promote a Continue row the listener hid", () => {
+    const rows = [
+      continueRow({ episodeId: "hidden", hideFromContinueListening: true, currentTimeSeconds: 40 }),
+    ];
+    const next = promoteActiveEpisodeInContinueShelf(rows, {
+      libraryItemId: "show-1",
+      episodeId: "hidden",
+      currentTimeSeconds: 50,
+      durationSeconds: 1800,
+      title: "Hidden",
+      podcastTitle: "Show One",
+    });
+    expect(next).toEqual(rows);
   });
 });
 

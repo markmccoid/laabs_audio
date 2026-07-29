@@ -28,4 +28,15 @@ describe("authenticated route gate", () => {
     expect(routeState.inEpisodeUtilitySheet).toBe(true);
     expect(isKnownAuthenticatedRoute(routeState)).toBe(true);
   });
+
+  it.each([
+    "episode-bookmarks",
+    "episode-bookmark-detail",
+    "episode-addbookmark",
+  ])("treats %s as a known authenticated root route", (route) => {
+    const routeState = getAuthenticatedRouteState([route]);
+
+    expect(routeState.inEpisodeUtilitySheet).toBe(true);
+    expect(isKnownAuthenticatedRoute(routeState)).toBe(true);
+  });
 });

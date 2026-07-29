@@ -5,6 +5,7 @@ import {
   useDeviceEpisodeDownloadsActions,
   useDeviceEpisodeDownloadsStore,
 } from "@/store/device-episode-downloads-store";
+import { playerService } from "@/player";
 import { selectIsAnyDownloadActive, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
@@ -68,10 +69,20 @@ export const EpisodeDownloadControls = ({
   };
 
   const handleDelete = () => {
-    void deleteDownloadedEpisode(identity).then(() => {
+    void (async () => {
+      const playbackSnapshot = await playerService.prepareForDownloadedEpisodeDeletion(
+        libraryItemId,
+        episodeId,
+      );
+      await deleteDownloadedEpisode(identity);
+      await playerService.resumeAfterDownloadedEpisodeDeletion(playbackSnapshot);
       if (isEpisodeDownloadsSheet) {
         router.back();
       }
+    })().catch((error) => {
+      toast.error("Unable to remove download", {
+        description: error instanceof Error ? error.message : undefined,
+      });
     });
   };
 

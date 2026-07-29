@@ -10,7 +10,9 @@ const STEP_SECONDS = 5;
 
 type Props = {
   draft: ClipRangeDraft;
-  bookDurationSeconds: number;
+  mediaDurationSeconds?: number;
+  /** Compatibility alias for existing book callers. */
+  bookDurationSeconds?: number;
   disabled?: boolean;
   rangeAccessory?: ReactNode;
   onScrubbingChange?: (isScrubbing: boolean) => void;
@@ -18,12 +20,14 @@ type Props = {
 
 export const ClipRangeEditor = ({
   draft,
+  mediaDurationSeconds,
   bookDurationSeconds,
   disabled = false,
   rangeAccessory,
   onScrubbingChange,
 }: Props) => {
   const themeColors = useThemeColors();
+  const resolvedMediaDurationSeconds = mediaDurationSeconds ?? bookDurationSeconds ?? 0;
 
   const renderStepButton = (label: "-5s" | "+5s", onPress: () => void) => (
     <Pressable
@@ -128,7 +132,7 @@ export const ClipRangeEditor = ({
       <ClipTrimWindowSlider
         trimWindowStartSeconds={draft.trimWindowStartSeconds}
         trimWindowDurationSeconds={draft.trimWindowDurationSeconds}
-        bookDurationSeconds={bookDurationSeconds}
+        bookDurationSeconds={resolvedMediaDurationSeconds}
         disabled={disabled}
         onChangeTrimWindowStart={draft.handleTrimWindowChange}
         onDragStart={draft.handleTrimWindowDragStart}

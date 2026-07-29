@@ -16,14 +16,18 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
 import {
-  DEFAULT_CREATE_CLIP_DURATION_SECONDS,
   useBookAddBookmarkDraft,
-} from "./book-addbookmark-draft-context";
+} from "@/components/bookComponents/book-addbookmark-draft-context";
+import { DEFAULT_CREATE_CLIP_DURATION_SECONDS } from "@/bookmarks/bookmark-draft";
 import {
   ClipEditorTimingControlGroup,
   StartingPositionScrubberRevealButton,
-} from "./clip-editor-timing-control-group";
-import { clampSeconds, MAX_CLIP_DURATION_SECONDS, MIN_CLIP_DURATION_SECONDS } from "./clip-timing";
+} from "@/components/bookComponents/clip-editor-timing-control-group";
+import {
+  clampSeconds,
+  MAX_CLIP_DURATION_SECONDS,
+  MIN_CLIP_DURATION_SECONDS,
+} from "@/components/bookComponents/clip-timing";
 
 const FALLBACK_BOOK_DURATION_SECONDS = 16 * 60 * 60;
 
@@ -62,12 +66,13 @@ const getInitialRange = ({
   return { startSeconds, durationSeconds };
 };
 
-export const BookAddBookmarkClipEditorSheet = () => {
+export const BookmarkClipEditor = () => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const segments = useSegments();
   const playbackDurationMs = usePlaybackStore((state) => state.durationMs);
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const activeEpisodeId = usePlaybackStore((state) => state.episodeId);
   const activeQueueLength = usePlaybackStore((state) => state.queue.length);
   const draft = useBookAddBookmarkDraft();
   const previewStatus = useClipPreviewStore((state) => state.status);
@@ -77,7 +82,8 @@ export const BookAddBookmarkClipEditorSheet = () => {
   const bookDurationSeconds = Math.max(
     MIN_CLIP_DURATION_SECONDS,
     Math.round(
-      itemDetails?.bookDuration ??
+      draft.mediaDurationSeconds ??
+        itemDetails?.bookDuration ??
         (playbackDurationMs > 0 ? playbackDurationMs / 1000 : FALLBACK_BOOK_DURATION_SECONDS),
     ),
   );
@@ -87,7 +93,7 @@ export const BookAddBookmarkClipEditorSheet = () => {
       ? Math.max(MIN_CLIP_DURATION_SECONDS, draft.clipEndSeconds - draft.positionSeconds)
       : DEFAULT_CREATE_CLIP_DURATION_SECONDS;
   const screenTitle = draft.sourceBookmarkKind === "clip" ? "Edit Clip" : "Create Clip";
-  const isSavedBookmarkEdit = segments[0] === "book-bookmark-detail";
+  const isSavedBookmarkEdit = segments[0]?.includes("bookmark-detail") ?? false;
   const backAccessibilityLabel = isSavedBookmarkEdit
     ? "Back to bookmark detail"
     : "Back to add bookmark";
@@ -118,13 +124,17 @@ export const BookAddBookmarkClipEditorSheet = () => {
   const [previewScrubSeconds, setPreviewScrubSeconds] = useState(0);
   const clipPreviewAvailability = resolveClipPreviewAvailability({
     targetLibraryItemId: draft.libraryItemId,
+    targetEpisodeId: draft.targetEpisodeId ?? null,
     activeLibraryItemId,
+    activeEpisodeId,
     activeQueueLength,
   });
   const previewUnavailableReason = clipPreviewAvailability.available
     ? null
     : (clipPreviewAvailability.reason ?? "Clip preview is unavailable.");
-  const draftPreviewId = draft.libraryItemId ? `draft:create-clip:${draft.libraryItemId}` : null;
+  const draftPreviewId = draft.libraryItemId
+    ? `draft:create-clip:${draft.libraryItemId}:${draft.targetEpisodeId ?? "book"}`
+    : null;
   const isThisDraftPreview =
     Boolean(draftPreviewId) &&
     previewBookmarkId === draftPreviewId &&
@@ -240,12 +250,13 @@ export const BookAddBookmarkClipEditorSheet = () => {
       setPreviewScrubSeconds(previewStartSeconds - startSeconds);
       await playerService.playClipPreview({
         libraryItemId: draft.libraryItemId,
+        episodeId: draft.targetEpisodeId ?? null,
         bookmarkId: draftPreviewId,
         startTimeSeconds: previewStartSeconds,
         endTimeSeconds: endSeconds,
       });
     } catch (error) {
-      console.warn("[BookAddBookmarkClipEditorSheet] Failed to preview clip", error);
+      console.warn("[BookmarkClipEditor] Failed to preview clip", error);
       toast.error("Unable to preview clip");
     }
   };

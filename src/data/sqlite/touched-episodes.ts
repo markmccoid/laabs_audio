@@ -10,12 +10,19 @@ type TouchedRow = {
   title: string;
   podcast_title: string;
   cover: string | null;
-  current_time: number;
+  /** Aliased — bare `current_time` is SQLite CURRENT_TIME (HH:MM:SS text). */
+  current_time_seconds: number;
   duration: number;
   is_finished: number;
   hide_from_continue_listening: number;
   last_update: number;
 };
+
+/**
+ * SQLite treats bare `current_time` as the CURRENT_TIME keyword (wall-clock
+ * HH:MM:SS). Always qualify or quote the column when reading Listening Position.
+ */
+export const TOUCHED_EPISODE_CURRENT_TIME_SQL = "touched_episodes.current_time";
 
 /**
  * Mark an Episode Touched after download without stomping Listening Position.
@@ -36,13 +43,14 @@ export const markEpisodeTouchedFromDownload = async (payload: {
   const db = await getDb();
   const timestamp = now();
   const existing = await db.getFirstAsync<{
-    current_time: number;
+    current_time_seconds: number;
     is_finished: number;
     hide_from_continue_listening: number;
     last_update: number;
     duration: number;
   }>(
-    `SELECT current_time, is_finished, hide_from_continue_listening, last_update, duration
+    `SELECT ${TOUCHED_EPISODE_CURRENT_TIME_SQL} AS current_time_seconds,
+            is_finished, hide_from_continue_listening, last_update, duration
      FROM touched_episodes
      WHERE user_id = ? AND library_id = ? AND library_item_id = ? AND episode_id = ?`,
     [payload.userId, payload.libraryId, payload.libraryItemId, payload.episodeId],
@@ -56,7 +64,7 @@ export const markEpisodeTouchedFromDownload = async (payload: {
     title: payload.title,
     podcastTitle: payload.podcastTitle,
     cover: payload.cover,
-    currentTimeSeconds: existing?.current_time ?? 0,
+    currentTimeSeconds: Number(existing?.current_time_seconds) || 0,
     durationSeconds: Math.max(payload.durationSeconds, existing?.duration ?? 0, 0),
     isFinished: existing ? existing.is_finished === 1 : false,
     hideFromContinueListening: existing ? existing.hide_from_continue_listening === 1 : false,
@@ -123,7 +131,8 @@ export const listTouchedEpisodesForContinue = async (): Promise<TouchedEpisodePr
   const db = await getDb();
   const rows = await db.getAllAsync<TouchedRow>(
     `SELECT library_item_id, episode_id, title, podcast_title, cover,
-            current_time, duration, is_finished, hide_from_continue_listening, last_update
+            ${TOUCHED_EPISODE_CURRENT_TIME_SQL} AS current_time_seconds,
+            duration, is_finished, hide_from_continue_listening, last_update
      FROM touched_episodes
      WHERE user_id = ? AND library_id = ?
      ORDER BY last_update DESC`,
@@ -135,8 +144,8 @@ export const listTouchedEpisodesForContinue = async (): Promise<TouchedEpisodePr
     title: row.title,
     podcastTitle: row.podcast_title,
     cover: row.cover,
-    currentTimeSeconds: row.current_time,
-    durationSeconds: row.duration,
+    currentTimeSeconds: Number(row.current_time_seconds) || 0,
+    durationSeconds: Number(row.duration) || 0,
     isFinished: row.is_finished === 1,
     hideFromContinueListening: row.hide_from_continue_listening === 1,
     lastUpdate: row.last_update,

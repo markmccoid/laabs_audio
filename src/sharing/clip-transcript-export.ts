@@ -5,6 +5,9 @@ import type { ClipExportRange } from "./clip-export";
 
 export type ClipTranscriptExportInput = {
   bookTitle: string;
+  sourceLabel?: string;
+  sourceTitle?: string;
+  secondaryTitle?: string | null;
   bookmarkTitle: string;
   range: ClipExportRange;
   transcription: ClipTranscriptionResult;
@@ -43,12 +46,16 @@ const formatClipRange = (range: ClipExportRange) => {
 
 const buildClipTranscriptExportBody = ({
   bookTitle,
+  sourceLabel = "Book",
+  sourceTitle,
+  secondaryTitle,
   bookmarkTitle,
   range,
   transcription,
 }: ClipTranscriptExportInput) =>
   [
-    `Book: ${bookTitle}`,
+    `${sourceLabel}: ${sourceTitle ?? bookTitle}`,
+    ...(secondaryTitle ? [`Podcast: ${secondaryTitle}`] : []),
     `Bookmark: ${bookmarkTitle}`,
     `Clip Range: ${formatClipRange(range)}`,
     "",
@@ -58,10 +65,17 @@ const buildClipTranscriptExportBody = ({
 
 const buildOutputFileUri = async ({
   bookTitle,
+  sourceTitle,
+  secondaryTitle,
   bookmarkTitle,
-}: Pick<ClipTranscriptExportInput, "bookTitle" | "bookmarkTitle">) => {
+}: Pick<
+  ClipTranscriptExportInput,
+  "bookTitle" | "sourceTitle" | "secondaryTitle" | "bookmarkTitle"
+>) => {
   const directoryUri = await ensureClipTranscriptExportCacheDirectory();
-  const safeBookTitle = sanitizeFileSegment(bookTitle) || "Book";
+  const exportTitle =
+    sourceTitle && secondaryTitle ? `${secondaryTitle} - ${sourceTitle}` : (sourceTitle ?? bookTitle);
+  const safeBookTitle = sanitizeFileSegment(exportTitle) || "Media";
   const safeBookmarkTitle = sanitizeFileSegment(bookmarkTitle) || "Clip";
   return `${directoryUri}${safeBookTitle} - ${safeBookmarkTitle} Transcript.txt`;
 };

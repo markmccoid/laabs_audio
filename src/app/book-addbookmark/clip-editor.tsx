@@ -1,7 +1,7 @@
-import { BookAddBookmarkClipEditorSheet } from "@/components/bookComponents/book-addbookmark-clip-editor-sheet";
+import { BookmarkClipEditor } from "@/components/bookmarks/bookmark-clip-editor";
 
 const BookAddBookmarkClipEditorRoute = () => {
-  return <BookAddBookmarkClipEditorSheet />;
+  return <BookmarkClipEditor />;
 };
 
 export default BookAddBookmarkClipEditorRoute;

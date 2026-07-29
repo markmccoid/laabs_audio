@@ -6,7 +6,11 @@ import { useActivateLibrarySelection } from "@/hooks/use-activate-library-select
 import { useLibrarySelection } from "@/hooks/use-library-selection";
 import { usePlaybackStore } from "@/player/playback-store";
 import type { TouchedEpisodeProgress } from "@/podcast/episode-continue-eligibility";
-import { applyActiveEpisodePlaybackOverlay, toContinueShelfItemFromRecent } from "@/podcast/recent-episodes-shelf";
+import {
+  applyActiveEpisodePlaybackOverlay,
+  promoteActiveEpisodeInContinueShelf,
+  toContinueShelfItemFromRecent,
+} from "@/podcast/recent-episodes-shelf";
 import { podcastShowToShelfSummary } from "@/podcast/podcast-show-to-shelf-summary";
 import { refreshPodcastHomeShelvesDefault } from "@/podcast/podcast-library-experience-default";
 import {
@@ -74,8 +78,13 @@ export const PodcastHomeShelvesScreen = () => {
   const recentQuery = usePodcastRecentEpisodes();
   const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const playbackEpisodeId = usePlaybackStore((state) => state.episodeId);
+  const playbackBookTitle = usePlaybackStore((state) => state.bookTitle);
+  const playbackSecondaryTitle = usePlaybackStore((state) => state.secondaryTitle);
   const playbackPositionMs = usePlaybackStore((state) => state.positionMs);
   const playbackDurationMs = usePlaybackStore((state) => state.durationMs);
+  const playbackQueueArtworkUri = usePlaybackStore(
+    (state) => state.queue[0]?.artworkUri ?? null,
+  );
   const activateLibrarySelection = useActivateLibrarySelection();
   const {
     libraries,
@@ -110,10 +119,24 @@ export const PodcastHomeShelvesScreen = () => {
     };
   }, [playbackDurationMs, playbackEpisodeId, playbackLibraryItemId, playbackPositionMs]);
 
-  const continueEpisodes = useMemo(
-    () => applyActiveEpisodePlaybackOverlay(continueQuery.data ?? [], activePlaybackOverlay),
-    [activePlaybackOverlay, continueQuery.data],
-  );
+  const continueEpisodes = useMemo(() => {
+    const promote =
+      activePlaybackOverlay == null
+        ? null
+        : {
+            ...activePlaybackOverlay,
+            title: playbackBookTitle,
+            podcastTitle: playbackSecondaryTitle,
+            cover: playbackQueueArtworkUri,
+          };
+    return promoteActiveEpisodeInContinueShelf(continueQuery.data ?? [], promote);
+  }, [
+    activePlaybackOverlay,
+    continueQuery.data,
+    playbackBookTitle,
+    playbackQueueArtworkUri,
+    playbackSecondaryTitle,
+  ]);
 
   const recentEpisodes = useMemo(() => {
     const assembled = recentQuery.data ?? [];

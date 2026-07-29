@@ -156,7 +156,12 @@ export const useEpisodeActionController = ({
     if (busyAction) return;
     setBusyAction("removeDownload");
     try {
+      const playbackSnapshot = await playerService.prepareForDownloadedEpisodeDeletion(
+        identity.libraryItemId,
+        identity.episodeId,
+      );
       await deleteDownloadedEpisode(identity);
+      await playerService.resumeAfterDownloadedEpisodeDeletion(playbackSnapshot);
     } catch {
       toast.error("Unable to remove download");
     } finally {

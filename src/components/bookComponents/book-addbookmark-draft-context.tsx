@@ -1,6 +1,6 @@
 import { usePlaybackStore } from "@/player";
 import type { LocalBookmarkRecord } from "@/store/device-books-store";
-import { formatSeconds } from "@/utils/formatUtils";
+import { DEFAULT_CREATE_CLIP_DURATION_SECONDS } from "@/bookmarks/bookmark-draft";
 import { useLocalSearchParams } from "expo-router";
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import {
@@ -23,7 +23,9 @@ type BookmarkDraftState = {
   createdAt?: number;
 };
 
-type BookmarkDraftContextValue = BookmarkDraftState & {
+export type BookmarkDraftContextValue = BookmarkDraftState & {
+  targetEpisodeId?: string | null;
+  mediaDurationSeconds?: number;
   setTitle: (title: string) => void;
   setLocalNote: (localNote: string) => void;
   setPointPosition: (positionSeconds: number) => void;
@@ -35,23 +37,22 @@ type BookmarkDraftContextValue = BookmarkDraftState & {
 
 const BookmarkDraftContext = createContext<BookmarkDraftContextValue | null>(null);
 
+export const BookmarkDraftAdapterProvider = ({
+  value,
+  children,
+}: {
+  value: BookmarkDraftContextValue;
+  children: ReactNode;
+}) => <BookmarkDraftContext.Provider value={value}>{children}</BookmarkDraftContext.Provider>;
+
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
-export const DEFAULT_CREATE_CLIP_DURATION_SECONDS = 30;
-
-export const formatBookmarkDraftTime = (seconds: number) =>
-  formatSeconds(seconds, "compact", true, true) ?? "00:00";
-
-export const formatBookmarkDraftDuration = (seconds: number) => {
-  const roundedSeconds = Math.max(0, Math.round(seconds));
-  const hours = Math.floor(roundedSeconds / 3600);
-  const minutes = Math.floor((roundedSeconds % 3600) / 60);
-  const remainingSeconds = roundedSeconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m ${remainingSeconds}s`;
-  if (minutes > 0) return `${minutes}m ${remainingSeconds}s`;
-  return `${remainingSeconds}s`;
-};
+export {
+  DEFAULT_CREATE_CLIP_DURATION_SECONDS,
+  formatBookmarkDraftDuration,
+  formatBookmarkDraftTime,
+} from "@/bookmarks/bookmark-draft";
 
 export const BookAddBookmarkDraftProvider = ({ children }: { children: ReactNode }) => {
   const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);

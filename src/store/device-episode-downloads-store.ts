@@ -16,6 +16,8 @@ import {
   parseEpisodeIdentityKey,
   type EpisodeIdentity,
 } from "@/podcast/episode-identity";
+import { resolveEpisodeDownloadFileName } from "@/podcast/episode-download-filename";
+import { describeLocalAudioSourceUri } from "@/player/local-audio-source-diagnostics";
 import {
   assembleDownloadedEpisodesShelf,
   isEpisodeDownloadAvailable,
@@ -357,7 +359,12 @@ export const deviceEpisodeDownloadsStore = createStore<EpisodeDownloadsState>()(
             const downloadDir = await ensureEpisodeDownloadDir(identity);
             if (!isTokenActive()) return;
 
-            const currentFileName = audioFile.metadata?.filename ?? "episode.mp3";
+            const currentFileName = resolveEpisodeDownloadFileName({
+              episodeId,
+              mimeType: audioFile.mimeType,
+              format: audioFile.format,
+              codec: audioFile.codec,
+            });
             const currentFileSize =
               typeof audioFile.metadata?.size === "number" && audioFile.metadata.size > 0
                 ? audioFile.metadata.size
@@ -433,6 +440,21 @@ export const deviceEpisodeDownloadsStore = createStore<EpisodeDownloadsState>()(
             if (!relativePath) {
               throw new Error("Unable to persist downloaded episode path.");
             }
+            console.log(
+              "[episode-downloads][audio-file]",
+              JSON.stringify({
+                libraryItemId,
+                episodeId,
+                serverFilename: audioFile.metadata?.filename ?? null,
+                resolvedFilename: cleanFileName,
+                relativePath,
+                mimeType: audioFile.mimeType ?? null,
+                format: audioFile.format ?? null,
+                codec: audioFile.codec ?? null,
+                status: result.status,
+                ...describeLocalAudioSourceUri(fileUri),
+              }),
+            );
 
             const audioTrack: DownloadTrack = {
               ino: audioFile.ino,
@@ -686,6 +708,30 @@ export const selectHasPlayableEpisodeDownloadForSession = (
   });
 };
 
+export const selectIsEpisodePlaybackDownloadReady = (
+  state: EpisodeDownloadsState,
+  identity: EpisodeIdentity,
+  sessionUserId?: string | null,
+) => {
+  const key = episodeIdentityKey(identity);
+  if (!key) return false;
+  if (!selectHasPlayableEpisodeDownloadForSession(state, identity, sessionUserId)) {
+    return false;
+  }
+  const details = state.downloadedEpisodeDetailsById[key];
+  const track = state.downloadedEpisodeData[key]?.audioTracks[0];
+  return Boolean(details && track && resolveEpisodeDownloadTrackUri(track));
+};
+
+export const selectEpisodeDownloadOwnerUserId = (
+  state: Pick<EpisodeDownloadsState, "downloadedEpisodeOwnerUserIdsById">,
+  identity: EpisodeIdentity,
+) => {
+  const key = episodeIdentityKey(identity);
+  if (!key) return null;
+  return state.downloadedEpisodeOwnerUserIdsById[key]?.[0] ?? null;
+};
+
 export const listEpisodeDownloadedAssetRecords = (
   state: Pick<
     EpisodeDownloadsState,
@@ -726,13 +772,7 @@ export const resolveDownloadedEpisodePlayback = (identity: EpisodeIdentity) => {
   const key = episodeIdentityKey(identity);
   if (!key) return null;
   const state = deviceEpisodeDownloadsStore.getState();
-  if (
-    !selectHasPlayableEpisodeDownloadForSession(
-      state,
-      identity,
-      resolveAuthUserKey(),
-    )
-  ) {
+  if (!selectIsEpisodePlaybackDownloadReady(state, identity, resolveAuthUserKey())) {
     return null;
   }
   const details = state.downloadedEpisodeDetailsById[key];

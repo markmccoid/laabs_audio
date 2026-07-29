@@ -19,7 +19,12 @@ const BOOK_UTILITY_SHEETS = new Set([
   "book-filter-results",
 ]);
 
-const EPISODE_UTILITY_SHEETS = new Set(["episode-downloads"]);
+const EPISODE_UTILITY_SHEETS = new Set([
+  "episode-downloads",
+  "episode-bookmarks",
+  "episode-bookmark-detail",
+  "episode-addbookmark",
+]);
 
 export type AuthenticatedRouteState = {
   rootSegment: string | undefined;

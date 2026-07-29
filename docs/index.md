@@ -93,6 +93,7 @@ propose superseding it.
 | [0019](./adr/0019-shadow-sqlite-concern-modules.md) | Shadow SQLite concern modules with ids-first search reads |
 | [0020](./adr/0020-single-user-session-entry-module.md) | Single User Session Entry module crosses the boundary after identity is confirmed |
 | [0023](./adr/0023-sqlite-read-model-for-collections.md) | Server-owned Collections use a normalized SQLite read model |
+| [0032](./adr/0032-local-episode-bookmarks-and-clips.md) | Episode bookmarks and clips remain local until ABS supports Episode identity |
 
 Note: ADRs are point-in-time records. ADR-0017's phased-cutover details are completed and
 superseded in part by ADR-0019; read 0017 for the why, 0019 plus

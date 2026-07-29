@@ -47,6 +47,7 @@ const MainPlayerScreen = () => {
   );
   const storeTitle = usePlaybackStore((state) => state.bookTitle);
   const storeSecondaryTitle = usePlaybackStore((state) => state.secondaryTitle);
+  const storeDurationMs = usePlaybackStore((state) => state.durationMs);
 
   const metadata = bookData?.media?.metadata;
   const authorFromList = metadata?.authors
@@ -254,7 +255,13 @@ const MainPlayerScreen = () => {
         </View>
 
         {playerDisplayMedia.isEpisodePlayback ? (
-          <EpisodeMainPlayerActionsBar libraryItemId={loadedActionLibraryItemId} />
+          <EpisodeMainPlayerActionsBar
+            libraryItemId={loadedActionLibraryItemId}
+            episodeId={playerDisplayMedia.displayEpisodeId}
+            episodeTitle={title}
+            podcastTitle={authorName}
+            durationSeconds={storeDurationMs / 1000}
+          />
         ) : (
           <MainPlayerActionsBar libraryItemId={loadedActionLibraryItemId} />
         )}

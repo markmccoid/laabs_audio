@@ -1,4 +1,5 @@
 import { Asset } from "expo-asset";
+import * as FileSystem from "expo-file-system/legacy";
 import { NativeModules } from "react-native";
 import {
   AudioPro,
@@ -10,6 +11,7 @@ import {
 } from "react-native-audio-pro";
 import { DEFAULT_BOOK_COVER } from "../constants/default-book-cover";
 import { settingsStore, type RemoteCommandMode } from "../store/settings-store";
+import { describeLocalAudioSourceUri } from "./local-audio-source-diagnostics";
 import type { PitchCorrectionQuality, PlaybackQueueItem, PlaybackSource } from "./types";
 
 type AudioHeaders = {
@@ -406,6 +408,36 @@ export const createAudioEngine = (): AudioEngine => {
         artwork,
         artist: track.author,
       };
+
+      if (track.source.isLocal) {
+        const sourceDescription = describeLocalAudioSourceUri(url);
+        try {
+          const fileInfo = await FileSystem.getInfoAsync(url);
+          console.log(
+            "[audio-engine][local-source]",
+            JSON.stringify({
+              trackId: track.id,
+              mimeType: track.source.mimeType ?? null,
+              ...sourceDescription,
+              exists: fileInfo.exists,
+              sizeBytes: fileInfo.exists ? fileInfo.size : null,
+              isDirectory: fileInfo.exists ? fileInfo.isDirectory : null,
+              modificationTime: fileInfo.exists ? fileInfo.modificationTime : null,
+            }),
+          );
+        } catch (error) {
+          console.warn(
+            "[audio-engine][local-source]",
+            JSON.stringify({
+              trackId: track.id,
+              mimeType: track.source.mimeType ?? null,
+              ...sourceDescription,
+              exists: null,
+              inspectionError: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+      }
 
       currentTrack = audioTrack;
 

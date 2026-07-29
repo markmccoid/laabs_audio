@@ -6,6 +6,7 @@ export type ClipPreviewStatus = "idle" | "loading" | "playing" | "paused" | "end
 export type ClipPreviewState = {
   status: ClipPreviewStatus;
   libraryItemId: string | null;
+  episodeId: string | null;
   bookmarkId: string | null;
   startMs: number;
   endMs: number;
@@ -15,6 +16,7 @@ export type ClipPreviewState = {
     reset: () => void;
     startLoading: (payload: {
       libraryItemId: string;
+      episodeId?: string | null;
       bookmarkId?: string | null;
       startMs: number;
       endMs: number;
@@ -30,6 +32,7 @@ export type ClipPreviewState = {
 const getBaseState = () => ({
   status: "idle" as ClipPreviewStatus,
   libraryItemId: null as string | null,
+  episodeId: null as string | null,
   bookmarkId: null as string | null,
   startMs: 0,
   endMs: 0,
@@ -41,10 +44,11 @@ export const clipPreviewStore = createStore<ClipPreviewState>()((set, get) => ({
   ...getBaseState(),
   actions: {
     reset: () => set({ ...getBaseState(), actions: get().actions }),
-    startLoading: ({ libraryItemId, bookmarkId = null, startMs, endMs }) =>
+    startLoading: ({ libraryItemId, episodeId = null, bookmarkId = null, startMs, endMs }) =>
       set({
         status: "loading",
         libraryItemId,
+        episodeId,
         bookmarkId,
         startMs,
         endMs,

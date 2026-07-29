@@ -24,6 +24,14 @@ export type ActiveEpisodePlaybackOverlay = EpisodeIdentity & {
   durationSeconds: number;
 };
 
+/** Active Playback fields needed to promote an Episode onto Continue Listening. */
+export type ActiveEpisodeContinuePromote = ActiveEpisodePlaybackOverlay & {
+  title: string | null;
+  podcastTitle: string | null;
+  cover?: string | null;
+  isFinished?: boolean;
+};
+
 /** Preserve server publish order from the recent-episodes first page. */
 export const assembleRecentEpisodesShelf = (
   episodes: readonly RecentEpisodeSummary[],
@@ -85,6 +93,60 @@ export const applyActiveEpisodePlaybackOverlay = <
       durationSeconds: Math.max(episode.durationSeconds, overlay.durationSeconds, 0),
     };
   });
+};
+
+/**
+ * Optimistically put Active Playback at the head of Continue Listening.
+ * Inserts a new row when the Episode is not yet in the durable Touched projection
+ * (e.g. just started). Does not promote when the durable row is hidden.
+ */
+export const promoteActiveEpisodeInContinueShelf = (
+  episodes: readonly TouchedEpisodeProgress[],
+  active: ActiveEpisodeContinuePromote | null,
+): TouchedEpisodeProgress[] => {
+  if (!active?.libraryItemId?.trim() || !active.episodeId?.trim()) {
+    return episodes as TouchedEpisodeProgress[];
+  }
+
+  const existing = episodes.find((episode) => isSameEpisodeIdentity(episode, active));
+  if (existing?.hideFromContinueListening) {
+    return episodes as TouchedEpisodeProgress[];
+  }
+
+  if (active.isFinished) {
+    return episodes.filter((episode) => !isSameEpisodeIdentity(episode, active));
+  }
+
+  const currentTimeSeconds = Math.max(
+    0,
+    active.currentTimeSeconds,
+    existing?.currentTimeSeconds ?? 0,
+  );
+  const promoted: TouchedEpisodeProgress = {
+    libraryItemId: active.libraryItemId,
+    episodeId: active.episodeId,
+    title: active.title?.trim() || existing?.title || "Episode",
+    podcastTitle: active.podcastTitle?.trim() || existing?.podcastTitle || "Podcast",
+    cover: active.cover ?? existing?.cover ?? null,
+    currentTimeSeconds,
+    durationSeconds: Math.max(active.durationSeconds, existing?.durationSeconds ?? 0, 0),
+    isFinished: false,
+    hideFromContinueListening: false,
+    lastUpdate: Math.max(Date.now(), existing?.lastUpdate ?? 0),
+  };
+
+  const rest = episodes.filter((episode) => !isSameEpisodeIdentity(episode, active));
+  const alreadyLeads =
+    episodes[0] != null &&
+    isSameEpisodeIdentity(episodes[0], active) &&
+    episodes[0].currentTimeSeconds === promoted.currentTimeSeconds &&
+    episodes[0].durationSeconds === promoted.durationSeconds &&
+    episodes[0].title === promoted.title &&
+    episodes[0].podcastTitle === promoted.podcastTitle &&
+    episodes[0].cover === promoted.cover;
+
+  if (alreadyLeads) return episodes as TouchedEpisodeProgress[];
+  return [promoted, ...rest];
 };
 
 export const toContinueShelfItemFromRecent = (

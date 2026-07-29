@@ -29,14 +29,17 @@ import {
   deviceBooksStore,
   resolveStoredDownloadCoverUri,
   resolveStoredDownloadTrackUri,
+  selectIsBookFullyDownloaded,
   selectBookPlaybackRate,
   selectBookPlaybackRateIfStored,
   type PendingProgressSync,
   type DownloadTrack,
 } from "../store/device-books-store";
 import {
+  deviceEpisodeDownloadsStore,
   resolveDownloadedEpisodePlayback,
   resolveStoredEpisodeDownloadTrackUri,
+  selectIsEpisodePlaybackDownloadReady,
 } from "../store/device-episode-downloads-store";
 import { resolveEpisodePlaybackSource } from "../podcast/episode-download-facade";
 import {
@@ -56,15 +59,24 @@ import { createAudioEngine } from "./audio-engine";
 import { buildChapterIndex, findChapterForPosition, findTrackForPosition } from "./chapters";
 import { clipPreviewStore } from "./clip-preview-store";
 import { resolveClipPreviewAvailability } from "./clip-preview-availability";
+import { describeLocalAudioSourceUri } from "./local-audio-source-diagnostics";
 import {
   isPlaybackControlIntentBlocking,
   PLAYBACK_CONTROL_SETTLE_MS,
 } from "./playback-control-intent";
 import {
   isStreamedPlaybackStartFailure,
+  LOCAL_PLAYBACK_SESSION_ID,
+  resolveLocalPlaybackFallbackTarget,
+  runLocalPlaybackFallback,
   StreamedPlaybackStartFailureError,
   withPlaybackStartTimeout,
 } from "./playback-start-attempt";
+import {
+  resolvePlaybackSourceTransition,
+  type PlaybackSourceTransition,
+  type PlaybackSourceTransitionTarget,
+} from "./playback-source-transition";
 import { NativeModules } from "react-native";
 import type { PlaybackStoreState } from "./playback-store";
 import { playbackStore } from "./playback-store";
@@ -76,7 +88,7 @@ const MAX_LISTEN_DELTA_MS = 5000;
 const PAUSE_SYNC_DEDUPE_WINDOW_MS = 2000;
 const DEBUG_PLAYBACK_EVENTS = false;
 const CHAPTER_RESTART_THRESHOLD_MS = 3000;
-const LOCAL_SESSION_ID = "local";
+const LOCAL_SESSION_ID = LOCAL_PLAYBACK_SESSION_ID;
 const PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS = 5;
 const LOCAL_PLAYBACK_PROGRESS_TIMEOUT_MS = 4000;
 const LOCAL_PLAYBACK_PROGRESS_POLL_INTERVAL_MS = 250;
@@ -119,6 +131,7 @@ type FreshServerProgressFetchResultPayload =
 
 type ClipPreviewRestoreState = {
   libraryItemId: string | null;
+  episodeId: string | null;
   positionMs: number;
   playbackState: PlaybackStoreState["playbackState"];
   queueWasLoaded: boolean;
@@ -126,6 +139,7 @@ type ClipPreviewRestoreState = {
 
 type ClipPreviewSession = {
   libraryItemId: string;
+  episodeId: string | null;
   bookmarkId: string | null;
   startMs: number;
   endMs: number;
@@ -139,6 +153,16 @@ export type DownloadedBookDeletionPlaybackSnapshot = {
   wasActiveLocalSession: boolean;
   wasPlaying: boolean;
   positionMs: number;
+};
+
+export type DownloadedEpisodeDeletionPlaybackSnapshot = {
+  libraryItemId: string;
+  episodeId: string;
+  wasActiveLocalSession: boolean;
+  wasPlaying: boolean;
+  positionMs: number;
+  episodeTitle: string | null;
+  podcastTitle: string | null;
 };
 
 type SkipBurst = {
@@ -213,6 +237,10 @@ class PlayerService {
   private nativeSeekPauseGuardUntilMs = 0;
   private clipPreviewSession: ClipPreviewSession | null = null;
   private unsubscribeSettings: (() => void) | null = null;
+  private unsubscribeBookDownloads: (() => void) | null = null;
+  private unsubscribeEpisodeDownloads: (() => void) | null = null;
+  private playbackSourceTransitionInFlight = false;
+  private pendingPlaybackSourceTransition: PlaybackSourceTransition | null = null;
   private postPreviewStatusGuard:
     | {
         untilMs: number;
@@ -224,14 +252,14 @@ class PlayerService {
     return `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  // Book-switch breadcrumbs. console.log is the reliable device-log channel:
+  // Playback breadcrumbs. console.log is the reliable device-log channel:
   // RCTLog forwards it to os_log at Info level, which idevicesyslog relays
   // even in Release builds — verified on hardware 2026-07-03. (NSLog-based
   // mirrors do NOT relay through idevicesyslog on current iOS, so the native
   // carPlayLog mirror is only a Console.app convenience, not the main path.)
   // Fires once per load step — negligible cost.
-  private carPlayTrace(message: string) {
-    console.log("[CarPlay][trace]", message);
+  private playbackTrace(message: string) {
+    console.log("[player-service][trace]", message);
     try {
       NativeModules.AudioPro?.carPlayLog?.(`trace ${message}`);
     } catch {
@@ -263,7 +291,7 @@ class PlayerService {
           activeIntentKind: activeIntent.kind,
         };
       }
-      this.carPlayTrace(
+      this.playbackTrace(
         `intent:${settleExpired ? "settle-expired" : "stale"}-cleared kind=${activeIntent.kind} ageMs=${ageMs} item=${activeIntent.libraryItemId ?? "none"}`,
       );
       playbackStore.getState().actions.setPlaybackControlIntent(null);
@@ -497,13 +525,149 @@ class PlayerService {
         void this.reconcilePlaybackRateRange();
       }
     });
+    this.unsubscribeBookDownloads = deviceBooksStore.subscribe((state, previousState) => {
+      const playback = playbackStore.getState();
+      const libraryItemId = playback.episodeId ? null : playback.libraryItemId;
+      if (!libraryItemId) return;
+      this.handlePlaybackDownloadAvailabilityChange({
+        target: { kind: "book", libraryItemId },
+        wasDownloadReady: selectIsBookFullyDownloaded(previousState, libraryItemId),
+        isDownloadReady: selectIsBookFullyDownloaded(state, libraryItemId),
+      });
+    });
+    this.unsubscribeEpisodeDownloads = deviceEpisodeDownloadsStore.subscribe(
+      (state, previousState) => {
+        const playback = playbackStore.getState();
+        if (!playback.libraryItemId || !playback.episodeId) return;
+        const target = {
+          kind: "episode" as const,
+          libraryItemId: playback.libraryItemId,
+          episodeId: playback.episodeId,
+        };
+        this.handlePlaybackDownloadAvailabilityChange({
+          target,
+          wasDownloadReady: selectIsEpisodePlaybackDownloadReady(previousState, target),
+          isDownloadReady: selectIsEpisodePlaybackDownloadReady(state, target),
+        });
+      },
+    );
   }
 
   destroy() {
     this.initialized = false;
     this.unsubscribeSettings?.();
     this.unsubscribeSettings = null;
+    this.unsubscribeBookDownloads?.();
+    this.unsubscribeBookDownloads = null;
+    this.unsubscribeEpisodeDownloads?.();
+    this.unsubscribeEpisodeDownloads = null;
+    this.pendingPlaybackSourceTransition = null;
     this.cancelPendingSkipBurst();
+  }
+
+  private handlePlaybackDownloadAvailabilityChange(payload: {
+    target: PlaybackSourceTransitionTarget;
+    wasDownloadReady: boolean;
+    isDownloadReady: boolean;
+  }) {
+    const state = playbackStore.getState();
+    const transition = resolvePlaybackSourceTransition({
+      playback: {
+        libraryItemId: state.libraryItemId,
+        episodeId: state.episodeId,
+        sessionId: state.sessionId,
+        hasLoadedQueue: state.queue.length > 0,
+        playbackState: state.playbackState,
+      },
+      ...payload,
+    });
+    if (!transition) return;
+
+    this.pendingPlaybackSourceTransition = transition;
+    if (this.playbackSourceTransitionInFlight) return;
+    this.playbackSourceTransitionInFlight = true;
+    void this.drainPlaybackSourceTransitions();
+  }
+
+  private async drainPlaybackSourceTransitions() {
+    try {
+      while (this.pendingPlaybackSourceTransition) {
+        const transition = this.pendingPlaybackSourceTransition;
+        this.pendingPlaybackSourceTransition = null;
+        await this.applyPlaybackSourceTransition(transition);
+      }
+    } finally {
+      this.playbackSourceTransitionInFlight = false;
+      if (this.pendingPlaybackSourceTransition) {
+        this.playbackSourceTransitionInFlight = true;
+        void this.drainPlaybackSourceTransitions();
+      }
+    }
+  }
+
+  private async applyPlaybackSourceTransition(transition: PlaybackSourceTransition) {
+    const state = playbackStore.getState();
+    const targetMatches =
+      state.libraryItemId === transition.target.libraryItemId &&
+      (transition.target.kind === "episode"
+        ? state.episodeId === transition.target.episodeId
+        : state.episodeId === null);
+    if (!targetMatches || !state.queue.length) return;
+
+    const isDownloadReady =
+      transition.target.kind === "episode"
+        ? selectIsEpisodePlaybackDownloadReady(
+            deviceEpisodeDownloadsStore.getState(),
+            transition.target,
+          )
+        : selectIsBookFullyDownloaded(
+            deviceBooksStore.getState(),
+            transition.target.libraryItemId,
+          );
+    const currentIsLocal = state.sessionId === LOCAL_SESSION_ID;
+    if (currentIsLocal === isDownloadReady) return;
+
+    const positionMs = state.positionMs;
+    const shouldResumePlaying = state.playbackState === "playing";
+    const episodeTitle = state.bookTitle;
+    const podcastTitle = state.secondaryTitle;
+
+    try {
+      await this.closeActiveBookForTransition();
+      if (transition.target.kind === "episode") {
+        await this.loadEpisode(
+          transition.target.libraryItemId,
+          transition.target.episodeId,
+          {
+            autoPlay: false,
+            episodeTitle,
+            podcastTitle,
+          },
+          { preferDownloaded: isDownloadReady },
+        );
+      } else {
+        await this.loadBook(
+          transition.target.libraryItemId,
+          { autoPlay: false },
+          { preferDownloaded: isDownloadReady },
+        );
+      }
+      await this.seekToImmediate(positionMs, {
+        syncProgress: false,
+        allowDuringPlaybackControlIntent: true,
+      });
+      if (shouldResumePlaying) {
+        await this.performPlay({ applyAutoRewind: false });
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.warn("[player-service] playback-source-transition:failed", {
+          target: transition.target,
+          source: isDownloadReady ? "local" : "stream",
+          error,
+        });
+      }
+    }
   }
 
   private logQueue(context: string, queue: PlaybackQueueItem[]) {
@@ -523,7 +687,7 @@ class PlayerService {
   ) {
     const suppressErrorState = options?.suppressErrorState ?? false;
     const existingState = playbackStore.getState();
-    this.carPlayTrace(
+    this.playbackTrace(
       `loadBook:start ${libraryItemId} (from=${existingState.libraryItemId ?? "none"})`,
     );
     const preferDownloaded = internalOptions?.preferDownloaded ?? true;
@@ -569,7 +733,7 @@ class PlayerService {
         stateBeforeTransition.queue.length > 0
       ) {
         await this.closeActiveBookForTransition();
-        this.carPlayTrace(`loadBook:transition-closed ${stateBeforeTransition.libraryItemId}`);
+        this.playbackTrace(`loadBook:transition-closed ${stateBeforeTransition.libraryItemId}`);
       }
       tornDownExistingPlayback = true;
 
@@ -603,7 +767,7 @@ class PlayerService {
       }
 
       const sessionKind = shouldUseDownloadedAudio ? "downloaded" : "streamed";
-      this.carPlayTrace(
+      this.playbackTrace(
         `loadBook:session-resolved ${resolvedLibraryItemId} kind=${sessionKind} tracks=${queue.length}`,
       );
       const rateCandidateIds = this.buildCandidateIds(resolvedLibraryItemId, libraryItemId);
@@ -702,19 +866,19 @@ class PlayerService {
 
       await this.loadTrack(targetIndex, { initialPositionMs: trackPositionMs });
       this.logSnapshot("after loadBook");
-      this.carPlayTrace(
+      this.playbackTrace(
         `loadBook:track-loaded ${resolvedLibraryItemId} track=${targetIndex} rate=${storedBookRate}`,
       );
 
       if (options?.autoPlay) {
         await this.performPlay();
-        this.carPlayTrace(
+        this.playbackTrace(
           `loadBook:play-result ${resolvedLibraryItemId} state=${playbackStore.getState().playbackState}`,
         );
         if (shouldUseDownloadedAudio) {
           const postPlayState = playbackStore.getState();
           if (postPlayState.playbackState !== "playing") {
-            this.carPlayTrace(
+            this.playbackTrace(
               `loadBook:downloaded-play-stalled ${resolvedLibraryItemId} → retry streamed`,
             );
             await this.loadBook(libraryItemId, options, { preferDownloaded: false });
@@ -725,14 +889,14 @@ class PlayerService {
         playbackStore.getState().actions.setPlaybackState("ready");
       }
     } catch (error) {
-      this.carPlayTrace(
+      this.playbackTrace(
         `loadBook:error ${libraryItemId} ${error instanceof Error ? error.message : String(error)}`,
       );
       if (!tornDownExistingPlayback) {
         // Preflight failure: the previously playing book is still fully
         // intact — do NOT reset playback state to error/idle over it. The
         // caller surfaces the failure (CarPlay alert / phone toast).
-        this.carPlayTrace(`loadBook:preflight-failed-kept-playing ${libraryItemId}`);
+        this.playbackTrace(`loadBook:preflight-failed-kept-playing ${libraryItemId}`);
         if (suppressErrorState) return;
         throw error;
       }
@@ -2161,12 +2325,12 @@ class PlayerService {
 
     try {
       await this.engine.play();
-      this.carPlayTrace("performPlay:waiting-for-playing");
+      this.playbackTrace("performPlay:waiting-for-playing");
 
       try {
         await this.engine.waitForPlaying({ timeoutMs: 15000 });
       } catch (waitError) {
-        this.carPlayTrace(
+        this.playbackTrace(
           `performPlay:playing-wait-retry ${waitError instanceof Error ? waitError.message : String(waitError)}`,
         );
         // Some devices can settle in PAUSED/STOPPED briefly after load.
@@ -2174,7 +2338,7 @@ class PlayerService {
         await this.engine.play();
         await this.engine.waitForPlaying({ timeoutMs: 15000 });
       }
-      this.carPlayTrace("performPlay:playing-confirmed");
+      this.playbackTrace("performPlay:playing-confirmed");
 
       this.logSnapshot("after play");
       if (options?.updatePlaybackStore !== false) {
@@ -2202,18 +2366,36 @@ class PlayerService {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to start playback";
       const currentState = playbackStore.getState();
+      const fallbackTarget = resolveLocalPlaybackFallbackTarget({
+        libraryItemId: currentState.libraryItemId,
+        episodeId: currentState.episodeId,
+        sessionId: currentState.sessionId,
+      });
       const shouldFallbackToStreaming =
-        currentState.sessionId === LOCAL_SESSION_ID &&
-        Boolean(currentState.libraryItemId) &&
+        Boolean(fallbackTarget) &&
         !this.localStreamFallbackInFlight &&
         options?.disableLocalStreamFallback !== true &&
         this.canUseServer();
 
-      if (shouldFallbackToStreaming) {
+      if (shouldFallbackToStreaming && fallbackTarget) {
         this.localStreamFallbackInFlight = true;
         try {
-          await this.loadBook(currentState.libraryItemId as string, { autoPlay: true }, {
-            preferDownloaded: false,
+          await runLocalPlaybackFallback(fallbackTarget, {
+            loadEpisode: (target) =>
+              this.loadEpisode(
+                target.libraryItemId,
+                target.episodeId,
+                {
+                  autoPlay: true,
+                  episodeTitle: currentState.bookTitle,
+                  podcastTitle: currentState.secondaryTitle,
+                },
+                { preferDownloaded: false },
+              ),
+            loadBook: (target) =>
+              this.loadBook(target.libraryItemId, { autoPlay: true }, {
+                preferDownloaded: false,
+              }),
           });
           return;
         } catch (fallbackError) {
@@ -2452,6 +2634,19 @@ class PlayerService {
         const trackUri =
           resolveStoredEpisodeDownloadTrackUri(downloadedEpisode.track) ??
           downloadedEpisode.trackUri;
+        console.log(
+          "[episode-playback][local-source]",
+          JSON.stringify({
+            libraryItemId,
+            episodeId,
+            storedFilename: downloadedEpisode.track.filename,
+            storedCleanFilename: downloadedEpisode.track.cleanFileName,
+            storedRelativePath: downloadedEpisode.track.relativePath,
+            mimeType: downloadedEpisode.mimeType ?? null,
+            durationSeconds: downloadedEpisode.durationSeconds,
+            ...describeLocalAudioSourceUri(trackUri),
+          }),
+        );
         queue = [
           {
             id: `${libraryItemId}-${episodeId}-download-0`,
@@ -2705,13 +2900,101 @@ class PlayerService {
     try {
       await this.loadBook(
         snapshot.libraryItemId,
-        { autoPlay: snapshot.wasPlaying },
+        { autoPlay: false },
         { preferDownloaded: false },
       );
+      await this.seekToImmediate(snapshot.positionMs, {
+        syncProgress: false,
+        allowDuringPlaybackControlIntent: true,
+      });
+      if (snapshot.wasPlaying) {
+        await this.performPlay({ applyAutoRewind: false });
+      }
     } catch (error) {
       if (__DEV__) {
         console.warn("[player-service] download-delete:stream-reload-failed", {
           libraryItemId: snapshot.libraryItemId,
+          error,
+        });
+      }
+    }
+  }
+
+  async prepareForDownloadedEpisodeDeletion(
+    libraryItemId: string,
+    episodeId: string,
+  ): Promise<DownloadedEpisodeDeletionPlaybackSnapshot | null> {
+    await this.flushPendingSkipBurstBeforeExit();
+    const state = playbackStore.getState();
+    const isActiveLocalSession =
+      state.libraryItemId === libraryItemId &&
+      state.episodeId === episodeId &&
+      state.sessionId === LOCAL_SESSION_ID &&
+      state.queue.some((track) => track.source.isLocal);
+    if (!isActiveLocalSession) return null;
+
+    const snapshot: DownloadedEpisodeDeletionPlaybackSnapshot = {
+      libraryItemId,
+      episodeId,
+      wasActiveLocalSession: true,
+      wasPlaying: state.playbackState === "playing",
+      positionMs: state.positionMs,
+      episodeTitle: state.bookTitle,
+      podcastTitle: state.secondaryTitle,
+    };
+
+    if (state.playbackState === "playing") {
+      this.recordListeningInterruptionForState(state);
+      try {
+        await this.engine.pause();
+      } catch (error) {
+        if (__DEV__) {
+          console.warn("[player-service] episode-download-delete:pause-before-delete-failed", {
+            libraryItemId,
+            episodeId,
+            error,
+          });
+        }
+      }
+      playbackStore.getState().actions.setPlaybackState("paused");
+    }
+
+    await this.syncProgress("download_deleted", {
+      state: playbackStore.getState(),
+      forceDirectProgressUpdate: true,
+    });
+    await this.unloadAndResetPlayback({ preservePlaybackControlIntent: true });
+    return snapshot;
+  }
+
+  async resumeAfterDownloadedEpisodeDeletion(
+    snapshot: DownloadedEpisodeDeletionPlaybackSnapshot | null,
+  ) {
+    if (!snapshot?.wasActiveLocalSession) return;
+
+    try {
+      await this.loadEpisode(
+        snapshot.libraryItemId,
+        snapshot.episodeId,
+        {
+          autoPlay: false,
+          episodeTitle: snapshot.episodeTitle,
+          podcastTitle: snapshot.podcastTitle,
+        },
+        { preferDownloaded: false },
+      );
+      await this.seekToImmediate(snapshot.positionMs, {
+        syncProgress: false,
+        allowDuringPlaybackControlIntent: true,
+      });
+      if (snapshot.wasPlaying) {
+        await this.performPlay({ applyAutoRewind: false });
+      }
+    } catch (error) {
+      if (__DEV__) {
+        console.warn("[player-service] episode-download-delete:stream-reload-failed", {
+          libraryItemId: snapshot.libraryItemId,
+          episodeId: snapshot.episodeId,
           error,
         });
       }
@@ -2945,6 +3228,7 @@ class PlayerService {
 
   async playClipPreview(payload: {
     libraryItemId: string;
+    episodeId?: string | null;
     bookmarkId?: string | null;
     startTimeSeconds: number;
     endTimeSeconds: number;
@@ -2958,7 +3242,9 @@ class PlayerService {
     const stateBeforePreview = playbackStore.getState();
     const availability = resolveClipPreviewAvailability({
       targetLibraryItemId: payload.libraryItemId,
+      targetEpisodeId: payload.episodeId ?? null,
       activeLibraryItemId: stateBeforePreview.libraryItemId,
+      activeEpisodeId: stateBeforePreview.episodeId,
       activeQueueLength: stateBeforePreview.queue.length,
     });
     if (!availability.available) {
@@ -2967,6 +3253,7 @@ class PlayerService {
 
     const restoreState: ClipPreviewRestoreState = {
       libraryItemId: stateBeforePreview.libraryItemId,
+      episodeId: stateBeforePreview.episodeId,
       positionMs: stateBeforePreview.positionMs,
       playbackState: stateBeforePreview.playbackState,
       queueWasLoaded: stateBeforePreview.queue.length > 0,
@@ -2980,6 +3267,7 @@ class PlayerService {
     }
     this.clipPreviewSession = {
       libraryItemId: payload.libraryItemId,
+      episodeId: payload.episodeId ?? null,
       bookmarkId: payload.bookmarkId ?? null,
       startMs,
       endMs,
@@ -2989,6 +3277,7 @@ class PlayerService {
     };
     clipPreviewStore.getState().actions.startLoading({
       libraryItemId: payload.libraryItemId,
+      episodeId: payload.episodeId ?? null,
       bookmarkId: payload.bookmarkId ?? null,
       startMs,
       endMs,
@@ -3014,8 +3303,12 @@ class PlayerService {
     if (!previewSession) return;
 
     const state = playbackStore.getState();
-    if (state.libraryItemId !== previewSession.libraryItemId || !state.queue.length) {
-      throw new Error("Clip preview requires the book to be loaded");
+    if (
+      state.libraryItemId !== previewSession.libraryItemId ||
+      (state.episodeId ?? null) !== previewSession.episodeId ||
+      !state.queue.length
+    ) {
+      throw new Error("Clip preview requires the media item to be loaded");
     }
 
     const maxPosition = state.durationMs > 0 ? state.durationMs : positionMs;
@@ -3054,7 +3347,11 @@ class PlayerService {
     }
 
     const state = playbackStore.getState();
-    if (state.libraryItemId !== restoreState.libraryItemId || !state.queue.length) {
+    if (
+      state.libraryItemId !== restoreState.libraryItemId ||
+      (state.episodeId ?? null) !== restoreState.episodeId ||
+      !state.queue.length
+    ) {
       await this.engine.pause();
       return;
     }
@@ -3092,7 +3389,11 @@ class PlayerService {
     }
 
     const state = playbackStore.getState();
-    if (state.libraryItemId !== restoreState.libraryItemId || !state.queue.length) {
+    if (
+      state.libraryItemId !== restoreState.libraryItemId ||
+      (state.episodeId ?? null) !== restoreState.episodeId ||
+      !state.queue.length
+    ) {
       return null;
     }
 
@@ -3300,7 +3601,9 @@ class PlayerService {
         track.source.uri ?? track.source.sourceModule ?? "unknown"
       }`,
     );
-    this.carPlayTrace(`loadTrack:engine-load index=${index} local=${String(track.source.isLocal ?? false)}`);
+    this.playbackTrace(
+      `loadTrack:engine-load index=${index} local=${String(track.source.isLocal ?? false)}`,
+    );
 
     await this.engine.load(track, {
       initialPositionMs: options?.initialPositionMs ?? 0,
@@ -3525,7 +3828,11 @@ class PlayerService {
   ) {
     const previewSession = this.clipPreviewSession;
     if (!previewSession) return false;
-    if (state.libraryItemId !== previewSession.libraryItemId || !state.queue.length) {
+    if (
+      state.libraryItemId !== previewSession.libraryItemId ||
+      (state.episodeId ?? null) !== previewSession.episodeId ||
+      !state.queue.length
+    ) {
       return true;
     }
 

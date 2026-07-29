@@ -4,6 +4,15 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-28` `pending` - Add local Episode bookmark/clip workflows and keep loaded playback aligned with download state changes.
+  Tester focus: create, edit, view, and export Episode bookmarks/clips; while an Episode or audiobook is loaded, download/remove its local audio and confirm playback reloads with the same position and playing/paused state.
+
+- `2026-07-25` `pending` - Optimistically promote the playing Episode to the front of podcast Continue Listening.
+  Tester focus: start an Episode from Current Podcast or Recent; return to Home and confirm Continue Listening appears (or updates) with that Episode first before progress sync settles.
+
+- `2026-07-25` `pending` - Fix podcast Home Continue Listening empty shelf from SQLite `current_time` collision.
+  Tester focus: in a podcast Library with in-progress Episodes, confirm Home shows Continue Listening above Recent Episodes; play/pause an Episode and verify it appears with real progress (not missing after listening).
+
 - `2026-07-25` `pending` - Complete the podcast-slice hardening pass without changing Book behavior.
   Tester focus: run the Book activation, browsing, playback, background sync, and Episode-to-Book handoff checks alongside podcast activation, offline playback, Search, downloads, and reconnect progress tests.
 

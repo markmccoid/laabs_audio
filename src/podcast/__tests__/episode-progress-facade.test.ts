@@ -39,6 +39,18 @@ describe("isEpisodeContinueEligible", () => {
       isEpisodeContinueEligible(touched({ episodeId: "a", currentTimeSeconds: 0 })),
     ).toBe(false);
   });
+
+  it("rejects SQLite CURRENT_TIME wall-clock strings (bare current_time SELECT bug)", () => {
+    // Bare SQL `current_time` is CURRENT_TIME → "HH:MM:SS"; Number is NaN.
+    expect(
+      isEpisodeContinueEligible(
+        touched({
+          episodeId: "a",
+          currentTimeSeconds: "02:22:52" as unknown as number,
+        }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("orderContinueEpisodes", () => {

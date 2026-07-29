@@ -1,6 +1,10 @@
 import { usePlaybackRateGesture } from "@/hooks/use-playback-rate-gesture";
 import { useGetUserServerState } from "@/hooks/abs-data-hooks";
 import { useResolvedListeningOwnerKey } from "@/auth/listening-owner";
+import {
+  useEpisodeBookmarks,
+  useResolvedEpisodeListeningOwnerKey,
+} from "@/podcast/episode-bookmarks-store";
 import { useSleepTimerStatus } from "@/player";
 import {
   selectLocalBookmarksForBook,
@@ -18,6 +22,13 @@ import Animated, { interpolate, useAnimatedStyle } from "react-native-reanimated
 
 type MainPlayerActionsBarProps = {
   libraryItemId?: string;
+};
+
+type EpisodeMainPlayerActionsBarProps = MainPlayerActionsBarProps & {
+  episodeId?: string | null;
+  episodeTitle?: string | null;
+  podcastTitle?: string | null;
+  durationSeconds?: number;
 };
 
 type ActionIconButtonProps = {
@@ -283,17 +294,60 @@ const SleepTimerAction = () => {
   );
 };
 
-export const EpisodeMainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => (
-  <PlayerActionsFrame>
-    <SleepTimerAction />
-    <RateActionButton
-      libraryItemId={libraryItemId}
-      onPress={() => {
-        router.push("/player-rate");
-      }}
-    />
-  </PlayerActionsFrame>
-);
+export const EpisodeMainPlayerActionsBar = ({
+  libraryItemId,
+  episodeId,
+  episodeTitle,
+  podcastTitle,
+  durationSeconds = 0,
+}: EpisodeMainPlayerActionsBarProps) => {
+  const identity = {
+    libraryItemId: libraryItemId ?? "",
+    episodeId: episodeId ?? "",
+  };
+  const ownerUserId = useResolvedEpisodeListeningOwnerKey(identity);
+  const bookmarkCount = useEpisodeBookmarks(ownerUserId, identity).length;
+  const params = {
+    ...identity,
+    episodeTitle: episodeTitle ?? "Episode",
+    podcastTitle: podcastTitle ?? "Podcast",
+    durationSeconds: String(Math.max(0, Math.round(durationSeconds))),
+  };
+  const disabled = !libraryItemId || !episodeId;
+
+  return (
+    <PlayerActionsFrame>
+      <SleepTimerAction />
+      <ActionIconButton
+        icon="bookmark.fill"
+        label={
+          bookmarkCount > 0
+            ? `Open episode bookmarks, ${bookmarkCount} available`
+            : "Open episode bookmarks"
+        }
+        badgeCount={bookmarkCount}
+        disabled={disabled}
+        onPress={() => {
+          if (!disabled) router.push({ pathname: "/episode-bookmarks", params });
+        }}
+      />
+      <ActionIconButton
+        icon="book.badge.plus.fill"
+        label="Add episode bookmark"
+        disabled={disabled}
+        onPress={() => {
+          if (!disabled) router.push({ pathname: "/episode-addbookmark", params });
+        }}
+      />
+      <RateActionButton
+        libraryItemId={libraryItemId}
+        onPress={() => {
+          router.push("/player-rate");
+        }}
+      />
+    </PlayerActionsFrame>
+  );
+};
 
 const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
   useGetUserServerState();

@@ -21,6 +21,7 @@ export type ClipExportSourceSegment = {
 
 export type ClipExportSourcePlan = {
   libraryItemId: string;
+  episodeId: string | null;
   range: ClipExportRange;
   segments: ClipExportSourceSegment[];
   requiresConcatenation: boolean;
@@ -207,6 +208,7 @@ export const resolveClipExportSourcePlan = ({
 
   return {
     libraryItemId,
+    episodeId: null,
     range: {
       startTimeSeconds: clipStartSeconds,
       endTimeSeconds: clipEndSeconds,

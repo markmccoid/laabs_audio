@@ -695,6 +695,35 @@ export default function RootLayout() {
                 options={sheetScreenOptions(themeColors.surface)}
               />
               <Stack.Screen
+                name="episode-bookmarks"
+                options={sheetScreenOptions(themeColors.surface, {
+                  headerShown: false,
+                  gestureEnabled: true,
+                })}
+              />
+              <Stack.Screen
+                name="episode-bookmark-detail"
+                options={{
+                  headerShown: false,
+                  presentation: "fullScreenModal",
+                  animation: "slide_from_bottom",
+                  gestureEnabled: false,
+                  sheetGrabberVisible: false,
+                  contentStyle: { backgroundColor: themeColors.surface },
+                }}
+              />
+              <Stack.Screen
+                name="episode-addbookmark"
+                options={{
+                  headerShown: false,
+                  presentation: "fullScreenModal",
+                  animation: "slide_from_bottom",
+                  gestureEnabled: false,
+                  sheetGrabberVisible: false,
+                  contentStyle: { backgroundColor: themeColors.surface },
+                }}
+              />
+              <Stack.Screen
                 name="book-bookmarks"
                 options={sheetScreenOptions(themeColors.surface, {
                   headerShown: false,

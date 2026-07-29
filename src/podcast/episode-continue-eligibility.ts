@@ -15,10 +15,15 @@ export type TouchedEpisodeProgress = {
   lastUpdate: number;
 };
 
-export const isEpisodeContinueEligible = (row: TouchedEpisodeProgress) =>
-  !row.isFinished &&
-  !row.hideFromContinueListening &&
-  row.currentTimeSeconds > 0;
+export const isEpisodeContinueEligible = (row: TouchedEpisodeProgress) => {
+  const currentTimeSeconds = Number(row.currentTimeSeconds);
+  return (
+    !row.isFinished &&
+    !row.hideFromContinueListening &&
+    Number.isFinite(currentTimeSeconds) &&
+    currentTimeSeconds > 0
+  );
+};
 
 /** Newest progress update first; drops ineligible rows. Empty → hide shelf. */
 export const orderContinueEpisodes = (

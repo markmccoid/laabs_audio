@@ -26,7 +26,8 @@ Related ADRs: 0024 (storage), 0025 (Activation), 0026 (Home), 0027 (show detail)
 | Detail | `BookContainer` / book routes | Current Podcast + Episode Detail stack container (ADR 0027, 0031) |
 | SQLite catalog / progress | `library_catalog_*`, book progress tables | Parallel series-index + Touched Episode tables/modules (ADR 0024) |
 | CarPlay publish | Book shelves from book Home | Parallel podcast shelves; no Chapters Up Next for Episodes (ADR 0028) |
-| Book-only sheets | Bookshelves, book series, bookmarks, clips | Not on podcast browse path |
+| Bookmark persistence | Existing local Book records + ABS reconciliation | Parallel local Episode records keyed by Episode Identity; no unsafe show-level ABS writes (ADR 0032) |
+| Clip source planning | Existing downloaded Book multi-track resolver | Episode adapter over the single downloaded Episode track (ADR 0032) |
 
 ## Share chrome, widen identity
 
@@ -34,7 +35,7 @@ Related ADRs: 0024 (storage), 0025 (Activation), 0026 (Home), 0027 (show detail)
 
 **Widen:** Active Playback, Player Display, Playback Start Attempt, Progress Sync Intent, and related helpers accept **Episode Identity** (not only Audiobook Identity). Neutral renames of book-shaped helper names are preferred over time, not a v1 hard gate.
 
-**Hide / no-op for Episodes:** chapter list UI, CarPlay Up Next/Chapters, bookmark/clip surfaces, book shelf-membership actions. Podcast Home uses an Episode **Downloaded** shelf (not audiobook Downloaded rows).
+**Hide / no-op for Episodes:** chapter list UI, CarPlay Up Next/Chapters, and book shelf-membership actions. Episode bookmarks are local-first but use the same bookmark list, add/detail editor, advanced Clip Editor, menus, confirmations, and export presentation as Books; only persistence, exact-media loading, source planning, and export metadata vary through media adapters (ADR 0032). Podcast Home uses an Episode **Downloaded** shelf (not audiobook Downloaded rows).
 
 **Downloads / progress:** Episode-scoped Downloaded Audio Assets and Progress Sync Intents parallel to books — do not treat episodes as rows in book download/progress maps (ADR 0029).
 
