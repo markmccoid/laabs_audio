@@ -4,6 +4,14 @@ import React
 import MediaPlayer
 import UIKit
 
+private enum AudioWidgetPlaybackIntentNotification {
+	static let name = Notification.Name("LAABSAudioWidgetPlaybackIntent")
+	static let targetKey = "target"
+	static let playTarget = "laabs.audio.play"
+	static let pauseTarget = "laabs.audio.pause"
+	static let toggleTarget = "laabs.audio.toggle"
+}
+
 @objc(AudioPro)
 class AudioPro: RCTEventEmitter {
 
@@ -158,6 +166,12 @@ class AudioPro: RCTEventEmitter {
 	override init() {
 		super.init()
 		addCarPlayObservers()
+		NotificationCenter.default.addObserver(
+			self,
+			selector: #selector(handleAudioWidgetPlaybackIntent(_:)),
+			name: AudioWidgetPlaybackIntentNotification.name,
+			object: nil
+		)
 		// Pin the emitter's internal listener count: RCTEventEmitter.sendEvent
 		// drops events entirely while the count is zero, and the count can
 		// transiently hit zero (or reset on a recycled module instance) even
@@ -168,6 +182,40 @@ class AudioPro: RCTEventEmitter {
 
 	deinit {
 		removeCarPlayObservers()
+		NotificationCenter.default.removeObserver(
+			self,
+			name: AudioWidgetPlaybackIntentNotification.name,
+			object: nil
+		)
+	}
+
+	@objc private func handleAudioWidgetPlaybackIntent(_ notification: Notification) {
+		guard
+			let target = notification.userInfo?[AudioWidgetPlaybackIntentNotification.targetKey]
+				as? String,
+			let player
+		else {
+			return
+		}
+
+		switch target {
+		case AudioWidgetPlaybackIntentNotification.playTarget:
+			if player.rate == 0, currentTrack != nil {
+				resume()
+			}
+		case AudioWidgetPlaybackIntentNotification.pauseTarget:
+			if player.rate != 0 {
+				pause()
+			}
+		case AudioWidgetPlaybackIntentNotification.toggleTarget:
+			if player.rate > 0 {
+				pause()
+			} else if currentTrack != nil {
+				resume()
+			}
+		default:
+			break
+		}
 	}
 
 	private func addCarPlayObservers() {

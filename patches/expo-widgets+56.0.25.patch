@@ -1,0 +1,109 @@
+diff --git a/node_modules/expo-widgets/ios/Widgets/AppIntent.swift b/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
+index 972fa4f..f041c3b 100644
+--- a/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
++++ b/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
+@@ -24,7 +24,7 @@ struct WidgetReload: AppIntent {
+ }
+ 
+ @available(iOS 16.0, *)
+-struct WidgetUserInteraction: AppIntent {
++struct WidgetUserInteraction: AudioPlaybackIntent {
+   // title is not used for non-discoverable intents, but it is required
+   static var title: LocalizedStringResource = "User Interaction"
+   static var isDiscoverable: Bool = false
+@@ -88,6 +88,16 @@ struct WidgetUserInteraction: AppIntent {
+       WidgetsStorage.set(newTimeline, forKey: "__expo_widgets_\(source)_timeline")
+     }
+ 
++    if let target, target.hasPrefix("laabs.audio.") {
++      await MainActor.run {
++        NotificationCenter.default.post(
++          name: Notification.Name("LAABSAudioWidgetPlaybackIntent"),
++          object: nil,
++          userInfo: ["target": target]
++        )
++      }
++    }
++     WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
+       "source": source as Any,
+       "target": target as Any,
+diff --git a/node_modules/expo-widgets/plugin/build/ios/withIosWidgets.js b/node_modules/expo-widgets/plugin/build/ios/withIosWidgets.js
+index c8cd841..89db478 100644
+--- a/node_modules/expo-widgets/plugin/build/ios/withIosWidgets.js
++++ b/node_modules/expo-widgets/plugin/build/ios/withIosWidgets.js
+@@ -72,6 +72,8 @@ const withIosWidgets = (config, props) => {
+                 bundleIdentifier,
+                 deploymentTarget,
+                 appleTeamId: config.ios?.appleTeamId,
++                marketingVersion: config.ios?.version ?? config.version ?? '1.0',
++                currentProjectVersion: config.ios?.buildNumber ?? '1',
+                 getFileUris,
+             },
+         ],
+diff --git a/node_modules/expo-widgets/plugin/build/ios/xcode/withTargetXcodeProject.js b/node_modules/expo-widgets/plugin/build/ios/xcode/withTargetXcodeProject.js
+index 06307c6..b650ad4 100644
+--- a/node_modules/expo-widgets/plugin/build/ios/xcode/withTargetXcodeProject.js
++++ b/node_modules/expo-widgets/plugin/build/ios/xcode/withTargetXcodeProject.js
+@@ -42,7 +42,7 @@ const addTargetDependency_1 = require("./addTargetDependency");
+ const addToPbxNativeTargetSection_1 = require("./addToPbxNativeTargetSection");
+ const addToPbxProjectSection_1 = require("./addToPbxProjectSection");
+ const addXCConfigurationList_1 = require("./addXCConfigurationList");
+-const withTargetXcodeProject = (config, { targetName, bundleIdentifier, deploymentTarget, appleTeamId, getFileUris }) => (0, config_plugins_1.withXcodeProject)(config, (config) => {
++const withTargetXcodeProject = (config, { targetName, bundleIdentifier, deploymentTarget, appleTeamId, marketingVersion, currentProjectVersion, getFileUris }) => (0, config_plugins_1.withXcodeProject)(config, (config) => {
+     const xcodeProject = config.modResults;
+     const targetUuid = xcodeProject.generateUuid();
+     const groupName = 'Embed Foundation Extensions';
+@@ -51,8 +51,8 @@ const withTargetXcodeProject = (config, { targetName, bundleIdentifier, deployme
+         bundleIdentifier,
+         deploymentTarget,
+         appleTeamId,
+-        marketingVersion: '1.0',
+-        currentProjectVersion: '1',
++        marketingVersion,
++        currentProjectVersion,
+     });
+     const productFile = (0, addProductFile_1.addProductFile)(xcodeProject, {
+         targetName,
+diff --git a/node_modules/expo-widgets/plugin/src/ios/withIosWidgets.ts b/node_modules/expo-widgets/plugin/src/ios/withIosWidgets.ts
+index e880642..037614b 100644
+--- a/node_modules/expo-widgets/plugin/src/ios/withIosWidgets.ts
++++ b/node_modules/expo-widgets/plugin/src/ios/withIosWidgets.ts
+@@ -86,9 +86,11 @@ const withIosWidgets: ConfigPlugin<IosWidgetsProps> = (config, props) => {
+       {
+         targetName,
+         bundleIdentifier,
+-        deploymentTarget,
+-        appleTeamId: config.ios?.appleTeamId,
+-        getFileUris,
++          deploymentTarget,
++          appleTeamId: config.ios?.appleTeamId,
++          marketingVersion: config.ios?.version ?? config.version ?? '1.0',
++          currentProjectVersion: config.ios?.buildNumber ?? '1',
++          getFileUris,
+       },
+     ],
+   ];
+diff --git a/node_modules/expo-widgets/plugin/src/ios/xcode/withTargetXcodeProject.ts b/node_modules/expo-widgets/plugin/src/ios/xcode/withTargetXcodeProject.ts
+index 823b1d2..5860076 100644
+--- a/node_modules/expo-widgets/plugin/src/ios/xcode/withTargetXcodeProject.ts
++++ b/node_modules/expo-widgets/plugin/src/ios/xcode/withTargetXcodeProject.ts
+@@ -14,6 +14,8 @@ type TargetXcodeProjectProps = {
+   bundleIdentifier: string;
+   deploymentTarget: string;
+   appleTeamId?: string;
++  marketingVersion: string;
++  currentProjectVersion: string;
+   getFileUris: () => string[];
+ };
+ 
+@@ -31,8 +33,8 @@ const withTargetXcodeProject: ConfigPlugin<TargetXcodeProjectProps> = (
+       bundleIdentifier,
+       deploymentTarget,
+       appleTeamId,
+-      marketingVersion: '1.0',
+-      currentProjectVersion: '1',
++      marketingVersion: props.marketingVersion,
++      currentProjectVersion: props.currentProjectVersion,
+     });
+ 
+     const productFile = addProductFile(xcodeProject, {

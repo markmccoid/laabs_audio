@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-29` `pending` - Route iOS widget playback taps directly to the loaded native audiobook player without opening the app.
+  Tester focus: on a physical iPhone, load an audiobook, background the app, and confirm the widget button pauses and resumes it while the app remains in the background; repeat after iOS suspends the app.
+
 - `2026-07-29` `pending` - Define the privacy-safe, versioned state and minute timeline used by iOS audio widgets.
   Tester focus: no visible widget change yet; verify widget snapshot tests cover empty, playing, paused, playback-rate, duration-clamping, and minute-update behavior.
 
