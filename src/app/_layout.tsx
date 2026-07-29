@@ -1,3 +1,4 @@
+import "@/widgets/LaabsAudioWidget";
 import type { QueryKey } from "@tanstack/react-query";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import * as Linking from "expo-linking";

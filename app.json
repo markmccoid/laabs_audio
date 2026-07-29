@@ -2,7 +2,7 @@
   "expo": {
     "name": "LAABS Audiobookshelf",
     "slug": "laabs_audio",
-    "version": "1.7.0",
+    "version": "1.7.1",
     "orientation": "portrait",
     "scheme": "laabsaudio",
     "userInterfaceStyle": "automatic",
@@ -56,7 +56,20 @@
       "expo-status-bar",
       "expo-web-browser",
       "expo-sqlite",
-      "./plugins/with-carplay"
+      "./plugins/with-carplay",
+      [
+        "expo-widgets",
+        {
+          "widgets": [
+            {
+              "name": "LAABSAudioWidget",
+              "displayName": "LAABS Audio Widget",
+              "description": "Access your audiobooks from anywhere.",
+              "supportedFamilies": ["systemSmall", "systemMedium"]
+            }
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

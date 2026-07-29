@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-29` `pending` - Scaffold the iOS Home Screen widget extension without publishing placeholder playback data.
+  Tester focus: create an iOS development build and confirm the LAABS Audio widget is available in the Home Screen widget gallery without changing audiobook playback or app startup behavior.
+
 - `2026-07-28` `21f87e5` - Clean up Current Podcast episode rows and move episode actions to the long-press menu.
   Tester focus: open a Current Podcast and confirm rows show only episode information, tapping a row opens Episode Detail, and long-press offers Play plus Download or Remove Download without an episode title header.
 
