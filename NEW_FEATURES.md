@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-29` `pending` - Replace the iOS widget placeholder with a live, JSON-safe initial timeline when the app opens.
+  Tester focus: open the app once, return to the Home Screen, and confirm the LAABS Audio widget shows its play/pause control instead of the redacted skeleton placeholder.
+
 - `2026-07-29` `pending` - Route iOS widget playback taps directly to the loaded native audiobook player without opening the app.
   Tester focus: on a physical iPhone, load an audiobook, background the app, and confirm the widget button pauses and resumes it while the app remains in the background; repeat after iOS suspends the app.
 

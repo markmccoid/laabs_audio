@@ -24,9 +24,43 @@ index 972fa4f..f041c3b 100644
 +        )
 +      }
 +    }
-+     WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
++
+     WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
        "source": source as Any,
        "target": target as Any,
+diff --git a/node_modules/expo-widgets/ios/WidgetsStorage.swift b/node_modules/expo-widgets/ios/WidgetsStorage.swift
+index 86f9d6c..76b91e7 100644
+--- a/node_modules/expo-widgets/ios/WidgetsStorage.swift
++++ b/node_modules/expo-widgets/ios/WidgetsStorage.swift
+@@ -9,9 +9,14 @@ public enum WidgetsStorage {
+   }
+ 
+   static func set(_ value: [[String: Any]], forKey key: String) {
+-    guard let defaults else { return }
+-
+-    defaults.set(value, forKey: key)
++    guard
++      let defaults,
++      let data = try? JSONSerialization.data(withJSONObject: value)
++    else {
++      return
++    }
++
++    defaults.set(data, forKey: key)
+   }
+ 
+   static func set(_ value: String, forKey key: String) {
+@@ -35,6 +40,10 @@ public enum WidgetsStorage {
+   public static func getArray(forKey key: String) -> [Any]? {
+     guard let defaults else { return nil }
+ 
++    if let data = defaults.data(forKey: key) {
++      return try? JSONSerialization.jsonObject(with: data) as? [Any]
++    }
++
+     return defaults.array(forKey: key)
+   }
+ 
 diff --git a/node_modules/expo-widgets/plugin/build/ios/withIosWidgets.js b/node_modules/expo-widgets/plugin/build/ios/withIosWidgets.js
 index c8cd841..89db478 100644
 --- a/node_modules/expo-widgets/plugin/build/ios/withIosWidgets.js
