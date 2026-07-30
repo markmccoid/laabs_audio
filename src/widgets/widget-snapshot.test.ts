@@ -83,7 +83,7 @@ describe("audio widget snapshot", () => {
       minuteCount: 2,
     });
 
-    expect(timeline.map((entry) => entry.timestamp.getTime())).toEqual([
+    expect(timeline.map((entry) => entry.date.getTime())).toEqual([
       1_000,
       61_000,
       121_000,

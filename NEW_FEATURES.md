@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-29` `pending` - Show the loaded audiobook in Small and Medium iOS widgets with square shared cover art, title, author, minute progress, deep linking, and background play/pause.
+  Tester focus: open the app with an audiobook loaded or paused, then verify Small shows its cover and control; Medium shows a square cover, title, author, current progress, and control; tap outside the control to open that book’s detail page.
+
 - `2026-07-29` `pending` - Replace the iOS widget placeholder with a live, JSON-safe initial timeline when the app opens.
   Tester focus: open the app once, return to the Home Screen, and confirm the LAABS Audio widget shows its play/pause control instead of the redacted skeleton placeholder.
 

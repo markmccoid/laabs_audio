@@ -59,7 +59,7 @@ export type AudioWidgetSnapshot = {
 };
 
 export type AudioWidgetTimelineEntry = {
-  timestamp: Date;
+  date: Date;
   props: AudioWidgetSnapshot;
 };
 
@@ -155,7 +155,7 @@ export const buildAudioWidgetMinuteTimeline = (
   return Array.from({ length: minuteCount + 1 }, (_, index) => {
     const timestampMs = startTimestampMs + index * 60_000;
     return {
-      timestamp: new Date(timestampMs),
+      date: new Date(timestampMs),
       props: projectAudioWidgetSnapshot(snapshot, timestampMs),
     };
   });

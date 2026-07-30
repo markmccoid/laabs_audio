@@ -53,6 +53,7 @@ import {
   getStartupPresentationState,
   subscribeStartupPresentation,
 } from "../utils/startup-presentation";
+import { startActiveAudiobookWidgetCoordinator } from "../widgets/active-audiobook-widget-coordinator";
 
 const logStartupDebug = (event: string, payload?: Record<string, unknown>) => {
   void event;
@@ -463,6 +464,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     playerService.init();
+    return startActiveAudiobookWidgetCoordinator();
   }, []);
 
   // Startup Active Playback Restore: once startup has settled (auth resolved, query cache
