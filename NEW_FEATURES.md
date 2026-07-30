@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-30` `pending` - Enlarge the Medium iOS widget's square audiobook cover and align it flush with the widget's left edge.
+  Tester focus: add or refresh the Medium widget and confirm the square cover uses nearly all of the available vertical space with no margin along its left edge.
+
 - `2026-07-29` `pending` - Show the loaded audiobook in Small and Medium iOS widgets with square shared cover art, title, author, minute progress, deep linking, and background play/pause.
   Tester focus: open the app with an audiobook loaded or paused, then verify Small shows its cover and control; Medium shows a square cover, title, author, current progress, and control; tap outside the control to open that book’s detail page.
 

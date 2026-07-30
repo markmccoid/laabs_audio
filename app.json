@@ -65,7 +65,10 @@
               "name": "LAABSAudioWidget",
               "displayName": "LAABS Audio Widget",
               "description": "Access your audiobooks from anywhere.",
-              "supportedFamilies": ["systemSmall", "systemMedium"]
+              "ios": {
+                "supportedFamilies": ["systemSmall", "systemMedium"],
+                "contentMarginsDisabled": true
+              }
             }
           ]
         }

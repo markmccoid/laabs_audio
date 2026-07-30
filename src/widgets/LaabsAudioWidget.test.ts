@@ -186,13 +186,25 @@ describe("LAABS audio widget registration", () => {
       $type: "widgetURL",
       url: "laabsaudio://book/book-1",
     });
+    expect(widget.props.modifiers).toContainEqual({
+      $type: "padding",
+      top: 12,
+      bottom: 12,
+      trailing: 12,
+    });
+    expect(
+      widget.props.modifiers.some(
+        (modifier) =>
+          modifier.$type === "padding" && modifier.leading !== undefined,
+      ),
+    ).toBe(false);
     expect(
       findAll(widget, "ZStack").some((stack) =>
         stack.props.modifiers?.some(
           (modifier) =>
             modifier.$type === "frame" &&
-            modifier.width === 82 &&
-            modifier.height === 82,
+            modifier.width === 130 &&
+            modifier.height === 130,
         ),
       ),
     ).toBe(true);

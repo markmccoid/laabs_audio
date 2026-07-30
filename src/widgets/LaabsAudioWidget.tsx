@@ -146,12 +146,12 @@ const LaabsAudioWidget = (
       modifiers={[
         containerBackground("#F5F1E8", "widget"),
         widgetURL(media.detailUrl),
-        padding({ all: 12 }),
+        padding({ top: 12, bottom: 12, trailing: 12 }),
       ]}
     >
       <ZStack
         modifiers={[
-          frame({ width: 82, height: 82 }),
+          frame({ width: 130, height: 130 }),
           clipShape("roundedRectangle", 10),
         ]}
       >
