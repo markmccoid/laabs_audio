@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-07-30` `pending` - Keep simulator startup working when native iOS widget timeline storage is unavailable.
+  Tester focus: launch the app in an iOS simulator and confirm the root route loads without a widget HostFunction error or missing-default-export warning; confirm physical-device widgets still update.
+
 - `2026-07-30` `pending` - Enlarge the Medium iOS widget's square audiobook cover and align it flush with the widget's left edge.
   Tester focus: add or refresh the Medium widget and confirm the square cover uses nearly all of the available vertical space with no margin along its left edge.
 

@@ -164,6 +164,34 @@ describe("active audiobook widget snapshot", () => {
 });
 
 describe("active audiobook widget publisher", () => {
+  it("keeps app startup alive and retries after native timeline publication fails", () => {
+    const playback = createTestStore(playbackState());
+    const auth = createTestStore(authState());
+    const updateTimeline = jest
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("Exception in HostFunction");
+      })
+      .mockImplementation(() => undefined);
+    let publisher: ReturnType<typeof startActiveAudiobookWidgetPublisher> | null =
+      null;
+
+    expect(() => {
+      publisher = startActiveAudiobookWidgetPublisher({
+        widget: { updateTimeline },
+        playback,
+        auth,
+        ...snapshotOptions,
+      });
+    }).not.toThrow();
+
+    expect(updateTimeline).toHaveBeenCalledTimes(1);
+    publisher?.refresh();
+    expect(updateTimeline).toHaveBeenCalledTimes(2);
+
+    publisher?.stop();
+  });
+
   it("publishes a minute timeline and ignores one-second engine ticks", () => {
     const playback = createTestStore(playbackState());
     const auth = createTestStore(authState());

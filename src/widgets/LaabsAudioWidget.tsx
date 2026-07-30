@@ -198,6 +198,11 @@ const LaabsAudioWidget = (
 
 const audioWidget = createWidget<AudioWidgetSnapshot>("LAABSAudioWidget", LaabsAudioWidget);
 
-audioWidget.updateSnapshot(createEmptyAudioWidgetSnapshot());
+try {
+  audioWidget.updateSnapshot(createEmptyAudioWidgetSnapshot());
+} catch {
+  // Widget timeline storage can be unavailable in the iOS simulator.
+  // Widget publication must not prevent the app's root route from loading.
+}
 
 export default audioWidget;

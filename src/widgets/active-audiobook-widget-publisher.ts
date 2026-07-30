@@ -166,13 +166,18 @@ export const startActiveAudiobookWidgetPublisher = (
     const signature = buildPublicationSignature(snapshot);
     if (signature === lastPublicationSignature) return;
 
-    lastPublicationSignature = signature;
-    options.widget.updateTimeline(
-      buildAudioWidgetMinuteTimeline(snapshot, {
-        startTimestampMs: snapshot.publishedAtMs,
-        minuteCount: options.minuteCount,
-      }),
-    );
+    try {
+      options.widget.updateTimeline(
+        buildAudioWidgetMinuteTimeline(snapshot, {
+          startTimestampMs: snapshot.publishedAtMs,
+          minuteCount: options.minuteCount,
+        }),
+      );
+      lastPublicationSignature = signature;
+    } catch {
+      // Timeline publication is optional app integration. Leave the signature
+      // uncommitted so a later state change or artwork refresh can retry.
+    }
   };
 
   const unsubscribePlayback = playback.subscribe(publish);
