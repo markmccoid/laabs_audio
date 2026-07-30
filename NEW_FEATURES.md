@@ -4,25 +4,28 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
-- `2026-07-30` `pending` - Keep simulator startup working when native iOS widget timeline storage is unavailable.
+- `2026-07-30` `pending` - Finalize the Small and Medium iOS audiobook widget release as app version 1.7.2.
+  Tester focus: verify Small and Medium widgets on a physical iPhone, including cover art, metadata, progress, deep linking, and background play/pause; the Large widget is deferred to a later release.
+
+- `2026-07-30` `41fb233` - Keep simulator startup working when native iOS widget timeline storage is unavailable.
   Tester focus: launch the app in an iOS simulator and confirm the root route loads without a widget HostFunction error or missing-default-export warning; confirm physical-device widgets still update.
 
-- `2026-07-30` `pending` - Enlarge the Medium iOS widget's square audiobook cover and align it flush with the widget's left edge.
+- `2026-07-30` `20e8530` - Enlarge the Medium iOS widget's square audiobook cover and align it flush with the widget's left edge.
   Tester focus: add or refresh the Medium widget and confirm the square cover uses nearly all of the available vertical space with no margin along its left edge.
 
-- `2026-07-29` `pending` - Show the loaded audiobook in Small and Medium iOS widgets with square shared cover art, title, author, minute progress, deep linking, and background play/pause.
+- `2026-07-29` `54bfaef` - Show the loaded audiobook in Small and Medium iOS widgets with square shared cover art, title, author, minute progress, deep linking, and background play/pause.
   Tester focus: open the app with an audiobook loaded or paused, then verify Small shows its cover and control; Medium shows a square cover, title, author, current progress, and control; tap outside the control to open that book’s detail page.
 
-- `2026-07-29` `pending` - Replace the iOS widget placeholder with a live, JSON-safe initial timeline when the app opens.
+- `2026-07-29` `a208487` - Replace the iOS widget placeholder with a live, JSON-safe initial timeline when the app opens.
   Tester focus: open the app once, return to the Home Screen, and confirm the LAABS Audio widget shows its play/pause control instead of the redacted skeleton placeholder.
 
-- `2026-07-29` `pending` - Route iOS widget playback taps directly to the loaded native audiobook player without opening the app.
+- `2026-07-29` `588f070` - Route iOS widget playback taps directly to the loaded native audiobook player without opening the app.
   Tester focus: on a physical iPhone, load an audiobook, background the app, and confirm the widget button pauses and resumes it while the app remains in the background; repeat after iOS suspends the app.
 
-- `2026-07-29` `pending` - Define the privacy-safe, versioned state and minute timeline used by iOS audio widgets.
+- `2026-07-29` `059b5ca` - Define the privacy-safe, versioned state and minute timeline used by iOS audio widgets.
   Tester focus: no visible widget change yet; verify widget snapshot tests cover empty, playing, paused, playback-rate, duration-clamping, and minute-update behavior.
 
-- `2026-07-29` `pending` - Scaffold the iOS Home Screen widget extension without publishing placeholder playback data.
+- `2026-07-29` `e9af63b` - Scaffold the iOS Home Screen widget extension without publishing placeholder playback data.
   Tester focus: create an iOS development build and confirm the LAABS Audio widget is available in the Home Screen widget gallery without changing audiobook playback or app startup behavior.
 
 - `2026-07-28` `21f87e5` - Clean up Current Podcast episode rows and move episode actions to the long-press menu.
