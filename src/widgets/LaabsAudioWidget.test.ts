@@ -175,6 +175,19 @@ describe("LAABS audio widget registration", () => {
         onPress: expect.any(Function),
       }),
     );
+    expect(
+      (findAll(widget, "Button")[0].props.onPress as () => {
+        media: { playback: { state: string } };
+      })(),
+    ).toEqual({
+      media: {
+        ...activeSnapshot().media,
+        playback: {
+          ...activeSnapshot().media.playback,
+          state: "paused",
+        },
+      },
+    });
   });
 
   it("renders medium widgets with metadata, minute progress, and play control", () => {
@@ -219,6 +232,11 @@ describe("LAABS audio widget registration", () => {
         (image) => image.props.systemName === "play.fill",
       ),
     ).toBe(true);
+    expect(
+      (findAll(widget, "Button")[0].props.onPress as () => {
+        media: { playback: { state: string } };
+      })().media.playback.state,
+    ).toBe("playing");
   });
 
   it("renders a useful empty state without a stale detail link or control", () => {

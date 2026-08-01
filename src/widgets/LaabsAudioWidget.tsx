@@ -90,7 +90,15 @@ const LaabsAudioWidget = (
   const playbackButton = (
     <Button
       target="laabs.audio.toggle"
-      onPress={() => ({})}
+      onPress={() => ({
+        media: {
+          ...media,
+          playback: {
+            ...media.playback,
+            state: isPlaying ? "paused" : "playing",
+          },
+        },
+      })}
       modifiers={[
         buttonStyle("borderedProminent"),
         buttonBorderShape("circle"),
