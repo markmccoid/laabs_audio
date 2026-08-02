@@ -12,11 +12,18 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 export const usePodcastSeriesByAddedAt = () => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const enabled = status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
+  const enabled =
+    status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
 
   return useQuery({
-    queryKey: queryKeys.podcastSeriesIndex(activeLibraryUserKey, activeLibraryId, "addedAtDesc"),
+    queryKey: queryKeys.podcastSeriesIndex(
+      activeLibraryUserKey,
+      activeLibraryId,
+      "addedAtDesc",
+    ),
     queryFn: () => podcastSeriesIndexRepository.listByAddedAtDesc(),
     enabled,
   });
@@ -25,11 +32,18 @@ export const usePodcastSeriesByAddedAt = () => {
 export const usePodcastSeriesByTitle = () => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const enabled = status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
+  const enabled =
+    status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
 
   return useQuery({
-    queryKey: queryKeys.podcastSeriesIndex(activeLibraryUserKey, activeLibraryId, "titleAsc"),
+    queryKey: queryKeys.podcastSeriesIndex(
+      activeLibraryUserKey,
+      activeLibraryId,
+      "titleAsc",
+    ),
     queryFn: () => podcastSeriesIndexRepository.listByTitle(),
     enabled,
   });
@@ -38,11 +52,18 @@ export const usePodcastSeriesByTitle = () => {
 export const usePodcastSeriesSearchHits = (query: string) => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const enabled = status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
+  const enabled =
+    status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
 
   return useQuery({
-    queryKey: queryKeys.podcastSeriesSearchHits(activeLibraryUserKey, activeLibraryId, query),
+    queryKey: queryKeys.podcastSeriesSearchHits(
+      activeLibraryUserKey,
+      activeLibraryId,
+      query,
+    ),
     queryFn: () => podcastSeriesIndexRepository.querySearchHits(query),
     enabled,
   });
@@ -51,12 +72,39 @@ export const usePodcastSeriesSearchHits = (query: string) => {
 export const usePodcastContinueEpisodes = () => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const enabled = status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
+  const enabled =
+    status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
 
   return useQuery({
-    queryKey: queryKeys.podcastContinueEpisodes(activeLibraryUserKey, activeLibraryId),
-    queryFn: async () => orderContinueEpisodes(await listTouchedEpisodesForContinue()),
+    queryKey: queryKeys.podcastContinueEpisodes(
+      activeLibraryUserKey,
+      activeLibraryId,
+    ),
+    queryFn: listTouchedEpisodesForContinue,
+    select: orderContinueEpisodes,
+    enabled,
+  });
+};
+
+/** All Touched Episodes, including hidden/unstarted rows used to enrich Home shelf duplicates. */
+export const usePodcastTouchedEpisodes = () => {
+  const status = useAuthStore((state) => state.status);
+  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
+  const enabled =
+    status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
+
+  return useQuery({
+    queryKey: queryKeys.podcastContinueEpisodes(
+      activeLibraryUserKey,
+      activeLibraryId,
+    ),
+    queryFn: listTouchedEpisodesForContinue,
     enabled,
   });
 };
@@ -64,13 +112,19 @@ export const usePodcastContinueEpisodes = () => {
 export const usePodcastRecentEpisodes = () => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
   const activeLibraryName = useAuthStore((state) => state.activeLibraryName);
   const queryClient = useQueryClient();
-  const enabled = status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
+  const enabled =
+    status === "authenticated" && !!activeLibraryUserKey && !!activeLibraryId;
 
   return useQuery({
-    queryKey: queryKeys.podcastRecentEpisodes(activeLibraryUserKey, activeLibraryId),
+    queryKey: queryKeys.podcastRecentEpisodes(
+      activeLibraryUserKey,
+      activeLibraryId,
+    ),
     queryFn: async () => {
       const result = await assembleRecentEpisodesForHomeDefault({
         userId: activeLibraryUserKey!,
@@ -79,7 +133,10 @@ export const usePodcastRecentEpisodes = () => {
       });
       // Touched overlays may have been imported from the recent page.
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.podcastContinueEpisodes(activeLibraryUserKey, activeLibraryId),
+        queryKey: queryKeys.podcastContinueEpisodes(
+          activeLibraryUserKey,
+          activeLibraryId,
+        ),
       });
       return result.episodes;
     },
@@ -92,7 +149,9 @@ export const usePodcastRecentEpisodes = () => {
 export const usePodcastSeriesIndexShow = (libraryItemId?: string) => {
   const status = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
   const enabled =
     status === "authenticated" &&
     !!activeLibraryUserKey &&
@@ -101,7 +160,11 @@ export const usePodcastSeriesIndexShow = (libraryItemId?: string) => {
 
   return useQuery({
     queryKey: [
-      ...queryKeys.podcastSeriesIndex(activeLibraryUserKey, activeLibraryId, "titleAsc"),
+      ...queryKeys.podcastSeriesIndex(
+        activeLibraryUserKey,
+        activeLibraryId,
+        "titleAsc",
+      ),
       "show",
       libraryItemId ?? null,
     ],
@@ -112,7 +175,9 @@ export const usePodcastSeriesIndexShow = (libraryItemId?: string) => {
 
 export const usePodcastItemDetails = (libraryItemId?: string) => {
   const status = useAuthStore((state) => state.status);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
   const isOnline = useAuthStore((state) => state.isOnline);
   const enabled =
     status === "authenticated" &&
@@ -122,7 +187,10 @@ export const usePodcastItemDetails = (libraryItemId?: string) => {
 
   return useQuery<PodcastItemDetails>(
     buildPodcastItemDetailsQueryOptions({
-      queryKey: queryKeys.podcastItemDetails(activeLibraryUserKey, libraryItemId),
+      queryKey: queryKeys.podcastItemDetails(
+        activeLibraryUserKey,
+        libraryItemId,
+      ),
       queryFn: () => itemsApi.getPodcastItemDetails(libraryItemId!),
       canFetch: enabled,
     }),

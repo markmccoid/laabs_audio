@@ -60,6 +60,14 @@ _Avoid_: Show, feed, series, podcast item
 One broadcast belonging to a Podcast. An Episode is the playable unit for podcast listening.
 _Avoid_: Track, chapter (for podcasts), “podcast” when meaning one broadcast
 
+**Episode Shelf**:
+A user-managed Home shelf in a podcast Library whose members are Episodes. An Episode Shelf may be backed by an Audiobookshelf playlist or stored only on the device; it never contains whole Podcasts.
+_Avoid_: Podcasts Shelf, show shelf, mixed podcast shelf
+
+**Podcasts Shelf**:
+The built-in Home shelf in a podcast Library whose members are Podcasts rather than Episodes. It is a derived browse projection, not a membership destination.
+_Avoid_: Episode Shelf, podcast playlist, shows shelf
+
 **Podcast Episode Order**:
 The default Episode list ordering for a Podcast: chronological (oldest→newest) when the Podcast is serial, or reverse-chronological (newest→oldest) when it is episodic.
 _Avoid_: Episode sort mode, feed order, podcast type alone as a UI label
@@ -69,7 +77,7 @@ The thin durable local projection of Podcasts in a podcast Library used for brow
 _Avoid_: Podcast catalog mirror, full podcast SQLite catalog, series cache when meaning episodes
 
 **Touched Episode**:
-An Episode that has durable local listening or download-related state (progress overlay, Progress Sync Intent, or download eligibility), as opposed to Episodes known only from live server discovery.
+An Episode that has durable local listening, download-related, or Episode Shelf membership state, as opposed to Episodes known only from live server discovery. LAABS retains enough of a Touched Episode’s presentation metadata to represent that durable state without live server discovery.
 _Avoid_: Cached episode, indexed episode, mirrored episode
 
 **Collection**:
@@ -97,15 +105,19 @@ The transition that makes a chosen Library ready for browsing after Library Sele
 _Avoid_: Library load, library warmup
 
 **Home Shelf Display**:
-The first visible Home surface that shows the Active Library's small shelf projections. For an audiobook Active Library this includes shelves such as Continue Listening, Recently Added, Discover, Downloaded, custom shelves, or playlist shelves. For a podcast Active Library this is Continue Listening (Episodes), Recent Episodes, Podcasts (recently-added shows), and Downloaded (Episodes).
+The first visible Home surface that shows the Active Library's small shelf projections. For an audiobook Active Library this includes shelves such as Continue Listening, Recently Added, Discover, Downloaded, device-only shelves, or Playlist Shelves. For a podcast Active Library this includes Continue Listening, Recent Episodes, the Podcasts Shelf, Downloaded, device-only Episode Shelves, and Playlist Episode Shelves according to the user's library-scoped visibility and order.
 _Avoid_: Home bookshelf display, catalog display, Library display
 
 **Shelf Membership**:
-The relationship between an audiobook and an app-managed Home shelf or playlist shelf for the Active Library.
-_Avoid_: Bookshelf selection, book assignment
+The relationship between an Audiobook or Episode and a user-managed shelf in its Active Library. Podcasts are never Shelf Membership subjects.
+_Avoid_: Bookshelf selection, book assignment, Podcast assignment
+
+**Device-only Shelf**:
+A user-managed shelf stored only by LAABS Audio for one Audiobookshelf User Identity and Library. It contains Audiobooks in an audiobook Library or Episodes in a podcast Library.
+_Avoid_: Playlist Shelf, server shelf, unsynced playlist
 
 **Playlist Shelf**:
-An app-managed shelf backed by an Audiobookshelf playlist on the Audiobookshelf Server.
+A user-managed shelf backed by an Audiobookshelf playlist on the Audiobookshelf Server. It contains Audiobooks in an audiobook Library or Episodes in a podcast Library.
 _Avoid_: Local playlist, app playlist
 
 **Missing Playlist Shelf**:
@@ -189,7 +201,7 @@ The context-specific collection of Book Actions offered from a book presentation
 _Avoid_: Book menu, universal menu
 
 **Episode Action**:
-A user-invoked command available for an Episode Identity from an Episode presentation, such as Play/Pause, Download/Remove Download, or Open Podcast.
+A user-invoked command available for an Episode Identity from an Episode presentation, such as Play/Pause, Download/Remove Download, Bookshelves, or Open Podcast.
 _Avoid_: Menu item, row action, Book Action
 
 **Episode Action Set**:

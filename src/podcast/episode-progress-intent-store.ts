@@ -59,9 +59,12 @@ export const recordEpisodeProgressSyncIntent = (payload: {
     trigger: payload.trigger,
   };
 
-  const recorded = episodeProgressStore.getState().actions.recordIntent(userKey, intent);
+  const recorded = episodeProgressStore
+    .getState()
+    .actions.recordIntent(userKey, intent);
   void upsertEpisodePendingProgressIntent(userKey, recorded);
   void upsertTouchedEpisodeProgress({
+    mediaProgressId: null,
     userId: userKey,
     libraryId: payload.libraryId ?? authStore.getState().activeLibraryId ?? "",
     libraryItemId: payload.libraryItemId,
@@ -74,6 +77,7 @@ export const recordEpisodeProgressSyncIntent = (payload: {
     isFinished: payload.isFinished,
     hideFromContinueListening: false,
     lastUpdate: updatedAt,
+    preserveExistingContinueListeningVisibility: true,
   });
   invalidateContinueShelf(userKey);
   return recorded;
@@ -112,7 +116,9 @@ export const getEpisodeProgressSyncIntent = (
 ) => {
   const resolved = userKey ?? authStore.getState().activeLibraryUserKey;
   if (!resolved) return null;
-  return episodeProgressStore.getState().actions.getIntent(resolved, libraryItemId, episodeId);
+  return episodeProgressStore
+    .getState()
+    .actions.getIntent(resolved, libraryItemId, episodeId);
 };
 
 export const listEpisodeProgressSyncIntents = (

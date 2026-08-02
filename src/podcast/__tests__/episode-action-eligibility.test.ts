@@ -13,10 +13,21 @@ describe("resolveEpisodeActionSet", () => {
       isEpisodePlaying: false,
     });
 
-    expect(actions.map((action) => ({ id: action.id, visible: action.visible, label: action.label }))).toEqual([
+    expect(
+      actions.map((action) => ({
+        id: action.id,
+        visible: action.visible,
+        label: action.label,
+      })),
+    ).toEqual([
       { id: "playPause", visible: true, label: "Play" },
       { id: "download", visible: true, label: "Download" },
       { id: "removeDownload", visible: false, label: "Remove Download" },
+      {
+        id: "removeFromContinueListening",
+        visible: false,
+        label: "Remove from Continue Listening",
+      },
       { id: "openPodcast", visible: true, label: "Open Podcast" },
     ]);
   });
@@ -30,9 +41,7 @@ describe("resolveEpisodeActionSet", () => {
     });
 
     expect(
-      actions
-        .filter((action) => action.visible)
-        .map((action) => action.id),
+      actions.filter((action) => action.visible).map((action) => action.id),
     ).toEqual(["playPause", "removeDownload", "openPodcast"]);
   });
 
@@ -45,9 +54,7 @@ describe("resolveEpisodeActionSet", () => {
     });
 
     expect(
-      actions
-        .filter((action) => action.visible)
-        .map((action) => action.id),
+      actions.filter((action) => action.visible).map((action) => action.id),
     ).toEqual(["playPause", "download"]);
   });
 
@@ -59,6 +66,32 @@ describe("resolveEpisodeActionSet", () => {
       isEpisodePlaying: true,
     });
 
-    expect(actions.find((action) => action.id === "playPause")?.label).toBe("Pause");
+    expect(actions.find((action) => action.id === "playPause")?.label).toBe(
+      "Pause",
+    );
+  });
+
+  it("offers removal from Continue Listening only when the Episode has eligible progress", () => {
+    const visible = resolveEpisodeActionSet({
+      actionIds: HOME_EPISODE_ACTIONS,
+      hasPlayableLocalDownload: false,
+      isOnCurrentPodcast: false,
+      canRemoveFromContinueListening: true,
+    });
+    const hidden = resolveEpisodeActionSet({
+      actionIds: HOME_EPISODE_ACTIONS,
+      hasPlayableLocalDownload: false,
+      isOnCurrentPodcast: false,
+      canRemoveFromContinueListening: false,
+    });
+
+    expect(
+      visible.find((action) => action.id === "removeFromContinueListening")
+        ?.visible,
+    ).toBe(true);
+    expect(
+      hidden.find((action) => action.id === "removeFromContinueListening")
+        ?.visible,
+    ).toBe(false);
   });
 });

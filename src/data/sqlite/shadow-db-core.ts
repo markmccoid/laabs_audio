@@ -13,9 +13,11 @@ export type ShadowSqliteRuntimeState = {
   didEnsureEffectiveProgressView: boolean;
 };
 
-export const shadowSqliteRuntimeState = ((globalThis as typeof globalThis & {
-  __laabsShadowSqliteRuntimeState?: ShadowSqliteRuntimeState;
-}).__laabsShadowSqliteRuntimeState ??= {
+export const shadowSqliteRuntimeState = ((
+  globalThis as typeof globalThis & {
+    __laabsShadowSqliteRuntimeState?: ShadowSqliteRuntimeState;
+  }
+).__laabsShadowSqliteRuntimeState ??= {
   dbPromise: null,
   schemaInitPromise: null,
   writeQueue: Promise.resolve(),
@@ -29,9 +31,12 @@ export const getDb = async () => {
     // sqlite3_close. With an FTS5 table present, that double-finalizes FTS5's
     // internally-owned statements during xDisconnect and crashes natively on
     // reload/Fast Refresh (OnDestroy -> closeDatabase). See expo/expo#38168.
-    shadowSqliteRuntimeState.dbPromise = SQLite.openDatabaseAsync(DATABASE_NAME, {
-      finalizeUnusedStatementsBeforeClosing: false,
-    });
+    shadowSqliteRuntimeState.dbPromise = SQLite.openDatabaseAsync(
+      DATABASE_NAME,
+      {
+        finalizeUnusedStatementsBeforeClosing: false,
+      },
+    );
   }
   return shadowSqliteRuntimeState.dbPromise;
 };
@@ -40,7 +45,7 @@ export const runInTransaction = async (db: Db, task: () => Promise<void>) => {
   await db.withTransactionAsync(task);
 };
 
-export const withWriteGuard = async <T,>(task: () => Promise<T>): Promise<T> => {
+export const withWriteGuard = async <T>(task: () => Promise<T>): Promise<T> => {
   const previousWrite = shadowSqliteRuntimeState.writeQueue;
   const queuedWrite = (async () => {
     await previousWrite;
@@ -432,6 +437,7 @@ CREATE TABLE IF NOT EXISTS touched_episodes (
   library_id TEXT NOT NULL,
   library_item_id TEXT NOT NULL,
   episode_id TEXT NOT NULL,
+  media_progress_id TEXT,
   title TEXT NOT NULL,
   podcast_title TEXT NOT NULL,
   cover TEXT,
@@ -506,40 +512,79 @@ export const initializeShadowDatabaseInternal = async () => {
   }
 
   shadowSqliteRuntimeState.schemaInitPromise = (async () => {
-  const db = await getDb();
-  const timestamp = Date.now();
+    const db = await getDb();
+    const timestamp = Date.now();
 
-  await db.execAsync(createSchemaSql);
-  await db.execAsync(`
+    await db.execAsync(createSchemaSql);
+    await db
+      .execAsync(
+        `
+    ALTER TABLE touched_episodes ADD COLUMN media_progress_id TEXT;
+  `,
+      )
+      .catch(() => undefined);
+    await db
+      .execAsync(
+        `
     ALTER TABLE library_refresh_runs ADD COLUMN elapsed_ms INTEGER;
-  `).catch(() => undefined);
-  await db.execAsync(`
+  `,
+      )
+      .catch(() => undefined);
+    await db
+      .execAsync(
+        `
     ALTER TABLE library_refresh_runs ADD COLUMN network_elapsed_ms INTEGER;
-  `).catch(() => undefined);
-  await db.execAsync(`
+  `,
+      )
+      .catch(() => undefined);
+    await db
+      .execAsync(
+        `
     ALTER TABLE library_refresh_runs ADD COLUMN write_elapsed_ms INTEGER;
-  `).catch(() => undefined);
-  await db.execAsync(`
+  `,
+      )
+      .catch(() => undefined);
+    await db
+      .execAsync(
+        `
     ALTER TABLE library_refresh_runs ADD COLUMN finalize_elapsed_ms INTEGER;
-  `).catch(() => undefined);
-  await db.execAsync(`
+  `,
+      )
+      .catch(() => undefined);
+    await db
+      .execAsync(
+        `
     ALTER TABLE libraries ADD COLUMN last_collections_refresh_at INTEGER;
-  `).catch(() => undefined);
-  await db.execAsync(`
+  `,
+      )
+      .catch(() => undefined);
+    await db
+      .execAsync(
+        `
     ALTER TABLE libraries ADD COLUMN last_series_refresh_at INTEGER;
-  `).catch(() => undefined);
-  await db.execAsync(`
+  `,
+      )
+      .catch(() => undefined);
+    await db
+      .execAsync(
+        `
     ALTER TABLE libraries ADD COLUMN last_podcast_series_index_refresh_at INTEGER;
-  `).catch(() => undefined);
-  if (!shadowSqliteRuntimeState.didEnsureEffectiveProgressView) {
-    await db.execAsync(`
+  `,
+      )
+      .catch(() => undefined);
+    if (!shadowSqliteRuntimeState.didEnsureEffectiveProgressView) {
+      await db
+        .execAsync(
+          `
       ALTER TABLE pending_progress_sync_intents ADD COLUMN duration REAL NOT NULL DEFAULT 0;
-    `).catch(() => undefined);
-    // Create the view in a transaction with proper error handling for concurrent calls
-    try {
-      await runInTransaction(db, async () => {
-        await db.execAsync(`DROP VIEW IF EXISTS effective_progress;`);
-        await db.execAsync(`
+    `,
+        )
+        .catch(() => undefined);
+      // Create the view in a transaction with proper error handling for concurrent calls
+      try {
+        await runInTransaction(db, async () => {
+          await db.execAsync(`DROP VIEW IF EXISTS effective_progress;`);
+          await db.execAsync(`
           CREATE VIEW effective_progress AS
           SELECT
             item.user_id,
@@ -604,35 +649,36 @@ export const initializeShadowDatabaseInternal = async () => {
           WHERE pending.library_item_id IS NOT NULL
             OR progress.library_item_id IS NOT NULL;
         `);
-      });
-      shadowSqliteRuntimeState.didEnsureEffectiveProgressView = true;
-    } catch (error) {
-      // If view creation fails due to concurrent creation, mark as done anyway
-      // The view should exist now from one of the concurrent calls
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("already exists")) {
+        });
         shadowSqliteRuntimeState.didEnsureEffectiveProgressView = true;
-      } else {
-        throw error;
+      } catch (error) {
+        // If view creation fails due to concurrent creation, mark as done anyway
+        // The view should exist now from one of the concurrent calls
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("already exists")) {
+          shadowSqliteRuntimeState.didEnsureEffectiveProgressView = true;
+        } else {
+          throw error;
+        }
       }
     }
-  }
-  await db.runAsync(
-    `INSERT OR REPLACE INTO app_metadata (key, value, updated_at) VALUES (?, ?, ?)`,
-    ["schema_version", String(SCHEMA_VERSION), timestamp],
-  );
-
-  try {
-    await db.getAllAsync("SELECT rowid FROM library_catalog_fts WHERE library_catalog_fts MATCH ?", [
-      "laabs",
-    ]);
-  } catch (error) {
-    throw new Error(
-      `SQLite FTS5 is unavailable for the shadow database: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+    await db.runAsync(
+      `INSERT OR REPLACE INTO app_metadata (key, value, updated_at) VALUES (?, ?, ?)`,
+      ["schema_version", String(SCHEMA_VERSION), timestamp],
     );
-  }
+
+    try {
+      await db.getAllAsync(
+        "SELECT rowid FROM library_catalog_fts WHERE library_catalog_fts MATCH ?",
+        ["laabs"],
+      );
+    } catch (error) {
+      throw new Error(
+        `SQLite FTS5 is unavailable for the shadow database: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   })().catch((error) => {
     shadowSqliteRuntimeState.schemaInitPromise = null;
     shadowSqliteRuntimeState.didEnsureEffectiveProgressView = false;

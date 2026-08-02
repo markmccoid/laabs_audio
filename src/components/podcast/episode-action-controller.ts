@@ -1,4 +1,10 @@
-import { getBookDetailHref, type BookDetailRouteSource } from "@/navigation/book-links";
+import { meApi } from "@/api/me-api";
+import { authStore } from "@/auth/auth-store";
+import { setTouchedEpisodeContinueListeningHidden } from "@/data/sqlite/touched-episodes";
+import {
+  getBookDetailHref,
+  type BookDetailRouteSource,
+} from "@/navigation/book-links";
 import {
   getEpisodeDetailHref,
   type EpisodeDetailRouteSource,
@@ -10,6 +16,9 @@ import {
   type ResolveEpisodeActionSetInput,
 } from "@/podcast/episode-action-eligibility";
 import type { EpisodeIdentity } from "@/podcast/episode-identity";
+import type { TouchedEpisodeProgress } from "@/podcast/episode-continue-eligibility";
+import { queryClient } from "@/query/query-client";
+import { queryKeys } from "@/query/query-keys";
 import {
   selectHasPlayableEpisodeDownloadForSession,
   useDeviceEpisodeDownloadsActions,
@@ -30,6 +39,8 @@ export type EpisodeActionControllerProps = {
   publishedAt?: number | null;
   durationSeconds?: number | null;
   currentTimeSeconds?: number | null;
+  mediaProgressId?: string | null;
+  hideFromContinueListening?: boolean;
   actionIds: readonly EpisodeActionId[];
   isOnCurrentPodcast?: boolean;
 };
@@ -45,12 +56,16 @@ const systemImageFor = (
       return "arrow.down.circle";
     case "removeDownload":
       return "trash";
+    case "removeFromContinueListening":
+      return "eye.slash";
     case "openPodcast":
       return "mic.fill";
   }
 };
 
-const resolveRouteSource = (segments: readonly string[]): EpisodeDetailRouteSource => {
+const resolveRouteSource = (
+  segments: readonly string[],
+): EpisodeDetailRouteSource => {
   if (segments.some((segment) => segment === "search")) return "search";
   if (segments.some((segment) => segment === "library")) return "library";
   return "home";
@@ -65,6 +80,8 @@ export const useEpisodeActionController = ({
   publishedAt,
   durationSeconds,
   currentTimeSeconds,
+  mediaProgressId,
+  hideFromContinueListening = false,
   actionIds,
   isOnCurrentPodcast = false,
 }: EpisodeActionControllerProps) => {
@@ -72,11 +89,14 @@ export const useEpisodeActionController = ({
   const routeSource = useMemo(() => resolveRouteSource(segments), [segments]);
   const bookRouteSource = routeSource as BookDetailRouteSource;
   const [busyAction, setBusyAction] = useState<EpisodeActionId | null>(null);
-  const { downloadEpisode, deleteDownloadedEpisode } = useDeviceEpisodeDownloadsActions();
+  const { downloadEpisode, deleteDownloadedEpisode } =
+    useDeviceEpisodeDownloadsActions();
   const hasPlayableLocalDownload = useDeviceEpisodeDownloadsStore((state) =>
     selectHasPlayableEpisodeDownloadForSession(state, identity),
   );
-  const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const playbackLibraryItemId = usePlaybackStore(
+    (state) => state.libraryItemId,
+  );
   const playbackEpisodeId = usePlaybackStore((state) => state.episodeId);
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const isEpisodeLoaded =
@@ -89,6 +109,9 @@ export const useEpisodeActionController = ({
     hasPlayableLocalDownload,
     isOnCurrentPodcast,
     isEpisodePlaying,
+    canRemoveFromContinueListening: Boolean(
+      mediaProgressId?.trim() && !hideFromContinueListening,
+    ),
   };
   const eligibility = resolveEpisodeActionSet(eligibilityInput);
 
@@ -108,7 +131,11 @@ export const useEpisodeActionController = ({
   };
 
   const openPodcast = () => {
-    router.push(getBookDetailHref(identity.libraryItemId, { routeSource: bookRouteSource }));
+    router.push(
+      getBookDetailHref(identity.libraryItemId, {
+        routeSource: bookRouteSource,
+      }),
+    );
   };
 
   const handlePlayPause = async () => {
@@ -123,10 +150,14 @@ export const useEpisodeActionController = ({
         await playerService.requestPlay();
         return;
       }
-      await playerService.requestStartEpisode(identity.libraryItemId, identity.episodeId, {
-        episodeTitle: episodeTitle ?? undefined,
-        podcastTitle: podcastTitle ?? undefined,
-      });
+      await playerService.requestStartEpisode(
+        identity.libraryItemId,
+        identity.episodeId,
+        {
+          episodeTitle: episodeTitle ?? undefined,
+          podcastTitle: podcastTitle ?? undefined,
+        },
+      );
     } catch {
       toast.error(isEpisodePlaying ? "Unable to pause" : "Unable to play");
     } finally {
@@ -145,7 +176,10 @@ export const useEpisodeActionController = ({
       });
     } catch (error) {
       toast.error("Download failed", {
-        description: error instanceof Error ? error.message : "Unable to download this Episode.",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Unable to download this Episode.",
       });
     } finally {
       setBusyAction(null);
@@ -156,14 +190,61 @@ export const useEpisodeActionController = ({
     if (busyAction) return;
     setBusyAction("removeDownload");
     try {
-      const playbackSnapshot = await playerService.prepareForDownloadedEpisodeDeletion(
-        identity.libraryItemId,
-        identity.episodeId,
-      );
+      const playbackSnapshot =
+        await playerService.prepareForDownloadedEpisodeDeletion(
+          identity.libraryItemId,
+          identity.episodeId,
+        );
       await deleteDownloadedEpisode(identity);
-      await playerService.resumeAfterDownloadedEpisodeDeletion(playbackSnapshot);
+      await playerService.resumeAfterDownloadedEpisodeDeletion(
+        playbackSnapshot,
+      );
     } catch {
       toast.error("Unable to remove download");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleRemoveFromContinueListening = async () => {
+    if (busyAction) return;
+    const progressId = mediaProgressId?.trim();
+    const { activeLibraryUserKey: userId, activeLibraryId: libraryId } =
+      authStore.getState();
+    if (!progressId || !userId || !libraryId) {
+      toast.error("Unable to remove from Continue Listening");
+      return;
+    }
+
+    setBusyAction("removeFromContinueListening");
+    const queryKey = queryKeys.podcastContinueEpisodes(userId, libraryId);
+    const previous =
+      queryClient.getQueryData<TouchedEpisodeProgress[]>(queryKey);
+    queryClient.setQueryData<TouchedEpisodeProgress[]>(queryKey, (episodes) =>
+      episodes?.map((episode) =>
+        episode.libraryItemId === identity.libraryItemId &&
+        episode.episodeId === identity.episodeId
+          ? { ...episode, hideFromContinueListening: true }
+          : episode,
+      ),
+    );
+
+    try {
+      await meApi.removeFromContinueListening(progressId);
+      await setTouchedEpisodeContinueListeningHidden({
+        userId,
+        libraryId,
+        libraryItemId: identity.libraryItemId,
+        episodeId: identity.episodeId,
+        mediaProgressId: progressId,
+        hidden: true,
+      });
+      toast.success("Removed from Continue Listening");
+    } catch (error) {
+      queryClient.setQueryData(queryKey, previous);
+      toast.error("Unable to remove from Continue Listening", {
+        description: error instanceof Error ? error.message : undefined,
+      });
     } finally {
       setBusyAction(null);
     }
@@ -183,6 +264,8 @@ export const useEpisodeActionController = ({
         return { ...base, onPress: handleDownload };
       case "removeDownload":
         return { ...base, onPress: handleRemoveDownload };
+      case "removeFromContinueListening":
+        return { ...base, onPress: handleRemoveFromContinueListening };
       case "openPodcast":
         return { ...base, onPress: openPodcast };
     }

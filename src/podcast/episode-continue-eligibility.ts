@@ -3,6 +3,7 @@
  */
 
 export type TouchedEpisodeProgress = {
+  mediaProgressId: string | null;
   libraryItemId: string;
   episodeId: string;
   title: string;

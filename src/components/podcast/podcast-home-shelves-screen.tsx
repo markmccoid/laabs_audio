@@ -1,3 +1,4 @@
+import type { UserBookProgress } from "@/api/me-api";
 import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
 import { HomeShelfSection } from "@/components/Home/home-shelf-section";
 import { useHomeSignInSwitcher } from "@/components/Home/home-sign-in-switcher";
@@ -6,20 +7,22 @@ import { useActivateLibrarySelection } from "@/hooks/use-activate-library-select
 import { useLibrarySelection } from "@/hooks/use-library-selection";
 import { usePlaybackStore } from "@/player/playback-store";
 import type { TouchedEpisodeProgress } from "@/podcast/episode-continue-eligibility";
+import { episodeIdentityKey } from "@/podcast/episode-identity";
+import { assembleDownloadedEpisodesShelf } from "@/podcast/episode-download-facade";
+import { refreshPodcastHomeShelvesDefault } from "@/podcast/podcast-library-experience-default";
+import { podcastShowToShelfSummary } from "@/podcast/podcast-show-to-shelf-summary";
 import {
   applyActiveEpisodePlaybackOverlay,
   promoteActiveEpisodeInContinueShelf,
   toContinueShelfItemFromRecent,
 } from "@/podcast/recent-episodes-shelf";
-import { podcastShowToShelfSummary } from "@/podcast/podcast-show-to-shelf-summary";
-import { refreshPodcastHomeShelvesDefault } from "@/podcast/podcast-library-experience-default";
 import {
   usePodcastContinueEpisodes,
   usePodcastRecentEpisodes,
   usePodcastSeriesByAddedAt,
+  usePodcastTouchedEpisodes,
 } from "@/podcast/use-podcast-series";
 import { queryKeys } from "@/query/query-keys";
-import { assembleDownloadedEpisodesShelf } from "@/podcast/episode-download-facade";
 import {
   listEpisodeDownloadedAssetRecords,
   useDeviceEpisodeDownloadsStore,
@@ -31,7 +34,6 @@ import {
   useSettingsStore,
 } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import type { UserBookProgress } from "@/api/me-api";
 import type { Library } from "@/types/absTypes";
 import { FlashList, type FlashListProps } from "@shopify/flash-list";
 import { useQueryClient } from "@tanstack/react-query";
@@ -40,14 +42,19 @@ import { useHeaderHeight } from "expo-router/react-navigation";
 import type { ReactElement } from "react";
 import { useCallback, useMemo, useState } from "react";
 import { ActivityIndicator, RefreshControl, Text, View } from "react-native";
-import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
+import Animated, {
+  useAnimatedScrollHandler,
+  useSharedValue,
+} from "react-native-reanimated";
 
 const EMPTY_FAVORITES: Record<string, true> = {};
 const EMPTY_PROGRESS: Record<string, UserBookProgress> = {};
+const EPISODE_CARD_SIZE_MULTIPLIER = 1.25;
+const PODCAST_CARD_SIZE_MULTIPLIER = 0.9;
 
-const AnimatedFlashList = Animated.createAnimatedComponent(FlashList) as unknown as <TItem>(
-  props: FlashListProps<TItem>,
-) => ReactElement;
+const AnimatedFlashList = Animated.createAnimatedComponent(
+  FlashList,
+) as unknown as <TItem>(props: FlashListProps<TItem>) => ReactElement;
 
 type PodcastHomeListItem =
   | { type: "refresh-message"; id: "refresh-message"; message: string }
@@ -61,25 +68,36 @@ export const PodcastHomeShelvesScreen = () => {
   const themeColors = useThemeColors();
   const queryClient = useQueryClient();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
   const activeLibraryName = useAuthStore((state) => state.activeLibraryName);
   const authStatus = useAuthStore((state) => state.status);
   const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
   const homePreviewSize = useSettingsStore((state) => state.homePreviewSize);
-  const setHomePreviewSize = useSettingsStore((state) => state.actions.setHomePreviewSize);
+  const setHomePreviewSize = useSettingsStore(
+    (state) => state.actions.setHomePreviewSize,
+  );
   const homeShowTitles = useSettingsStore((state) => state.homeShowTitles);
-  const setHomeShowTitles = useSettingsStore((state) => state.actions.setHomeShowTitles);
+  const setHomeShowTitles = useSettingsStore(
+    (state) => state.actions.setHomeShowTitles,
+  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const scrollY = useSharedValue(0);
   const seriesQuery = usePodcastSeriesByAddedAt();
   const continueQuery = usePodcastContinueEpisodes();
+  const touchedQuery = usePodcastTouchedEpisodes();
   const recentQuery = usePodcastRecentEpisodes();
-  const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const playbackLibraryItemId = usePlaybackStore(
+    (state) => state.libraryItemId,
+  );
   const playbackEpisodeId = usePlaybackStore((state) => state.episodeId);
   const playbackBookTitle = usePlaybackStore((state) => state.bookTitle);
-  const playbackSecondaryTitle = usePlaybackStore((state) => state.secondaryTitle);
+  const playbackSecondaryTitle = usePlaybackStore(
+    (state) => state.secondaryTitle,
+  );
   const playbackPositionMs = usePlaybackStore((state) => state.positionMs);
   const playbackDurationMs = usePlaybackStore((state) => state.durationMs);
   const playbackQueueArtworkUri = usePlaybackStore(
@@ -117,7 +135,23 @@ export const PodcastHomeShelvesScreen = () => {
       currentTimeSeconds: Math.max(0, playbackPositionMs / 1000),
       durationSeconds: Math.max(0, playbackDurationMs / 1000),
     };
-  }, [playbackDurationMs, playbackEpisodeId, playbackLibraryItemId, playbackPositionMs]);
+  }, [
+    playbackDurationMs,
+    playbackEpisodeId,
+    playbackLibraryItemId,
+    playbackPositionMs,
+  ]);
+
+  const touchedByEpisode = useMemo(
+    () =>
+      new Map(
+        (touchedQuery.data ?? []).flatMap((episode) => {
+          const key = episodeIdentityKey(episode);
+          return key ? [[key, episode] as const] : [];
+        }),
+      ),
+    [touchedQuery.data],
+  );
 
   const continueEpisodes = useMemo(() => {
     const promote =
@@ -129,7 +163,10 @@ export const PodcastHomeShelvesScreen = () => {
             podcastTitle: playbackSecondaryTitle,
             cover: playbackQueueArtworkUri,
           };
-    return promoteActiveEpisodeInContinueShelf(continueQuery.data ?? [], promote);
+    return promoteActiveEpisodeInContinueShelf(
+      continueQuery.data ?? [],
+      promote,
+    );
   }, [
     activePlaybackOverlay,
     continueQuery.data,
@@ -140,9 +177,30 @@ export const PodcastHomeShelvesScreen = () => {
 
   const recentEpisodes = useMemo(() => {
     const assembled = recentQuery.data ?? [];
-    const withOverlay = applyActiveEpisodePlaybackOverlay(assembled, activePlaybackOverlay);
-    return withOverlay.map(toContinueShelfItemFromRecent);
-  }, [activePlaybackOverlay, recentQuery.data]);
+    const withOverlay = applyActiveEpisodePlaybackOverlay(
+      assembled,
+      activePlaybackOverlay,
+    );
+    return withOverlay.map((episode) => {
+      const projected = toContinueShelfItemFromRecent(episode);
+      const touched = touchedByEpisode.get(episodeIdentityKey(projected) ?? "");
+      if (!touched) return projected;
+      return {
+        ...projected,
+        mediaProgressId: touched.mediaProgressId ?? projected.mediaProgressId,
+        currentTimeSeconds: Math.max(
+          projected.currentTimeSeconds,
+          touched.currentTimeSeconds,
+        ),
+        durationSeconds: Math.max(
+          projected.durationSeconds,
+          touched.durationSeconds,
+        ),
+        isFinished: touched.isFinished,
+        hideFromContinueListening: touched.hideFromContinueListening,
+      };
+    });
+  }, [activePlaybackOverlay, recentQuery.data, touchedByEpisode]);
 
   // Subscribe to stable map references — assembling in the selector returns a new
   // array every call and trips Zustand's Object.is check into an update loop.
@@ -165,35 +223,51 @@ export const PodcastHomeShelvesScreen = () => {
     return assembleDownloadedEpisodesShelf(records, {
       activeLibraryId,
       sessionUserId: activeLibraryUserKey,
-    }).map((episode) => ({
-      libraryItemId: episode.libraryItemId,
-      episodeId: episode.episodeId,
-      title: episode.title,
-      podcastTitle: episode.podcastTitle,
-      cover: episode.cover,
-      currentTimeSeconds: 0,
-      durationSeconds: episode.durationSeconds,
-      isFinished: false,
-      hideFromContinueListening: false,
-      lastUpdate: episode.downloadedAt,
-    }));
+    }).map((episode) => {
+      const touched = touchedByEpisode.get(episodeIdentityKey(episode) ?? "");
+      return {
+        mediaProgressId: touched?.mediaProgressId ?? null,
+        libraryItemId: episode.libraryItemId,
+        episodeId: episode.episodeId,
+        title: episode.title,
+        podcastTitle: episode.podcastTitle,
+        cover: episode.cover,
+        currentTimeSeconds: touched?.currentTimeSeconds ?? 0,
+        durationSeconds: Math.max(
+          episode.durationSeconds,
+          touched?.durationSeconds ?? 0,
+        ),
+        isFinished: touched?.isFinished ?? false,
+        hideFromContinueListening: touched?.hideFromContinueListening ?? false,
+        lastUpdate: Math.max(episode.downloadedAt, touched?.lastUpdate ?? 0),
+      };
+    });
   }, [
     activeLibraryId,
     activeLibraryUserKey,
     downloadedEpisodeData,
     downloadedEpisodeDetailsById,
     downloadedEpisodeOwnerUserIdsById,
+    touchedByEpisode,
   ]);
 
   const listData = useMemo<PodcastHomeListItem[]>(() => {
     return [
       ...(refreshMessage
-        ? [{ type: "refresh-message" as const, id: "refresh-message" as const, message: refreshMessage }]
+        ? [
+            {
+              type: "refresh-message" as const,
+              id: "refresh-message" as const,
+              message: refreshMessage,
+            },
+          ]
         : []),
       ...(continueEpisodes.length > 0
         ? [{ type: "continue" as const, id: "continue" as const }]
         : []),
-      ...(recentEpisodes.length > 0 ? [{ type: "recent" as const, id: "recent" as const }] : []),
+      ...(recentEpisodes.length > 0
+        ? [{ type: "recent" as const, id: "recent" as const }]
+        : []),
       { type: "shelf", id: "podcasts" },
       ...(downloadedShelfEpisodes.length > 0
         ? [{ type: "downloaded" as const, id: "downloaded" as const }]
@@ -219,7 +293,9 @@ export const PodcastHomeShelvesScreen = () => {
       return;
     }
     if (!activeLibraryId || !activeLibraryUserKey) {
-      setRefreshMessage("Library context is not ready yet. Try again in a moment.");
+      setRefreshMessage(
+        "Library context is not ready yet. Try again in a moment.",
+      );
       return;
     }
 
@@ -231,21 +307,40 @@ export const PodcastHomeShelvesScreen = () => {
         libraryId: activeLibraryId,
         libraryName: activeLibraryName ?? "Podcast Library",
       });
-      if (result.recent.source === "snapshot" || result.recent.source === "empty") {
-        setRefreshMessage("Could not refresh Recent Episodes. Showing the last saved shelf.");
+      if (
+        result.recent.source === "snapshot" ||
+        result.recent.source === "empty"
+      ) {
+        setRefreshMessage(
+          "Could not refresh Recent Episodes. Showing the last saved shelf.",
+        );
       }
       await queryClient.invalidateQueries({
-        queryKey: queryKeys.podcastRecentEpisodes(activeLibraryUserKey, activeLibraryId),
+        queryKey: queryKeys.podcastRecentEpisodes(
+          activeLibraryUserKey,
+          activeLibraryId,
+        ),
       });
       await queryClient.invalidateQueries({
-        queryKey: queryKeys.podcastContinueEpisodes(activeLibraryUserKey, activeLibraryId),
+        queryKey: queryKeys.podcastContinueEpisodes(
+          activeLibraryUserKey,
+          activeLibraryId,
+        ),
       });
       if (result.seriesIndexRefreshed) {
         await queryClient.invalidateQueries({
-          queryKey: queryKeys.podcastSeriesIndex(activeLibraryUserKey, activeLibraryId, "addedAtDesc"),
+          queryKey: queryKeys.podcastSeriesIndex(
+            activeLibraryUserKey,
+            activeLibraryId,
+            "addedAtDesc",
+          ),
         });
         await queryClient.invalidateQueries({
-          queryKey: queryKeys.podcastSeriesIndex(activeLibraryUserKey, activeLibraryId, "titleAsc"),
+          queryKey: queryKeys.podcastSeriesIndex(
+            activeLibraryUserKey,
+            activeLibraryId,
+            "titleAsc",
+          ),
         });
       }
     } catch {
@@ -286,7 +381,10 @@ export const PodcastHomeShelvesScreen = () => {
               backgroundColor: themeColors.surface,
             }}
           >
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+            <Text
+              selectable
+              style={{ color: themeColors.textMuted, fontSize: 13 }}
+            >
               {item.message}
             </Text>
           </View>
@@ -295,7 +393,12 @@ export const PodcastHomeShelvesScreen = () => {
 
       if (item.type === "continue") {
         return (
-          <PodcastContinueShelf episodes={continueEpisodes} bookSizeMultiplier={1.25} />
+          <PodcastContinueShelf
+            episodes={continueEpisodes}
+            sizeMultiplier={EPISODE_CARD_SIZE_MULTIPLIER}
+            headerHeight={headerHeight}
+            scrollY={scrollY}
+          />
         );
       }
 
@@ -304,7 +407,9 @@ export const PodcastHomeShelvesScreen = () => {
           <PodcastContinueShelf
             title="Recent Episodes"
             episodes={recentEpisodes}
-            bookSizeMultiplier={1.25}
+            sizeMultiplier={EPISODE_CARD_SIZE_MULTIPLIER}
+            headerHeight={headerHeight}
+            scrollY={scrollY}
           />
         );
       }
@@ -314,7 +419,9 @@ export const PodcastHomeShelvesScreen = () => {
           <PodcastContinueShelf
             title="Downloaded"
             episodes={downloadedShelfEpisodes}
-            bookSizeMultiplier={1.25}
+            sizeMultiplier={EPISODE_CARD_SIZE_MULTIPLIER}
+            headerHeight={headerHeight}
+            scrollY={scrollY}
           />
         );
       }
@@ -336,7 +443,7 @@ export const PodcastHomeShelvesScreen = () => {
           shelfHref="/(tabs)/library"
           renderCardMenus={false}
           scrollY={scrollY}
-          bookSizeMultiplier={1.25}
+          bookSizeMultiplier={PODCAST_CARD_SIZE_MULTIPLIER}
         />
       );
     },
@@ -362,7 +469,14 @@ export const PodcastHomeShelvesScreen = () => {
 
   if (!hasHomeScope) {
     return (
-      <View style={{ flex: 1, backgroundColor: themeColors.bg, alignItems: "center", justifyContent: "center" }}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: themeColors.bg,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
         <ActivityIndicator color={themeColors.accent} />
       </View>
     );
@@ -382,7 +496,11 @@ export const PodcastHomeShelvesScreen = () => {
             {otherSessions.map((session) => (
               <Stack.Toolbar.MenuAction
                 key={session.key}
-                icon={session.needsAttention ? "exclamationmark.triangle" : undefined}
+                icon={
+                  session.needsAttention
+                    ? "exclamationmark.triangle"
+                    : undefined
+                }
                 onPress={() => void switchTo(session)}
               >
                 {session.label}
@@ -403,18 +521,26 @@ export const PodcastHomeShelvesScreen = () => {
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Menu icon="ellipsis">
           {canChangeLibrary ? (
-            <Stack.Toolbar.Menu icon="books.vertical.fill" title="Change Library">
+            <Stack.Toolbar.Menu
+              icon="books.vertical.fill"
+              title="Change Library"
+            >
               {isLibrariesLoading && libraries.length === 0 ? (
                 <Stack.Toolbar.MenuAction disabled icon="ellipsis">
                   Loading libraries...
                 </Stack.Toolbar.MenuAction>
               ) : null}
               {isLibrariesError && libraries.length === 0 ? (
-                <Stack.Toolbar.MenuAction icon="arrow.clockwise" onPress={() => refetchLibraries()}>
+                <Stack.Toolbar.MenuAction
+                  icon="arrow.clockwise"
+                  onPress={() => refetchLibraries()}
+                >
                   Retry loading libraries
                 </Stack.Toolbar.MenuAction>
               ) : null}
-              {!isLibrariesLoading && !isLibrariesError && libraries.length === 0 ? (
+              {!isLibrariesLoading &&
+              !isLibrariesError &&
+              libraries.length === 0 ? (
                 <Stack.Toolbar.MenuAction disabled icon="books.vertical">
                   No libraries available
                 </Stack.Toolbar.MenuAction>

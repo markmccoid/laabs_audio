@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-08-01` `pending` - Differentiate Podcast Home Episode cards with a footer, native action pill, progress display, and Continue Listening removal.
+  Tester focus: in a Podcast Library, confirm Continue Listening, Recent Episodes, and Downloaded Episodes share the larger Episode card with title/footer, accent progress bar, and fading ellipsis pill; use an eligible menu to remove an Episode from Continue Listening without removing its duplicate cards elsewhere.
+
 - `2026-07-30` `pending` - Finalize the Small and Medium iOS audiobook widget release as app version 1.7.2.
   Tester focus: verify Small and Medium widgets on a physical iPhone, including cover art, metadata, progress, deep linking, and background play/pause; the Large widget is deferred to a later release.
 

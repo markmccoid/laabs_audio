@@ -24,10 +24,11 @@ import { meApi } from "@/api/me-api";
 import { episodeIdentityKey } from "@/podcast/episode-identity";
 import type { RecentEpisodeSummary } from "@/api/library-items-api";
 
-export const defaultPodcastLibraryExperienceDeps: PodcastLibraryExperienceDeps = {
-  hasRememberedSeriesIndex: hasRememberedPodcastSeriesIndex,
-  refreshSeriesIndex: async (scope) => refreshPodcastSeriesIndex(scope),
-};
+export const defaultPodcastLibraryExperienceDeps: PodcastLibraryExperienceDeps =
+  {
+    hasRememberedSeriesIndex: hasRememberedPodcastSeriesIndex,
+    refreshSeriesIndex: async (scope) => refreshPodcastSeriesIndex(scope),
+  };
 
 /**
  * Attach server episode progress from /api/me onto recent-episodes rows that
@@ -40,7 +41,10 @@ const mergeMeProgressOntoRecentEpisodes = async (
   if (episodes.length === 0) return [...episodes];
   try {
     const me = await meApi.getMe();
-    const byKey = new Map<string, NonNullable<RecentEpisodeSummary["progress"]>>();
+    const byKey = new Map<
+      string,
+      NonNullable<RecentEpisodeSummary["progress"]>
+    >();
     for (const progress of me.mediaProgress ?? []) {
       if (!progress.episodeId) continue;
       const key = episodeIdentityKey({
@@ -49,6 +53,7 @@ const mergeMeProgressOntoRecentEpisodes = async (
       });
       if (!key) continue;
       byKey.set(key, {
+        mediaProgressId: progress.id?.trim() || null,
         currentTimeSeconds: Math.max(0, progress.currentTime ?? 0),
         durationSeconds: Math.max(0, progress.duration ?? 0),
         isFinished: Boolean(progress.isFinished),
@@ -58,11 +63,20 @@ const mergeMeProgressOntoRecentEpisodes = async (
     }
 
     return episodes.map((episode) => {
-      if (episode.progress) return episode;
       const key = episodeIdentityKey(episode);
       if (!key) return episode;
       const progress = byKey.get(key) ?? null;
-      return progress ? { ...episode, progress } : episode;
+      if (!progress) return episode;
+      if (!episode.progress) return { ...episode, progress };
+      return {
+        ...episode,
+        progress: {
+          ...progress,
+          ...episode.progress,
+          mediaProgressId:
+            episode.progress.mediaProgressId ?? progress.mediaProgressId,
+        },
+      };
     });
   } catch {
     return [...episodes];
@@ -91,11 +105,14 @@ export const defaultPodcastHomeRefreshDeps: PodcastHomeRefreshDeps = {
   refreshSeriesIndex: async (scope) => refreshPodcastSeriesIndex(scope),
 };
 
-export const ensurePodcastSeriesIndexReadyForActivation = (scope: PodcastSeriesIndexScope) =>
-  ensurePodcastSeriesIndexReady(scope, defaultPodcastLibraryExperienceDeps);
+export const ensurePodcastSeriesIndexReadyForActivation = (
+  scope: PodcastSeriesIndexScope,
+) => ensurePodcastSeriesIndexReady(scope, defaultPodcastLibraryExperienceDeps);
 
-export const assembleRecentEpisodesForHomeDefault = (scope: PodcastSeriesIndexScope) =>
-  assembleRecentEpisodesForHome(scope, defaultPodcastHomeRefreshDeps);
+export const assembleRecentEpisodesForHomeDefault = (
+  scope: PodcastSeriesIndexScope,
+) => assembleRecentEpisodesForHome(scope, defaultPodcastHomeRefreshDeps);
 
-export const refreshPodcastHomeShelvesDefault = (scope: PodcastSeriesIndexScope) =>
-  refreshPodcastHomeShelves(scope, defaultPodcastHomeRefreshDeps);
+export const refreshPodcastHomeShelvesDefault = (
+  scope: PodcastSeriesIndexScope,
+) => refreshPodcastHomeShelves(scope, defaultPodcastHomeRefreshDeps);

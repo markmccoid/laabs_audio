@@ -200,36 +200,51 @@ export const authStore = createStore<AuthState>()(
             hasMatchingLibrary,
           });
 
-          set((state) => ({
-            rememberedSessions: authStorage.getSessionsSnapshot().sessions,
-            activeSessionKey: activeSession?.key ?? null,
-            storedUsername: activeSession?.username ?? null,
-            storedUserId: activeSession?.userId ?? null,
-            serverUrl: activeSession?.serverUrl ?? null,
-            hasStoredCredentials,
-            hasOfflineContent: offlineContent,
-            accessToken: secrets.accessToken,
-            refreshToken: secrets.refreshToken,
-            accessTokenExpiresAt,
-            serverConnectionStatus: "unknown",
-            status: computeEntryStatus(hasStoredSession, offlineContent),
-            loginRequired: hasStoredSession ? false : state.loginRequired,
-            lastAuthError: hasStoredSession ? null : state.lastAuthError,
-            activeLibraryId: hasMatchingLibrary
+          set((state) => {
+            const hydratedActiveLibraryId = hasMatchingLibrary
               ? (activeSession?.activeLibraryId ?? state.activeLibraryId)
-              : null,
-            activeLibraryName: hasMatchingLibrary
+              : null;
+            const hydratedActiveLibraryName = hasMatchingLibrary
               ? (activeSession?.activeLibraryName ?? state.activeLibraryName)
-              : null,
-            activeLibraryUserKey: hasMatchingLibrary ? userKey : null,
-            activeLibraryMediaType: hasMatchingLibrary
-              ? hydratedActiveLibraryMediaType
-              : null,
-            activeLibraryReady: Boolean(
-              hasMatchingLibrary &&
-                hydratedActiveLibraryMediaType?.trim().toLowerCase() === "book",
-            ),
-          }));
+              : null;
+            const normalizedHydratedMediaType =
+              hydratedActiveLibraryMediaType?.trim().toLowerCase() ?? null;
+            const preservesReadyActiveLibrary = Boolean(
+              !isInitialHydrate &&
+                state.activeLibraryReady &&
+                state.activeLibraryId === hydratedActiveLibraryId &&
+                state.activeLibraryUserKey === userKey &&
+                state.activeLibraryMediaType?.trim().toLowerCase() ===
+                  normalizedHydratedMediaType,
+            );
+
+            return {
+              rememberedSessions: authStorage.getSessionsSnapshot().sessions,
+              activeSessionKey: activeSession?.key ?? null,
+              storedUsername: activeSession?.username ?? null,
+              storedUserId: activeSession?.userId ?? null,
+              serverUrl: activeSession?.serverUrl ?? null,
+              hasStoredCredentials,
+              hasOfflineContent: offlineContent,
+              accessToken: secrets.accessToken,
+              refreshToken: secrets.refreshToken,
+              accessTokenExpiresAt,
+              serverConnectionStatus: "unknown",
+              status: computeEntryStatus(hasStoredSession, offlineContent),
+              loginRequired: hasStoredSession ? false : state.loginRequired,
+              lastAuthError: hasStoredSession ? null : state.lastAuthError,
+              activeLibraryId: hydratedActiveLibraryId,
+              activeLibraryName: hydratedActiveLibraryName,
+              activeLibraryUserKey: hasMatchingLibrary ? userKey : null,
+              activeLibraryMediaType: hasMatchingLibrary
+                ? hydratedActiveLibraryMediaType
+                : null,
+              activeLibraryReady: Boolean(
+                hasMatchingLibrary &&
+                  (normalizedHydratedMediaType === "book" || preservesReadyActiveLibrary),
+              ),
+            };
+          });
 
           log("hydrate:done", {
             status: computeEntryStatus(hasStoredSession, offlineContent),

@@ -1,4 +1,8 @@
-import type { GetLibraryItemsResponse, LibraryItem, MediaProgress } from "../types/absTypes";
+import type {
+  GetLibraryItemsResponse,
+  LibraryItem,
+  MediaProgress,
+} from "../types/absTypes";
 import { absClient } from "./abs-client";
 import { buildCoverUrls } from "./cover-urls";
 import { favoritesApi } from "./favorites-api";
@@ -103,6 +107,7 @@ export type PodcastSeriesIndexPage = {
 export const RECENT_EPISODES_HOME_PAGE_LIMIT = 25;
 
 export type RecentEpisodeProgressOverlay = {
+  mediaProgressId: string | null;
   currentTimeSeconds: number;
   durationSeconds: number;
   isFinished: boolean;
@@ -136,6 +141,7 @@ const toRecentProgressOverlay = (
 ): RecentEpisodeProgressOverlay | null => {
   if (!progress) return null;
   return {
+    mediaProgressId: progress.id?.trim() || null,
     currentTimeSeconds: Math.max(0, progress.currentTime ?? 0),
     durationSeconds: Math.max(0, progress.duration ?? 0),
     isFinished: Boolean(progress.isFinished),
@@ -211,9 +217,14 @@ export const libraryItemsApi = {
     };
   },
 
-  async getItemsPage(params: GetLibraryItemsParams): Promise<LibraryItemsSummaryPage> {
+  async getItemsPage(
+    params: GetLibraryItemsParams,
+  ): Promise<LibraryItemsSummaryPage> {
     const { filterType, filterValue, sortBy, page, limit, minified } = params;
-    const libraryId = requireLibraryId(params.libraryId, "libraryItemsApi.getItemsPage");
+    const libraryId = requireLibraryId(
+      params.libraryId,
+      "libraryItemsApi.getItemsPage",
+    );
 
     const query = new URLSearchParams();
 
@@ -257,11 +268,15 @@ export const libraryItemsApi = {
     page?: number;
     limit?: number;
   }): Promise<PodcastSeriesIndexPage> {
-    const libraryId = requireLibraryId(params.libraryId, "libraryItemsApi.getPodcastSeriesIndexPage");
+    const libraryId = requireLibraryId(
+      params.libraryId,
+      "libraryItemsApi.getPodcastSeriesIndexPage",
+    );
     const query = new URLSearchParams();
     query.set("minified", "1");
     if (typeof params.page === "number") query.set("page", String(params.page));
-    if (typeof params.limit === "number") query.set("limit", String(params.limit));
+    if (typeof params.limit === "number")
+      query.set("limit", String(params.limit));
     query.set("sort", "addedAt");
     query.set("desc", "1");
 
@@ -277,7 +292,9 @@ export const libraryItemsApi = {
     };
   },
 
-  toRecentEpisodeSummary(episode: AbsRecentEpisodePayload): RecentEpisodeSummary | null {
+  toRecentEpisodeSummary(
+    episode: AbsRecentEpisodePayload,
+  ): RecentEpisodeSummary | null {
     const libraryItemId = episode.libraryItemId?.trim();
     const episodeId = episode.id?.trim();
     if (!libraryItemId || !episodeId) return null;
@@ -316,7 +333,10 @@ export const libraryItemsApi = {
     page?: number;
     limit?: number;
   }): Promise<RecentEpisodesPage> {
-    const libraryId = requireLibraryId(params.libraryId, "libraryItemsApi.getRecentEpisodesPage");
+    const libraryId = requireLibraryId(
+      params.libraryId,
+      "libraryItemsApi.getRecentEpisodesPage",
+    );
     const query = new URLSearchParams();
     const page = params.page ?? 0;
     const limit = params.limit ?? RECENT_EPISODES_HOME_PAGE_LIMIT;
@@ -340,7 +360,10 @@ export const libraryItemsApi = {
   },
 
   async getFinishedItems(libraryId: string): Promise<LibraryItem[]> {
-    const libraryIdToUse = requireLibraryId(libraryId, "libraryItemsApi.getFinishedItems");
+    const libraryIdToUse = requireLibraryId(
+      libraryId,
+      "libraryItemsApi.getFinishedItems",
+    );
 
     const response = await absClient.get<{ results: LibraryItem[] }>(
       `/api/libraries/${libraryIdToUse}/items?filter=progress.ZmluaXNoZWQ=`,
@@ -349,8 +372,14 @@ export const libraryItemsApi = {
     return response.results;
   },
 
-  async getFavorites(libraryId: string, favoriteTag?: string): Promise<LibraryItem[]> {
-    const libraryIdToUse = requireLibraryId(libraryId, "libraryItemsApi.getFavorites");
+  async getFavorites(
+    libraryId: string,
+    favoriteTag?: string,
+  ): Promise<LibraryItem[]> {
+    const libraryIdToUse = requireLibraryId(
+      libraryId,
+      "libraryItemsApi.getFavorites",
+    );
 
     const favoriteSearchString =
       favoriteTag ?? favoritesApi.getUserFavoriteInfo().favoriteSearchString;
@@ -365,7 +394,9 @@ export const libraryItemsApi = {
     return response.results;
   },
 
-  async getFavoritedAndFinishedItems(libraryId: string): Promise<FavoriteOrFinishedItem[]> {
+  async getFavoritedAndFinishedItems(
+    libraryId: string,
+  ): Promise<FavoriteOrFinishedItem[]> {
     const libraryIdToUse = requireLibraryId(
       libraryId,
       "libraryItemsApi.getFavoritedAndFinishedItems",

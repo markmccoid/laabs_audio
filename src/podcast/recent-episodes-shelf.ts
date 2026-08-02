@@ -9,6 +9,7 @@ import { isSameEpisodeIdentity } from "./episode-identity";
 import type { TouchedEpisodeProgress } from "./episode-continue-eligibility";
 
 export type RecentEpisodeShelfItem = {
+  mediaProgressId: string | null;
   libraryItemId: string;
   episodeId: string;
   title: string;
@@ -17,6 +18,7 @@ export type RecentEpisodeShelfItem = {
   durationSeconds: number;
   publishedAt: number | null;
   currentTimeSeconds: number;
+  hideFromContinueListening: boolean;
 };
 
 export type ActiveEpisodePlaybackOverlay = EpisodeIdentity & {
@@ -37,6 +39,7 @@ export const assembleRecentEpisodesShelf = (
   episodes: readonly RecentEpisodeSummary[],
 ): RecentEpisodeShelfItem[] =>
   episodes.map((episode) => ({
+    mediaProgressId: episode.progress?.mediaProgressId ?? null,
     libraryItemId: episode.libraryItemId,
     episodeId: episode.episodeId,
     title: episode.title,
@@ -45,6 +48,8 @@ export const assembleRecentEpisodesShelf = (
     durationSeconds: episode.durationSeconds,
     publishedAt: episode.publishedAt,
     currentTimeSeconds: episode.progress?.currentTimeSeconds ?? 0,
+    hideFromContinueListening:
+      episode.progress?.hideFromContinueListening ?? false,
   }));
 
 /**
@@ -55,7 +60,10 @@ export const resolveRecentEpisodesShelfSource = (payload: {
   liveEpisodes: readonly RecentEpisodeSummary[] | null;
   snapshotEpisodes: readonly RecentEpisodeSummary[] | null;
   refreshFailed: boolean;
-}): { episodes: RecentEpisodeSummary[]; source: "live" | "snapshot" | "empty" } => {
+}): {
+  episodes: RecentEpisodeSummary[];
+  source: "live" | "snapshot" | "empty";
+} => {
   if (payload.liveEpisodes != null && !payload.refreshFailed) {
     return { episodes: [...payload.liveEpisodes], source: "live" };
   }
@@ -90,7 +98,11 @@ export const applyActiveEpisodePlaybackOverlay = <
     return {
       ...episode,
       currentTimeSeconds: Math.max(0, overlay.currentTimeSeconds),
-      durationSeconds: Math.max(episode.durationSeconds, overlay.durationSeconds, 0),
+      durationSeconds: Math.max(
+        episode.durationSeconds,
+        overlay.durationSeconds,
+        0,
+      ),
     };
   });
 };
@@ -108,13 +120,17 @@ export const promoteActiveEpisodeInContinueShelf = (
     return episodes as TouchedEpisodeProgress[];
   }
 
-  const existing = episodes.find((episode) => isSameEpisodeIdentity(episode, active));
+  const existing = episodes.find((episode) =>
+    isSameEpisodeIdentity(episode, active),
+  );
   if (existing?.hideFromContinueListening) {
     return episodes as TouchedEpisodeProgress[];
   }
 
   if (active.isFinished) {
-    return episodes.filter((episode) => !isSameEpisodeIdentity(episode, active));
+    return episodes.filter(
+      (episode) => !isSameEpisodeIdentity(episode, active),
+    );
   }
 
   const currentTimeSeconds = Math.max(
@@ -123,19 +139,27 @@ export const promoteActiveEpisodeInContinueShelf = (
     existing?.currentTimeSeconds ?? 0,
   );
   const promoted: TouchedEpisodeProgress = {
+    mediaProgressId: existing?.mediaProgressId ?? null,
     libraryItemId: active.libraryItemId,
     episodeId: active.episodeId,
     title: active.title?.trim() || existing?.title || "Episode",
-    podcastTitle: active.podcastTitle?.trim() || existing?.podcastTitle || "Podcast",
+    podcastTitle:
+      active.podcastTitle?.trim() || existing?.podcastTitle || "Podcast",
     cover: active.cover ?? existing?.cover ?? null,
     currentTimeSeconds,
-    durationSeconds: Math.max(active.durationSeconds, existing?.durationSeconds ?? 0, 0),
+    durationSeconds: Math.max(
+      active.durationSeconds,
+      existing?.durationSeconds ?? 0,
+      0,
+    ),
     isFinished: false,
     hideFromContinueListening: false,
     lastUpdate: Math.max(Date.now(), existing?.lastUpdate ?? 0),
   };
 
-  const rest = episodes.filter((episode) => !isSameEpisodeIdentity(episode, active));
+  const rest = episodes.filter(
+    (episode) => !isSameEpisodeIdentity(episode, active),
+  );
   const alreadyLeads =
     episodes[0] != null &&
     isSameEpisodeIdentity(episodes[0], active) &&
@@ -152,6 +176,7 @@ export const promoteActiveEpisodeInContinueShelf = (
 export const toContinueShelfItemFromRecent = (
   item: RecentEpisodeShelfItem,
 ): TouchedEpisodeProgress => ({
+  mediaProgressId: item.mediaProgressId,
   libraryItemId: item.libraryItemId,
   episodeId: item.episodeId,
   title: item.title,
@@ -160,6 +185,6 @@ export const toContinueShelfItemFromRecent = (
   currentTimeSeconds: item.currentTimeSeconds,
   durationSeconds: item.durationSeconds,
   isFinished: false,
-  hideFromContinueListening: false,
+  hideFromContinueListening: item.hideFromContinueListening,
   lastUpdate: item.publishedAt ?? 0,
 });

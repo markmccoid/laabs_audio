@@ -5,6 +5,7 @@ import { requireActiveLibraryContext } from "./shadow-scope";
 import { now } from "./shadow-shared";
 
 type TouchedRow = {
+  media_progress_id: string | null;
   library_item_id: string;
   episode_id: string;
   title: string;
@@ -43,20 +44,27 @@ export const markEpisodeTouchedFromDownload = async (payload: {
   const db = await getDb();
   const timestamp = now();
   const existing = await db.getFirstAsync<{
+    media_progress_id: string | null;
     current_time_seconds: number;
     is_finished: number;
     hide_from_continue_listening: number;
     last_update: number;
     duration: number;
   }>(
-    `SELECT ${TOUCHED_EPISODE_CURRENT_TIME_SQL} AS current_time_seconds,
+    `SELECT media_progress_id, ${TOUCHED_EPISODE_CURRENT_TIME_SQL} AS current_time_seconds,
             is_finished, hide_from_continue_listening, last_update, duration
      FROM touched_episodes
      WHERE user_id = ? AND library_id = ? AND library_item_id = ? AND episode_id = ?`,
-    [payload.userId, payload.libraryId, payload.libraryItemId, payload.episodeId],
+    [
+      payload.userId,
+      payload.libraryId,
+      payload.libraryItemId,
+      payload.episodeId,
+    ],
   );
 
   await upsertTouchedEpisodeProgress({
+    mediaProgressId: existing?.media_progress_id ?? null,
     userId: payload.userId,
     libraryId: payload.libraryId,
     libraryItemId: payload.libraryItemId,
@@ -65,14 +73,21 @@ export const markEpisodeTouchedFromDownload = async (payload: {
     podcastTitle: payload.podcastTitle,
     cover: payload.cover,
     currentTimeSeconds: Number(existing?.current_time_seconds) || 0,
-    durationSeconds: Math.max(payload.durationSeconds, existing?.duration ?? 0, 0),
+    durationSeconds: Math.max(
+      payload.durationSeconds,
+      existing?.duration ?? 0,
+      0,
+    ),
     isFinished: existing ? existing.is_finished === 1 : false,
-    hideFromContinueListening: existing ? existing.hide_from_continue_listening === 1 : false,
+    hideFromContinueListening: existing
+      ? existing.hide_from_continue_listening === 1
+      : false,
     lastUpdate: existing?.last_update ?? timestamp,
   });
 };
 
 export const upsertTouchedEpisodeProgress = async (payload: {
+  mediaProgressId: string | null;
   userId: string;
   libraryId: string;
   libraryItemId: string;
@@ -85,6 +100,7 @@ export const upsertTouchedEpisodeProgress = async (payload: {
   isFinished: boolean;
   hideFromContinueListening: boolean;
   lastUpdate: number;
+  preserveExistingContinueListeningVisibility?: boolean;
 }) => {
   if (!payload.libraryId.trim()) return;
   await initializeShadowDatabaseInternal();
@@ -92,18 +108,22 @@ export const upsertTouchedEpisodeProgress = async (payload: {
   const timestamp = now();
   await db.runAsync(
     `INSERT INTO touched_episodes (
-      user_id, library_id, library_item_id, episode_id, title, podcast_title, cover,
+      user_id, library_id, library_item_id, episode_id, media_progress_id, title, podcast_title, cover,
       current_time, duration, is_finished, hide_from_continue_listening, last_update,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_id, library_id, library_item_id, episode_id) DO UPDATE SET
       title = excluded.title,
+      media_progress_id = COALESCE(excluded.media_progress_id, touched_episodes.media_progress_id),
       podcast_title = excluded.podcast_title,
       cover = COALESCE(excluded.cover, touched_episodes.cover),
       current_time = excluded.current_time,
       duration = excluded.duration,
       is_finished = excluded.is_finished,
-      hide_from_continue_listening = excluded.hide_from_continue_listening,
+      hide_from_continue_listening = CASE
+        WHEN ? THEN touched_episodes.hide_from_continue_listening
+        ELSE excluded.hide_from_continue_listening
+      END,
       last_update = excluded.last_update,
       updated_at = excluded.updated_at`,
     [
@@ -111,6 +131,7 @@ export const upsertTouchedEpisodeProgress = async (payload: {
       payload.libraryId,
       payload.libraryItemId,
       payload.episodeId,
+      payload.mediaProgressId,
       payload.title,
       payload.podcastTitle,
       payload.cover,
@@ -121,16 +142,19 @@ export const upsertTouchedEpisodeProgress = async (payload: {
       payload.lastUpdate,
       timestamp,
       timestamp,
+      payload.preserveExistingContinueListeningVisibility ? 1 : 0,
     ],
   );
 };
 
-export const listTouchedEpisodesForContinue = async (): Promise<TouchedEpisodeProgress[]> => {
+export const listTouchedEpisodesForContinue = async (): Promise<
+  TouchedEpisodeProgress[]
+> => {
   await initializeShadowDatabaseInternal();
   const context = requireActiveLibraryContext();
   const db = await getDb();
   const rows = await db.getAllAsync<TouchedRow>(
-    `SELECT library_item_id, episode_id, title, podcast_title, cover,
+    `SELECT media_progress_id, library_item_id, episode_id, title, podcast_title, cover,
             ${TOUCHED_EPISODE_CURRENT_TIME_SQL} AS current_time_seconds,
             duration, is_finished, hide_from_continue_listening, last_update
      FROM touched_episodes
@@ -139,6 +163,7 @@ export const listTouchedEpisodesForContinue = async (): Promise<TouchedEpisodePr
     [context.userId, context.libraryId],
   );
   return rows.map((row) => ({
+    mediaProgressId: row.media_progress_id,
     libraryItemId: row.library_item_id,
     episodeId: row.episode_id,
     title: row.title,
@@ -173,6 +198,7 @@ export const importTouchedOverlaysFromRecentEpisodes = async (payload: {
     cover: string | null;
     durationSeconds: number;
     progress: {
+      mediaProgressId: string | null;
       currentTimeSeconds: number;
       durationSeconds: number;
       isFinished: boolean;
@@ -192,7 +218,10 @@ export const importTouchedOverlaysFromRecentEpisodes = async (payload: {
     [payload.userId, payload.libraryId],
   );
   const existingByKey = new Map(
-    existing.map((row) => [`${row.library_item_id}::${row.episode_id}`, row.last_update]),
+    existing.map((row) => [
+      `${row.library_item_id}::${row.episode_id}`,
+      row.last_update,
+    ]),
   );
 
   let imported = 0;
@@ -217,6 +246,7 @@ export const importTouchedOverlaysFromRecentEpisodes = async (payload: {
     }
 
     await upsertTouchedEpisodeProgress({
+      mediaProgressId: progress.mediaProgressId,
       userId: payload.userId,
       libraryId: payload.libraryId,
       libraryItemId: episode.libraryItemId,
@@ -225,7 +255,11 @@ export const importTouchedOverlaysFromRecentEpisodes = async (payload: {
       podcastTitle: episode.podcastTitle,
       cover: episode.cover,
       currentTimeSeconds: progress.currentTimeSeconds,
-      durationSeconds: Math.max(progress.durationSeconds, episode.durationSeconds, 0),
+      durationSeconds: Math.max(
+        progress.durationSeconds,
+        episode.durationSeconds,
+        0,
+      ),
       isFinished: progress.isFinished,
       hideFromContinueListening: progress.hideFromContinueListening,
       lastUpdate: progress.lastUpdate,
@@ -234,6 +268,35 @@ export const importTouchedOverlaysFromRecentEpisodes = async (payload: {
   }
 
   return { imported, skipped };
+};
+
+export const setTouchedEpisodeContinueListeningHidden = async (payload: {
+  userId: string;
+  libraryId: string;
+  libraryItemId: string;
+  episodeId: string;
+  mediaProgressId: string;
+  hidden: boolean;
+}) => {
+  if (!payload.libraryId.trim()) return;
+  await initializeShadowDatabaseInternal();
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE touched_episodes
+     SET hide_from_continue_listening = ?,
+         media_progress_id = COALESCE(?, media_progress_id),
+         updated_at = ?
+     WHERE user_id = ? AND library_id = ? AND library_item_id = ? AND episode_id = ?`,
+    [
+      payload.hidden ? 1 : 0,
+      payload.mediaProgressId,
+      now(),
+      payload.userId,
+      payload.libraryId,
+      payload.libraryItemId,
+      payload.episodeId,
+    ],
+  );
 };
 
 export const upsertEpisodePendingProgressIntent = async (

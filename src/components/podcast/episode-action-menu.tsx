@@ -1,5 +1,10 @@
 import type { EpisodeActionEligibility } from "@/podcast/episode-action-eligibility";
-import { MenuView, type MenuAction, type NativeActionEvent } from "@expo/ui/community/menu";
+import { formatEpisodeMenuTitle } from "@/podcast/episode-menu-title";
+import {
+  MenuView,
+  type MenuAction,
+  type NativeActionEvent,
+} from "@expo/ui/community/menu";
 import type { ReactNode } from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 import type { SFSymbols7_0 } from "sf-symbols-typescript";
@@ -42,7 +47,7 @@ export const EpisodeActionMenu = ({
 
   return (
     <MenuView
-      title={title}
+      title={formatEpisodeMenuTitle(title)}
       actions={menuActions}
       shouldOpenOnLongPress={shouldOpenOnLongPress}
       onPressAction={handlePressAction}

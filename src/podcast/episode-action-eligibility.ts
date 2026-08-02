@@ -7,12 +7,14 @@ export type EpisodeActionId =
   | "playPause"
   | "download"
   | "removeDownload"
+  | "removeFromContinueListening"
   | "openPodcast";
 
 export const HOME_EPISODE_ACTIONS = [
   "playPause",
   "download",
   "removeDownload",
+  "removeFromContinueListening",
   "openPodcast",
 ] as const satisfies readonly EpisodeActionId[];
 
@@ -36,12 +38,10 @@ export type ResolveEpisodeActionSetInput = {
   /** True when already on Current Podcast for this Episode's parent Podcast. */
   isOnCurrentPodcast: boolean;
   isEpisodePlaying?: boolean;
+  canRemoveFromContinueListening?: boolean;
 };
 
-const labelFor = (
-  id: EpisodeActionId,
-  isEpisodePlaying: boolean,
-): string => {
+const labelFor = (id: EpisodeActionId, isEpisodePlaying: boolean): string => {
   switch (id) {
     case "playPause":
       return isEpisodePlaying ? "Pause" : "Play";
@@ -49,6 +49,8 @@ const labelFor = (
       return "Download";
     case "removeDownload":
       return "Remove Download";
+    case "removeFromContinueListening":
+      return "Remove from Continue Listening";
     case "openPodcast":
       return "Open Podcast";
   }
@@ -75,6 +77,13 @@ export const resolveEpisodeActionSet = (
         return {
           id,
           visible: input.hasPlayableLocalDownload,
+          disabled: false,
+          label,
+        };
+      case "removeFromContinueListening":
+        return {
+          id,
+          visible: Boolean(input.canRemoveFromContinueListening),
           disabled: false,
           label,
         };
