@@ -24,7 +24,7 @@ import {
   useDeviceEpisodeDownloadsActions,
   useDeviceEpisodeDownloadsStore,
 } from "@/store/device-episode-downloads-store";
-import { router, useSegments } from "expo-router";
+import { router, useSegments, type Href } from "expo-router";
 import { useMemo, useState } from "react";
 import { toast } from "react-native-sonner";
 import type { SFSymbols7_0 } from "sf-symbols-typescript";
@@ -56,6 +56,8 @@ const systemImageFor = (
       return "arrow.down.circle";
     case "removeDownload":
       return "trash";
+    case "bookshelves":
+      return "books.vertical.fill";
     case "removeFromContinueListening":
       return "eye.slash";
     case "openPodcast":
@@ -136,6 +138,23 @@ export const useEpisodeActionController = ({
         routeSource: bookRouteSource,
       }),
     );
+  };
+
+  const openBookshelves = () => {
+    router.push({
+      pathname: "/episode-bookshelves",
+      params: {
+        libraryItemId: identity.libraryItemId,
+        episodeId: identity.episodeId,
+        ...(episodeTitle?.trim() ? { episodeTitle: episodeTitle.trim() } : {}),
+        ...(podcastTitle?.trim() ? { podcastTitle: podcastTitle.trim() } : {}),
+        ...(coverUri?.trim() ? { coverUri: coverUri.trim() } : {}),
+        ...(durationSeconds != null
+          ? { durationSeconds: String(durationSeconds) }
+          : {}),
+        ...(publishedAt != null ? { publishedAt: String(publishedAt) } : {}),
+      },
+    } as unknown as Href);
   };
 
   const handlePlayPause = async () => {
@@ -264,6 +283,8 @@ export const useEpisodeActionController = ({
         return { ...base, onPress: handleDownload };
       case "removeDownload":
         return { ...base, onPress: handleRemoveDownload };
+      case "bookshelves":
+        return { ...base, onPress: openBookshelves };
       case "removeFromContinueListening":
         return { ...base, onPress: handleRemoveFromContinueListening };
       case "openPodcast":

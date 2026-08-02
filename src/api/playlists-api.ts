@@ -1,7 +1,24 @@
 import { absClient } from "./abs-client";
+import { buildCoverUrls } from "./cover-urls";
+import type { PodcastShelfEpisodeSnapshot } from "../podcast/podcast-shelf-types";
 
-export type PlaylistItemRef = {
+export type BookPlaylistItemRef = {
+  mediaKind: "book";
   libraryItemId: string;
+};
+
+export type EpisodePlaylistItemRef = {
+  mediaKind: "episode";
+  libraryItemId: string;
+  episodeId: string;
+  episode: PodcastShelfEpisodeSnapshot | null;
+};
+
+export type PlaylistItemRef = BookPlaylistItemRef | EpisodePlaylistItemRef;
+
+export type EpisodePlaylistItemIdentity = {
+  libraryItemId: string;
+  episodeId: string;
 };
 
 export type PlaylistSummary = {
@@ -23,18 +40,89 @@ const asRecord = (value: unknown): UnknownRecord | null =>
 const asString = (value: unknown) => (typeof value === "string" ? value : null);
 const asNumber = (value: unknown) => (typeof value === "number" ? value : null);
 
+const asTrimmedString = (value: unknown) => asString(value)?.trim() || null;
+
+const toEpisodeSnapshot = (
+  libraryItemId: string,
+  episodeId: string,
+  record: UnknownRecord,
+): PodcastShelfEpisodeSnapshot | null => {
+  const episode = asRecord(record.episode);
+  if (!episode) return null;
+
+  const nestedEpisodeId = asTrimmedString(episode.id);
+  const nestedLibraryItemId = asTrimmedString(episode.libraryItemId);
+  if (
+    (nestedEpisodeId && nestedEpisodeId !== episodeId) ||
+    (nestedLibraryItemId && nestedLibraryItemId !== libraryItemId)
+  ) {
+    return null;
+  }
+
+  const libraryItem = asRecord(record.libraryItem);
+  const media = asRecord(libraryItem?.media);
+  const metadata = asRecord(media?.metadata);
+  const episodePodcast = asRecord(episode.podcast);
+  const episodePodcastMetadata = asRecord(episodePodcast?.metadata);
+  const publishedAt = asNumber(episode.publishedAt);
+  const updatedAt = asNumber(libraryItem?.updatedAt);
+
+  let cover: string | null = null;
+  let coverFull: string | null = null;
+  try {
+    const covers = buildCoverUrls(libraryItemId, {
+      version: updatedAt ?? publishedAt,
+    });
+    cover = covers.thumb;
+    coverFull = covers.full;
+  } catch {
+    // A parsed playlist remains useful before a server endpoint is restored.
+  }
+
+  return {
+    libraryItemId,
+    episodeId,
+    title: asTrimmedString(episode.title) ?? "Episode",
+    podcastTitle:
+      asTrimmedString(metadata?.title) ??
+      asTrimmedString(episodePodcastMetadata?.title) ??
+      "Podcast",
+    cover,
+    coverFull,
+    durationSeconds: Math.max(
+      0,
+      asNumber(episode.duration) ??
+        asNumber(asRecord(episode.audioFile)?.duration) ??
+        0,
+    ),
+    publishedAt,
+  };
+};
+
 const toPlaylistItemRef = (value: unknown): PlaylistItemRef | null => {
   const record = asRecord(value);
   if (!record) return null;
 
-  const directId = asString(record.libraryItemId);
-  if (directId) return { libraryItemId: directId };
-
   const nestedLibraryItem = asRecord(record.libraryItem);
-  const nestedId = asString(nestedLibraryItem?.id);
-  if (nestedId) return { libraryItemId: nestedId };
+  const libraryItemId =
+    asTrimmedString(record.libraryItemId) ?? asTrimmedString(nestedLibraryItem?.id);
+  if (!libraryItemId) return null;
 
-  return null;
+  const episodeId = asTrimmedString(record.episodeId);
+  if (episodeId) {
+    return {
+      mediaKind: "episode",
+      libraryItemId,
+      episodeId,
+      episode: toEpisodeSnapshot(libraryItemId, episodeId, record),
+    };
+  }
+
+  // A Podcast playlist entry without an Episode ID is malformed and must not
+  // become a playable book-shaped entry.
+  if (asTrimmedString(nestedLibraryItem?.mediaType) === "podcast") return null;
+
+  return { mediaKind: "book", libraryItemId };
 };
 
 const toPlaylistItems = (value: unknown): PlaylistItemRef[] => {
@@ -110,8 +198,12 @@ const requireLibraryId = (libraryId: string, requestName: string) => {
   return trimmed;
 };
 
-const buildPlaylistItemPayload = (libraryItemIds: string[]) =>
+const buildBookPlaylistItemPayload = (libraryItemIds: readonly string[]) =>
   libraryItemIds.map((libraryItemId) => ({ libraryItemId }));
+
+const buildEpisodePlaylistItemPayload = (
+  items: readonly EpisodePlaylistItemIdentity[],
+) => items.map(({ libraryItemId, episodeId }) => ({ libraryItemId, episodeId }));
 
 export const playlistsApi = {
   async getLibraryPlaylists(libraryId: string): Promise<PlaylistSummary[]> {
@@ -141,7 +233,7 @@ export const playlistsApi = {
       libraryId: payload.libraryId,
       name: payload.name,
       description: payload.description ?? undefined,
-      items: buildPlaylistItemPayload(payload.items ?? []),
+      items: buildBookPlaylistItemPayload(payload.items ?? []),
     });
     const [playlist] = extractPlaylists(created);
     return playlist ?? null;
@@ -162,7 +254,7 @@ export const playlistsApi = {
       items:
         updates.orderedLibraryItemIds === undefined
           ? undefined
-          : buildPlaylistItemPayload(updates.orderedLibraryItemIds),
+          : buildBookPlaylistItemPayload(updates.orderedLibraryItemIds),
     });
     const [playlist] = extractPlaylists(payload);
     return playlist ?? null;
@@ -173,7 +265,7 @@ export const playlistsApi = {
     orderedLibraryItemIds: string[],
   ): Promise<PlaylistSummary | null> {
     const payload = await absClient.patch<unknown>(`/api/playlists/${playlistId}`, {
-      items: buildPlaylistItemPayload(orderedLibraryItemIds),
+      items: buildBookPlaylistItemPayload(orderedLibraryItemIds),
     });
     const [playlist] = extractPlaylists(payload);
     return playlist ?? null;
@@ -184,7 +276,7 @@ export const playlistsApi = {
     libraryItemIds: string[],
   ): Promise<PlaylistSummary | null> {
     const payload = await absClient.post<unknown>(`/api/playlists/${playlistId}/batch/add`, {
-      items: buildPlaylistItemPayload(libraryItemIds),
+      items: buildBookPlaylistItemPayload(libraryItemIds),
     });
     const [playlist] = extractPlaylists(payload);
     return playlist ?? null;
@@ -195,7 +287,56 @@ export const playlistsApi = {
     libraryItemIds: string[],
   ): Promise<PlaylistSummary | null> {
     const payload = await absClient.post<unknown>(`/api/playlists/${playlistId}/batch/remove`, {
-      items: buildPlaylistItemPayload(libraryItemIds),
+      items: buildBookPlaylistItemPayload(libraryItemIds),
+    });
+    const [playlist] = extractPlaylists(payload);
+    return playlist ?? null;
+  },
+
+  async createEpisodePlaylist(payload: {
+    libraryId: string;
+    name: string;
+    description?: string | null;
+    items?: EpisodePlaylistItemIdentity[];
+  }): Promise<PlaylistSummary | null> {
+    const created = await absClient.post<unknown>("/api/playlists", {
+      libraryId: payload.libraryId,
+      name: payload.name,
+      description: payload.description ?? undefined,
+      items: buildEpisodePlaylistItemPayload(payload.items ?? []),
+    });
+    const [playlist] = extractPlaylists(created);
+    return playlist ?? null;
+  },
+
+  async setEpisodePlaylistItems(
+    playlistId: string,
+    orderedItems: EpisodePlaylistItemIdentity[],
+  ): Promise<PlaylistSummary | null> {
+    const payload = await absClient.patch<unknown>(`/api/playlists/${playlistId}`, {
+      items: buildEpisodePlaylistItemPayload(orderedItems),
+    });
+    const [playlist] = extractPlaylists(payload);
+    return playlist ?? null;
+  },
+
+  async batchAddEpisodes(
+    playlistId: string,
+    items: EpisodePlaylistItemIdentity[],
+  ): Promise<PlaylistSummary | null> {
+    const payload = await absClient.post<unknown>(`/api/playlists/${playlistId}/batch/add`, {
+      items: buildEpisodePlaylistItemPayload(items),
+    });
+    const [playlist] = extractPlaylists(payload);
+    return playlist ?? null;
+  },
+
+  async batchRemoveEpisodes(
+    playlistId: string,
+    items: EpisodePlaylistItemIdentity[],
+  ): Promise<PlaylistSummary | null> {
+    const payload = await absClient.post<unknown>(`/api/playlists/${playlistId}/batch/remove`, {
+      items: buildEpisodePlaylistItemPayload(items),
     });
     const [playlist] = extractPlaylists(payload);
     return playlist ?? null;

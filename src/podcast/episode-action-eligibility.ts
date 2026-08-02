@@ -7,6 +7,7 @@ export type EpisodeActionId =
   | "playPause"
   | "download"
   | "removeDownload"
+  | "bookshelves"
   | "removeFromContinueListening"
   | "openPodcast";
 
@@ -14,6 +15,7 @@ export const HOME_EPISODE_ACTIONS = [
   "playPause",
   "download",
   "removeDownload",
+  "bookshelves",
   "removeFromContinueListening",
   "openPodcast",
 ] as const satisfies readonly EpisodeActionId[];
@@ -22,6 +24,7 @@ export const CURRENT_PODCAST_EPISODE_ACTIONS = [
   "playPause",
   "download",
   "removeDownload",
+  "bookshelves",
   "openPodcast",
 ] as const satisfies readonly EpisodeActionId[];
 
@@ -49,6 +52,8 @@ const labelFor = (id: EpisodeActionId, isEpisodePlaying: boolean): string => {
       return "Download";
     case "removeDownload":
       return "Remove Download";
+    case "bookshelves":
+      return "Bookshelves";
     case "removeFromContinueListening":
       return "Remove from Continue Listening";
     case "openPodcast":
@@ -80,6 +85,8 @@ export const resolveEpisodeActionSet = (
           disabled: false,
           label,
         };
+      case "bookshelves":
+        return { id, visible: true, disabled: false, label };
       case "removeFromContinueListening":
         return {
           id,

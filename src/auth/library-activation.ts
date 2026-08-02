@@ -7,6 +7,10 @@ import type { Library } from "../types/absTypes";
 import { recordTimingLog } from "../data/sqlite/timing-logger";
 import { ensurePodcastSeriesIndexReadyForActivation } from "../podcast/podcast-library-experience-default";
 import { isPodcastLibraryMediaType } from "../podcast/series-index-readiness";
+import {
+  reconcilePodcastPlaylists,
+  replayPendingPodcastPlaylistOperations,
+} from "../podcast/podcast-playlist-sync";
 
 type ActivateLibraryOptions = {
   library: Library;
@@ -91,6 +95,22 @@ export const activateLibrary = async ({
     backgroundRefreshIfStale(queryClient, queryKeys.userServerState(activeLibraryUserKey), () =>
       fetchReconciledUserServerState(queryClient, activeLibraryUserKey),
     );
+    deferBackgroundRefresh(() => {
+      backgroundRefresh(
+        playlistsApi.getLibraryPlaylists(library.id).then(async (playlists) => {
+          queryClient.setQueryData(
+            queryKeys.libraryPlaylists(activeLibraryUserKey, library.id),
+            playlists,
+          );
+          const scope = {
+            userKey: activeLibraryUserKey,
+            libraryId: library.id,
+          };
+          reconcilePodcastPlaylists(playlists, scope);
+          await replayPendingPodcastPlaylistOperations(scope);
+        }),
+      );
+    });
     void recordTimingLog("library_switch", "activate_library_fetch", startedAt, {
       libraryId: library.id,
       libraryName: library.name,

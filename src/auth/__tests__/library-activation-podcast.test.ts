@@ -11,6 +11,10 @@ jest.mock("../../api/playlists-api", () => ({
 jest.mock("../../podcast/podcast-library-experience-default", () => ({
   ensurePodcastSeriesIndexReadyForActivation: jest.fn(),
 }));
+jest.mock("../../podcast/podcast-playlist-sync", () => ({
+  reconcilePodcastPlaylists: jest.fn(),
+  replayPendingPodcastPlaylistOperations: jest.fn(async () => undefined),
+}));
 
 import type { QueryClient } from "@tanstack/react-query";
 import { activateLibrary } from "../library-activation";

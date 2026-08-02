@@ -20,6 +20,7 @@ const BOOK_UTILITY_SHEETS = new Set([
 ]);
 
 const EPISODE_UTILITY_SHEETS = new Set([
+  "episode-bookshelves",
   "episode-downloads",
   "episode-bookmarks",
   "episode-bookmark-detail",

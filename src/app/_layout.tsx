@@ -694,6 +694,13 @@ export default function RootLayout() {
                 options={sheetScreenOptions(themeColors.surface)}
               />
               <Stack.Screen
+                name="episode-bookshelves"
+                options={sheetScreenOptions(themeColors.surface, {
+                  headerTitle: "Add To Bookshelves",
+                  headerShown: true,
+                })}
+              />
+              <Stack.Screen
                 name="episode-downloads"
                 options={sheetScreenOptions(themeColors.surface)}
               />

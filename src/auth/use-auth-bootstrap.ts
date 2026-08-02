@@ -15,6 +15,7 @@ import {
   routeBackgroundProgressIntent,
 } from "../progress/background-progress-routing";
 import { syncPendingEpisodeProgressIntents } from "../podcast/episode-progress-sync-service";
+import { replayPendingPodcastPlaylistOperations } from "../podcast/podcast-playlist-sync";
 
 export const useAuthBootstrap = () => {
   const status = useAuthStore((state) => state.status);
@@ -22,6 +23,9 @@ export const useAuthBootstrap = () => {
   const refreshToken = useAuthStore((state) => state.refreshToken);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const activeLibraryMediaType = useAuthStore(
+    (state) => state.activeLibraryMediaType,
+  );
   const storedUserId = useAuthStore((state) => state.storedUserId);
   const resolvedUserKey = activeLibraryUserKey ?? storedUserId;
   const hasOfflineContent = useDeviceBooksStore((state) =>
@@ -109,6 +113,16 @@ export const useAuthBootstrap = () => {
       await syncPendingBookmarkDeletes().catch(() => undefined);
       await syncPendingBookmarks().catch(() => undefined);
       await syncPendingPlaylistOps().catch(() => undefined);
+      if (
+        activeLibraryMediaType?.trim().toLowerCase() === "podcast" &&
+        activeLibraryUserKey &&
+        activeLibraryId
+      ) {
+        await replayPendingPodcastPlaylistOperations({
+          userKey: activeLibraryUserKey,
+          libraryId: activeLibraryId,
+        }).catch(() => undefined);
+      }
     };
     syncPending().catch(() => undefined);
   }, [
@@ -119,6 +133,9 @@ export const useAuthBootstrap = () => {
     syncPendingPlaylistOps,
     syncPendingProgress,
     resolvedUserKey,
+    activeLibraryId,
+    activeLibraryMediaType,
+    activeLibraryUserKey,
   ]);
 
   return { status };

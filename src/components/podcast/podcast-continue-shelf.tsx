@@ -2,7 +2,7 @@ import { CoverImage } from "@/components/images/cover-image";
 import { useEpisodeActionController } from "@/components/podcast/episode-action-controller";
 import { EpisodeActionMenuButton } from "@/components/podcast/episode-action-menu-button";
 import { HOME_EPISODE_ACTIONS } from "@/podcast/episode-action-eligibility";
-import type { TouchedEpisodeProgress } from "@/podcast/episode-continue-eligibility";
+import type { PodcastShelfEpisodeItem } from "@/podcast/podcast-shelf-types";
 import { getEpisodeProgressPresentation } from "@/podcast/episode-progress-presentation";
 import {
   getHomePreviewCoverSize,
@@ -22,17 +22,21 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { useUniwind } from "uniwind";
+import { Link, type Href } from "expo-router";
+import { SymbolView } from "expo-symbols";
 
 type Props = {
   title?: string;
-  episodes: readonly TouchedEpisodeProgress[];
+  episodes: readonly PodcastShelfEpisodeItem[];
+  emptyMessage?: string;
+  shelfHref?: Href;
   sizeMultiplier?: number;
   headerHeight: number;
   scrollY: SharedValue<number>;
 };
 
 type EpisodeTileProps = {
-  episode: TouchedEpisodeProgress;
+  episode: PodcastShelfEpisodeItem;
   coverSize: number;
   isDarkMode: boolean;
   themeColors: ReturnType<typeof useThemeColors>;
@@ -295,6 +299,8 @@ const PodcastEpisodeShelfTile = ({
 export const PodcastContinueShelf = ({
   title = "Continue Listening",
   episodes,
+  emptyMessage = "No Episodes are available.",
+  shelfHref,
   sizeMultiplier = 1,
   headerHeight,
   scrollY,
@@ -305,8 +311,6 @@ export const PodcastContinueShelf = ({
   const coverSize = Math.round(
     getHomePreviewCoverSize(homePreviewSize) * sizeMultiplier,
   );
-
-  if (episodes.length === 0) return null;
 
   return (
     <View style={{ gap: 12 }} className="mb-3">
@@ -323,24 +327,53 @@ export const PodcastContinueShelf = ({
             {title}
           </Text>
         </View>
+        {shelfHref ? (
+          <Link href={shelfHref} asChild>
+            <Pressable
+              hitSlop={12}
+              style={{
+                width: 52,
+                height: 32,
+                borderRadius: 999,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: themeColors.surface,
+                borderWidth: 1,
+                borderColor: themeColors.border,
+              }}
+            >
+              <SymbolView
+                name="chevron.right"
+                tintColor={themeColors.textMuted}
+                size={14}
+              />
+            </Pressable>
+          </Link>
+        ) : null}
       </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 12, gap: 10 }}
-      >
-        {episodes.map((episode) => (
-          <PodcastEpisodeShelfTile
-            key={`${episode.libraryItemId}:${episode.episodeId}`}
-            episode={episode}
-            coverSize={coverSize}
-            isDarkMode={theme === "dark"}
-            themeColors={themeColors}
-            headerHeight={headerHeight}
-            scrollY={scrollY}
-          />
-        ))}
-      </ScrollView>
+      {episodes.length === 0 ? (
+        <Text style={{ color: themeColors.textMuted, fontSize: 13, paddingHorizontal: 18 }}>
+          {emptyMessage}
+        </Text>
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 12, gap: 10 }}
+        >
+          {episodes.map((episode) => (
+            <PodcastEpisodeShelfTile
+              key={`${episode.libraryItemId}:${episode.episodeId}`}
+              episode={episode}
+              coverSize={coverSize}
+              isDarkMode={theme === "dark"}
+              themeColors={themeColors}
+              headerHeight={headerHeight}
+              scrollY={scrollY}
+            />
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 };

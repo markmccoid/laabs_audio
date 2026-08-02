@@ -95,7 +95,10 @@ export const PlaylistDetailScreen = ({ playlistId }: PlaylistDetailScreenProps) 
     const optimisticPlaylist: PlaylistSummary = {
       ...playlist,
       name: nextName,
-      items: nextBookIds.map((libraryItemId) => ({ libraryItemId })),
+      items: nextBookIds.map((libraryItemId) => ({
+        mediaKind: "book" as const,
+        libraryItemId,
+      })),
     };
     const replacePlaylist = (updatedPlaylist: PlaylistSummary) => {
       queryClient.setQueryData<PlaylistSummary[]>(playlistQueryKey, (current = []) =>

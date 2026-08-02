@@ -30,6 +30,7 @@ describe("authenticated route gate", () => {
   });
 
   it.each([
+    "episode-bookshelves",
     "episode-bookmarks",
     "episode-bookmark-detail",
     "episode-addbookmark",

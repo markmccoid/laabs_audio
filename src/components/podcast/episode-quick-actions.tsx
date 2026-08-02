@@ -7,7 +7,7 @@ import {
   useDeviceEpisodeDownloadsStore,
 } from "@/store/device-episode-downloads-store";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { Pressable, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
@@ -115,6 +115,20 @@ export const EpisodeQuickActions = ({
     });
   };
 
+  const openBookshelves = () => {
+    if (!identity.libraryItemId || !identity.episodeId) return;
+    router.push({
+      pathname: "/episode-bookshelves",
+      params: {
+        libraryItemId: identity.libraryItemId,
+        episodeId: identity.episodeId,
+        ...(episodeTitle?.trim() ? { episodeTitle: episodeTitle.trim() } : {}),
+        ...(podcastTitle?.trim() ? { podcastTitle: podcastTitle.trim() } : {}),
+        ...(coverUri?.trim() ? { coverUri: coverUri.trim() } : {}),
+      },
+    } as unknown as Href);
+  };
+
   return (
     <View style={{ width: 60, alignItems: "center", gap: 10 }}>
       <Pressable
@@ -162,6 +176,25 @@ export const EpisodeQuickActions = ({
             size={25}
           />
         </View>
+      </Pressable>
+      <Pressable
+        onPress={openBookshelves}
+        accessibilityRole="button"
+        accessibilityLabel="Add Episode to Bookshelves"
+        style={({ pressed }) => ({
+          width: 48,
+          height: 48,
+          borderRadius: 999,
+          borderCurve: "continuous",
+          borderWidth: 1,
+          borderColor: themeColors.border,
+          backgroundColor: themeColors.surface,
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: pressed ? 0.82 : 1,
+        })}
+      >
+        <SymbolView name="books.vertical.fill" tintColor={themeColors.text} size={24} />
       </Pressable>
     </View>
   );

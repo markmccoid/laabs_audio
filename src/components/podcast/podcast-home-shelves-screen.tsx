@@ -1,36 +1,19 @@
-import type { UserBookProgress } from "@/api/me-api";
 import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
-import { HomeShelfSection } from "@/components/Home/home-shelf-section";
 import { useHomeSignInSwitcher } from "@/components/Home/home-sign-in-switcher";
 import { PodcastContinueShelf } from "@/components/podcast/podcast-continue-shelf";
+import { PodcastHomeShelfSection } from "@/components/podcast/podcast-home-shelf-section";
 import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
 import { useLibrarySelection } from "@/hooks/use-library-selection";
-import { usePlaybackStore } from "@/player/playback-store";
-import type { TouchedEpisodeProgress } from "@/podcast/episode-continue-eligibility";
-import { episodeIdentityKey } from "@/podcast/episode-identity";
-import { assembleDownloadedEpisodesShelf } from "@/podcast/episode-download-facade";
+import { usePodcastHomeShelves } from "@/hooks/use-podcast-home-shelves";
 import { refreshPodcastHomeShelvesDefault } from "@/podcast/podcast-library-experience-default";
-import { podcastShowToShelfSummary } from "@/podcast/podcast-show-to-shelf-summary";
-import {
-  applyActiveEpisodePlaybackOverlay,
-  promoteActiveEpisodeInContinueShelf,
-  toContinueShelfItemFromRecent,
-} from "@/podcast/recent-episodes-shelf";
-import {
-  usePodcastContinueEpisodes,
-  usePodcastRecentEpisodes,
-  usePodcastSeriesByAddedAt,
-  usePodcastTouchedEpisodes,
-} from "@/podcast/use-podcast-series";
+import { replayPendingPodcastPlaylistOperations } from "@/podcast/podcast-playlist-sync";
+import type { PodcastHomeShelf } from "@/podcast/podcast-shelf-types";
 import { queryKeys } from "@/query/query-keys";
-import {
-  listEpisodeDownloadedAssetRecords,
-  useDeviceEpisodeDownloadsStore,
-} from "@/store/device-episode-downloads-store";
 import {
   HOME_PREVIEW_SIZE_LARGE,
   HOME_PREVIEW_SIZE_MEDIUM,
   HOME_PREVIEW_SIZE_SMALL,
+  selectHomeShelfOrder,
   useSettingsStore,
 } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -47,10 +30,7 @@ import Animated, {
   useSharedValue,
 } from "react-native-reanimated";
 
-const EMPTY_FAVORITES: Record<string, true> = {};
-const EMPTY_PROGRESS: Record<string, UserBookProgress> = {};
 const EPISODE_CARD_SIZE_MULTIPLIER = 1.25;
-const PODCAST_CARD_SIZE_MULTIPLIER = 0.9;
 
 const AnimatedFlashList = Animated.createAnimatedComponent(
   FlashList,
@@ -58,10 +38,7 @@ const AnimatedFlashList = Animated.createAnimatedComponent(
 
 type PodcastHomeListItem =
   | { type: "refresh-message"; id: "refresh-message"; message: string }
-  | { type: "continue"; id: "continue" }
-  | { type: "recent"; id: "recent" }
-  | { type: "shelf"; id: "podcasts" }
-  | { type: "downloaded"; id: "downloaded" };
+  | { type: "shelf"; id: string; shelf: PodcastHomeShelf };
 
 export const PodcastHomeShelvesScreen = () => {
   const headerHeight = useHeaderHeight();
@@ -86,22 +63,10 @@ export const PodcastHomeShelvesScreen = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const scrollY = useSharedValue(0);
-  const seriesQuery = usePodcastSeriesByAddedAt();
-  const continueQuery = usePodcastContinueEpisodes();
-  const touchedQuery = usePodcastTouchedEpisodes();
-  const recentQuery = usePodcastRecentEpisodes();
-  const playbackLibraryItemId = usePlaybackStore(
-    (state) => state.libraryItemId,
-  );
-  const playbackEpisodeId = usePlaybackStore((state) => state.episodeId);
-  const playbackBookTitle = usePlaybackStore((state) => state.bookTitle);
-  const playbackSecondaryTitle = usePlaybackStore(
-    (state) => state.secondaryTitle,
-  );
-  const playbackPositionMs = usePlaybackStore((state) => state.positionMs);
-  const playbackDurationMs = usePlaybackStore((state) => state.durationMs);
-  const playbackQueueArtworkUri = usePlaybackStore(
-    (state) => state.queue[0]?.artworkUri ?? null,
+  const { visibleShelves, scope, scopeKey, playlistQuery } =
+    usePodcastHomeShelves();
+  const shelfOrder = useSettingsStore((state) =>
+    selectHomeShelfOrder(state, scopeKey),
   );
   const activateLibrarySelection = useActivateLibrarySelection();
   const {
@@ -122,135 +87,6 @@ export const PodcastHomeShelvesScreen = () => {
     openManage,
   } = useHomeSignInSwitcher();
 
-  const shelfBooks = useMemo(
-    () => (seriesQuery.data ?? []).map(podcastShowToShelfSummary),
-    [seriesQuery.data],
-  );
-
-  const activePlaybackOverlay = useMemo(() => {
-    if (!playbackLibraryItemId || !playbackEpisodeId) return null;
-    return {
-      libraryItemId: playbackLibraryItemId,
-      episodeId: playbackEpisodeId,
-      currentTimeSeconds: Math.max(0, playbackPositionMs / 1000),
-      durationSeconds: Math.max(0, playbackDurationMs / 1000),
-    };
-  }, [
-    playbackDurationMs,
-    playbackEpisodeId,
-    playbackLibraryItemId,
-    playbackPositionMs,
-  ]);
-
-  const touchedByEpisode = useMemo(
-    () =>
-      new Map(
-        (touchedQuery.data ?? []).flatMap((episode) => {
-          const key = episodeIdentityKey(episode);
-          return key ? [[key, episode] as const] : [];
-        }),
-      ),
-    [touchedQuery.data],
-  );
-
-  const continueEpisodes = useMemo(() => {
-    const promote =
-      activePlaybackOverlay == null
-        ? null
-        : {
-            ...activePlaybackOverlay,
-            title: playbackBookTitle,
-            podcastTitle: playbackSecondaryTitle,
-            cover: playbackQueueArtworkUri,
-          };
-    return promoteActiveEpisodeInContinueShelf(
-      continueQuery.data ?? [],
-      promote,
-    );
-  }, [
-    activePlaybackOverlay,
-    continueQuery.data,
-    playbackBookTitle,
-    playbackQueueArtworkUri,
-    playbackSecondaryTitle,
-  ]);
-
-  const recentEpisodes = useMemo(() => {
-    const assembled = recentQuery.data ?? [];
-    const withOverlay = applyActiveEpisodePlaybackOverlay(
-      assembled,
-      activePlaybackOverlay,
-    );
-    return withOverlay.map((episode) => {
-      const projected = toContinueShelfItemFromRecent(episode);
-      const touched = touchedByEpisode.get(episodeIdentityKey(projected) ?? "");
-      if (!touched) return projected;
-      return {
-        ...projected,
-        mediaProgressId: touched.mediaProgressId ?? projected.mediaProgressId,
-        currentTimeSeconds: Math.max(
-          projected.currentTimeSeconds,
-          touched.currentTimeSeconds,
-        ),
-        durationSeconds: Math.max(
-          projected.durationSeconds,
-          touched.durationSeconds,
-        ),
-        isFinished: touched.isFinished,
-        hideFromContinueListening: touched.hideFromContinueListening,
-      };
-    });
-  }, [activePlaybackOverlay, recentQuery.data, touchedByEpisode]);
-
-  // Subscribe to stable map references — assembling in the selector returns a new
-  // array every call and trips Zustand's Object.is check into an update loop.
-  const downloadedEpisodeDetailsById = useDeviceEpisodeDownloadsStore(
-    (state) => state.downloadedEpisodeDetailsById,
-  );
-  const downloadedEpisodeData = useDeviceEpisodeDownloadsStore(
-    (state) => state.downloadedEpisodeData,
-  );
-  const downloadedEpisodeOwnerUserIdsById = useDeviceEpisodeDownloadsStore(
-    (state) => state.downloadedEpisodeOwnerUserIdsById,
-  );
-
-  const downloadedShelfEpisodes = useMemo((): TouchedEpisodeProgress[] => {
-    const records = listEpisodeDownloadedAssetRecords({
-      downloadedEpisodeDetailsById,
-      downloadedEpisodeData,
-      downloadedEpisodeOwnerUserIdsById,
-    });
-    return assembleDownloadedEpisodesShelf(records, {
-      activeLibraryId,
-      sessionUserId: activeLibraryUserKey,
-    }).map((episode) => {
-      const touched = touchedByEpisode.get(episodeIdentityKey(episode) ?? "");
-      return {
-        mediaProgressId: touched?.mediaProgressId ?? null,
-        libraryItemId: episode.libraryItemId,
-        episodeId: episode.episodeId,
-        title: episode.title,
-        podcastTitle: episode.podcastTitle,
-        cover: episode.cover,
-        currentTimeSeconds: touched?.currentTimeSeconds ?? 0,
-        durationSeconds: Math.max(
-          episode.durationSeconds,
-          touched?.durationSeconds ?? 0,
-        ),
-        isFinished: touched?.isFinished ?? false,
-        hideFromContinueListening: touched?.hideFromContinueListening ?? false,
-        lastUpdate: Math.max(episode.downloadedAt, touched?.lastUpdate ?? 0),
-      };
-    });
-  }, [
-    activeLibraryId,
-    activeLibraryUserKey,
-    downloadedEpisodeData,
-    downloadedEpisodeDetailsById,
-    downloadedEpisodeOwnerUserIdsById,
-    touchedByEpisode,
-  ]);
-
   const listData = useMemo<PodcastHomeListItem[]>(() => {
     return [
       ...(refreshMessage
@@ -262,23 +98,17 @@ export const PodcastHomeShelvesScreen = () => {
             },
           ]
         : []),
-      ...(continueEpisodes.length > 0
-        ? [{ type: "continue" as const, id: "continue" as const }]
-        : []),
-      ...(recentEpisodes.length > 0
-        ? [{ type: "recent" as const, id: "recent" as const }]
-        : []),
-      { type: "shelf", id: "podcasts" },
-      ...(downloadedShelfEpisodes.length > 0
-        ? [{ type: "downloaded" as const, id: "downloaded" as const }]
-        : []),
+      ...visibleShelves.map((shelf) => ({
+        type: "shelf" as const,
+        id: shelf.id,
+        shelf,
+      })),
     ];
-  }, [
-    continueEpisodes.length,
-    downloadedShelfEpisodes.length,
-    recentEpisodes.length,
-    refreshMessage,
-  ]);
+  }, [refreshMessage, visibleShelves]);
+  const homeListOrderKey = useMemo(
+    () => `${scopeKey ?? "no-scope"}:${JSON.stringify(shelfOrder)}`,
+    [scopeKey, shelfOrder],
+  );
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -343,6 +173,15 @@ export const PodcastHomeShelvesScreen = () => {
           ),
         });
       }
+      const playlistResult = await playlistQuery.refetch();
+      if (playlistResult.isError) {
+        setRefreshMessage(
+          "Podcast shelves refreshed, but Playlist Shelves could not be updated.",
+        );
+      }
+      if (scope) {
+        await replayPendingPodcastPlaylistOperations(scope);
+      }
     } catch {
       setRefreshMessage("Refresh failed. Pull down to try again.");
     } finally {
@@ -354,7 +193,9 @@ export const PodcastHomeShelvesScreen = () => {
     activeLibraryUserKey,
     isOnline,
     isRefreshing,
+    playlistQuery,
     queryClient,
+    scope,
   ]);
 
   const handleLibraryChange = useCallback(
@@ -391,34 +232,16 @@ export const PodcastHomeShelvesScreen = () => {
         );
       }
 
-      if (item.type === "continue") {
+      if (item.shelf.kind !== "derivedPodcast") {
         return (
           <PodcastContinueShelf
-            episodes={continueEpisodes}
-            sizeMultiplier={EPISODE_CARD_SIZE_MULTIPLIER}
-            headerHeight={headerHeight}
-            scrollY={scrollY}
-          />
-        );
-      }
-
-      if (item.type === "recent") {
-        return (
-          <PodcastContinueShelf
-            title="Recent Episodes"
-            episodes={recentEpisodes}
-            sizeMultiplier={EPISODE_CARD_SIZE_MULTIPLIER}
-            headerHeight={headerHeight}
-            scrollY={scrollY}
-          />
-        );
-      }
-
-      if (item.type === "downloaded") {
-        return (
-          <PodcastContinueShelf
-            title="Downloaded"
-            episodes={downloadedShelfEpisodes}
+            title={item.shelf.title}
+            episodes={item.shelf.episodes}
+            emptyMessage={item.shelf.emptyMessage}
+            shelfHref={{
+              pathname: "/(tabs)/(home)/bookshelf/[shelfId]",
+              params: { shelfId: item.shelf.id },
+            }}
             sizeMultiplier={EPISODE_CARD_SIZE_MULTIPLIER}
             headerHeight={headerHeight}
             scrollY={scrollY}
@@ -427,35 +250,17 @@ export const PodcastHomeShelvesScreen = () => {
       }
 
       return (
-        <HomeShelfSection
-          shelfId="podcasts"
-          title="Podcasts"
-          books={shelfBooks}
-          favoriteByBookId={EMPTY_FAVORITES}
-          progressByBookId={EMPTY_PROGRESS}
-          isOffline={isOnline === false}
-          emptyMessage={
-            seriesQuery.isLoading
-              ? "Loading podcasts…"
-              : "No podcasts in this Library yet."
-          }
-          headerHeight={headerHeight}
+        <PodcastHomeShelfSection
+          title={item.shelf.title}
+          podcasts={item.shelf.podcasts}
+          emptyMessage={item.shelf.emptyMessage}
           shelfHref="/(tabs)/library"
-          renderCardMenus={false}
-          scrollY={scrollY}
-          bookSizeMultiplier={PODCAST_CARD_SIZE_MULTIPLIER}
         />
       );
     },
     [
-      continueEpisodes,
-      downloadedShelfEpisodes,
       headerHeight,
-      isOnline,
-      recentEpisodes,
       scrollY,
-      seriesQuery.isLoading,
-      shelfBooks,
       themeColors.border,
       themeColors.surface,
       themeColors.textMuted,
@@ -591,6 +396,7 @@ export const PodcastHomeShelvesScreen = () => {
       </Stack.Toolbar>
 
       <AnimatedFlashList
+        key={homeListOrderKey}
         contentInsetAdjustmentBehavior="automatic"
         data={listData}
         keyExtractor={(item) => item.id}

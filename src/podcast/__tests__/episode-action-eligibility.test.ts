@@ -23,6 +23,7 @@ describe("resolveEpisodeActionSet", () => {
       { id: "playPause", visible: true, label: "Play" },
       { id: "download", visible: true, label: "Download" },
       { id: "removeDownload", visible: false, label: "Remove Download" },
+      { id: "bookshelves", visible: true, label: "Bookshelves" },
       {
         id: "removeFromContinueListening",
         visible: false,
@@ -42,7 +43,7 @@ describe("resolveEpisodeActionSet", () => {
 
     expect(
       actions.filter((action) => action.visible).map((action) => action.id),
-    ).toEqual(["playPause", "removeDownload", "openPodcast"]);
+    ).toEqual(["playPause", "removeDownload", "bookshelves", "openPodcast"]);
   });
 
   it("omits Open Podcast on Current Podcast for the same Podcast", () => {
@@ -55,7 +56,7 @@ describe("resolveEpisodeActionSet", () => {
 
     expect(
       actions.filter((action) => action.visible).map((action) => action.id),
-    ).toEqual(["playPause", "download"]);
+    ).toEqual(["playPause", "download", "bookshelves"]);
   });
 
   it("labels Play/Pause as Pause when the Episode is playing", () => {

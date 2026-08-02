@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-08-02` `pending` - Add configurable podcast Home shelves and shared bookshelf settings, including sortable episode shelves and reliable Home reordering.
+  Tester focus: in a Podcast Library, reorder shelves in Settings and confirm Home returns to the top in the new order; open an Episode Shelf and verify episode titles, drag handles, and shelf contents render correctly.
+
 - `2026-08-01` `pending` - Differentiate Podcast Home Episode cards with a footer, native action pill, progress display, and Continue Listening removal.
   Tester focus: in a Podcast Library, confirm Continue Listening, Recent Episodes, and Downloaded Episodes share the larger Episode card with title/footer, accent progress bar, and fading ellipsis pill; use an eligible menu to remove an Episode from Continue Listening without removing its duplicate cards elsewhere.
 

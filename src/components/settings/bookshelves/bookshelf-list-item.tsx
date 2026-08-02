@@ -1,13 +1,16 @@
-import type { HomeShelf } from "@/hooks/use-home-shelves";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView } from "expo-symbols";
 import { Pressable, Text, View } from "react-native";
 import Sortable from "react-native-sortables";
+import type { BookshelfSettingsItem } from "./bookshelf-settings-types";
 
 type BookshelfListItemProps = {
-  shelf: HomeShelf;
-  onPress: (shelf: HomeShelf) => void;
-  onToggleVisibility: (shelf: HomeShelf, nextVisibility: boolean) => void;
+  shelf: BookshelfSettingsItem;
+  onPress: (shelf: BookshelfSettingsItem) => void;
+  onToggleVisibility: (
+    shelf: BookshelfSettingsItem,
+    nextVisibility: boolean,
+  ) => void;
   itemWidth?: number;
 };
 
@@ -19,33 +22,26 @@ export const BookshelfListItem = ({
 }: BookshelfListItemProps) => {
   const themeColors = useThemeColors();
   const isHidden = !shelf.isVisible;
-  const syncStatus = (() => {
-    if (shelf.kind === "playlist" && shelf.syncState === "missing") {
-      return {
-        label: "Missing",
-        icon: "exclamationmark.triangle.fill",
-        color: "#b36f00",
-      };
-    }
-    if (shelf.kind === "playlist" && shelf.syncState === "unsynced") {
-      return {
-        label: "Unsynced",
-        icon: "exclamationmark.circle.fill",
-        color: "#d24b20",
-      };
-    }
-    if (shelf.kind === "playlist" && shelf.syncState === "pending") {
-      return {
-        label: "Pending",
-        icon: "clock.fill",
-        color: themeColors.absGold,
-      };
-    }
-    return null;
-  })();
+  const syncStatus = shelf.syncStatus
+    ? {
+        label: shelf.syncStatus.label,
+        icon:
+          shelf.syncStatus.tone === "warning"
+            ? "exclamationmark.triangle.fill"
+            : shelf.syncStatus.tone === "error"
+              ? "exclamationmark.circle.fill"
+              : "clock.fill",
+        color:
+          shelf.syncStatus.tone === "warning"
+            ? "#b36f00"
+            : shelf.syncStatus.tone === "error"
+              ? "#d24b20"
+              : themeColors.absGold,
+      }
+    : null;
 
   const typeInfo = (() => {
-    if (shelf.kind === "derived") {
+    if (shelf.kindTone === "derived") {
       return {
         label: "Derived",
         borderColor: themeColors.border,
@@ -53,7 +49,7 @@ export const BookshelfListItem = ({
         textColor: themeColors.textMuted,
       };
     }
-    if (shelf.kind === "custom") {
+    if (shelf.kindTone === "custom") {
       return {
         label: "Custom",
         borderColor: themeColors.accent,
@@ -133,7 +129,7 @@ export const BookshelfListItem = ({
                 selectable
                 style={{ color: typeInfo.textColor, fontSize: 10, fontWeight: "700" }}
               >
-                {typeInfo.label}
+                {shelf.kindLabel}
               </Text>
             </View>
           </View>
