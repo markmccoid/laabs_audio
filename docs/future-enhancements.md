@@ -4,6 +4,12 @@ This document tracks technical debt, refactoring opportunities, and future enhan
 
 ## Recent Enhancements
 
+- `2026-08-02` `pending` - Add Podcast-level ambient audio associations with Episode overrides.
+  Resolve an active Episode using Episode override → Podcast association → no ambient track. Before
+  implementation, decide whether inherited playback shares Podcast-wide ambient position/volume or
+  layers Episode-local preferences over the inherited track. See
+  `AmbientEpisodePlaybackImplementationPlan.md` for the identity seam this should extend.
+
 - `2026-06-09` `pending` - Replace InteractionManager with modern deferred execution (setTimeout, requestIdleCallback polyfill, startTransition) to prepare for its deprecation.
   Tester focus: verify that deferred operations (clearing deep links, startup queries, home shelf menus) still run reliably and performantly.
 

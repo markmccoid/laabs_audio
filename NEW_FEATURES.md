@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-08-02` `pending` - Define the implementation plan for Episode-specific ambient audio using full media identity while preserving existing Book associations and reserving Podcast-level fallback for a future enhancement.
+  Tester focus: review the planned behavior for separate Episode track, volume, and ambient-position preferences, including migration of existing Book associations; no runtime behavior changes are included in this commit.
+
 - `2026-08-02` `pending` - Add configurable podcast Home shelves and shared bookshelf settings, including sortable episode shelves and reliable Home reordering.
   Tester focus: in a Podcast Library, reorder shelves in Settings and confirm Home returns to the top in the new order; open an Episode Shelf and verify episode titles, drag handles, and shelf contents render correctly.
 
