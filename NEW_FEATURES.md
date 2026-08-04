@@ -4,7 +4,7 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
-- `2026-08-04` `pending` - Bump the app release version to 1.7.3.
+- `2026-08-04` `933c990` - Bump the app release version to 1.7.3.
   Tester focus: confirm the built app reports version 1.7.3 while existing runtime behavior remains unchanged.
 
 - `2026-08-04` `cd44257` - Add non-destructive bookmark and clip playback with a protected return
