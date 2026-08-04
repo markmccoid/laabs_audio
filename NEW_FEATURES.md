@@ -4,6 +4,12 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-08-04` `pending` - Add non-destructive bookmark and clip playback with a protected return
+  position, prominent in-sheet controls, explicit paused progress relocation, and 15-second Undo.
+  Tester focus: from active audiobook and podcast Episode bookmark sheets, play and switch point
+  bookmarks/clips without changing progress, use the row menu and full trailing Play/Pause corner,
+  return or close to restore the original paused position, and verify Move Progress plus Undo.
+
 - `2026-08-02` `pending` - Define the implementation plan for Episode-specific ambient audio using full media identity while preserving existing Book associations and reserving Podcast-level fallback for a future enhancement.
   Tester focus: review the planned behavior for separate Episode track, volume, and ambient-position preferences, including migration of existing Book associations; no runtime behavior changes are included in this commit.
 

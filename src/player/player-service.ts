@@ -51,14 +51,19 @@ import {
 } from "../store/progress-log-store";
 import { clampPlaybackRateToRange, settingsStore } from "../store/settings-store";
 import type { AudioTrack } from "../types/absTypes";
-import {
-  resolveAutoRewindDecision,
-  type AutoRewindDecision,
-} from "./auto-rewind";
+import { resolveAutoRewindDecision, type AutoRewindDecision } from "./auto-rewind";
 import { createAudioEngine } from "./audio-engine";
 import { buildChapterIndex, findChapterForPosition, findTrackForPosition } from "./chapters";
-import { clipPreviewStore } from "./clip-preview-store";
-import { resolveClipPreviewAvailability } from "./clip-preview-availability";
+import { temporaryPlaybackStore } from "./temporary-playback-store";
+import { resolveTemporaryPlaybackAvailability } from "./temporary-playback-availability";
+import {
+  consumeBookmarkRelocationUndo,
+  invalidateBookmarkRelocationUndo,
+} from "./bookmark-relocation-undo";
+import {
+  canAdvanceTemporaryPlaybackToTrack,
+  clampTemporaryPlaybackPosition,
+} from "./temporary-playback-policy";
 import { describeLocalAudioSourceUri } from "./local-audio-source-diagnostics";
 import {
   isPlaybackControlIntentBlocking,
@@ -129,23 +134,26 @@ type FreshServerProgressFetchResultPayload =
       errorMessage: string;
     };
 
-type ClipPreviewRestoreState = {
+type TemporaryPlaybackRestoreState = {
   libraryItemId: string | null;
   episodeId: string | null;
   positionMs: number;
-  playbackState: PlaybackStoreState["playbackState"];
   queueWasLoaded: boolean;
 };
 
-type ClipPreviewSession = {
+type TemporaryPlaybackSession = {
+  surface: "bookmark-list" | "clip-editor";
   libraryItemId: string;
   episodeId: string | null;
   bookmarkId: string | null;
+  bookmarkTitle: string | null;
+  kind: "point" | "clip";
   startMs: number;
-  endMs: number;
-  restoreState: ClipPreviewRestoreState;
+  endMs: number | null;
+  restoreState: TemporaryPlaybackRestoreState;
   currentTrackIndex: number;
   stoppedAtEnd: boolean;
+  retainEndedState: boolean;
 };
 
 export type DownloadedBookDeletionPlaybackSnapshot = {
@@ -181,6 +189,22 @@ export type PlaybackControlResult =
     }
   | { status: "already_satisfied"; state: "playing" | "paused" };
 
+export type BookmarkRelocationUndoToken = {
+  id: string;
+  relocated: {
+    libraryItemId: string;
+    episodeId: string | null;
+    previousPositionMs: number;
+  };
+  previous: {
+    libraryItemId: string;
+    episodeId: string | null;
+    positionMs: number;
+    title: string | null;
+    secondaryTitle: string | null;
+  };
+};
+
 const secondsToMs = (value: number) => Math.max(0, Math.round(value * 1000));
 const msToSeconds = (value: number) => Math.max(0, Math.floor(value / 1000));
 const clampPlaybackRate = (rate: number) => {
@@ -192,7 +216,11 @@ const clampPlaybackRate = (rate: number) => {
 };
 
 const pickNewestProgress = <
-  T extends { libraryItemId?: string; mediaItemId?: string; lastUpdate?: number },
+  T extends {
+    libraryItemId?: string;
+    mediaItemId?: string;
+    lastUpdate?: number;
+  },
 >(
   entries: T[],
 ) =>
@@ -235,18 +263,16 @@ class PlayerService {
   private skipBurstMaxTimeout: ReturnType<typeof setTimeout> | null = null;
   private skipSeekInFlight: Promise<void> | null = null;
   private nativeSeekPauseGuardUntilMs = 0;
-  private clipPreviewSession: ClipPreviewSession | null = null;
+  private temporaryPlaybackSession: TemporaryPlaybackSession | null = null;
   private unsubscribeSettings: (() => void) | null = null;
   private unsubscribeBookDownloads: (() => void) | null = null;
   private unsubscribeEpisodeDownloads: (() => void) | null = null;
   private playbackSourceTransitionInFlight = false;
   private pendingPlaybackSourceTransition: PlaybackSourceTransition | null = null;
-  private postPreviewStatusGuard:
-    | {
-        untilMs: number;
-        restoredPositionMs: number;
-      }
-    | null = null;
+  private postPreviewStatusGuard: {
+    untilMs: number;
+    restoredPositionMs: number;
+  } | null = null;
 
   private createPlaybackControlIntentId(kind: "start" | "play" | "pause") {
     return `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -357,7 +383,9 @@ class PlayerService {
     try {
       void Promise.resolve(task()).catch((error) => {
         if (__DEV__) {
-          console.warn(`[player-service] follow-up failed: ${label}`, { error });
+          console.warn(`[player-service] follow-up failed: ${label}`, {
+            error,
+          });
         }
       });
     } catch (error) {
@@ -498,8 +526,8 @@ class PlayerService {
         void this.handleTrackEnded();
       },
       onError: (error) => {
-        if (this.clipPreviewSession) {
-          clipPreviewStore.getState().actions.setError(error.message);
+        if (this.temporaryPlaybackSession) {
+          temporaryPlaybackStore.getState().actions.setError(error.message);
         } else {
           playbackStore.getState().actions.setError(error.message);
         }
@@ -510,10 +538,18 @@ class PlayerService {
       },
       onRemoteNext: () => {
         if (settingsStore.getState().remoteCommandMode !== "next-prev") return;
+        if (this.temporaryPlaybackSession) {
+          void this.skipBy(settingsStore.getState().seekForwardSeconds);
+          return;
+        }
         void this.nextChapter();
       },
       onRemotePrevious: () => {
         if (settingsStore.getState().remoteCommandMode !== "next-prev") return;
+        if (this.temporaryPlaybackSession) {
+          void this.skipBy(settingsStore.getState().seekBackwardSeconds, true);
+          return;
+        }
         void this.previousChapter();
       },
     });
@@ -620,10 +656,7 @@ class PlayerService {
             deviceEpisodeDownloadsStore.getState(),
             transition.target,
           )
-        : selectIsBookFullyDownloaded(
-            deviceBooksStore.getState(),
-            transition.target.libraryItemId,
-          );
+        : selectIsBookFullyDownloaded(deviceBooksStore.getState(), transition.target.libraryItemId);
     const currentIsLocal = state.sessionId === LOCAL_SESSION_ID;
     if (currentIsLocal === isDownloadReady) return;
 
@@ -685,6 +718,7 @@ class PlayerService {
     options?: { autoPlay?: boolean; suppressErrorState?: boolean },
     internalOptions?: { preferDownloaded?: boolean },
   ) {
+    invalidateBookmarkRelocationUndo();
     const suppressErrorState = options?.suppressErrorState ?? false;
     const existingState = playbackStore.getState();
     this.playbackTrace(
@@ -704,7 +738,9 @@ class PlayerService {
     }
 
     try {
-      const downloadedSession = preferDownloaded ? this.resolveDownloadedSession(libraryItemId) : null;
+      const downloadedSession = preferDownloaded
+        ? this.resolveDownloadedSession(libraryItemId)
+        : null;
       const shouldUseDownloadedAudio = Boolean(downloadedSession);
       attemptedDownloadedAudio = shouldUseDownloadedAudio;
       let resolvedLibraryItemId = libraryItemId;
@@ -881,7 +917,9 @@ class PlayerService {
             this.playbackTrace(
               `loadBook:downloaded-play-stalled ${resolvedLibraryItemId} → retry streamed`,
             );
-            await this.loadBook(libraryItemId, options, { preferDownloaded: false });
+            await this.loadBook(libraryItemId, options, {
+              preferDownloaded: false,
+            });
             return;
           }
         }
@@ -902,7 +940,9 @@ class PlayerService {
       }
       if (preferDownloaded && attemptedDownloadedAudio) {
         try {
-          await this.loadBook(libraryItemId, options, { preferDownloaded: false });
+          await this.loadBook(libraryItemId, options, {
+            preferDownloaded: false,
+          });
           return;
         } catch (fallbackError) {
           if (isStreamedPlaybackStartFailure(fallbackError)) {
@@ -913,7 +953,10 @@ class PlayerService {
       }
       if (isStreamedPlaybackStartFailure(error)) {
         if (__DEV__) {
-          console.log("[player-service] streamed-start-failure", { libraryItemId, error });
+          console.log("[player-service] streamed-start-failure", {
+            libraryItemId,
+            error,
+          });
         }
         const playbackState = playbackStore.getState();
         if (playbackState.playbackState === "loading") {
@@ -936,7 +979,10 @@ class PlayerService {
         throw error;
       }
       if (__DEV__) {
-        console.log("[player-service] loadBook:error", { libraryItemId, error });
+        console.log("[player-service] loadBook:error", {
+          libraryItemId,
+          error,
+        });
       }
       const message = error instanceof Error ? error.message : "Unable to load book";
       const hasQueue = playbackStore.getState().queue.length > 0;
@@ -965,7 +1011,8 @@ class PlayerService {
     rate: number;
     autoRewindDecision?: AutoRewindDecision | null;
   }) {
-    const targetTrack = findTrackForPosition(payload.queue, payload.resumePositionMs) ?? payload.queue[0];
+    const targetTrack =
+      findTrackForPosition(payload.queue, payload.resumePositionMs) ?? payload.queue[0];
     if (!targetTrack) {
       throw new Error("Track not found");
     }
@@ -993,15 +1040,14 @@ class PlayerService {
             await this.engine.waitForPlaying();
           }
 
-          await this.engine.setRate(
-            payload.rate,
-            settingsStore.getState().pitchCorrectionQuality,
-          );
+          await this.engine.setRate(payload.rate, settingsStore.getState().pitchCorrectionQuality);
         })(),
       );
 
       if (attemptId !== this.playbackStartAttemptId) {
-        throw new StreamedPlaybackStartFailureError("Streamed playback start attempt was superseded");
+        throw new StreamedPlaybackStartFailureError(
+          "Streamed playback start attempt was superseded",
+        );
       }
 
       playbackStore.getState().actions.commitStartedSession({
@@ -1076,7 +1122,9 @@ class PlayerService {
       await this.engine.unload();
     } catch (error) {
       if (__DEV__) {
-        console.warn("[player-service] streamed-start-failure:unload-failed", { error });
+        console.warn("[player-service] streamed-start-failure:unload-failed", {
+          error,
+        });
       }
     }
 
@@ -1205,8 +1253,7 @@ class PlayerService {
   private shouldPersistProgressOnClose(state: PlaybackStoreState) {
     const isStreamingSession = Boolean(state.sessionId && state.sessionId !== LOCAL_SESSION_ID);
     return (
-      state.playbackState === "playing" ||
-      (state.playbackState === "paused" && isStreamingSession)
+      state.playbackState === "playing" || (state.playbackState === "paused" && isStreamingSession)
     );
   }
 
@@ -1360,17 +1407,16 @@ class PlayerService {
         rate: selectBookPlaybackRateIfStored(deviceBooksState, candidateId, userKey),
       }))
       .find(
-        (candidate): candidate is { candidateId: string; rate: number } =>
-          candidate.rate !== null,
+        (candidate): candidate is { candidateId: string; rate: number } => candidate.rate !== null,
       );
     if (storedRateCandidate) {
       const normalizedRate = clampPlaybackRate(storedRateCandidate.rate);
       if (Math.abs(normalizedRate - storedRateCandidate.rate) > 0.0001) {
-        deviceBooksStore.getState().actions.setBookPlaybackRate(
-          storedRateCandidate.candidateId,
-          normalizedRate,
-          { userKey },
-        );
+        deviceBooksStore
+          .getState()
+          .actions.setBookPlaybackRate(storedRateCandidate.candidateId, normalizedRate, {
+            userKey,
+          });
       }
       return normalizedRate;
     }
@@ -1385,13 +1431,11 @@ class PlayerService {
   private recordListeningInterruptionForState(state: PlaybackStoreState, startedAtMs = Date.now()) {
     if (!settingsStore.getState().autoRewindEnabled) return;
     if (!state.libraryItemId) return;
-    deviceBooksStore.getState().actions.recordListeningInterruption(
-      state.libraryItemId,
-      startedAtMs,
-      {
+    deviceBooksStore
+      .getState()
+      .actions.recordListeningInterruption(state.libraryItemId, startedAtMs, {
         userKey: this.resolveUserKeyForLibraryItem(state.libraryItemId),
-      },
-    );
+      });
   }
 
   private consumeAutoRewindDecision(payload: {
@@ -1406,12 +1450,11 @@ class PlayerService {
       return { status: "disabled" };
     }
 
-    const interruption = deviceBooksStore.getState().actions.consumeListeningInterruption(
-      payload.libraryItemId,
-      {
+    const interruption = deviceBooksStore
+      .getState()
+      .actions.consumeListeningInterruption(payload.libraryItemId, {
         userKey: this.resolveUserKeyForLibraryItem(payload.libraryItemId),
-      },
-    );
+      });
 
     return resolveAutoRewindDecision({
       enabled: settings.autoRewindEnabled,
@@ -1640,25 +1683,28 @@ class PlayerService {
           cachedLastUpdate: null,
           errorMessage,
         });
-        return { status: "failed", errorMessage } as FreshServerProgressFetchResultPayload;
+        return {
+          status: "failed",
+          errorMessage,
+        } as FreshServerProgressFetchResultPayload;
       });
   }
 
-  private async awaitFreshServerProgressForLoad(
-    payload: {
-      request: Promise<FreshServerProgressFetchResultPayload> | null;
-      libraryItemId: string;
-      bookTitle: string | null;
-      sessionKind: ProgressLogSessionKind;
-    },
-  ) {
+  private async awaitFreshServerProgressForLoad(payload: {
+    request: Promise<FreshServerProgressFetchResultPayload> | null;
+    libraryItemId: string;
+    bookTitle: string | null;
+    sessionKind: ProgressLogSessionKind;
+  }) {
     if (!payload.request) {
       return null;
     }
 
     const result = await Promise.race([
       payload.request,
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), LOAD_PROGRESS_FETCH_TIMEOUT_MS)),
+      new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), LOAD_PROGRESS_FETCH_TIMEOUT_MS),
+      ),
     ]);
 
     if (!result) {
@@ -1688,9 +1734,11 @@ class PlayerService {
     if (Math.abs(state.rate - preferredRate) > 0.0001) {
       playbackStore.getState().actions.setRate(preferredRate);
       if (state.libraryItemId) {
-        deviceBooksStore.getState().actions.setBookPlaybackRate(state.libraryItemId, preferredRate, {
-          userKey: this.resolveUserKeyForLibraryItem(state.libraryItemId),
-        });
+        deviceBooksStore
+          .getState()
+          .actions.setBookPlaybackRate(state.libraryItemId, preferredRate, {
+            userKey: this.resolveUserKeyForLibraryItem(state.libraryItemId),
+          });
       }
     }
 
@@ -1708,9 +1756,7 @@ class PlayerService {
     }
   }
 
-  private async getCachedUserServerState(options?: {
-    fetchIfMissing?: boolean;
-  }): Promise<{
+  private async getCachedUserServerState(options?: { fetchIfMissing?: boolean }): Promise<{
     state: UserServerState | undefined;
     source: CachedUserServerStateSource;
   }> {
@@ -1732,7 +1778,10 @@ class PlayerService {
       });
       return { state: cachedUserServerState, source: "fetch_success" };
     } catch {
-      return { state: undefined, source: "fetch_failed" as CachedUserServerStateSource };
+      return {
+        state: undefined,
+        source: "fetch_failed" as CachedUserServerStateSource,
+      };
     }
   }
 
@@ -1783,7 +1832,9 @@ class PlayerService {
     }
 
     return pickNewestQueuedProgress(
-      Object.values(queueByItemId).filter((progress) => candidateIds.includes(progress.libraryItemId)),
+      Object.values(queueByItemId).filter((progress) =>
+        candidateIds.includes(progress.libraryItemId),
+      ),
     );
   }
 
@@ -1829,9 +1880,7 @@ class PlayerService {
       payload.candidateIds,
       payload.cachedUserServerState,
     );
-    const carPlayResumeSnapshot = getCarPlayResumeSnapshotForCandidateIds(
-      payload.candidateIds,
-    );
+    const carPlayResumeSnapshot = getCarPlayResumeSnapshotForCandidateIds(payload.candidateIds);
     const queuedProgress = this.getQueuedProgressForCandidateIds(payload.candidateIds);
     const persisted = playbackStore.getState();
     const persistedPositionMs = payload.candidateIds.some(
@@ -1868,7 +1917,9 @@ class PlayerService {
             ? Math.max(0, Math.floor(cachedUserProgress.duration))
             : null,
         isFinished:
-          typeof cachedUserProgress?.isFinished === "boolean" ? cachedUserProgress.isFinished : null,
+          typeof cachedUserProgress?.isFinished === "boolean"
+            ? cachedUserProgress.isFinished
+            : null,
         lastUpdate:
           typeof cachedUserProgress?.lastUpdate === "number"
             ? Math.max(0, Math.floor(cachedUserProgress.lastUpdate))
@@ -1898,7 +1949,8 @@ class PlayerService {
         available: queuedCurrentTimeSeconds !== null,
         currentTimeSeconds: queuedCurrentTimeSeconds,
         durationSeconds: null,
-        isFinished: typeof queuedProgress?.isFinished === "boolean" ? queuedProgress.isFinished : null,
+        isFinished:
+          typeof queuedProgress?.isFinished === "boolean" ? queuedProgress.isFinished : null,
         lastUpdate:
           typeof queuedProgress?.updatedAt === "number"
             ? Math.max(0, Math.floor(queuedProgress.updatedAt))
@@ -1941,12 +1993,8 @@ class PlayerService {
     const persisted = playbackStore.getState();
     const persistedPositionMs =
       persisted.libraryItemId === libraryItemId ? Math.max(0, persisted.positionMs) : 0;
-    const cachedPositionMs = secondsToMs(
-      Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0)),
-    );
-    const queuedPositionMs = secondsToMs(
-      Math.max(0, Math.floor(queuedProgress?.currentTime ?? 0)),
-    );
+    const cachedPositionMs = secondsToMs(Math.max(0, Math.floor(cachedProgress?.currentTime ?? 0)));
+    const queuedPositionMs = secondsToMs(Math.max(0, Math.floor(queuedProgress?.currentTime ?? 0)));
     const carPlayPositionMs = secondsToMs(
       Math.max(0, Math.floor(carPlayResumeSnapshot?.currentTimeSeconds ?? 0)),
     );
@@ -1987,10 +2035,11 @@ class PlayerService {
     const queuedProgress = this.getQueuedProgressForCandidateIds(candidateIds);
 
     const persisted = playbackStore.getState();
-    const persistedPositionMs =
-      candidateIds.some((candidateId) => persisted.libraryItemId === candidateId)
-        ? persisted.positionMs
-        : 0;
+    const persistedPositionMs = candidateIds.some(
+      (candidateId) => persisted.libraryItemId === candidateId,
+    )
+      ? persisted.positionMs
+      : 0;
     const freshServerCurrentTimeSeconds =
       typeof freshServerProgress?.currentTime === "number"
         ? Math.max(0, Math.floor(freshServerProgress.currentTime))
@@ -2049,7 +2098,9 @@ class PlayerService {
             ? Math.max(0, Math.floor(cachedUserProgress.duration))
             : null,
         isFinished:
-          typeof cachedUserProgress?.isFinished === "boolean" ? cachedUserProgress.isFinished : null,
+          typeof cachedUserProgress?.isFinished === "boolean"
+            ? cachedUserProgress.isFinished
+            : null,
         lastUpdate:
           typeof cachedUserProgress?.lastUpdate === "number"
             ? Math.max(0, Math.floor(cachedUserProgress.lastUpdate))
@@ -2084,7 +2135,8 @@ class PlayerService {
         available: queuedCurrentTimeSeconds !== null,
         currentTimeSeconds: queuedCurrentTimeSeconds,
         durationSeconds: null,
-        isFinished: typeof queuedProgress?.isFinished === "boolean" ? queuedProgress.isFinished : null,
+        isFinished:
+          typeof queuedProgress?.isFinished === "boolean" ? queuedProgress.isFinished : null,
         lastUpdate:
           typeof queuedProgress?.updatedAt === "number"
             ? Math.max(0, Math.floor(queuedProgress.updatedAt))
@@ -2124,11 +2176,11 @@ class PlayerService {
           ? "Persisted playback-store position was ahead of the other resume candidates"
           : chosenSource === "carplay_resume_snapshot"
             ? "CarPlay local resume snapshot was the best available resume point"
-          : chosenSource === "fresh_server_fetch"
-            ? "Fresh server progress was the best available resume point"
-            : chosenSource === "persisted_query_cache"
-              ? "Persisted React Query progress cache was the best available resume point"
-            : "No saved progress was available";
+            : chosenSource === "fresh_server_fetch"
+              ? "Fresh server progress was the best available resume point"
+              : chosenSource === "persisted_query_cache"
+                ? "Persisted React Query progress cache was the best available resume point"
+                : "No saved progress was available";
 
     progressLogStore.getState().actions.appendEntry({
       eventType: "progress_resolution",
@@ -2267,7 +2319,10 @@ class PlayerService {
     author: string;
     fallbackTitle: string;
     artworkUri?: string;
-    track: DownloadTrack & { normalizedStartOffset?: number; normalizedDuration?: number };
+    track: DownloadTrack & {
+      normalizedStartOffset?: number;
+      normalizedDuration?: number;
+    };
     trackIndex: number;
     detailsTrack?: {
       title?: string;
@@ -2393,9 +2448,13 @@ class PlayerService {
                 { preferDownloaded: false },
               ),
             loadBook: (target) =>
-              this.loadBook(target.libraryItemId, { autoPlay: true }, {
-                preferDownloaded: false,
-              }),
+              this.loadBook(
+                target.libraryItemId,
+                { autoPlay: true },
+                {
+                  preferDownloaded: false,
+                },
+              ),
           });
           return;
         } catch (fallbackError) {
@@ -2451,7 +2510,7 @@ class PlayerService {
 
     const dedupeSkipped = Boolean(
       signature === this.lastPauseSyncSignature &&
-        now - this.lastPauseSyncAt <= PAUSE_SYNC_DEDUPE_WINDOW_MS,
+      now - this.lastPauseSyncAt <= PAUSE_SYNC_DEDUPE_WINDOW_MS,
     );
 
     if (dedupeSkipped) {
@@ -2478,12 +2537,15 @@ class PlayerService {
     }
     if (options?.updatePlaybackStore !== false && options?.syncProgress !== false) {
       this.runPlaybackFollowUp("pause-progress-sync", () =>
-        this.syncPauseLikeProgress("pause", { state: playbackStore.getState() }),
+        this.syncPauseLikeProgress("pause", {
+          state: playbackStore.getState(),
+        }),
       );
     }
   }
 
   async requestStart(libraryItemId: string): Promise<PlaybackControlResult> {
+    invalidateBookmarkRelocationUndo();
     const state = playbackStore.getState();
     const accepted = this.beginPlaybackControlIntent({
       kind: "start",
@@ -2526,6 +2588,7 @@ class PlayerService {
     episodeId: string,
     options?: { episodeTitle?: string | null; podcastTitle?: string | null },
   ): Promise<PlaybackControlResult> {
+    invalidateBookmarkRelocationUndo();
     const state = playbackStore.getState();
     const accepted = this.beginPlaybackControlIntent({
       kind: "start",
@@ -2575,16 +2638,16 @@ class PlayerService {
     },
     internalOptions?: { preferDownloaded?: boolean },
   ) {
+    invalidateBookmarkRelocationUndo();
     const suppressErrorState = options?.suppressErrorState ?? false;
     const preferDownloaded = internalOptions?.preferDownloaded ?? true;
     let tornDownExistingPlayback = false;
     let attemptedDownloadedAudio = false;
 
     try {
-      const downloadedEpisode =
-        preferDownloaded
-          ? resolveDownloadedEpisodePlayback({ libraryItemId, episodeId })
-          : null;
+      const downloadedEpisode = preferDownloaded
+        ? resolveDownloadedEpisodePlayback({ libraryItemId, episodeId })
+        : null;
       const playbackSource = resolveEpisodePlaybackSource({
         hasPlayableLocalDownload: Boolean(downloadedEpisode),
         canStream: this.canUseServer(),
@@ -2596,8 +2659,7 @@ class PlayerService {
       }
 
       attemptedDownloadedAudio = playbackSource === "local";
-      let streamedSession: Awaited<ReturnType<typeof playbackApi.getEpisodePlayInfo>> | null =
-        null;
+      let streamedSession: Awaited<ReturnType<typeof playbackApi.getEpisodePlayInfo>> | null = null;
       if (playbackSource === "stream") {
         streamedSession = await withPlaybackStartTimeout(
           playbackApi.getEpisodePlayInfo(libraryItemId, episodeId),
@@ -2667,9 +2729,7 @@ class PlayerService {
         ];
       } else if (streamedSession) {
         episodeTitle =
-          options?.episodeTitle?.trim() ||
-          streamedSession.displayTitle ||
-          episodeTitle;
+          options?.episodeTitle?.trim() || streamedSession.displayTitle || episodeTitle;
         podcastTitle =
           options?.podcastTitle?.trim() ||
           streamedSession.displayAuthor ||
@@ -2700,9 +2760,7 @@ class PlayerService {
         serverIsFinished,
       });
       const resumePositionMs = secondsToMs(resumeSeconds);
-      const storedBookRate = this.resolveStoredBookRate(
-        this.buildCandidateIds(libraryItemId),
-      );
+      const storedBookRate = this.resolveStoredBookRate(this.buildCandidateIds(libraryItemId));
 
       displayedListeningPositionStore.getState().actions.setResumeResolution({
         libraryItemId,
@@ -2782,6 +2840,11 @@ class PlayerService {
   }
 
   async requestPlay(): Promise<PlaybackControlResult> {
+    invalidateBookmarkRelocationUndo();
+    if (this.temporaryPlaybackSession) {
+      await this.resumeTemporaryPlayback();
+      return { status: "already_satisfied", state: "playing" };
+    }
     const state = playbackStore.getState();
     const accepted = this.beginPlaybackControlIntent({
       kind: "play",
@@ -2797,7 +2860,9 @@ class PlayerService {
     try {
       if (!state.queue.length) {
         if (state.libraryItemId && state.episodeId) {
-          await this.loadEpisode(state.libraryItemId, state.episodeId, { autoPlay: true });
+          await this.loadEpisode(state.libraryItemId, state.episodeId, {
+            autoPlay: true,
+          });
         } else if (state.libraryItemId) {
           await this.loadBook(state.libraryItemId, { autoPlay: true });
         }
@@ -2811,6 +2876,10 @@ class PlayerService {
   }
 
   async requestPause(): Promise<PlaybackControlResult> {
+    if (this.temporaryPlaybackSession) {
+      await this.pauseTemporaryPlayback();
+      return { status: "already_satisfied", state: "paused" };
+    }
     const state = playbackStore.getState();
     const accepted = this.beginPlaybackControlIntent({
       kind: "pause",
@@ -2836,14 +2905,24 @@ class PlayerService {
     updatePlaybackStore?: boolean;
     disableLocalStreamFallback?: boolean;
   }) {
+    invalidateBookmarkRelocationUndo();
+    if (this.temporaryPlaybackSession) {
+      await this.resumeTemporaryPlayback();
+      return;
+    }
     await this.performPlay(options);
   }
 
   async pause(options?: { syncProgress?: boolean; updatePlaybackStore?: boolean }) {
+    if (this.temporaryPlaybackSession) {
+      await this.pauseTemporaryPlayback();
+      return;
+    }
     await this.performPause(options);
   }
 
   async stop() {
+    invalidateBookmarkRelocationUndo();
     await this.closeActiveBookForTransition();
   }
 
@@ -2892,17 +2971,11 @@ class PlayerService {
     return snapshot;
   }
 
-  async resumeAfterDownloadedBookDeletion(
-    snapshot: DownloadedBookDeletionPlaybackSnapshot | null,
-  ) {
+  async resumeAfterDownloadedBookDeletion(snapshot: DownloadedBookDeletionPlaybackSnapshot | null) {
     if (!snapshot?.wasActiveLocalSession) return;
 
     try {
-      await this.loadBook(
-        snapshot.libraryItemId,
-        { autoPlay: false },
-        { preferDownloaded: false },
-      );
+      await this.loadBook(snapshot.libraryItemId, { autoPlay: false }, { preferDownloaded: false });
       await this.seekToImmediate(snapshot.positionMs, {
         syncProgress: false,
         allowDuringPlaybackControlIntent: true,
@@ -3079,9 +3152,9 @@ class PlayerService {
         currentTrackIndex: finalTrackIndex >= 0 ? finalTrackIndex : state.currentTrackIndex,
         currentChapterId: finalChapter?.id ?? null,
       });
-      playbackStore.getState().actions.setLastSyncAt(
-        syncResult?.syncedToServer ? this.lastSyncAt : null,
-      );
+      playbackStore
+        .getState()
+        .actions.setLastSyncAt(syncResult?.syncedToServer ? this.lastSyncAt : null);
       this.listenedMs = 0;
       this.lastSyncAttemptAt = 0;
       this.lastTrackedPositionMs = finalPositionMs;
@@ -3098,10 +3171,7 @@ class PlayerService {
       progressSyncReason?: Extract<ProgressSyncReason, "seek" | "auto_rewind">;
     },
   ) {
-    if (
-      !options?.allowDuringPlaybackControlIntent &&
-      this.hasBlockingPlaybackControlIntent()
-    ) {
+    if (!options?.allowDuringPlaybackControlIntent && this.hasBlockingPlaybackControlIntent()) {
       return;
     }
     const state = playbackStore.getState();
@@ -3172,6 +3242,7 @@ class PlayerService {
   }
 
   async seekTo(positionMs: number, options?: { syncProgress?: boolean }) {
+    invalidateBookmarkRelocationUndo();
     this.cancelPendingSkipBurst();
     if (this.skipSeekInFlight) {
       await this.skipSeekInFlight.catch(() => undefined);
@@ -3186,6 +3257,13 @@ class PlayerService {
   }
 
   async skipBy(seconds: number, goBackwards: boolean = false) {
+    invalidateBookmarkRelocationUndo();
+    if (this.temporaryPlaybackSession) {
+      const temporaryPositionMs = temporaryPlaybackStore.getState().positionMs;
+      const deltaMs = secondsToMs(seconds) * (goBackwards ? -1 : 1);
+      await this.seekTemporaryEngineTo(temporaryPositionMs + deltaMs);
+      return;
+    }
     const state = playbackStore.getState();
     if (this.hasBlockingPlaybackControlIntent()) return;
     if (!state.queue.length || !state.libraryItemId) return;
@@ -3233,96 +3311,170 @@ class PlayerService {
     startTimeSeconds: number;
     endTimeSeconds: number;
   }) {
+    await this.startTemporaryPlayback({
+      surface: "clip-editor",
+      libraryItemId: payload.libraryItemId,
+      episodeId: payload.episodeId,
+      bookmarkId: payload.bookmarkId,
+      bookmarkTitle: null,
+      kind: "clip",
+      startTimeSeconds: payload.startTimeSeconds,
+      endTimeSeconds: payload.endTimeSeconds,
+      retainEndedState: true,
+    });
+  }
+
+  async playBookmarkTemporarily(payload: {
+    libraryItemId: string;
+    episodeId?: string | null;
+    bookmarkId: string;
+    bookmarkTitle: string;
+    kind: "point" | "clip";
+    startTimeSeconds: number;
+    endTimeSeconds?: number | null;
+  }) {
+    invalidateBookmarkRelocationUndo();
+    await this.startTemporaryPlayback({
+      surface: "bookmark-list",
+      ...payload,
+      retainEndedState: false,
+    });
+  }
+
+  private async startTemporaryPlayback(payload: {
+    surface: "bookmark-list" | "clip-editor";
+    libraryItemId: string;
+    episodeId?: string | null;
+    bookmarkId?: string | null;
+    bookmarkTitle?: string | null;
+    kind: "point" | "clip";
+    startTimeSeconds: number;
+    endTimeSeconds?: number | null;
+    retainEndedState: boolean;
+  }) {
     const startMs = secondsToMs(payload.startTimeSeconds);
-    const endMs = secondsToMs(payload.endTimeSeconds);
-    if (endMs <= startMs) {
+    const endMs =
+      payload.kind === "clip" && typeof payload.endTimeSeconds === "number"
+        ? secondsToMs(payload.endTimeSeconds)
+        : null;
+    if (payload.kind === "clip" && (endMs === null || endMs <= startMs)) {
       throw new Error("Clip end must be after clip start");
     }
 
-    const stateBeforePreview = playbackStore.getState();
-    const availability = resolveClipPreviewAvailability({
-      targetLibraryItemId: payload.libraryItemId,
-      targetEpisodeId: payload.episodeId ?? null,
-      activeLibraryItemId: stateBeforePreview.libraryItemId,
-      activeEpisodeId: stateBeforePreview.episodeId,
-      activeQueueLength: stateBeforePreview.queue.length,
-    });
-    if (!availability.available) {
-      throw new Error(availability.reason ?? "Unable to preview clip");
+    const existingSession = this.temporaryPlaybackSession;
+    const canSwitchInPlace =
+      existingSession?.surface === "bookmark-list" && payload.surface === "bookmark-list";
+    if (existingSession && !canSwitchInPlace) {
+      await this.returnFromTemporaryPlayback();
     }
 
-    const restoreState: ClipPreviewRestoreState = {
-      libraryItemId: stateBeforePreview.libraryItemId,
-      episodeId: stateBeforePreview.episodeId,
-      positionMs: stateBeforePreview.positionMs,
-      playbackState: stateBeforePreview.playbackState,
-      queueWasLoaded: stateBeforePreview.queue.length > 0,
+    const stateBeforePlayback = playbackStore.getState();
+    const availability = resolveTemporaryPlaybackAvailability({
+      targetLibraryItemId: payload.libraryItemId,
+      targetEpisodeId: payload.episodeId ?? null,
+      activeLibraryItemId: stateBeforePlayback.libraryItemId,
+      activeEpisodeId: stateBeforePlayback.episodeId,
+      activeQueueLength: stateBeforePlayback.queue.length,
+    });
+    if (!availability.available) {
+      throw new Error(availability.reason ?? "Unable to play bookmark");
+    }
+
+    const switchSource = canSwitchInPlace ? this.temporaryPlaybackSession : null;
+    const restoreState: TemporaryPlaybackRestoreState = switchSource?.restoreState ?? {
+      libraryItemId: stateBeforePlayback.libraryItemId,
+      episodeId: stateBeforePlayback.episodeId,
+      positionMs: stateBeforePlayback.positionMs,
+      queueWasLoaded: stateBeforePlayback.queue.length > 0,
     };
-    if (stateBeforePreview.playbackState === "playing") {
+    if (!switchSource && stateBeforePlayback.playbackState === "playing") {
       playbackStore.getState().actions.setPlaybackState("paused");
     }
-    const startTrack = findTrackForPosition(stateBeforePreview.queue, startMs);
-    if (!startTrack) {
-      throw new Error("Unable to resolve clip start position");
-    }
-    this.clipPreviewSession = {
+
+    this.temporaryPlaybackSession = {
+      surface: payload.surface,
       libraryItemId: payload.libraryItemId,
       episodeId: payload.episodeId ?? null,
       bookmarkId: payload.bookmarkId ?? null,
+      bookmarkTitle: payload.bookmarkTitle ?? null,
+      kind: payload.kind,
       startMs,
       endMs,
       restoreState,
-      currentTrackIndex: stateBeforePreview.currentTrackIndex,
+      currentTrackIndex: switchSource?.currentTrackIndex ?? stateBeforePlayback.currentTrackIndex,
       stoppedAtEnd: false,
+      retainEndedState: payload.retainEndedState,
     };
-    clipPreviewStore.getState().actions.startLoading({
+    temporaryPlaybackStore.getState().actions.startLoading({
+      surface: payload.surface,
       libraryItemId: payload.libraryItemId,
       episodeId: payload.episodeId ?? null,
       bookmarkId: payload.bookmarkId ?? null,
+      bookmarkTitle: payload.bookmarkTitle ?? null,
+      kind: payload.kind,
       startMs,
       endMs,
+      returnPositionMs: restoreState.positionMs,
     });
 
     try {
-      await this.seekPreviewEngineTo(startMs);
+      await this.seekTemporaryEngineTo(startMs);
       await this.performPlay({
         touchProgressCache: false,
         updatePlaybackStore: false,
         disableLocalStreamFallback: true,
       });
-      clipPreviewStore.getState().actions.setPlaying();
+      temporaryPlaybackStore.getState().actions.setPlaying();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to preview clip";
-      clipPreviewStore.getState().actions.setError(message);
+      const message = error instanceof Error ? error.message : "Unable to play bookmark";
+      const failedSession = this.temporaryPlaybackSession;
+      if (failedSession) {
+        try {
+          await this.restoreEngineToListeningPosition(failedSession.restoreState, {
+            currentEngineTrackIndex: failedSession.currentTrackIndex,
+          });
+        } catch {
+          // Preserve the original failure; the ordinary playback store is restored below.
+        }
+        this.restorePlaybackStoreToListeningPosition(failedSession.restoreState);
+      }
+      this.temporaryPlaybackSession = null;
+      temporaryPlaybackStore.getState().actions.reset();
+      temporaryPlaybackStore.getState().actions.setError(message);
       throw error;
     }
   }
 
-  private async seekPreviewEngineTo(positionMs: number) {
-    const previewSession = this.clipPreviewSession;
-    if (!previewSession) return;
+  private async seekTemporaryEngineTo(positionMs: number) {
+    const temporarySession = this.temporaryPlaybackSession;
+    if (!temporarySession) return;
 
     const state = playbackStore.getState();
     if (
-      state.libraryItemId !== previewSession.libraryItemId ||
-      (state.episodeId ?? null) !== previewSession.episodeId ||
+      state.libraryItemId !== temporarySession.libraryItemId ||
+      (state.episodeId ?? null) !== temporarySession.episodeId ||
       !state.queue.length
     ) {
-      throw new Error("Clip preview requires the media item to be loaded");
+      throw new Error("Temporary playback requires the media item to be loaded");
     }
 
-    const maxPosition = state.durationMs > 0 ? state.durationMs : positionMs;
-    const boundedPosition = Math.max(0, Math.min(positionMs, maxPosition));
+    const boundedPosition = clampTemporaryPlaybackPosition({
+      kind: temporarySession.kind,
+      startMs: temporarySession.startMs,
+      endMs: temporarySession.endMs,
+      mediaDurationMs: state.durationMs,
+      requestedPositionMs: positionMs,
+    });
     const targetTrack = findTrackForPosition(state.queue, boundedPosition);
     if (!targetTrack) {
-      throw new Error("Unable to resolve clip preview position");
+      throw new Error("Unable to resolve temporary playback position");
     }
 
     const targetIndex = state.queue.indexOf(targetTrack);
     const trackPositionMs = Math.max(0, boundedPosition - targetTrack.startOffsetMs);
-    if (targetIndex !== previewSession.currentTrackIndex) {
-      this.clipPreviewSession = {
-        ...previewSession,
+    if (targetIndex !== temporarySession.currentTrackIndex) {
+      this.temporaryPlaybackSession = {
+        ...temporarySession,
         currentTrackIndex: targetIndex,
       };
       await this.engine.load(targetTrack, {
@@ -3334,11 +3486,11 @@ class PlayerService {
       await this.engine.seek(trackPositionMs);
     }
 
-    clipPreviewStore.getState().actions.setPosition(boundedPosition);
+    temporaryPlaybackStore.getState().actions.setPosition(boundedPosition);
   }
 
   private async restoreEngineToListeningPosition(
-    restoreState: ClipPreviewRestoreState,
+    restoreState: TemporaryPlaybackRestoreState,
     options?: { currentEngineTrackIndex?: number },
   ) {
     if (!restoreState.libraryItemId || !restoreState.queueWasLoaded) {
@@ -3379,11 +3531,7 @@ class PlayerService {
     }
   }
 
-  private resolvePostPreviewPlaybackState(restoreState: ClipPreviewRestoreState) {
-    return restoreState.playbackState === "playing" ? "paused" : restoreState.playbackState;
-  }
-
-  private restorePlaybackStoreToListeningPosition(restoreState: ClipPreviewRestoreState) {
+  private restorePlaybackStoreToListeningPosition(restoreState: TemporaryPlaybackRestoreState) {
     if (!restoreState.libraryItemId || !restoreState.queueWasLoaded) {
       return null;
     }
@@ -3415,24 +3563,35 @@ class PlayerService {
     });
     const chapterAtPosition = findChapterForPosition(state.chapterIndex, boundedPosition);
     playbackStore.getState().actions.setCurrentChapter(chapterAtPosition?.id ?? null);
-    playbackStore
-      .getState()
-      .actions.setPlaybackState(this.resolvePostPreviewPlaybackState(restoreState));
+    playbackStore.getState().actions.setPlaybackState("paused");
     this.lastTrackedPositionMs = boundedPosition;
     return boundedPosition;
   }
 
-  async restoreListeningPositionAfterPreview() {
-    const previewSession = this.clipPreviewSession;
-    if (!previewSession) return;
+  async returnFromTemporaryPlayback(options?: {
+    surface?: "bookmark-list" | "clip-editor";
+    libraryItemId?: string;
+    episodeId?: string | null;
+  }) {
+    const temporarySession = this.temporaryPlaybackSession;
+    if (
+      !temporarySession ||
+      (options?.surface && temporarySession.surface !== options.surface) ||
+      (options?.libraryItemId && temporarySession.libraryItemId !== options.libraryItemId) ||
+      (options?.episodeId !== undefined && temporarySession.episodeId !== options.episodeId)
+    ) {
+      return;
+    }
+
+    this.temporaryPlaybackSession = { ...temporarySession, stoppedAtEnd: true };
 
     try {
-      await this.restoreEngineToListeningPosition(previewSession.restoreState, {
-        currentEngineTrackIndex: previewSession.currentTrackIndex,
+      await this.restoreEngineToListeningPosition(temporarySession.restoreState, {
+        currentEngineTrackIndex: temporarySession.currentTrackIndex,
       });
     } finally {
       const restoredPositionMs = this.restorePlaybackStoreToListeningPosition(
-        previewSession.restoreState,
+        temporarySession.restoreState,
       );
       if (restoredPositionMs !== null) {
         this.postPreviewStatusGuard = {
@@ -3440,23 +3599,145 @@ class PlayerService {
           restoredPositionMs,
         };
       }
-      this.clipPreviewSession = null;
-      clipPreviewStore.getState().actions.reset();
+      this.temporaryPlaybackSession = null;
+      temporaryPlaybackStore.getState().actions.reset();
     }
   }
 
+  async restoreListeningPositionAfterPreview() {
+    await this.returnFromTemporaryPlayback();
+  }
+
+  async pauseTemporaryPlayback() {
+    if (!this.temporaryPlaybackSession) return;
+    await this.engine.pause();
+    temporaryPlaybackStore.getState().actions.setPaused();
+  }
+
+  async resumeTemporaryPlayback() {
+    const temporarySession = this.temporaryPlaybackSession;
+    if (!temporarySession || temporarySession.stoppedAtEnd) return;
+    await this.engine.play();
+    temporaryPlaybackStore.getState().actions.setPlaying();
+  }
+
   async cancelPreviewForExplicitNavigation() {
-    const previewSession = this.clipPreviewSession;
-    if (!previewSession) return;
+    const temporarySession = this.temporaryPlaybackSession;
+    if (!temporarySession) return;
 
     try {
       await this.engine.pause();
     } catch {
       // Ignore cancellation pause failures; explicit navigation is about to take over.
     } finally {
-      this.clipPreviewSession = null;
-      clipPreviewStore.getState().actions.reset();
+      this.temporaryPlaybackSession = null;
+      temporaryPlaybackStore.getState().actions.reset();
     }
+  }
+
+  async relocateToBookmark(payload: {
+    libraryItemId: string;
+    episodeId?: string | null;
+    positionMs: number;
+    episodeTitle?: string | null;
+    podcastTitle?: string | null;
+  }): Promise<BookmarkRelocationUndoToken | null> {
+    invalidateBookmarkRelocationUndo();
+    const stateBeforeRelocation = playbackStore.getState();
+    const previous = stateBeforeRelocation.libraryItemId
+      ? {
+          libraryItemId: stateBeforeRelocation.libraryItemId,
+          episodeId: stateBeforeRelocation.episodeId,
+          positionMs: stateBeforeRelocation.positionMs,
+          title: stateBeforeRelocation.bookTitle,
+          secondaryTitle: stateBeforeRelocation.secondaryTitle,
+        }
+      : null;
+
+    await this.returnFromTemporaryPlayback();
+    const targetEpisodeId = payload.episodeId ?? null;
+    const current = playbackStore.getState();
+    const targetIsLoaded =
+      current.libraryItemId === payload.libraryItemId &&
+      (current.episodeId ?? null) === targetEpisodeId &&
+      current.queue.length > 0;
+
+    if (!targetIsLoaded) {
+      if (targetEpisodeId) {
+        await this.loadEpisode(payload.libraryItemId, targetEpisodeId, {
+          autoPlay: false,
+          episodeTitle: payload.episodeTitle,
+          podcastTitle: payload.podcastTitle,
+        });
+      } else {
+        await this.loadBook(payload.libraryItemId, { autoPlay: false });
+      }
+    } else if (current.playbackState === "playing") {
+      await this.performPause();
+    } else {
+      await this.engine.pause();
+      playbackStore.getState().actions.setPlaybackState("paused");
+    }
+
+    const targetPositionBeforeRelocation = playbackStore.getState().positionMs;
+    await this.seekTo(payload.positionMs);
+    await this.engine.pause();
+    playbackStore.getState().actions.setPlaybackState("paused");
+
+    if (!previous) return null;
+    return {
+      id: `bookmark-relocation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      relocated: {
+        libraryItemId: payload.libraryItemId,
+        episodeId: targetEpisodeId,
+        previousPositionMs: targetPositionBeforeRelocation,
+      },
+      previous,
+    };
+  }
+
+  async undoBookmarkRelocation(token: BookmarkRelocationUndoToken) {
+    if (!consumeBookmarkRelocationUndo(token.id)) {
+      throw new Error("This progress change can no longer be undone");
+    }
+
+    await this.returnFromTemporaryPlayback();
+    const current = playbackStore.getState();
+    const relocatedIsLoaded =
+      current.libraryItemId === token.relocated.libraryItemId &&
+      (current.episodeId ?? null) === token.relocated.episodeId &&
+      current.queue.length > 0;
+    if (!relocatedIsLoaded) {
+      throw new Error("This progress change can no longer be undone");
+    }
+
+    await this.seekTo(token.relocated.previousPositionMs);
+    await this.engine.pause();
+    playbackStore.getState().actions.setPlaybackState("paused");
+
+    const restoredTarget = playbackStore.getState();
+    const previousIsLoaded =
+      restoredTarget.libraryItemId === token.previous.libraryItemId &&
+      (restoredTarget.episodeId ?? null) === token.previous.episodeId &&
+      restoredTarget.queue.length > 0;
+
+    if (!previousIsLoaded) {
+      if (token.previous.episodeId) {
+        await this.loadEpisode(token.previous.libraryItemId, token.previous.episodeId, {
+          autoPlay: false,
+          episodeTitle: token.previous.title,
+          podcastTitle: token.previous.secondaryTitle,
+        });
+      } else {
+        await this.loadBook(token.previous.libraryItemId, { autoPlay: false });
+      }
+    }
+
+    if (!previousIsLoaded || token.previous.positionMs !== token.relocated.previousPositionMs) {
+      await this.seekTo(token.previous.positionMs);
+    }
+    await this.engine.pause();
+    playbackStore.getState().actions.setPlaybackState("paused");
   }
 
   async setRate(rate: number) {
@@ -3500,6 +3781,7 @@ class PlayerService {
   }
 
   async nextTrack() {
+    invalidateBookmarkRelocationUndo();
     this.cancelPendingSkipBurst();
     const state = playbackStore.getState();
     const nextIndex = state.currentTrackIndex + 1;
@@ -3516,10 +3798,14 @@ class PlayerService {
     }
 
     const shouldAutoPlay = state.playbackState === "playing";
-    await this.loadTrack(nextIndex, { initialPositionMs: 0, autoPlay: shouldAutoPlay });
+    await this.loadTrack(nextIndex, {
+      initialPositionMs: 0,
+      autoPlay: shouldAutoPlay,
+    });
   }
 
   async previousTrack() {
+    invalidateBookmarkRelocationUndo();
     this.cancelPendingSkipBurst();
     const state = playbackStore.getState();
     if (!state.queue.length) return;
@@ -3531,7 +3817,10 @@ class PlayerService {
 
     const prevIndex = Math.max(0, state.currentTrackIndex - 1);
     const shouldAutoPlay = state.playbackState === "playing";
-    await this.loadTrack(prevIndex, { initialPositionMs: 0, autoPlay: shouldAutoPlay });
+    await this.loadTrack(prevIndex, {
+      initialPositionMs: 0,
+      autoPlay: shouldAutoPlay,
+    });
   }
 
   async jumpToChapter(chapterId: number) {
@@ -3658,8 +3947,8 @@ class PlayerService {
 
     const state = playbackStore.getState();
     if (!state.queue.length) return;
-    const handledAsClipPreview = await this.handleClipPreviewStatus(status, state);
-    if (handledAsClipPreview) return;
+    const handledAsTemporaryPlayback = await this.handleTemporaryPlaybackStatus(status, state);
+    if (handledAsTemporaryPlayback) return;
 
     const currentTrack = state.queue[state.currentTrackIndex];
     if (!currentTrack) return;
@@ -3734,7 +4023,10 @@ class PlayerService {
 
     this.lastTrackedPositionMs = positionMs;
 
-    let externalPauseSyncResult: { syncAttempted: boolean; dedupeSkipped: boolean } | null = null;
+    let externalPauseSyncResult: {
+      syncAttempted: boolean;
+      dedupeSkipped: boolean;
+    } | null = null;
     if (didTransitionToNonPlaying && !status.didJustFinish) {
       this.recordListeningInterruptionForState(state);
       externalPauseSyncResult = await this.syncPauseLikeProgress("external_pause", {
@@ -3798,7 +4090,8 @@ class PlayerService {
     }
 
     const isRestoredPosition =
-      Math.abs(positionMs - guard.restoredPositionMs) <= POST_PREVIEW_RESTORED_POSITION_TOLERANCE_MS;
+      Math.abs(positionMs - guard.restoredPositionMs) <=
+      POST_PREVIEW_RESTORED_POSITION_TOLERANCE_MS;
     if (status.isPlaying) {
       try {
         await this.engine.pause();
@@ -3817,7 +4110,7 @@ class PlayerService {
     return true;
   }
 
-  private async handleClipPreviewStatus(
+  private async handleTemporaryPlaybackStatus(
     status: {
       positionMs: number;
       durationMs: number;
@@ -3826,66 +4119,84 @@ class PlayerService {
     },
     state: PlaybackStoreState,
   ) {
-    const previewSession = this.clipPreviewSession;
-    if (!previewSession) return false;
+    const temporarySession = this.temporaryPlaybackSession;
+    if (!temporarySession) return false;
     if (
-      state.libraryItemId !== previewSession.libraryItemId ||
-      (state.episodeId ?? null) !== previewSession.episodeId ||
+      state.libraryItemId !== temporarySession.libraryItemId ||
+      (state.episodeId ?? null) !== temporarySession.episodeId ||
       !state.queue.length
     ) {
       return true;
     }
 
-    if (previewSession.stoppedAtEnd) {
+    if (temporarySession.stoppedAtEnd) {
       return true;
     }
 
-    const currentPreviewTrack = state.queue[previewSession.currentTrackIndex];
-    if (!currentPreviewTrack) {
+    const currentTemporaryTrack = state.queue[temporarySession.currentTrackIndex];
+    if (!currentTemporaryTrack) {
       return true;
     }
 
     const trackPositionMs = Math.max(0, status.positionMs);
-    const positionMs = currentPreviewTrack.startOffsetMs + trackPositionMs;
-    const boundedPositionMs = Math.min(positionMs, previewSession.endMs);
-    clipPreviewStore.getState().actions.setPosition(boundedPositionMs);
+    const positionMs = currentTemporaryTrack.startOffsetMs + trackPositionMs;
+    const boundedPositionMs =
+      temporarySession.endMs === null ? positionMs : Math.min(positionMs, temporarySession.endMs);
+    temporaryPlaybackStore.getState().actions.setPosition(boundedPositionMs);
 
-    if (boundedPositionMs >= previewSession.endMs) {
-      const endedSession = {
-        ...previewSession,
-        stoppedAtEnd: true,
-      };
-      this.clipPreviewSession = endedSession;
-      clipPreviewStore.getState().actions.setEnded();
-      try {
-        await this.restoreEngineToListeningPosition(endedSession.restoreState, {
-          currentEngineTrackIndex: endedSession.currentTrackIndex,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unable to restore playback";
-        clipPreviewStore.getState().actions.setError(message);
-      }
+    if (temporarySession.endMs !== null && boundedPositionMs >= temporarySession.endMs) {
+      await this.finishTemporaryPlaybackAtEnd(temporarySession);
       return true;
     }
 
-    if (status.didJustFinish) {
-      const nextTrackIndex = previewSession.currentTrackIndex + 1;
+    if (status.isPlaying) {
+      temporaryPlaybackStore.getState().actions.setPlaying();
+    } else {
+      temporaryPlaybackStore.getState().actions.setPaused();
+    }
+
+    return true;
+  }
+
+  private async finishTemporaryPlaybackAtEnd(session: TemporaryPlaybackSession) {
+    if (!session.retainEndedState) {
+      await this.returnFromTemporaryPlayback({ surface: session.surface });
+      return;
+    }
+
+    const endedSession = { ...session, stoppedAtEnd: true };
+    this.temporaryPlaybackSession = endedSession;
+    temporaryPlaybackStore.getState().actions.setEnded();
+    try {
+      await this.restoreEngineToListeningPosition(endedSession.restoreState, {
+        currentEngineTrackIndex: endedSession.currentTrackIndex,
+      });
+      this.restorePlaybackStoreToListeningPosition(endedSession.restoreState);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to restore playback";
+      temporaryPlaybackStore.getState().actions.setError(message);
+    }
+  }
+
+  private async handleTrackEnded() {
+    const temporarySession = this.temporaryPlaybackSession;
+    if (temporarySession) {
+      const state = playbackStore.getState();
+      const nextTrackIndex = temporarySession.currentTrackIndex + 1;
       const nextTrack = state.queue[nextTrackIndex];
-      if (!nextTrack || nextTrack.startOffsetMs >= previewSession.endMs) {
-        const endedSession = {
-          ...previewSession,
-          stoppedAtEnd: true,
-        };
-        this.clipPreviewSession = endedSession;
-        clipPreviewStore.getState().actions.setEnded();
-        await this.restoreEngineToListeningPosition(endedSession.restoreState, {
-          currentEngineTrackIndex: endedSession.currentTrackIndex,
-        });
-        return true;
+      if (
+        !canAdvanceTemporaryPlaybackToTrack({
+          nextTrackStartMs: nextTrack?.startOffsetMs ?? null,
+          endMs: temporarySession.endMs,
+        }) ||
+        !nextTrack
+      ) {
+        await this.finishTemporaryPlaybackAtEnd(temporarySession);
+        return;
       }
 
-      this.clipPreviewSession = {
-        ...previewSession,
+      this.temporaryPlaybackSession = {
+        ...temporarySession,
         currentTrackIndex: nextTrackIndex,
       };
       await this.engine.load(nextTrack, {
@@ -3893,23 +4204,9 @@ class PlayerService {
         rate: state.rate,
         pitchCorrectionQuality: settingsStore.getState().pitchCorrectionQuality,
       });
-      clipPreviewStore.getState().actions.setPosition(nextTrack.startOffsetMs);
+      temporaryPlaybackStore.getState().actions.setPosition(nextTrack.startOffsetMs);
       await this.engine.play();
-      clipPreviewStore.getState().actions.setPlaying();
-      return true;
-    }
-
-    if (status.isPlaying) {
-      clipPreviewStore.getState().actions.setPlaying();
-    } else {
-      clipPreviewStore.getState().actions.setPaused();
-    }
-
-    return true;
-  }
-
-  private async handleTrackEnded() {
-    if (this.clipPreviewSession) {
+      temporaryPlaybackStore.getState().actions.setPlaying();
       return;
     }
     const state = playbackStore.getState();
@@ -4066,8 +4363,7 @@ class PlayerService {
     const shouldPreventTransientRegression =
       Boolean(cachedProgress) &&
       !cachedProgress?.isFinished &&
-      previousCurrentTimeSeconds >
-        currentTimeSeconds + PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS;
+      previousCurrentTimeSeconds > currentTimeSeconds + PLAY_START_PROGRESS_FLOOR_TOLERANCE_SECONDS;
     const promotedCurrentTimeSeconds = shouldPreventTransientRegression
       ? previousCurrentTimeSeconds
       : currentTimeSeconds;

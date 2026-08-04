@@ -1,9 +1,9 @@
-export type ClipPreviewAvailability = {
+export type TemporaryPlaybackAvailability = {
   available: boolean;
   reason: string | null;
 };
 
-export const resolveClipPreviewAvailability = ({
+export const resolveTemporaryPlaybackAvailability = ({
   targetLibraryItemId,
   targetEpisodeId = null,
   activeLibraryItemId,
@@ -15,11 +15,11 @@ export const resolveClipPreviewAvailability = ({
   activeLibraryItemId: string | null | undefined;
   activeEpisodeId?: string | null;
   activeQueueLength: number;
-}): ClipPreviewAvailability => {
+}): TemporaryPlaybackAvailability => {
   if (!targetLibraryItemId) {
     return {
       available: false,
-      reason: "Clip preview is unavailable.",
+      reason: "Temporary playback is unavailable.",
     };
   }
 
@@ -30,14 +30,14 @@ export const resolveClipPreviewAvailability = ({
   ) {
     return {
       available: false,
-      reason: "Preview uses the currently loaded media. Start this item to preview its clips.",
+      reason: "Load this item to play bookmarks without moving progress.",
     };
   }
 
   if (!activeLibraryItemId || activeQueueLength <= 0) {
     return {
       available: false,
-      reason: "Start this item before previewing clips.",
+      reason: "Load this item to play bookmarks without moving progress.",
     };
   }
 

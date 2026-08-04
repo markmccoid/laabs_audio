@@ -1,8 +1,8 @@
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import {
   playerService,
-  resolveClipPreviewAvailability,
-  useClipPreviewStore,
+  resolveTemporaryPlaybackAvailability,
+  useTemporaryPlaybackStore,
   usePlaybackStore,
 } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -42,7 +42,6 @@ const formatDuration = (seconds: number) => {
   if (minutes > 0) return `${minutes}m ${remainingSeconds}s`;
   return `${remainingSeconds}s`;
 };
-
 const getInitialRange = ({
   requestedStartSeconds,
   requestedDurationSeconds,
@@ -75,9 +74,9 @@ export const BookmarkClipEditor = () => {
   const activeEpisodeId = usePlaybackStore((state) => state.episodeId);
   const activeQueueLength = usePlaybackStore((state) => state.queue.length);
   const draft = useBookAddBookmarkDraft();
-  const previewStatus = useClipPreviewStore((state) => state.status);
-  const previewBookmarkId = useClipPreviewStore((state) => state.bookmarkId);
-  const previewPositionMs = useClipPreviewStore((state) => state.positionMs);
+  const previewStatus = useTemporaryPlaybackStore((state) => state.status);
+  const previewBookmarkId = useTemporaryPlaybackStore((state) => state.bookmarkId);
+  const previewPositionMs = useTemporaryPlaybackStore((state) => state.positionMs);
   const { data: itemDetails } = useGetItemDetails(draft.libraryItemId);
   const bookDurationSeconds = Math.max(
     MIN_CLIP_DURATION_SECONDS,
@@ -122,7 +121,7 @@ export const BookmarkClipEditor = () => {
   );
   const endSeconds = startSeconds + durationSeconds;
   const [previewScrubSeconds, setPreviewScrubSeconds] = useState(0);
-  const clipPreviewAvailability = resolveClipPreviewAvailability({
+  const clipPreviewAvailability = resolveTemporaryPlaybackAvailability({
     targetLibraryItemId: draft.libraryItemId,
     targetEpisodeId: draft.targetEpisodeId ?? null,
     activeLibraryItemId,

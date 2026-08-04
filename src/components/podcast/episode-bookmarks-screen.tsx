@@ -6,7 +6,13 @@ import {
   useResolvedEpisodeListeningOwnerKey,
 } from "@/podcast/episode-bookmarks-store";
 import type { EpisodeIdentity } from "@/podcast/episode-identity";
-import { playerService, usePlaybackStore } from "@/player";
+import {
+  activateBookmarkRelocationUndo,
+  playerService,
+  usePlaybackStore,
+  useTemporaryPlaybackStore,
+} from "@/player";
+import { formatSeconds } from "@/utils/formatUtils";
 import * as FileSystem from "expo-file-system/legacy";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import * as Sharing from "expo-sharing";
@@ -18,6 +24,9 @@ const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
 const sanitizeFileSegment = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "_");
+const BOOKMARK_RELOCATION_TOAST_ID = "bookmark-progress-relocation";
+const getBookmarkTimeLabel = (timeSeconds: number) =>
+  formatSeconds(timeSeconds, "compact", true, true) ?? "00:00";
 
 const toCsvField = (value: string | number) => {
   const normalized = String(value ?? "");
@@ -44,15 +53,42 @@ export const EpisodeBookmarksScreen = () => {
   const { remove } = useEpisodeBookmarkActions();
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const activeEpisodeId = usePlaybackStore((state) => state.episodeId);
+  const queueLength = usePlaybackStore((state) => state.queue.length);
+  const temporarySurface = useTemporaryPlaybackStore((state) => state.surface);
+  const temporaryLibraryItemId = useTemporaryPlaybackStore((state) => state.libraryItemId);
+  const temporaryEpisodeId = useTemporaryPlaybackStore((state) => state.episodeId);
+  const temporaryBookmarkId = useTemporaryPlaybackStore((state) => state.bookmarkId);
+  const temporaryBookmarkTitle = useTemporaryPlaybackStore((state) => state.bookmarkTitle);
+  const temporaryKind = useTemporaryPlaybackStore((state) => state.kind);
+  const temporaryStartMs = useTemporaryPlaybackStore((state) => state.startMs);
+  const temporaryEndMs = useTemporaryPlaybackStore((state) => state.endMs);
+  const temporaryPositionMs = useTemporaryPlaybackStore((state) => state.positionMs);
+  const temporaryReturnPositionMs = useTemporaryPlaybackStore((state) => state.returnPositionMs);
+  const temporaryStatus = useTemporaryPlaybackStore((state) => state.status);
   const [pendingPlayId, setPendingPlayId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const isEpisodeLoaded =
+    activeLibraryItemId === identity.libraryItemId &&
+    activeEpisodeId === identity.episodeId &&
+    queueLength > 0;
+  const isThisBookmarkListTemporaryPlayback =
+    temporarySurface === "bookmark-list" &&
+    temporaryLibraryItemId === identity.libraryItemId &&
+    temporaryEpisodeId === identity.episodeId &&
+    temporaryBookmarkId !== null &&
+    temporaryKind !== null &&
+    temporaryReturnPositionMs !== null;
 
   useEffect(
     () => () => {
-      void playerService.restoreListeningPositionAfterPreview();
+      void playerService.returnFromTemporaryPlayback({
+        surface: "bookmark-list",
+        libraryItemId: identity.libraryItemId,
+        episodeId: identity.episodeId,
+      });
     },
-    [],
+    [identity.episodeId, identity.libraryItemId],
   );
 
   const routeParams = {
@@ -70,39 +106,120 @@ export const EpisodeBookmarksScreen = () => {
 
   const playBookmark = async (record: BookmarkViewRecord) => {
     if (pendingPlayId) return;
+    if (!isEpisodeLoaded) {
+      toast.info("Load this episode to play bookmarks without moving progress.");
+      return;
+    }
     setPendingPlayId(record.id);
     try {
-      await playerService.cancelPreviewForExplicitNavigation();
-      if (
-        activeLibraryItemId !== identity.libraryItemId ||
-        activeEpisodeId !== identity.episodeId
-      ) {
-        await playerService.loadEpisode(identity.libraryItemId, identity.episodeId, {
-          autoPlay: false,
-          episodeTitle,
-          podcastTitle,
+      if (isThisBookmarkListTemporaryPlayback && temporaryBookmarkId === record.id) {
+        if (temporaryStatus === "playing") {
+          await playerService.pauseTemporaryPlayback();
+        } else {
+          await playerService.resumeTemporaryPlayback();
+        }
+      } else {
+        await playerService.playBookmarkTemporarily({
+          ...identity,
+          bookmarkId: record.id,
+          bookmarkTitle: record.title.trim(),
+          kind: record.kind,
+          startTimeSeconds: record.startTimeSeconds,
+          endTimeSeconds: record.endTimeSeconds,
         });
       }
-      await playerService.seekTo(record.startTimeSeconds * 1000);
-      await playerService.play();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to play bookmark");
     } finally {
       setPendingPlayId(null);
-      router.back();
     }
   };
 
-  const deleteBookmark = (record: BookmarkViewRecord) => {
+  const returnToListeningPosition = async () => {
+    await playerService.returnFromTemporaryPlayback({
+      surface: "bookmark-list",
+      libraryItemId: identity.libraryItemId,
+      episodeId: identity.episodeId,
+    });
+  };
+
+  const handleHeaderPlayback = async () => {
+    if (!isThisBookmarkListTemporaryPlayback) return;
+    if (temporaryStatus === "playing") {
+      await playerService.pauseTemporaryPlayback();
+    } else {
+      await playerService.resumeTemporaryPlayback();
+    }
+  };
+
+  const closeBookmarks = async () => {
+    await returnToListeningPosition();
+    router.back();
+  };
+
+  const openBookmarkDetail = async (record: BookmarkViewRecord) => {
+    await returnToListeningPosition();
+    router.push({
+      pathname: "/episode-bookmark-detail",
+      params: { ...routeParams, bookmarkId: record.id },
+    });
+  };
+
+  const deleteBookmark = async (record: BookmarkViewRecord) => {
     if (!ownerUserId || pendingDeleteId) return;
     setPendingDeleteId(record.id);
     try {
+      if (isThisBookmarkListTemporaryPlayback && temporaryBookmarkId === record.id) {
+        await returnToListeningPosition();
+      }
       remove(ownerUserId, record.id);
       toast.success("Bookmark deleted");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to delete bookmark");
     } finally {
       setPendingDeleteId(null);
+    }
+  };
+
+  const moveProgressToBookmark = async (record: BookmarkViewRecord) => {
+    if (pendingPlayId) return;
+    setPendingPlayId(record.id);
+    try {
+      const token = await playerService.relocateToBookmark({
+        ...identity,
+        positionMs: record.startTimeSeconds * 1000,
+        episodeTitle,
+        podcastTitle,
+      });
+      router.back();
+      const movedTime = getBookmarkTimeLabel(record.startTimeSeconds);
+      if (!token) {
+        toast.success(`Progress moved to ${movedTime}`);
+        return;
+      }
+      toast.success(`Progress moved to ${movedTime}`, {
+        id: BOOKMARK_RELOCATION_TOAST_ID,
+        duration: 15_000,
+        dismissible: true,
+        action: {
+          label: "Undo",
+          onClick: () => {
+            void playerService
+              .undoBookmarkRelocation(token)
+              .then(() => toast.success("Previous listening position restored"))
+              .catch((error) =>
+                toast.error(
+                  error instanceof Error ? error.message : "Unable to restore listening position",
+                ),
+              );
+          },
+        },
+      });
+      activateBookmarkRelocationUndo(token.id, () => toast.dismiss(BOOKMARK_RELOCATION_TOAST_ID));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to move progress");
+    } finally {
+      setPendingPlayId(null);
     }
   };
 
@@ -205,6 +322,11 @@ export const EpisodeBookmarksScreen = () => {
     ]);
   };
 
+  const handleExport = async () => {
+    await returnToListeningPosition();
+    openExportFormatPicker();
+  };
+
   return (
     <>
       <Stack.Screen options={{ title: "Bookmarks" }} />
@@ -214,17 +336,29 @@ export const EpisodeBookmarksScreen = () => {
           isExporting,
           pendingPlayId,
           pendingDeleteId,
+          isMediaLoaded: isEpisodeLoaded,
+          temporaryPlayback: isThisBookmarkListTemporaryPlayback
+            ? {
+                activeBookmarkId: temporaryBookmarkId,
+                activeBookmarkTitle: temporaryBookmarkTitle ?? "Bookmark",
+                activeKind: temporaryKind,
+                startTimeSeconds: temporaryStartMs / 1000,
+                endTimeSeconds: temporaryEndMs === null ? null : temporaryEndMs / 1000,
+                positionSeconds: temporaryPositionMs / 1000,
+                returnPositionSeconds: temporaryReturnPositionMs / 1000,
+                status: temporaryStatus,
+              }
+            : null,
         }}
         actions={{
-          onClose: () => router.back(),
-          onExport: openExportFormatPicker,
-          onPlay: (record) => void playBookmark(record),
-          onOpenDetail: (record) =>
-            router.push({
-              pathname: "/episode-bookmark-detail",
-              params: { ...routeParams, bookmarkId: record.id },
-            }),
-          onDelete: deleteBookmark,
+          onClose: () => void closeBookmarks(),
+          onExport: () => void handleExport(),
+          onTogglePlayback: (record) => void playBookmark(record),
+          onToggleHeaderPlayback: () => void handleHeaderPlayback(),
+          onReturn: () => void returnToListeningPosition(),
+          onMoveProgress: (record) => void moveProgressToBookmark(record),
+          onOpenDetail: (record) => void openBookmarkDetail(record),
+          onDelete: (record) => void deleteBookmark(record),
         }}
       />
     </>
