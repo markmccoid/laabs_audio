@@ -4,7 +4,7 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
-- `2026-08-04` `pending` - Add non-destructive bookmark and clip playback with a protected return
+- `2026-08-04` `cd44257` - Add non-destructive bookmark and clip playback with a protected return
   position, prominent in-sheet controls, explicit paused progress relocation, and 15-second Undo.
   Tester focus: from active audiobook and podcast Episode bookmark sheets, play and switch point
   bookmarks/clips without changing progress, use the row menu and full trailing Play/Pause corner,
