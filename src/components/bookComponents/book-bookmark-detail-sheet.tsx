@@ -344,12 +344,17 @@ export const BookBookmarkDetailSheet = () => {
           onNoteChange: draft.setLocalNote,
           onAdjustPosition: (deltaSeconds) =>
             draft.setPointPosition(draft.positionSeconds + deltaSeconds),
+          onClipModeChange: (enabled) => {
+            if (enabled) {
+              draft.convertToClipDraft();
+            } else {
+              draft.removeClip();
+            }
+          },
           onOpenClipEditor: () => {
-            if (!bookmark) return;
-            draft.convertToClipDraft();
+            if (!bookmark || !draft.title.trim() || !isClip || isBusy) return;
             router.push("/book-bookmark-detail/clip-editor");
           },
-          onRemoveClip: draft.removeClip,
           onSave: () => void handleSave(),
           onCancel: requestCloseDetail,
           onExportAudio: () => void handleExportAudio(),

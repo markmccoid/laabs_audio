@@ -2,15 +2,26 @@ import { useAuthStore } from "@/auth/auth-store";
 import { CoverImage } from "@/components/images/cover-image";
 import { EpisodeActionMenu } from "@/components/podcast/episode-action-menu";
 import { useEpisodeActionController } from "@/components/podcast/episode-action-controller";
+import { EpisodeProgressPill } from "@/components/podcast/episode-key-details";
+import type { TouchedEpisodeProgress } from "@/podcast/episode-continue-eligibility";
 import {
   filterEpisodesByTitle,
   orderPodcastEpisodes,
 } from "@/podcast/podcast-episode-browse";
 import { CURRENT_PODCAST_EPISODE_ACTIONS } from "@/podcast/episode-action-eligibility";
 import {
+  resolveEpisodeListProgress,
+  type IndexedEpisodeProgress,
+} from "@/podcast/episode-list-progress";
+import { getEpisodeProgressSyncIntent } from "@/podcast/episode-progress-intent-store";
+import {
   usePodcastItemDetails,
+  usePodcastEpisodeProgress,
   usePodcastSeriesIndexShow,
+  usePodcastTouchedEpisodes,
 } from "@/podcast/use-podcast-series";
+import { usePlaybackStore } from "@/player";
+import { useSettingsStore } from "@/store/settings-store";
 import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { useThemeColors } from "@/theme/use-app-theme";
 import type { PodcastEpisode } from "@/types/absTypes";
@@ -69,6 +80,9 @@ type EpisodeRowProps = {
   item: VisibleEpisode;
   headerTitle: string;
   headerCover: string | null;
+  activeLibraryUserKey: string | null;
+  progress: TouchedEpisodeProgress | null;
+  serverProgress: IndexedEpisodeProgress | null;
   themeColors: ReturnType<typeof useThemeColors>;
 };
 
@@ -77,12 +91,15 @@ const CurrentPodcastEpisodeRow = ({
   item,
   headerTitle,
   headerCover,
+  activeLibraryUserKey,
+  progress,
+  serverProgress,
   themeColors,
 }: EpisodeRowProps) => {
   const published = formatPublishedAt(item.publishedAt);
   const duration = formatDuration(item.duration);
   const meta = [published, duration].filter(Boolean).join(" · ");
-  const { resolvedActions, openEpisodeDetail } = useEpisodeActionController({
+  const { resolvedActions, openEpisodeDetail, isEpisodeLoaded } = useEpisodeActionController({
     identity: { libraryItemId, episodeId: item.id },
     episodeTitle: item.title,
     podcastTitle: headerTitle,
@@ -93,6 +110,32 @@ const CurrentPodcastEpisodeRow = ({
     actionIds: CURRENT_PODCAST_EPISODE_ACTIONS,
     isOnCurrentPodcast: true,
   });
+  const defaultProgressTimeDisplay = useSettingsStore(
+    (state) => state.defaultBookProgressTimeDisplay,
+  );
+  const activePositionMs = usePlaybackStore((state) =>
+    state.libraryItemId === libraryItemId && state.episodeId === item.id
+      ? state.positionMs
+      : 0,
+  );
+  const activeDurationMs = usePlaybackStore((state) =>
+    state.libraryItemId === libraryItemId && state.episodeId === item.id
+      ? state.durationMs
+      : 0,
+  );
+  const localIntent = activeLibraryUserKey
+    ? getEpisodeProgressSyncIntent(libraryItemId, item.id, activeLibraryUserKey)
+    : null;
+  const { progressSeconds, remainingSeconds, displayStatus } =
+    resolveEpisodeListProgress({
+      episodeDurationSeconds: item.duration,
+      storedProgress: progress,
+      serverProgress,
+      localIntent,
+      activeProgress: isEpisodeLoaded
+        ? { positionMs: activePositionMs, durationMs: activeDurationMs }
+        : null,
+    });
 
   return (
     <View style={styles.episodeRowFrame}>
@@ -104,9 +147,10 @@ const CurrentPodcastEpisodeRow = ({
           style={[
             styles.episodeRow,
             {
-              borderColor: themeColors.border,
+              borderColor: isEpisodeLoaded ? themeColors.accent : themeColors.border,
               backgroundColor: themeColors.surface,
             },
+            isEpisodeLoaded ? styles.activeEpisodeRow : null,
           ]}
         >
           <Pressable
@@ -118,22 +162,82 @@ const CurrentPodcastEpisodeRow = ({
               { opacity: pressed ? 0.72 : 1 },
             ]}
           >
-            <Text
-              maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-              numberOfLines={2}
-              selectable
-              style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
-            >
-              {item.title}
-            </Text>
-            {meta ? (
-              <Text
-                maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                style={{ color: themeColors.textMuted, fontSize: 12, marginTop: 4 }}
-              >
-                {meta}
-              </Text>
-            ) : null}
+            <View style={styles.episodeContentRow}>
+              <View style={styles.episodeTextColumn}>
+                <Text
+                  maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                  numberOfLines={2}
+                  selectable
+                  style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
+                >
+                  {item.title}
+                </Text>
+                {meta ? (
+                  <Text
+                    maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                    style={{ color: themeColors.textMuted, fontSize: 12, marginTop: 4 }}
+                  >
+                    {meta}
+                  </Text>
+                ) : null}
+              </View>
+              {displayStatus !== "none" || isEpisodeLoaded ? (
+                <View style={styles.episodeStatusColumn}>
+                  {displayStatus === "progress" ? (
+                    <EpisodeProgressPill
+                      progressSeconds={progressSeconds}
+                      remainingSeconds={remainingSeconds}
+                      defaultProgressTimeDisplay={defaultProgressTimeDisplay}
+                      progressResetKey={`${libraryItemId}:${item.id}`}
+                    />
+                  ) : null}
+                  {displayStatus === "finished" ? (
+                    <View
+                      accessibilityLabel="Finished episode"
+                      style={[styles.statusBadge, { backgroundColor: themeColors.accent }]}
+                    >
+                      <SymbolView
+                        name="checkmark.circle.fill"
+                        size={12}
+                        tintColor={themeColors.accentForeground}
+                      />
+                      <Text
+                        maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                        style={{
+                          color: themeColors.accentForeground,
+                          fontSize: 11,
+                          fontWeight: "700",
+                        }}
+                      >
+                        Finished
+                      </Text>
+                    </View>
+                  ) : null}
+                  {isEpisodeLoaded ? (
+                    <View
+                      accessibilityLabel="Active episode"
+                      style={[styles.statusBadge, { backgroundColor: themeColors.accent }]}
+                    >
+                      <SymbolView
+                        name="waveform"
+                        size={12}
+                        tintColor={themeColors.accentForeground}
+                      />
+                      <Text
+                        maxFontSizeMultiplier={COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                        style={{
+                          color: themeColors.accentForeground,
+                          fontSize: 11,
+                          fontWeight: "700",
+                        }}
+                      >
+                        Active
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
           </Pressable>
         </View>
       </EpisodeActionMenu>
@@ -144,11 +248,14 @@ const CurrentPodcastEpisodeRow = ({
 export const CurrentPodcastScreen = ({ libraryItemId }: Props) => {
   const themeColors = useThemeColors();
   const isOnline = useAuthStore((state) => state.isOnline !== false);
+  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const [reverseOrder, setReverseOrder] = useState(false);
   const [titleFilter, setTitleFilter] = useState("");
 
   const seriesQuery = usePodcastSeriesIndexShow(libraryItemId);
   const detailsQuery = usePodcastItemDetails(libraryItemId);
+  const episodeProgressQuery = usePodcastEpisodeProgress(libraryItemId);
+  const touchedEpisodesQuery = usePodcastTouchedEpisodes();
 
   const headerTitle = detailsQuery.data?.title ?? seriesQuery.data?.title ?? "Podcast";
   const headerAuthor = detailsQuery.data?.author ?? seriesQuery.data?.author ?? null;
@@ -173,6 +280,16 @@ export const CurrentPodcastScreen = ({ libraryItemId }: Props) => {
     );
     return filterEpisodesByTitle(ordered, titleFilter);
   }, [detailsQuery.data, podcastType, reverseOrder, titleFilter]);
+  const progressByEpisodeId = useMemo(() => {
+    const result = new Map<string, TouchedEpisodeProgress>();
+    if (!libraryItemId) return result;
+    for (const episode of touchedEpisodesQuery.data ?? []) {
+      if (episode.libraryItemId === libraryItemId) {
+        result.set(episode.episodeId, episode);
+      }
+    }
+    return result;
+  }, [libraryItemId, touchedEpisodesQuery.data]);
 
   if (!libraryItemId) {
     return (
@@ -312,6 +429,9 @@ export const CurrentPodcastScreen = ({ libraryItemId }: Props) => {
             item={item}
             headerTitle={headerTitle}
             headerCover={headerCover}
+            activeLibraryUserKey={activeLibraryUserKey}
+            progress={progressByEpisodeId.get(item.id) ?? null}
+            serverProgress={episodeProgressQuery.data?.[item.id] ?? null}
             themeColors={themeColors}
           />
         )}
@@ -395,9 +515,33 @@ const styles = StyleSheet.create({
     width: "100%",
     overflow: "hidden",
   },
+  activeEpisodeRow: {
+    borderWidth: 1.5,
+  },
   episodeRowPressable: {
     minWidth: 0,
     paddingHorizontal: 14,
     paddingVertical: 12,
+  },
+  episodeContentRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  episodeTextColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+  episodeStatusColumn: {
+    alignItems: "flex-end",
+    gap: 6,
+  },
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
 });

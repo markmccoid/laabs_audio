@@ -16,6 +16,13 @@ type Props = {
   onPodcastPress?: () => void;
 };
 
+type EpisodeProgressPillProps = {
+  progressSeconds?: number | null;
+  remainingSeconds?: number | null;
+  defaultProgressTimeDisplay?: BookProgressTimeDisplay;
+  progressResetKey?: string;
+};
+
 const formatDurationBadge = (durationSeconds?: number | null) => {
   const seconds = Math.max(0, Math.floor(durationSeconds ?? 0));
   const hours = Math.floor(seconds / 3600);
@@ -26,6 +33,81 @@ const formatDurationBadge = (durationSeconds?: number | null) => {
   }
 
   return `${minutes}m`;
+};
+
+export const EpisodeProgressPill = ({
+  progressSeconds,
+  remainingSeconds,
+  defaultProgressTimeDisplay = "elapsed",
+  progressResetKey,
+}: EpisodeProgressPillProps) => {
+  const themeColors = useThemeColors();
+  const [progressSelection, setProgressSelection] = useState<{
+    defaultDisplay: BookProgressTimeDisplay;
+    display: BookProgressTimeDisplay;
+    resetKey?: string;
+  }>(() => ({
+    defaultDisplay: defaultProgressTimeDisplay,
+    display: defaultProgressTimeDisplay,
+    resetKey: progressResetKey,
+  }));
+  const progressDisplay =
+    progressSelection.defaultDisplay === defaultProgressTimeDisplay &&
+    progressSelection.resetKey === progressResetKey
+      ? progressSelection.display
+      : defaultProgressTimeDisplay;
+  const elapsedLabel = formatDurationBadge(progressSeconds);
+  const remainingLabel = `${formatDurationBadge(remainingSeconds)} left`;
+  const progressLabel = progressDisplay === "elapsed" ? elapsedLabel : remainingLabel;
+  const isElapsedView = progressDisplay === "elapsed";
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Episode progress: ${progressLabel}. Toggle progress display`}
+      onPress={(event) => {
+        event.stopPropagation();
+        setProgressSelection({
+          defaultDisplay: defaultProgressTimeDisplay,
+          display: progressDisplay === "elapsed" ? "remaining" : "elapsed",
+          resetKey: progressResetKey,
+        });
+      }}
+      style={({ pressed }) => ({
+        borderRadius: 999,
+        borderCurve: "continuous",
+        borderWidth: 1,
+        borderColor: isElapsedView ? themeColors.accent : themeColors.border,
+        backgroundColor: isElapsedView ? themeColors.accent : themeColors.bg,
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+        opacity: pressed ? 0.82 : 1,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        alignSelf: "flex-start",
+        boxShadow: isElapsedView ? "0 6px 14px rgba(15, 23, 42, 0.18)" : undefined,
+      })}
+    >
+      <SymbolView
+        name={progressDisplay === "elapsed" ? "gauge.with.needle.fill" : "hourglass"}
+        size={14}
+        tintColor={isElapsedView ? themeColors.bg : themeColors.textMuted}
+      />
+      <Text
+        selectable
+        style={{
+          fontSize: 14,
+          fontWeight: "700",
+          color: isElapsedView ? themeColors.bg : themeColors.textMuted,
+          fontVariant: ["tabular-nums"],
+        }}
+        numberOfLines={1}
+      >
+        {progressLabel}
+      </Text>
+    </Pressable>
+  );
 };
 
 export const EpisodeKeyDetails = ({
@@ -41,20 +123,6 @@ export const EpisodeKeyDetails = ({
 }: Props) => {
   const themeColors = useThemeColors();
   const durationLabel = formatDurationBadge(durationSeconds);
-  const [progressSelection, setProgressSelection] = useState<{
-    defaultDisplay: BookProgressTimeDisplay;
-    display: BookProgressTimeDisplay;
-    resetKey?: string;
-  }>(() => ({
-    defaultDisplay: defaultProgressTimeDisplay,
-    display: defaultProgressTimeDisplay,
-    resetKey: progressResetKey,
-  }));
-  const progressDisplay =
-    progressSelection.defaultDisplay === defaultProgressTimeDisplay &&
-    progressSelection.resetKey === progressResetKey
-      ? progressSelection.display
-      : defaultProgressTimeDisplay;
 
   const rows = useMemo(() => {
     const values: {
@@ -78,11 +146,6 @@ export const EpisodeKeyDetails = ({
 
     return values;
   }, [onPodcastPress, podcastTitle, publishedLabel]);
-
-  const elapsedLabel = formatDurationBadge(progressSeconds);
-  const remainingLabel = `${formatDurationBadge(remainingSeconds)} left`;
-  const progressLabel = progressDisplay === "elapsed" ? elapsedLabel : remainingLabel;
-  const isElapsedView = progressDisplay === "elapsed";
 
   return (
     <View
@@ -108,49 +171,12 @@ export const EpisodeKeyDetails = ({
         }}
       >
         {isInProgress ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Toggle progress display"
-            onPress={() =>
-              setProgressSelection({
-                defaultDisplay: defaultProgressTimeDisplay,
-                display: progressDisplay === "elapsed" ? "remaining" : "elapsed",
-                resetKey: progressResetKey,
-              })
-            }
-            style={({ pressed }) => ({
-              borderRadius: 999,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: isElapsedView ? themeColors.accent : themeColors.border,
-              backgroundColor: isElapsedView ? themeColors.accent : themeColors.bg,
-              paddingHorizontal: 9,
-              paddingVertical: 5,
-              opacity: pressed ? 0.82 : 1,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 5,
-              boxShadow: isElapsedView ? "0 6px 14px rgba(15, 23, 42, 0.18)" : undefined,
-            })}
-          >
-            <SymbolView
-              name={progressDisplay === "elapsed" ? "gauge.with.needle.fill" : "hourglass"}
-              size={14}
-              tintColor={isElapsedView ? themeColors.bg : themeColors.textMuted}
-            />
-            <Text
-              selectable
-              style={{
-                fontSize: 14,
-                fontWeight: "700",
-                color: isElapsedView ? themeColors.bg : themeColors.textMuted,
-                fontVariant: ["tabular-nums"],
-              }}
-              numberOfLines={1}
-            >
-              {progressLabel}
-            </Text>
-          </Pressable>
+          <EpisodeProgressPill
+            progressSeconds={progressSeconds}
+            remainingSeconds={remainingSeconds}
+            defaultProgressTimeDisplay={defaultProgressTimeDisplay}
+            progressResetKey={progressResetKey}
+          />
         ) : (
           <View />
         )}
@@ -184,7 +210,7 @@ export const EpisodeKeyDetails = ({
           <View style={{ width: 14, alignItems: "center" }}>
             <SymbolView
               name={row.icon}
-              size={11}
+              size={12}
               tintColor={row.onPress ? themeColors.accent : themeColors.textMuted}
             />
           </View>
@@ -198,13 +224,16 @@ export const EpisodeKeyDetails = ({
                 opacity: pressed ? 0.82 : 1,
               })}
             >
-              <Text
-                selectable
-                style={{ flex: 1, fontSize: 12, color: themeColors.accent, fontWeight: "500" }}
-                numberOfLines={1}
-              >
-                {row.value}
-              </Text>
+              <View className="flex-row flex-1 items-center gap-1">
+                <Text
+                  selectable
+                  style={{ fontSize: 14, color: themeColors.accent, fontWeight: "500" }}
+                  numberOfLines={1}
+                >
+                  {row.value}
+                </Text>
+                <SymbolView name="arrowshape.right.fill" size={12} />
+              </View>
             </Pressable>
           ) : (
             <Text

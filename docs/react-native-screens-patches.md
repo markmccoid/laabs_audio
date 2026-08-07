@@ -1,9 +1,8 @@
 # `react-native-screens` patches — catalog
 
 Single source of truth for everything inside
-`patches/react-native-screens+4.25.2.patch`. That one patch file bundles **three
-independent fixes** to `react-native-screens@4.25.2`, all targeting the iOS 26
-`NativeTabs.BottomAccessory` (mini-player) on this app's tab layout.
+`patches/react-native-screens+4.26.2.patch`. The current patch contains one fix for
+the iOS 26 `NativeTabs.BottomAccessory` (mini-player) on this app's tab layout.
 
 > How patches reach an EAS build (CNG / gitignored `ios/`) is documented separately in
 > [`eas-patch-package-cng-builds.md`](./eas-patch-package-cng-builds.md). TL;DR: the
@@ -11,33 +10,26 @@ independent fixes** to `react-native-screens@4.25.2`, all targeting the iOS 26
 > `.mm` edits survive to compile time. **Native (`.mm`) changes require a native rebuild;
 > a Metro reload is not enough.**
 
-When you bump `react-native-screens`, re-check each section below against the new source
-before assuming the patch still applies (patch-package will also fail loudly if a hunk no
-longer matches).
+## Required upgrade gate
+
+Whenever Expo, React Native, Expo Router, or `react-native-screens` is upgraded:
+
+1. Check the installed `react-native-screens` source and upstream release notes/issues to see
+   whether the dual-content BottomAccessory duplication has been fixed.
+2. On an iOS 26 simulator/device, play media, open the main player from the mini-player, dismiss
+   it, and confirm there is exactly one cover, metadata block, and play/pause control. Repeat the
+   cycle at least twice.
+3. If upstream is fixed, remove the patch and rerun the reproduction before committing the
+   upgrade. If it is not fixed, port/regenerate the patch for the exact installed version and
+   update this document and the patch filename together.
+4. Run `npm run postinstall` after the upgrade and confirm `patch-package` reports the installed
+   `react-native-screens` version as successfully patched. A stale versioned patch is not
+   protection—the 4.25.2 → 4.26.2 upgrade silently left this workaround behind until the doubled
+   mini-player was reproduced again.
 
 ---
 
-## Patch A — Tab-bar minimize / inline trigger
-
-**File:** `ios/tabs/screen/RNSTabsScreenViewController.mm`
-**Problem:** On iOS 26, UIKit drives `tabBarMinimizeBehavior` ("onScrollDown") off
-`UIViewController.contentScrollView(for:)`. Its default search can't find a React Native
-scroll view through the `NativeTab → nested Stack → screen` hierarchy, so the tab bar never
-minimizes and the bottom accessory never enters the **inline** environment.
-**Fix:** Override `contentScrollViewForEdge:` + a BFS helper
-(`rns_findDescendantScrollViewInView:`) to locate the screen's `UIScrollView`, and
-eagerly register it via `setContentScrollView:forEdge:` in `viewDidLayoutSubviews` and
-`viewDidAppear:` (UIKit ignores registrations made while a tab is off-screen).
-**Refs:** callstack/react-native-bottom-tabs#496 (same bug in another lib).
-**Verify in a build (deterministic):**
-```bash
-strings -a ".../RNScreens.framework/RNScreens" | grep -c "rns_findDescendantScrollViewInView"  # >0 = present
-```
-**Upgrade check:** the upstream file must have all three of — (1) `contentScrollViewForEdge:`
-override, (2) eager `setContentScrollView:forEdge:` in `viewDidLayoutSubviews`, (3)
-re-registration in `viewDidAppear:`. See `ROLLBACK_ACCESSORY_INLINE.md` for the longer note.
-
-## Patch B — Single-content BottomAccessory path (anti-duplication)
+## Current patch — Single-content BottomAccessory path (anti-duplication)
 
 **File (live):** `src/components/tabs/host/TabsHost.ios.tsx`
 **Files (redundant mirrors):** `lib/commonjs/.../TabsHost.ios.js`, `lib/module/.../TabsHost.ios.js`
@@ -60,57 +52,10 @@ A JS patch that only edits `lib/` is dead code. The `lib/*` hunks in our patch a
 mirrors; the `src/` hunk is the one that runs.
 **Verify:** JS-only — reload Metro (`--clear`), play a book, open `/main-player`, swipe down.
 No doubled accessory.
-**Upgrade check:** if upstream's `src/.../TabsHost.ios.tsx` still branches on
-`reactNativeVersion.minor >= 82` into two `TabsBottomAccessoryContent` children, keep this
-patch. If they've fixed the opacity-switch lifecycle, you may be able to drop it.
-
-## Patch C — Stuck-inline after a card dismiss (four interacting fixes)
-
-**Files:** `ios/tabs/bottom-accessory/RNSTabsBottomAccessoryComponentView.mm`,
-`ios/tabs/bottom-accessory/RNSTabsBottomAccessoryHelper.mm`
-
-**Symptom:** Play a book → scroll so the accessory goes **inline** → open the `/main-player`
-`card` → dismiss. The tab bar expands back to regular but the accessory stays a narrow inline
-pill. (Opening the card *from regular* works, and "primes" it so later inline cycles also work
-— that asymmetry was the key clue.) This took four layered fixes; each unblocked the next.
-The trigger: `/main-player` is `presentation: "card"`, so the full-screen card removes the tab
-host (and accessory) from the window, running `-invalidate`.
-
-1. **Helper recreation on window re-entry** — `RNSTabsBottomAccessoryComponentView.didMoveToWindow`.
-   `-invalidate` nils `_helper`/`_shadowStateProxy`; upstream's return path only re-messages the
-   now-nil `_helper`, so the environment-trait observer and frame observer are never
-   re-established. Fix: when re-entering the window, recreate `_helper`/`_shadowStateProxy` if nil.
-
-2. **Deferred env re-assert** — same method. The trait observer only fires on *changes*, and on a
-   physical device the trait isn't settled at `didMoveToWindow` time, so a synchronous emit can be
-   stale. Re-emit `emitOnEnvironmentChangeIfNeeded:` on the next runloop turn (dedupes, so it's a
-   no-op when already correct).
-
-3. **Frame re-sync on trait change** — `RNSTabsBottomAccessoryHelper.registerForAccessoryEnvironmentChanges`.
-   The env correctly flips to regular but the **size** doesn't, because the frame observer watches
-   the wrapper's **`center`**, which is *invariant* across regular↔inline (only width/origin change;
-   center stays put) — so a width-only resize never fires the KVO. Fix: on each env change, force a
-   frame-observer re-registration (deferred a tick). The explicit `unregister` first is required —
-   `registerForAccessoryFrameChanges` early-returns when the wrapper pointer is unchanged.
-
-4. **Preserve Fabric `state` across `invalidate`** — `RNSTabsBottomAccessoryComponentView.invalidateImpl`
-   (commented-out `_state.reset()`). Even with #3 pushing the right frame, it landed nowhere:
-   `RNSTabsBottomAccessoryShadowStateProxy.updateShadowStateWithFrame:` no-ops when
-   `_bottomAccessoryView.state == nullptr`, and `-invalidate` had reset it with no Fabric
-   re-delivery on return. Keeping the `shared_ptr` is safe (these views aren't recycled —
-   `shouldBeRecycled == NO` — and it releases on dealloc).
-
-**Refs:** same lifecycle area as react-native-screens #3948. Both the `_state.reset()` on a
-transient window-removal and the `center`-only frame observer are genuine upstream bugs worth
-reporting.
-**Verify:** native rebuild → play → scroll inline → open `/main-player` → dismiss → accessory
-snaps back to the full-width regular bar. (No unique selector to grep; all changes are inside
-existing methods. Earlier diagnostics used a temporary `[laabs]` `NSLog` prefix — fully removed.)
-**Upgrade check:** re-verify all four points survive an RNS bump — especially that `invalidate`
-no longer discards `state` and that the frame observer reacts to a width-only resize.
-**Known tradeoff:** the single-content path + frame re-sync means regular↔inline transitions
-re-layout reactively (a brief flash) instead of UIKit's native cross-fade — cosmetic, and
-inherent to avoiding the duplication from Patch B. See `mini-player-bottom-accessory.tsx`.
+**Upgrade check:** if upstream's `src/.../TabsHost.ios.tsx` still mounts separate `regular`
+and `inline` `TabsBottomAccessoryContent` children, keep and regenerate this patch. If upstream
+uses one content tree or has otherwise fixed the visibility lifecycle, remove the patch and prove
+the open/dismiss reproduction stays green before shipping the upgrade.
 
 ---
 
@@ -118,11 +63,10 @@ inherent to avoiding the duplication from Patch B. See `mini-player-bottom-acces
 
 ```bash
 npx patch-package react-native-screens --reverse   # revert node_modules in place
-rm patches/react-native-screens+4.25.2.patch       # drop the patch
+rm patches/react-native-screens+4.26.2.patch       # drop the patch
 npx expo run:ios                                    # native rebuild required
 ```
 To remove a single fix, edit the patched `node_modules` file back to stock and re-run
 `npx patch-package react-native-screens` to regenerate the patch without that hunk.
 
-*Related: `ROLLBACK_ACCESSORY_INLINE.md` (original Patch A change-log),
-`eas-patch-package-cng-builds.md` (how patches survive EAS managed builds).*
+*Related: `eas-patch-package-cng-builds.md` (how patches survive EAS managed builds).*

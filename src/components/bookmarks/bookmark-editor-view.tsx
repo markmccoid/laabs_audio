@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
+  Switch,
   Text,
   TextInput,
   View,
@@ -42,8 +43,8 @@ export type BookmarkEditorActions = {
   onTitleChange: (value: string) => void;
   onNoteChange: (value: string) => void;
   onAdjustPosition: (deltaSeconds: number) => void;
+  onClipModeChange: (enabled: boolean) => void;
   onOpenClipEditor: () => void;
-  onRemoveClip: () => void;
   onSave: () => void;
   onCancel: () => void;
   onExportAudio?: () => void;
@@ -80,6 +81,9 @@ export const BookmarkEditorView = ({
   const saveLabel =
     model.isSaving ? "Saving..." : model.mode === "add" && isClip ? "Save Clip" : "Save";
   const fieldBackgroundColor = model.mode === "detail" ? "#FFFFFF" : themeColors.surface;
+  const titleIsRequired = model.mode === "add" && !model.draft.title.trim();
+  const canEditClip =
+    model.targetAvailable && !model.isBusy && Boolean(model.draft.title.trim());
 
   const renderStepButton = (label: "-5s" | "+5s", deltaSeconds: number) => (
     <Pressable
@@ -117,9 +121,12 @@ export const BookmarkEditorView = ({
         Bookmark Title
       </Text>
       <TextInput
+        autoFocus={model.mode === "add"}
         value={model.draft.title}
         onChangeText={actions.onTitleChange}
         editable={!model.isBusy}
+        accessibilityLabel="Bookmark Title"
+        accessibilityHint={titleIsRequired ? "A title is required before saving" : undefined}
         placeholder="Enter a descriptive name"
         placeholderTextColor={themeColors.textMuted}
         cursorColor={themeColors.accent}
@@ -127,14 +134,43 @@ export const BookmarkEditorView = ({
         style={{
           borderRadius: 12,
           borderCurve: "continuous",
-          borderWidth: 1,
-          borderColor: themeColors.border,
+          borderWidth: titleIsRequired ? 2 : 1,
+          borderColor: titleIsRequired ? "#dc2626" : themeColors.border,
           backgroundColor: fieldBackgroundColor,
           color: themeColors.text,
           paddingHorizontal: 12,
           paddingVertical: 10,
           fontSize: 14,
         }}
+      />
+    </View>
+  );
+
+  const renderClipSwitch = () => (
+    <View
+      style={{
+        minHeight: 50,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        borderRadius: 12,
+        borderCurve: "continuous",
+        borderWidth: 1,
+        borderColor: themeColors.border,
+        backgroundColor: fieldBackgroundColor,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+      }}
+    >
+      <Text selectable style={{ flex: 1, color: themeColors.text, fontSize: 14, fontWeight: "600" }}>
+        Create as Clip
+      </Text>
+      <Switch
+        accessibilityLabel="Create as Clip"
+        value={isClip}
+        onValueChange={actions.onClipModeChange}
+        disabled={!model.targetAvailable || model.isBusy}
       />
     </View>
   );
@@ -220,7 +256,7 @@ export const BookmarkEditorView = ({
             accessibilityRole="button"
             accessibilityLabel="Edit clip range"
             onPress={actions.onOpenClipEditor}
-            disabled={model.isBusy}
+            disabled={!canEditClip}
             style={({ pressed }) => ({
               flex: 1,
               borderRadius: 12,
@@ -228,7 +264,7 @@ export const BookmarkEditorView = ({
               backgroundColor: themeColors.accent,
               paddingVertical: 12,
               alignItems: "center",
-              opacity: model.isBusy ? 0.5 : pressed ? 0.82 : 1,
+              opacity: !canEditClip ? 0.5 : pressed ? 0.82 : 1,
             })}
           >
             <Text selectable style={{ color: themeColors.accentForeground, fontSize: 14, fontWeight: "800" }}>
@@ -238,7 +274,7 @@ export const BookmarkEditorView = ({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Remove clip"
-            onPress={actions.onRemoveClip}
+            onPress={() => actions.onClipModeChange(false)}
             disabled={model.isBusy}
             style={({ pressed }) => ({
               flex: 1,
@@ -338,24 +374,6 @@ export const BookmarkEditorView = ({
             {formatBookmarkDraftTime(model.draft.startTimeSeconds)}
           </Text>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Create clip"
-          onPress={actions.onOpenClipEditor}
-          disabled={model.isBusy}
-          style={({ pressed }) => ({
-            borderRadius: 12,
-            borderCurve: "continuous",
-            backgroundColor: themeColors.accent,
-            paddingVertical: 12,
-            alignItems: "center",
-            opacity: model.isBusy ? 0.5 : pressed ? 0.82 : 1,
-          })}
-        >
-          <Text selectable style={{ color: themeColors.accentForeground, fontSize: 14, fontWeight: "800" }}>
-            Create Clip
-          </Text>
-        </Pressable>
       </View>
     );
 
@@ -482,66 +500,73 @@ export const BookmarkEditorView = ({
           backgroundColor: themeColors.bg,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <View style={{ flex: 1, alignItems: "flex-start" }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                model.mode === "detail" ? "Cancel bookmark detail" : "Cancel bookmark draft"
+              }
+              onPress={actions.onCancel}
+              disabled={model.isBusy}
+              style={({ pressed }) => ({
+                borderRadius: 12,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: themeColors.border,
+                backgroundColor: themeColors.surface,
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 10,
+                opacity: model.isBusy ? 0.5 : pressed ? 0.82 : 1,
+              })}
+            >
+              <Text selectable style={{ color: themeColors.text, fontSize: 14, fontWeight: "700" }}>
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
           <Text
             selectable
+            numberOfLines={1}
+            adjustsFontSizeToFit
             style={{
-              flex: 1,
+              flex: 2,
               color: themeColors.text,
               fontSize: 20,
               lineHeight: 26,
               fontWeight: "700",
+              textAlign: "center",
             }}
           >
             {screenTitle}
           </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              model.mode === "detail" ? "Cancel bookmark detail" : "Cancel bookmark draft"
-            }
-            onPress={actions.onCancel}
-            disabled={model.isBusy}
-            style={({ pressed }) => ({
-              borderRadius: 12,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: themeColors.border,
-              backgroundColor: themeColors.surface,
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 10,
-              opacity: model.isBusy ? 0.5 : pressed ? 0.82 : 1,
-            })}
-          >
-            <Text selectable style={{ color: themeColors.text, fontSize: 14, fontWeight: "700" }}>
-              Cancel
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={model.mode === "detail" ? "Save bookmark edit" : "Save bookmark"}
-            onPress={actions.onSave}
-            disabled={!model.canSave}
-            style={({ pressed }) => ({
-              borderRadius: 12,
-              borderCurve: "continuous",
-              borderWidth: 1,
-              borderColor: themeColors.accent,
-              backgroundColor: themeColors.accent,
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 10,
-              opacity: !model.canSave ? 0.5 : pressed ? 0.82 : 1,
-            })}
-          >
-            <Text
-              selectable
-              style={{ color: themeColors.accentForeground, fontSize: 14, fontWeight: "700" }}
+          <View style={{ flex: 1, alignItems: "flex-end" }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={model.mode === "detail" ? "Save bookmark edit" : "Save bookmark"}
+              onPress={actions.onSave}
+              disabled={!model.canSave}
+              style={({ pressed }) => ({
+                borderRadius: 12,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: themeColors.accent,
+                backgroundColor: themeColors.accent,
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 10,
+                opacity: !model.canSave ? 0.5 : pressed ? 0.82 : 1,
+              })}
             >
-              {saveLabel}
-            </Text>
-          </Pressable>
+              <Text
+                selectable
+                style={{ color: themeColors.accentForeground, fontSize: 14, fontWeight: "700" }}
+              >
+                {saveLabel}
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         {model.persistenceNotice ? (
@@ -584,57 +609,9 @@ export const BookmarkEditorView = ({
         ) : (
           <>
             {renderTitleField()}
+            {renderClipSwitch()}
             {renderRange()}
             {model.mode === "add" ? renderNoteField() : null}
-            {model.mode === "add" && !isClip ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Create clip"
-                onPress={actions.onOpenClipEditor}
-                disabled={!model.targetAvailable || model.isBusy || !model.draft.title.trim()}
-                style={({ pressed }) => {
-                  const enabled =
-                    model.targetAvailable && !model.isBusy && Boolean(model.draft.title.trim());
-                  return {
-                    borderRadius: 14,
-                    borderCurve: "continuous",
-                    borderWidth: 1,
-                    borderColor: enabled ? themeColors.accent : themeColors.border,
-                    backgroundColor: enabled ? themeColors.accent : themeColors.surface,
-                    paddingHorizontal: 14,
-                    paddingVertical: 14,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8,
-                    opacity: !enabled ? 0.5 : pressed ? 0.82 : 1,
-                  };
-                }}
-              >
-                <SymbolView
-                  name="waveform"
-                  tintColor={
-                    model.targetAvailable && model.draft.title.trim()
-                      ? themeColors.accentForeground
-                      : themeColors.textMuted
-                  }
-                  size={18}
-                />
-                <Text
-                  selectable
-                  style={{
-                    color:
-                      model.targetAvailable && model.draft.title.trim()
-                        ? themeColors.accentForeground
-                        : themeColors.textMuted,
-                    fontSize: 14,
-                    fontWeight: "700",
-                  }}
-                >
-                  Create Clip
-                </Text>
-              </Pressable>
-            ) : null}
             {model.mode === "detail" ? renderExportActions() : null}
             {model.mode === "detail" ? renderNoteField() : null}
           </>

@@ -161,4 +161,5 @@ for native edits. Reach for it only if the `eas-build-post-install` hook proves 
 
 ---
 
-*Related: `patches/react-native-screens+4.25.2.patch` (the patch itself), `ROLLBACK_ACCESSORY_INLINE.md` (what the patch does and how to remove it).*
+*Related: `patches/react-native-screens+4.26.2.patch` (the patch itself) and
+`react-native-screens-patches.md` (its purpose, upgrade gate, verification, and removal).*

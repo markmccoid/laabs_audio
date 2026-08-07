@@ -1,10 +1,12 @@
 import { itemsApi, type PodcastItemDetails } from "@/api/items-api";
+import { meApi } from "@/api/me-api";
 import type { PodcastSeriesIndexSummary } from "@/api/library-items-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { podcastSeriesIndexRepository } from "@/data/sqlite/podcast-series-index-repository";
 import { listTouchedEpisodesForContinue } from "@/data/sqlite/touched-episodes";
 import { orderContinueEpisodes } from "@/podcast/episode-continue-eligibility";
 import { buildPodcastItemDetailsQueryOptions } from "@/podcast/podcast-item-details-query";
+import { indexServerEpisodeProgress } from "@/podcast/episode-list-progress";
 import { assembleRecentEpisodesForHomeDefault } from "@/podcast/podcast-library-experience-default";
 import { queryKeys } from "@/query/query-keys";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -106,6 +108,33 @@ export const usePodcastTouchedEpisodes = () => {
     ),
     queryFn: listTouchedEpisodesForContinue,
     enabled,
+  });
+};
+
+/** Complete server-known Episode progress from /api/me, scoped to one Podcast. */
+export const usePodcastEpisodeProgress = (libraryItemId?: string) => {
+  const status = useAuthStore((state) => state.status);
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
+  const isOnline = useAuthStore((state) => state.isOnline);
+  const enabled =
+    status === "authenticated" &&
+    !!activeLibraryUserKey &&
+    !!libraryItemId?.trim() &&
+    isOnline !== false;
+
+  return useQuery({
+    queryKey: queryKeys.podcastEpisodeProgress(activeLibraryUserKey),
+    queryFn: async () => (await meApi.getMe()).mediaProgress ?? [],
+    select: (mediaProgress) =>
+      indexServerEpisodeProgress({
+        libraryItemId: libraryItemId!,
+        mediaProgress,
+      }),
+    enabled,
+    staleTime: 60 * 1000,
+    meta: { persist: true },
   });
 };
 

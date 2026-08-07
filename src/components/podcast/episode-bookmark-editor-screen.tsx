@@ -309,21 +309,24 @@ export const EpisodeBookmarkEditorScreen = () => {
           onNoteChange: draft.setNote,
           onAdjustPosition: (deltaSeconds) =>
             draft.setPointTime(draft.startTimeSeconds + deltaSeconds),
-          onOpenClipEditor: () => {
-            if (!draft.title.trim() || isBusy) return;
-            if (draft.kind !== "clip" || draft.endTimeSeconds === null) {
+          onClipModeChange: (enabled) => {
+            if (enabled) {
               draft.setClipRange(
                 draft.startTimeSeconds,
                 Math.min(draft.durationSeconds, draft.startTimeSeconds + 30),
               );
+            } else {
+              draft.removeClip();
             }
+          },
+          onOpenClipEditor: () => {
+            if (!draft.title.trim() || !isClip || isBusy) return;
             router.push(
               isEditing
                 ? "/episode-bookmark-detail/clip-editor"
                 : "/episode-addbookmark/clip-editor",
             );
           },
-          onRemoveClip: draft.removeClip,
           onSave: () => void handleSave(),
           onCancel: requestClose,
           onExportAudio: () => void handleExportAudio(),

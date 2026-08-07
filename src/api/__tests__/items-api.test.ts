@@ -40,7 +40,7 @@ describe("itemsApi.getPodcastItemDetails", () => {
     const details = await itemsApi.getPodcastItemDetails("podcast-1");
 
     expect(mockGet).toHaveBeenCalledWith(
-      "/api/items/podcast-1?expanded=1&include=progress",
+      "/api/items/podcast-1?expanded=1",
     );
     expect(details).toEqual(
       expect.objectContaining({

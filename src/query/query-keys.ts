@@ -114,6 +114,8 @@ export const queryKeys = {
     userKey: string | null | undefined,
     itemId: string | null | undefined,
   ) => ["user", userKey ?? null, "podcastItemDetails", itemId ?? null] as const,
+  podcastEpisodeProgress: (userKey: string | null | undefined) =>
+    ["user", userKey ?? null, "podcastEpisodeProgress"] as const,
   podcastSeriesIndex: (
     userKey: string | null | undefined,
     libraryId: string | null | undefined,

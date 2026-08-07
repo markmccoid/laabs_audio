@@ -89,12 +89,25 @@ export const BookAddBookmarkSheet = () => {
           onNoteChange: draft.setLocalNote,
           onAdjustPosition: (deltaSeconds) =>
             draft.setPointPosition(draft.positionSeconds + deltaSeconds),
+          onClipModeChange: (enabled) => {
+            if (enabled) {
+              draft.convertToClipDraft();
+            } else {
+              draft.removeClip();
+            }
+          },
           onOpenClipEditor: () => {
-            if (!draft.libraryItemId || !draft.title.trim() || isSaving) return;
-            draft.convertToClipDraft();
+            if (
+              !draft.libraryItemId ||
+              !draft.title.trim() ||
+              draft.kind !== "clip" ||
+              draft.clipEndSeconds === null ||
+              isSaving
+            ) {
+              return;
+            }
             router.push("/book-addbookmark/clip-editor");
           },
-          onRemoveClip: draft.removeClip,
           onSave: () => void handleSave(),
           onCancel: () => void closeDraft(),
         }}

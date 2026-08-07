@@ -62,7 +62,7 @@ export const itemsApi = {
 
   async getPodcastItemDetails(itemId: string): Promise<PodcastItemDetails> {
     const response = await absClient.get<LibraryItem>(
-      `/api/items/${itemId}?expanded=1&include=progress`,
+      `/api/items/${itemId}?expanded=1`,
     );
 
     if (!response?.media) {

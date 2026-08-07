@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-08-06` `8e1db69` - Improve podcast episode browsing/progress and bookmark clip editing, including centered bookmark actions, title validation, and switch-based clip creation.
+  Tester focus: browse podcast episodes and verify progress remains accurate; add or edit a bookmark, confirm the title field focuses with required-field feedback, use Create as Clip, Edit Clip, and Remove Clip, and verify Cancel/Save placement.
+
 - `2026-08-04` `933c990` - Bump the app release version to 1.7.3.
   Tester focus: confirm the built app reports version 1.7.3 while existing runtime behavior remains unchanged.
 
