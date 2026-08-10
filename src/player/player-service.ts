@@ -142,6 +142,7 @@ type TemporaryPlaybackRestoreState = {
 };
 
 type TemporaryPlaybackSession = {
+  id: number;
   surface: "bookmark-list" | "clip-editor";
   libraryItemId: string;
   episodeId: string | null;
@@ -264,6 +265,7 @@ class PlayerService {
   private skipSeekInFlight: Promise<void> | null = null;
   private nativeSeekPauseGuardUntilMs = 0;
   private temporaryPlaybackSession: TemporaryPlaybackSession | null = null;
+  private temporaryPlaybackOperationId = 0;
   private unsubscribeSettings: (() => void) | null = null;
   private unsubscribeBookDownloads: (() => void) | null = null;
   private unsubscribeEpisodeDownloads: (() => void) | null = null;
@@ -276,6 +278,14 @@ class PlayerService {
 
   private createPlaybackControlIntentId(kind: "start" | "play" | "pause") {
     return `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private isCurrentTemporaryPlaybackOperation(operationId: number) {
+    return (
+      this.temporaryPlaybackOperationId === operationId &&
+      this.temporaryPlaybackSession?.id === operationId &&
+      !this.temporaryPlaybackSession.stoppedAtEnd
+    );
   }
 
   // Playback breadcrumbs. console.log is the reliable device-log channel:
@@ -3352,6 +3362,7 @@ class PlayerService {
     endTimeSeconds?: number | null;
     retainEndedState: boolean;
   }) {
+    const operationId = ++this.temporaryPlaybackOperationId;
     const startMs = secondsToMs(payload.startTimeSeconds);
     const endMs =
       payload.kind === "clip" && typeof payload.endTimeSeconds === "number"
@@ -3365,7 +3376,8 @@ class PlayerService {
     const canSwitchInPlace =
       existingSession?.surface === "bookmark-list" && payload.surface === "bookmark-list";
     if (existingSession && !canSwitchInPlace) {
-      await this.returnFromTemporaryPlayback();
+      await this.returnFromTemporaryPlaybackSession(existingSession);
+      if (operationId !== this.temporaryPlaybackOperationId) return;
     }
 
     const stateBeforePlayback = playbackStore.getState();
@@ -3391,7 +3403,8 @@ class PlayerService {
       playbackStore.getState().actions.setPlaybackState("paused");
     }
 
-    this.temporaryPlaybackSession = {
+    const temporarySession: TemporaryPlaybackSession = {
+      id: operationId,
       surface: payload.surface,
       libraryItemId: payload.libraryItemId,
       episodeId: payload.episodeId ?? null,
@@ -3405,6 +3418,7 @@ class PlayerService {
       stoppedAtEnd: false,
       retainEndedState: payload.retainEndedState,
     };
+    this.temporaryPlaybackSession = temporarySession;
     temporaryPlaybackStore.getState().actions.startLoading({
       surface: payload.surface,
       libraryItemId: payload.libraryItemId,
@@ -3418,14 +3432,17 @@ class PlayerService {
     });
 
     try {
-      await this.seekTemporaryEngineTo(startMs);
+      await this.seekTemporaryEngineTo(startMs, operationId);
+      if (!this.isCurrentTemporaryPlaybackOperation(operationId)) return;
       await this.performPlay({
         touchProgressCache: false,
         updatePlaybackStore: false,
         disableLocalStreamFallback: true,
       });
+      if (!this.isCurrentTemporaryPlaybackOperation(operationId)) return;
       temporaryPlaybackStore.getState().actions.setPlaying();
     } catch (error) {
+      if (!this.isCurrentTemporaryPlaybackOperation(operationId)) return;
       const message = error instanceof Error ? error.message : "Unable to play bookmark";
       const failedSession = this.temporaryPlaybackSession;
       if (failedSession) {
@@ -3445,9 +3462,11 @@ class PlayerService {
     }
   }
 
-  private async seekTemporaryEngineTo(positionMs: number) {
+  private async seekTemporaryEngineTo(positionMs: number, expectedOperationId?: number) {
     const temporarySession = this.temporaryPlaybackSession;
     if (!temporarySession) return;
+    const operationId = expectedOperationId ?? temporarySession.id;
+    if (temporarySession.id !== operationId) return;
 
     const state = playbackStore.getState();
     if (
@@ -3486,6 +3505,7 @@ class PlayerService {
       await this.engine.seek(trackPositionMs);
     }
 
+    if (!this.isCurrentTemporaryPlaybackOperation(operationId)) return;
     temporaryPlaybackStore.getState().actions.setPosition(boundedPosition);
   }
 
@@ -3583,6 +3603,15 @@ class PlayerService {
       return;
     }
 
+    ++this.temporaryPlaybackOperationId;
+    await this.returnFromTemporaryPlaybackSession(temporarySession);
+  }
+
+  private async returnFromTemporaryPlaybackSession(
+    temporarySession: TemporaryPlaybackSession,
+  ) {
+    if (this.temporaryPlaybackSession?.id !== temporarySession.id) return;
+
     this.temporaryPlaybackSession = { ...temporarySession, stoppedAtEnd: true };
 
     try {
@@ -3599,8 +3628,10 @@ class PlayerService {
           restoredPositionMs,
         };
       }
-      this.temporaryPlaybackSession = null;
-      temporaryPlaybackStore.getState().actions.reset();
+      if (this.temporaryPlaybackSession?.id === temporarySession.id) {
+        this.temporaryPlaybackSession = null;
+        temporaryPlaybackStore.getState().actions.reset();
+      }
     }
   }
 

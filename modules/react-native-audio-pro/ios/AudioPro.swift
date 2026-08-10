@@ -538,9 +538,11 @@ class AudioPro: RCTEventEmitter {
 		DispatchQueue.main.async {
 			self.timer?.invalidate()
 			self.sendProgressNoticeEvent()
-			self.timer = Timer.scheduledTimer(withTimeInterval: self.settingProgressInterval, repeats: true) { [weak self] _ in
+			let timer = Timer(timeInterval: self.settingProgressInterval, repeats: true) { [weak self] _ in
 				self?.sendProgressNoticeEvent()
 			}
+			self.timer = timer
+			RunLoop.main.add(timer, forMode: .common)
 		}
 	}
 

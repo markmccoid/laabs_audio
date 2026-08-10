@@ -1,0 +1,227 @@
+{
+  "generated_at": "2026-08-07T11:37:40Z",
+  "generated_from_commit": "2b49de5352e8d8e190db5806ce331bad7e37da60",
+  "scope": [
+    "index.js",
+    "package.json",
+    "app.json",
+    "metro.config.js",
+    "src/**",
+    "modules/react-native-audio-pro/**"
+  ],
+  "nodes": [
+    {
+      "id": "app-ui",
+      "path": "src/app/_layout.tsx",
+      "type": "presentation",
+      "role": "Expo Router shell and React Native screens/components; owns navigation, startup coordination, and user-triggered commands.",
+      "entrypoints": ["RootLayout", "src/app/(tabs)/(home)/index.tsx", "src/app/(tabs)/library/index.tsx", "src/app/(tabs)/search/index.tsx"],
+      "tests": ["src/components/__tests__/library-selection-gate.test.ts", "src/navigation/__tests__/authenticated-route-state.test.ts"],
+      "constraints": ["Expo Router route files live under src/app.", "Startup gates rendering on auth hydration and persisted-query restoration."],
+      "evidence": [{"path": "src/app/_layout.tsx", "symbol": "RootLayout"}]
+    },
+    {
+      "id": "auth-session",
+      "path": "src/auth/enter-user-session.ts",
+      "type": "domain",
+      "role": "Authentication, remembered sessions, identity boundaries, active-library resolution, and library activation.",
+      "entrypoints": ["enterUserSession", "activateLibrary", "useAuthBootstrap", "authStore"],
+      "tests": ["src/auth/__tests__/enter-user-session.test.ts", "src/auth/__tests__/library-activation-podcast.test.ts", "src/auth/__tests__/auth-store-repeat-hydration.test.ts"],
+      "constraints": ["Session entry phases are authenticate, persist, crossBoundary, commit, then resolve.", "Library activation is navigation-free and scoped by user plus library."],
+      "evidence": [{"path": "src/auth/enter-user-session.ts", "symbol": "enterUserSession"}]
+    },
+    {
+      "id": "abs-api",
+      "path": "src/api/abs-client.ts",
+      "type": "service",
+      "role": "Typed Audiobookshelf API facade with authenticated requests and domain-specific network errors.",
+      "entrypoints": ["absClient.request", "librariesApi", "libraryItemsApi", "meApi", "playbackApi", "sessionsApi"],
+      "tests": ["src/api/__tests__/auth-fetch.test.ts", "src/api/__tests__/items-api.test.ts", "src/api/__tests__/playlists-api.test.ts"],
+      "constraints": ["All authenticated API calls pass through authFetch.", "401, offline, and server-unavailable states are translated into explicit errors."],
+      "evidence": [{"path": "src/api/abs-client.ts", "symbol": "absClient"}]
+    },
+    {
+      "id": "audiobookshelf",
+      "path": "src/api/auth-fetch.ts",
+      "type": "external",
+      "role": "External Audiobookshelf HTTP server boundary for authentication, catalog, playback sessions, progress, bookmarks, collections, and playlists.",
+      "entrypoints": ["fetchFromAudiobookshelf", "fetch"],
+      "tests": ["src/api/__tests__/auth-fetch.test.ts"],
+      "constraints": ["Server URL comes from the active auth provider.", "Requests time out after 15 seconds and update reachability state."],
+      "evidence": [{"path": "src/api/auth-fetch.ts", "symbol": "fetchFromAudiobookshelf"}]
+    },
+    {
+      "id": "query-cache",
+      "path": "src/query/query-client.ts",
+      "type": "data",
+      "role": "TanStack Query cache, query keys, session cache clearing, reconciliation, and SQLite projection invalidation.",
+      "entrypoints": ["queryClient", "queryKeys", "clearSessionQueryCache", "fetchReconciledUserServerState"],
+      "tests": ["src/hooks/__tests__/abs-data-hooks.test.ts", "src/regression/__tests__/book-library-slice-contract.test.ts"],
+      "constraints": ["Only successful queries with meta.persist opt into MMKV persistence.", "User-scoped cache is cleared across session boundaries."],
+      "evidence": [{"path": "src/query/query-client.ts", "symbol": "queryClient"}]
+    },
+    {
+      "id": "catalog-experience",
+      "path": "src/library/use-library-results.ts",
+      "type": "domain",
+      "role": "Library, home, search, shelves, collections, playlists, and series view models backed by query and SQLite projections.",
+      "entrypoints": ["useLibraryResults", "useSearchResults", "useHomeShelves", "useLibraryCollections", "useLibraryPlaylists", "useLibrarySeries"],
+      "tests": ["src/library/__tests__/lists-preferences-store.test.ts", "src/hooks/__tests__/use-library-series.test.ts", "src/components/books/__tests__/book-action-types.test.ts"],
+      "constraints": ["Catalog queries require an authenticated active user/library scope.", "Missing catalog rows trigger a forced shadow refresh."],
+      "evidence": [{"path": "src/library/use-library-results.ts", "symbol": "useLibraryResults"}]
+    },
+    {
+      "id": "shadow-sqlite",
+      "path": "src/data/sqlite/shadow-db-core.ts",
+      "type": "database",
+      "role": "On-device shadow SQLite catalog and overlay database with FTS search, repositories, refresh coordination, and serialized writes.",
+      "entrypoints": ["getDb", "sqliteRefreshCoordinator.refreshActiveLibrary", "sqliteSearchRepository", "refreshShadowLibraryCatalog", "refreshShadowUserOverlays"],
+      "tests": ["src/data/sqlite/__tests__/use-windowed-item-summaries.test.ts", "src/data/sqlite/__tests__/touched-episodes-current-time-sql.test.ts"],
+      "constraints": ["Database is scoped by user_id and library_id.", "Writes pass through withWriteGuard; WAL and foreign keys are enabled."],
+      "evidence": [{"path": "src/data/sqlite/shadow-db-core.ts", "symbol": "getDb"}]
+    },
+    {
+      "id": "podcast-domain",
+      "path": "src/podcast/podcast-library-experience.ts",
+      "type": "domain",
+      "role": "Podcast-specific browsing, shelves, episode identity, downloads, bookmarks, progress intents, and series-index readiness.",
+      "entrypoints": ["refreshPodcastHomeShelves", "ensurePodcastSeriesIndexReady", "syncPendingEpisodeProgressIntents", "resolveEpisodePlaybackSource"],
+      "tests": ["src/podcast/__tests__/podcast-library-experience.test.ts", "src/podcast/__tests__/episode-progress-sync.test.ts", "src/podcast/__tests__/episode-download-facade.test.ts"],
+      "constraints": ["Episode identity requires both library item and episode identifiers.", "Podcast home refresh requires a ready SQLite series index."],
+      "evidence": [{"path": "src/podcast/podcast-library-experience.ts", "symbol": "refreshPodcastHomeShelves"}]
+    },
+    {
+      "id": "player",
+      "path": "src/player/player-service.ts",
+      "type": "service",
+      "role": "Playback orchestration for books and episodes, queue/source resolution, controls, temporary clips, restore, and periodic synchronization.",
+      "entrypoints": ["playerService", "PlayerService.loadBook", "PlayerService.loadEpisode", "PlayerService.play", "PlayerService.pause"],
+      "tests": ["src/player/playback-start-attempt.test.ts", "src/player/playback-source-transition.test.ts", "src/player/temporary-playback-policy.test.ts"],
+      "constraints": ["Playback supports streamed and local sessions with guarded fallback.", "Only one playback control intent may settle at a time."],
+      "evidence": [{"path": "src/player/player-service.ts", "symbol": "PlayerService"}]
+    },
+    {
+      "id": "audio-native",
+      "path": "modules/react-native-audio-pro/src/audioPro.ts",
+      "type": "native",
+      "role": "In-repo React Native Audio Pro bridge and native iOS/Android playback, lock-screen, CarPlay, progress-event, and ambient-audio runtime.",
+      "entrypoints": ["AudioPro.play", "AudioPro.pause", "AudioPro.resume", "AudioPro.addEventListener", "AudioPro.ambientPlay"],
+      "tests": ["modules/react-native-audio-pro/src/__tests__/audioPro.basic.test.ts", "modules/react-native-audio-pro/src/__tests__/internalStore.test.ts"],
+      "constraints": ["Native AudioPro is accessed through NativeModules.AudioPro.", "Track URLs must use supported http(s) or file schemes."],
+      "evidence": [{"path": "modules/react-native-audio-pro/src/audioPro.ts", "symbol": "AudioPro"}]
+    },
+    {
+      "id": "device-storage",
+      "path": "src/store/mmkv-storage.ts",
+      "type": "database",
+      "role": "MMKV-backed Zustand state and persisted TanStack Query snapshots for auth-adjacent preferences, playback, shelves, logs, and local intent queues.",
+      "entrypoints": ["mmkvStorage", "mmkvQueryPersister", "deviceBooksStore", "deviceEpisodeDownloadsStore", "settingsStore"],
+      "tests": ["src/store/device-books-bookmarks.characterization.test.ts", "src/store/__tests__/podcast-shelves-store.test.ts"],
+      "constraints": ["Storage identifier is laabs-mmkv.", "Persisted records are normalized during hydration and scoped where identity requires it."],
+      "evidence": [{"path": "src/store/mmkv-storage.ts", "symbol": "mmkvStorage"}]
+    },
+    {
+      "id": "progress-sync",
+      "path": "src/progress/listening-position-sync.ts",
+      "type": "queue",
+      "role": "Durable listening-position intent queues, server synchronization, offline retry, progress reconciliation, and display-position projection.",
+      "entrypoints": ["syncListeningPosition", "recordProgressSyncIntent", "syncPendingEpisodeProgressIntents", "chooseResumeResolutionCandidate"],
+      "tests": ["src/progress/background-progress-routing.test.ts", "src/podcast/__tests__/episode-progress-sync.test.ts", "src/regression/__tests__/book-library-slice-contract.test.ts"],
+      "constraints": ["Durable intents are recorded before sync for lifecycle-critical triggers.", "Offline or failed writes remain queued rather than being discarded."],
+      "evidence": [{"path": "src/progress/listening-position-sync.ts", "symbol": "syncListeningPosition"}]
+    },
+    {
+      "id": "bookmarks-sharing",
+      "path": "src/sharing/clip-export.ts",
+      "type": "domain",
+      "role": "Bookmark contracts and editors plus book sharing, downloaded-audio clip planning/extraction, and transcript export.",
+      "entrypoints": ["resolveClipExportSourcePlan", "extractClipExportFile", "createClipTranscriptExportFile", "shareBook"],
+      "tests": ["src/bookmarks/bookmark-contracts.test.ts", "src/sharing/clip-export.test.ts", "src/sharing/episode-clip-export.test.ts"],
+      "constraints": ["Audio clip export requires fully available local source segments.", "Temporary export files are explicitly deleted by callers."],
+      "evidence": [{"path": "src/sharing/clip-export.ts", "symbol": "resolveClipExportSourcePlan"}]
+    },
+    {
+      "id": "transcription-native",
+      "path": "src/transcription/clip-transcription.ts",
+      "type": "native",
+      "role": "Native audio trimming and on-device clip transcription adapters used by bookmark clip workflows.",
+      "entrypoints": ["createTranscriptionSourceFile", "transcribeClipSourcePlan", "extractClip", "transcribeClip"],
+      "tests": ["src/sharing/clip-export.test.ts", "src/sharing/episode-clip-export.test.ts"],
+      "constraints": ["Web adapters report native capability as unavailable.", "Transcription source files live in a cache directory and require cleanup."],
+      "evidence": [{"path": "src/transcription/clip-transcription.ts", "symbol": "transcribeClipSourcePlan"}]
+    },
+    {
+      "id": "ambient-audio",
+      "path": "src/ambient/ambient-service.ts",
+      "type": "service",
+      "role": "Imports ambient tracks, attaches per-book preferences, coordinates position/volume, and follows primary playback state.",
+      "entrypoints": ["ambientService", "AmbientCoordinator"],
+      "tests": ["modules/react-native-audio-pro/src/__tests__/audioPro.basic.test.ts"],
+      "constraints": ["Ambient audio only runs for an enabled attached track and active book session.", "Primary player state controls pause/resume behavior."],
+      "evidence": [{"path": "src/ambient/ambient-service.ts", "symbol": "ambientService"}]
+    },
+    {
+      "id": "carplay",
+      "path": "src/carplay/carplay-service.ts",
+      "type": "integration",
+      "role": "Publishes audiobook shelves and metadata to native CarPlay and routes native selection, chapter, rate, and remote-control events back to playback.",
+      "entrypoints": ["initCarPlayService", "publishCarPlayShelves", "initHeadlessCarPlayRuntime"],
+      "tests": ["src/carplay/headless-runtime.test.ts", "src/carplay/carplay-rate-options.test.ts", "src/carplay/carplay-shelf-labels.test.ts"],
+      "constraints": ["Headless runtime initializes player state before handling native events.", "Shelf snapshots are persisted for native startup fallback."],
+      "evidence": [{"path": "src/carplay/carplay-service.ts", "symbol": "initCarPlayService"}]
+    },
+    {
+      "id": "widgets",
+      "path": "src/widgets/active-audiobook-widget-coordinator.ts",
+      "type": "integration",
+      "role": "Projects active audiobook playback into Expo Widgets snapshots, timelines, and locally cached artwork.",
+      "entrypoints": ["startActiveAudiobookWidgetCoordinator", "startActiveAudiobookWidgetPublisher", "LaabsAudioWidget"],
+      "tests": ["src/widgets/active-audiobook-widget-coordinator.test.ts", "src/widgets/active-audiobook-widget-publisher.test.ts", "src/widgets/LaabsAudioWidget.test.ts"],
+      "constraints": ["Widget projection currently excludes podcast episodes.", "Artwork preparation is generation-guarded to avoid publishing stale async results."],
+      "evidence": [{"path": "src/widgets/active-audiobook-widget-coordinator.ts", "symbol": "startActiveAudiobookWidgetCoordinator"}]
+    }
+  ],
+  "edges": [
+    {"from": "app-ui", "to": "auth-session", "type": "calls", "evidence": [{"path": "src/components/auth/sign-in-form-screen.tsx", "symbol": "enterUserSession"}]},
+    {"from": "app-ui", "to": "query-cache", "type": "imports", "evidence": [{"path": "src/app/_layout.tsx", "symbol": "queryClient"}]},
+    {"from": "app-ui", "to": "catalog-experience", "type": "imports", "evidence": [{"path": "src/components/Library/LibraryContainer.tsx", "symbol": "useSearchResults"}]},
+    {"from": "app-ui", "to": "podcast-domain", "type": "imports", "evidence": [{"path": "src/components/podcast/podcast-home-shelves-screen.tsx", "symbol": "usePodcastHomeShelves"}]},
+    {"from": "app-ui", "to": "player", "type": "calls", "evidence": [{"path": "src/app/_layout.tsx", "symbol": "playerService.loadBook"}]},
+    {"from": "app-ui", "to": "bookmarks-sharing", "type": "calls", "evidence": [{"path": "src/components/bookComponents/book-bookmark-detail-sheet.tsx", "symbol": "extractClipExportFile"}]},
+    {"from": "app-ui", "to": "ambient-audio", "type": "calls", "evidence": [{"path": "src/components/main-player/main-player-ambient-control.tsx", "symbol": "ambientService.resumeTrack"}]},
+    {"from": "auth-session", "to": "audiobookshelf", "type": "calls", "evidence": [{"path": "src/auth/auth-service.ts", "symbol": "async login"}]},
+    {"from": "auth-session", "to": "device-storage", "type": "writes", "evidence": [{"path": "src/auth/enter-user-session.ts", "symbol": "authStorage.upsertSession"}]},
+    {"from": "auth-session", "to": "query-cache", "type": "calls", "evidence": [{"path": "src/auth/session-boundary.ts", "symbol": "clearSessionQueryCache"}]},
+    {"from": "auth-session", "to": "shadow-sqlite", "type": "calls", "evidence": [{"path": "src/auth/library-activation.ts", "symbol": "ensurePodcastSeriesIndexReady"}]},
+    {"from": "abs-api", "to": "audiobookshelf", "type": "calls", "evidence": [{"path": "src/api/auth-fetch.ts", "symbol": "fetchFromAudiobookshelf"}]},
+    {"from": "query-cache", "to": "device-storage", "type": "writes", "evidence": [{"path": "src/app/_layout.tsx", "symbol": "mmkvQueryPersister"}]},
+    {"from": "catalog-experience", "to": "query-cache", "type": "reads", "evidence": [{"path": "src/library/use-library-results.ts", "symbol": "useQuery"}]},
+    {"from": "catalog-experience", "to": "shadow-sqlite", "type": "reads", "evidence": [{"path": "src/library/use-library-results.ts", "symbol": "sqliteSearchRepository.querySearchResultSet"}]},
+    {"from": "shadow-sqlite", "to": "abs-api", "type": "calls", "evidence": [{"path": "src/data/sqlite/catalog-refresh.ts", "symbol": "libraryItemsApi.getItemsPage"}]},
+    {"from": "shadow-sqlite", "to": "query-cache", "type": "calls", "evidence": [{"path": "src/data/sqlite/refresh-coordinator.ts", "symbol": "invalidateAllSqliteProjections"}]},
+    {"from": "podcast-domain", "to": "shadow-sqlite", "type": "reads", "evidence": [{"path": "src/podcast/podcast-library-experience-default.ts", "symbol": "refreshPodcastSeriesIndex"}]},
+    {"from": "podcast-domain", "to": "device-storage", "type": "writes", "evidence": [{"path": "src/podcast/episode-progress-store.ts", "symbol": "mmkvStorage"}]},
+    {"from": "player", "to": "abs-api", "type": "calls", "evidence": [{"path": "src/player/player-service.ts", "symbol": "playbackApi.getPlayInfo"}]},
+    {"from": "player", "to": "audio-native", "type": "calls", "evidence": [{"path": "src/player/audio-engine.ts", "symbol": "AudioPro.play"}]},
+    {"from": "player", "to": "device-storage", "type": "reads", "evidence": [{"path": "src/player/player-service.ts", "symbol": "deviceBooksStore.getState"}]},
+    {"from": "player", "to": "progress-sync", "type": "calls", "evidence": [{"path": "src/player/player-service.ts", "symbol": "syncListeningPosition"}]},
+    {"from": "progress-sync", "to": "abs-api", "type": "calls", "evidence": [{"path": "src/progress/listening-position-sync.ts", "symbol": "meApi.updateProgress"}]},
+    {"from": "progress-sync", "to": "device-storage", "type": "writes", "evidence": [{"path": "src/progress/listening-position-sync.ts", "symbol": "recordProgressSyncIntent"}]},
+    {"from": "bookmarks-sharing", "to": "device-storage", "type": "reads", "evidence": [{"path": "src/sharing/clip-export.ts", "symbol": "DownloadTrack"}]},
+    {"from": "bookmarks-sharing", "to": "transcription-native", "type": "calls", "evidence": [{"path": "src/sharing/clip-export-extractor.ts", "symbol": "extractClip"}]},
+    {"from": "transcription-native", "to": "audio-native", "type": "imports", "evidence": [{"path": "src/transcription/clip-transcription.ts", "symbol": "extractClip"}]},
+    {"from": "ambient-audio", "to": "audio-native", "type": "calls", "evidence": [{"path": "src/ambient/ambient-service.ts", "symbol": "AudioPro.ambientPlay"}]},
+    {"from": "ambient-audio", "to": "device-storage", "type": "writes", "evidence": [{"path": "src/ambient/ambient-service.ts", "symbol": "ambientStore.getState"}]},
+    {"from": "carplay", "to": "player", "type": "calls", "evidence": [{"path": "src/carplay/carplay-service.ts", "symbol": "playerService.requestStart"}]},
+    {"from": "carplay", "to": "audio-native", "type": "publishes", "evidence": [{"path": "src/carplay/carplay-service.ts", "symbol": "NativeModules.AudioPro?.carPlaySetShelves"}]},
+    {"from": "widgets", "to": "player", "type": "subscribes", "evidence": [{"path": "src/widgets/active-audiobook-widget-coordinator.ts", "symbol": "playbackStore.subscribe"}]},
+    {"from": "widgets", "to": "device-storage", "type": "reads", "evidence": [{"path": "src/widgets/active-audiobook-widget-coordinator.ts", "symbol": "authStore"}]}
+  ],
+  "flows": [
+    {"id": "sign-in-activate", "name": "Sign in and activate library", "trigger": "A user submits credentials or selects a remembered session.", "steps": ["app-ui", "auth-session", "audiobookshelf", "device-storage", "query-cache", "shadow-sqlite"], "outcome": "An authenticated user session and active library are committed, caches are scoped, and the local catalog begins refreshing."},
+    {"id": "browse-refresh", "name": "Browse/search local catalog", "trigger": "A library, home, search, series, collection, or playlist screen requests data.", "steps": ["app-ui", "catalog-experience", "query-cache", "shadow-sqlite", "abs-api", "audiobookshelf"], "outcome": "The UI receives locally projected results; stale or missing projections refresh from Audiobookshelf and invalidate affected queries."},
+    {"id": "play-and-sync", "name": "Play and synchronize position", "trigger": "A user starts or resumes an audiobook or podcast episode.", "steps": ["app-ui", "player", "device-storage", "audio-native", "progress-sync", "abs-api", "audiobookshelf"], "outcome": "Audio plays from a local or streamed source and listening position is persisted locally then synchronized to the server when possible."},
+    {"id": "bookmark-clip", "name": "Export/transcribe bookmark clip", "trigger": "A user exports or transcribes a bookmark clip from downloaded audio.", "steps": ["app-ui", "bookmarks-sharing", "device-storage", "transcription-native"], "outcome": "A trimmed audio clip or transcript file is produced for sharing, with temporary-file cleanup owned by the caller."},
+    {"id": "external-surfaces", "name": "Publish playback to external surfaces", "trigger": "Playback or shelf state changes while CarPlay or the home-screen widget is active.", "steps": ["device-storage", "player", "carplay", "audio-native", "widgets"], "outcome": "CarPlay receives shelf/playback commands and the widget receives an updated audiobook snapshot and artwork timeline."}
+  ]
+}

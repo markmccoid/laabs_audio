@@ -139,7 +139,9 @@ export const BookmarkClipEditor = () => {
     previewBookmarkId === draftPreviewId &&
     previewStatus !== "idle" &&
     previewStatus !== "error";
-  const isPreviewing = isThisDraftPreview && previewStatus !== "ended";
+  const isPreviewPlaying = isThisDraftPreview && previewStatus === "playing";
+  const isPreviewPaused = isThisDraftPreview && previewStatus === "paused";
+  const isPreviewLoading = isThisDraftPreview && previewStatus === "loading";
   const previewElapsedSeconds = isThisDraftPreview
     ? clampSeconds(Math.round(previewPositionMs / 1000) - startSeconds, 0, durationSeconds)
     : previewScrubSeconds;
@@ -233,9 +235,15 @@ export const BookmarkClipEditor = () => {
     }
     if (!draft.libraryItemId || !draftPreviewId) return;
     try {
-      if (isPreviewing && !options?.lastFiveSeconds && options?.offsetSeconds === undefined) {
-        await stopPreview();
-        return;
+      if (!options?.lastFiveSeconds && options?.offsetSeconds === undefined) {
+        if (isPreviewPlaying) {
+          await playerService.pauseTemporaryPlayback();
+          return;
+        }
+        if (isPreviewPaused) {
+          await playerService.resumeTemporaryPlayback();
+          return;
+        }
       }
       await stopPreview();
       const offsetSeconds = clampSeconds(
@@ -506,12 +514,22 @@ export const BookmarkClipEditor = () => {
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={isPreviewing ? "Stop clip preview" : "Preview clip"}
+              accessibilityLabel={
+                isPreviewLoading
+                  ? "Loading clip preview"
+                  : isPreviewPlaying
+                    ? "Pause clip preview"
+                    : isPreviewPaused
+                      ? "Resume clip preview"
+                      : "Preview clip"
+              }
               onPress={() => {
                 void playPreview();
               }}
-              disabled={!clipPreviewAvailability.available}
-              accessibilityState={{ disabled: !clipPreviewAvailability.available }}
+              disabled={!clipPreviewAvailability.available || isPreviewLoading}
+              accessibilityState={{
+                disabled: !clipPreviewAvailability.available || isPreviewLoading,
+              }}
               style={({ pressed }) => ({
                 width: 54,
                 height: 54,
@@ -519,11 +537,16 @@ export const BookmarkClipEditor = () => {
                 backgroundColor: themeColors.accent,
                 alignItems: "center",
                 justifyContent: "center",
-                opacity: !clipPreviewAvailability.available ? 0.45 : pressed ? 0.8 : 1,
+                opacity:
+                  !clipPreviewAvailability.available || isPreviewLoading
+                    ? 0.45
+                    : pressed
+                      ? 0.8
+                      : 1,
               })}
             >
               <SymbolView
-                name={isPreviewing ? "pause.fill" : "play.fill"}
+                name={isPreviewPlaying || isPreviewLoading ? "pause.fill" : "play.fill"}
                 tintColor={themeColors.accentForeground}
                 size={24}
               />
