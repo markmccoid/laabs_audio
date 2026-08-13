@@ -33,6 +33,7 @@ import {
 } from "../navigation/authenticated-route-state";
 import { playerService } from "../player/player-service";
 import { playbackStore, usePlaybackStore } from "../player/playback-store";
+import { configureRevenueCat } from "../purchases/revenuecat";
 import { settingsStore } from "../store/settings-store";
 import { SleepTimerCoordinator } from "../player/sleep-timer-coordinator";
 import { FIVE_MINUTES_MS, queryClient } from "../query/query-client";
@@ -243,6 +244,10 @@ export default function RootLayout() {
 
   useEffect(() => {
     Uniwind.setTheme("system");
+  }, []);
+
+  useEffect(() => {
+    configureRevenueCat();
   }, []);
 
   useEffect(() => {

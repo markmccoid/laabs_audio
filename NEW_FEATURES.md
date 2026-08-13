@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-08-13` `pending` - Add optional iOS tip support through RevenueCat with a Settings support screen, feedback email, App Store rating link, and app version 1.7.6.
+  Tester focus: open Settings > Support LAABS Audio, confirm tip tiers load from RevenueCat Sandbox, complete each sandbox tip purchase, verify cancellation and retry states behave correctly, send feedback opens an addressed email, and Rate LAABS Audio opens the App Store review flow.
+
 - `2026-08-06` `29e3723` - Improve podcast episode browsing/progress and bookmark clip editing, including centered bookmark actions, title validation, and switch-based clip creation.
   Tester focus: browse podcast episodes and verify progress remains accurate; add or edit a bookmark, confirm the title field focuses with required-field feedback, use Create as Clip, Edit Clip, and Remove Clip, and verify Cancel/Save placement.
 

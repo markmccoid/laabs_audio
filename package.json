@@ -65,6 +65,7 @@
     "react-native-markdown-display": "^7.0.2",
     "react-native-mmkv": "^4.1.2",
     "react-native-nitro-modules": "^0.33.7",
+    "react-native-purchases": "^10.7.0",
     "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",

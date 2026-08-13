@@ -1,6 +1,6 @@
 import { useAuthStore } from "@/auth/auth-store";
-import { useThemeColors } from "@/theme/use-app-theme";
 import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
+import { useThemeColors } from "@/theme/use-app-theme";
 import Constants from "expo-constants";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -16,6 +16,7 @@ type SettingsRowProps = {
     | "/(tabs)/settings/progress-logs"
     | "/(tabs)/settings/shadow-sqlite"
     | "/(tabs)/settings/playback"
+    | "/(tabs)/settings/support"
     | "/(tabs)/settings/system"
     | "/(tabs)/settings/testRoute";
   title: string;
@@ -178,7 +179,7 @@ export const SettingsHomeScreen = () => {
               subtitle="App-level behavior for images and cover handling"
               icon="gearshape.2"
             />
-            <SettingsRow
+            {/* <SettingsRow
               href="/(tabs)/settings/progress-logs"
               title="Progress Logs"
               subtitle="Inspect restore, queue, and sync diagnostics"
@@ -190,7 +191,7 @@ export const SettingsHomeScreen = () => {
               subtitle="Stress test library storage, overlays, and SQL search"
               icon="cylinder.split.1x2"
               isLast
-            />
+            /> */}
             {/* <SettingsRow
               href="/(tabs)/settings/testRoute"
               title="Testng"
@@ -199,6 +200,16 @@ export const SettingsHomeScreen = () => {
             /> */}
           </SettingsGroup>
         ) : null}
+
+        <SettingsGroup title="Support">
+          <SettingsRow
+            href="/(tabs)/settings/support"
+            title="Support LAABS Audio"
+            subtitle="Leave an optional tip to support continued development"
+            icon="heart"
+            isLast
+          />
+        </SettingsGroup>
       </ScrollView>
     </View>
   );
