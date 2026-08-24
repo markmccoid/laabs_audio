@@ -1,5 +1,5 @@
 import type { BookProgressTimeDisplay } from "@/store/settings-store";
-import { useThemeColors } from "@/theme/use-app-theme";
+import { useEbookAccentColor, useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -8,6 +8,8 @@ type Props = {
   author?: string | null;
   narrator?: string | null;
   publishedYear?: string | null;
+  hasEbook?: boolean;
+  onEbookPress?: () => void;
   series?: string | null;
   durationSeconds?: number | null;
   progressSeconds?: number | null;
@@ -35,6 +37,8 @@ const BookKeyDetails = ({
   author,
   narrator,
   publishedYear,
+  hasEbook = false,
+  onEbookPress,
   series,
   durationSeconds,
   progressSeconds,
@@ -46,6 +50,7 @@ const BookKeyDetails = ({
   onNarratorPress,
 }: Props) => {
   const themeColors = useThemeColors();
+  const ebookGreen = useEbookAccentColor();
   const durationLabel = formatDurationBadge(durationSeconds);
   const [progressDisplay, setProgressDisplay] = useState<BookProgressTimeDisplay>(
     defaultProgressTimeDisplay,
@@ -62,17 +67,20 @@ const BookKeyDetails = ({
         icon: "person.fill" as SFSymbol,
         value: author?.trim() || "Unknown",
         onPress: author?.trim() ? onAuthorPress : undefined,
+        showEbookBadge: false,
       },
       {
         key: "narrator",
         icon: "person.wave.2.fill" as SFSymbol,
         value: narrator?.trim() || "Unknown",
         onPress: narrator?.trim() ? onNarratorPress : undefined,
+        showEbookBadge: false,
       },
       {
         key: "published",
         icon: "calendar" as SFSymbol,
         value: publishedYear?.trim() || "Unknown",
+        showEbookBadge: hasEbook,
       },
     ];
 
@@ -81,11 +89,12 @@ const BookKeyDetails = ({
         key: "series",
         icon: "books.vertical.fill" as SFSymbol,
         value: series.trim(),
+        showEbookBadge: false,
       });
     }
 
     return values;
-  }, [author, narrator, onAuthorPress, onNarratorPress, publishedYear, series]);
+  }, [author, hasEbook, narrator, onAuthorPress, onNarratorPress, publishedYear, series]);
 
   const elapsedLabel = formatDurationBadge(progressSeconds);
   const remainingLabel = `${formatDurationBadge(remainingSeconds)} left`;
@@ -219,6 +228,29 @@ const BookKeyDetails = ({
               {row.value}
             </Text>
           )}
+          {row.showEbookBadge ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Ebook available. Open downloads"
+              disabled={!onEbookPress}
+              onPress={onEbookPress}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+                borderRadius: 999,
+                borderCurve: "continuous",
+                borderWidth: 1,
+                borderColor: ebookGreen,
+                paddingHorizontal: 7,
+                paddingVertical: 2,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <SymbolView name="book.badge.plus.fill" size={11} tintColor={ebookGreen} />
+              <Text style={{ fontSize: 11, fontWeight: "600", color: ebookGreen }}>EBook</Text>
+            </Pressable>
+          ) : null}
         </View>
       ))}
     </View>

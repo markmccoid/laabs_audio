@@ -1,0 +1,13 @@
+executionPrerequisite: LAABS Audio launched on Home tab
+steps:
+  - tool: open-url
+    args:
+      udid: CFBB15AE-D4A5-447C-9E21-3523004D3A68
+      url: laabsaudio://
+    delayMs: 1500
+  - tool: gesture-tap
+    args:
+      udid: CFBB15AE-D4A5-447C-9E21-3523004D3A68
+      x: 0.413
+      y: 0.941
+    delayMs: 1200

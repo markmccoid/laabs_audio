@@ -1,6 +1,7 @@
 import { FilterOptionsSheet } from "@/components/Library/filter-options-sheet";
 import { useGetFilterData } from "@/hooks/abs-data-hooks";
 import {
+  useSearchEbookOnly,
   useSearchFavoriteFilter,
   useSearchFinishedOnly,
   useSearchGenreOperator,
@@ -26,6 +27,7 @@ export default function SearchFilterSheet() {
   const tagOperator = useSearchTagOperator();
   const favoriteFilter = useSearchFavoriteFilter();
   const finishedOnly = useSearchFinishedOnly();
+  const ebookOnly = useSearchEbookOnly();
   const { genres, tags, isLoading, isPending, isError, refetch } = useGetFilterData();
 
   const genreOptions = useMemo(() => uniqueNames(genres), [genres]);
@@ -84,6 +86,7 @@ export default function SearchFilterSheet() {
           tagOperator={tagOperator}
           favoriteFilter={favoriteFilter}
           finishedOnly={finishedOnly}
+          ebookOnly={ebookOnly}
           onToggleGenre={(genre) =>
             selectedGenres.includes(genre)
               ? searchActions.removeGenre(genre)
@@ -100,6 +103,7 @@ export default function SearchFilterSheet() {
           onClearTags={() => searchActions.clearTags()}
           onFavoriteFilterChange={(filter) => searchActions.setFavoriteFilter(filter)}
           onToggleFinishedOnly={() => searchActions.toggleFinishedOnly()}
+          onToggleEbookOnly={() => searchActions.toggleEbookOnly()}
           onClose={() => router.back()}
         />
       )}

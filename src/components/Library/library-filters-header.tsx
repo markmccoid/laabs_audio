@@ -1,4 +1,4 @@
-import { useThemeColors } from "@/theme/use-app-theme";
+import { useEbookAccentColor, useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import React from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
@@ -9,9 +9,11 @@ type LibraryFiltersHeaderProps = {
   selectedTags: string[];
   favoriteFilter: SearchFavoriteFilter;
   finishedOnly: boolean;
+  ebookOnly: boolean;
   resultCount: number;
   onClearFavoriteFilter: () => void;
   onClearFinishedOnly: () => void;
+  onClearEbookOnly: () => void;
   onRemoveGenre: (genre: string) => void;
   onRemoveTag: (tag: string) => void;
 };
@@ -32,13 +34,16 @@ const SelectedFilterChip = ({
   icon,
   label,
   onPress,
+  color,
 }: {
   icon: SFSymbol;
   label: string;
   onPress: () => void;
+  color?: string;
 }) => {
   const themeColors = useThemeColors();
-  const selectedChipBackground = withAlpha(themeColors.accent, 0.16) ?? themeColors.surface;
+  const chipColor = color ?? themeColors.accent;
+  const selectedChipBackground = withAlpha(chipColor, 0.16) ?? themeColors.surface;
 
   return (
     <Pressable
@@ -46,7 +51,7 @@ const SelectedFilterChip = ({
       style={{
         borderRadius: 999,
         borderWidth: 1,
-        borderColor: themeColors.accent,
+        borderColor: chipColor,
         backgroundColor: selectedChipBackground,
         paddingHorizontal: 10,
         paddingVertical: 5,
@@ -55,7 +60,7 @@ const SelectedFilterChip = ({
         gap: 5,
       }}
     >
-      <SymbolView name={icon} tintColor={themeColors.accent} size={12} />
+      <SymbolView name={icon} tintColor={chipColor} size={12} />
       <Text style={{ color: themeColors.text, fontSize: 12 }}>{label}</Text>
       <SymbolView name="xmark" tintColor={themeColors.textMuted} size={10} />
     </Pressable>
@@ -67,16 +72,23 @@ export const LibraryFiltersHeader = ({
   selectedTags,
   favoriteFilter,
   finishedOnly,
+  ebookOnly,
   resultCount,
   onClearFavoriteFilter,
   onClearFinishedOnly,
+  onClearEbookOnly,
   onRemoveGenre,
   onRemoveTag,
 }: LibraryFiltersHeaderProps) => {
   const themeColors = useThemeColors();
+  const ebookGreen = useEbookAccentColor();
   const hasFavoriteFilter = favoriteFilter !== "all";
   const hasAnyFilters =
-    selectedGenres.length > 0 || selectedTags.length > 0 || hasFavoriteFilter || finishedOnly;
+    selectedGenres.length > 0 ||
+    selectedTags.length > 0 ||
+    hasFavoriteFilter ||
+    finishedOnly ||
+    ebookOnly;
   const favoriteIcon: SFSymbol = favoriteFilter === "only" ? "heart.fill" : "heart.slash.fill";
   const favoriteChipLabel =
     favoriteFilter === "only"
@@ -124,6 +136,14 @@ export const LibraryFiltersHeader = ({
               icon="checkmark.circle.fill"
               label="Finished only"
               onPress={onClearFinishedOnly}
+            />
+          ) : null}
+          {ebookOnly ? (
+            <SelectedFilterChip
+              icon="book.badge.plus.fill"
+              label="EBook only"
+              onPress={onClearEbookOnly}
+              color={ebookGreen}
             />
           ) : null}
         </View>

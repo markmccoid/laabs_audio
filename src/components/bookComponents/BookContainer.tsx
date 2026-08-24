@@ -44,6 +44,7 @@ import BookDetails from "./book-details";
 import BookImage from "./book-image";
 import BookKeyDetails from "./book-key-details";
 import { BookQuickActions } from "./book-quick-actions";
+import { hasEbookAvailable } from "./ebook-files";
 import BookRateSetter from "./book-rate-setter";
 import { useBookProgressDisplay } from "./use-book-progress-display";
 
@@ -110,6 +111,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
     bookData?.publishedYear ??
     metadata?.publishedDate?.split("-")[0] ??
     null;
+  const hasEbook = useMemo(() => hasEbookAvailable(bookData), [bookData]);
   const seriesEntries = useMemo(() => {
     return (metadata?.series ?? [])
       .filter((entry) => Boolean(entry?.id) && Boolean(entry?.name))
@@ -311,6 +313,14 @@ const BookContainer = ({ libraryItemId }: Props) => {
         filterValue,
         sourceTab,
       },
+    });
+  };
+
+  const openDownloadsSheet = () => {
+    if (!libraryItemId) return;
+    router.push({
+      pathname: "/book-downloads",
+      params: { libraryItemId, sourceBookRoute: sourceTab },
     });
   };
 
@@ -559,6 +569,8 @@ const BookContainer = ({ libraryItemId }: Props) => {
                   author={author}
                   narrator={narrator}
                   publishedYear={publishedYear}
+                  hasEbook={hasEbook}
+                  onEbookPress={openDownloadsSheet}
                   series={series}
                   durationSeconds={resolvedDurationSeconds}
                   progressSeconds={progressSeconds}

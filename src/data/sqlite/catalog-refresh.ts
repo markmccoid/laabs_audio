@@ -239,6 +239,9 @@ export const refreshShadowLibraryCatalog = (options: CatalogRefreshOptions = {})
           limit: pageSize,
           sortBy: "progress",
           sortDesc: true,
+          // Minified items are the only shape that carries media.ebookFormat and
+          // media.numAudioFiles, both of which toSummary stores.
+          minified: true,
         });
         networkElapsedMs += now() - networkStartedAt;
         totalExpected = response.total;

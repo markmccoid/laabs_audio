@@ -1,5 +1,6 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
+import { hasEbookAvailable } from "@/components/bookComponents/ebook-files";
 import { BookActionMenu } from "@/components/books/book-action-menu";
 import { useBookActionController } from "@/components/books/book-action-controller";
 import {
@@ -15,7 +16,7 @@ import {
   selectIsBookFullyDownloaded,
   useDeviceBooksStore,
 } from "@/store/device-books-store";
-import { useThemeColors } from "@/theme/use-app-theme";
+import { useEbookAccentColor, useThemeColors } from "@/theme/use-app-theme";
 import { formatSeconds } from "@/utils/formatUtils";
 import type { Href } from "expo-router";
 import { Link } from "expo-router";
@@ -56,6 +57,8 @@ export const BookListItem = ({
   showRowBorders = true,
 }: BookListItemProps) => {
   const themeColors = useThemeColors();
+  const ebookGreen = useEbookAccentColor();
+  const hasEbook = hasEbookAvailable(book);
   const isDownloaded = useDeviceBooksStore((state) =>
     selectHasPlayableBookDownload(state, book.id),
   );
@@ -242,6 +245,18 @@ export const BookListItem = ({
                 {book.publishedYear ?? "-"}
               </Text>
             </View>
+            {hasEbook ? (
+              <View
+                accessible
+                accessibilityLabel="Ebook available"
+                style={{ flexDirection: "row", gap: 4, alignItems: "center" }}
+              >
+                <SymbolView name="book.badge.plus.fill" tintColor={ebookGreen} size={16} />
+                <Text selectable style={{ color: ebookGreen, fontSize: 13, fontWeight: "600" }}>
+                  EBook
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
       </View>

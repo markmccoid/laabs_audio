@@ -1,5 +1,6 @@
 import { DarkTheme, DefaultTheme, type Theme } from "expo-router/react-navigation";
 import { useMemo, useEffect } from "react";
+import { useColorScheme } from "react-native";
 import { Uniwind, useCSSVariable, useUniwind } from "uniwind";
 import { useSettingsStore } from "@/store/settings-store";
 import {
@@ -56,6 +57,19 @@ export const useThemeColors = (): ThemeColors => {
     accentForeground: resolveColor(accentForeground, FALLBACK_COLORS.accentForeground),
     absGold: resolveColor(absGold, FALLBACK_COLORS.absGold),
   };
+};
+
+// Ebook availability reads as green everywhere it appears. There is no green
+// token in ThemeColors, so the two shades live here instead of per component.
+const EBOOK_GREEN_LIGHT = "#15803d";
+const EBOOK_GREEN_DARK = "#4ade80";
+
+export const useEbookAccentColor = () => {
+  const { theme } = useUniwind();
+  const colorScheme = useColorScheme();
+  const isDark = theme === "dark" || (theme !== "light" && colorScheme === "dark");
+
+  return isDark ? EBOOK_GREEN_DARK : EBOOK_GREEN_LIGHT;
 };
 
 export const useNavigationTheme = (): Theme => {

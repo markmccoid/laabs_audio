@@ -1,5 +1,6 @@
 import type { SearchFavoriteFilter, SearchFilterOperator } from "@/search/search-session-store";
-import { useThemeColors } from "@/theme/use-app-theme";
+import { getAccentForegroundColor } from "@/theme/accent-color";
+import { useEbookAccentColor, useThemeColors } from "@/theme/use-app-theme";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import React, { useMemo, useState } from "react";
 import {
@@ -260,6 +261,73 @@ const SegmentTab = ({
   );
 };
 
+// Finished and EBook share a row of their own beneath the favorite selector,
+// so neither has to compete with it for width.
+const FilterToggle = ({
+  label,
+  icon,
+  selectedIcon,
+  isSelected,
+  onPress,
+  selectedColor,
+}: {
+  label: string;
+  icon: SFSymbol;
+  selectedIcon: SFSymbol;
+  isSelected: boolean;
+  onPress: () => void;
+  selectedColor?: string;
+}) => {
+  const themeColors = useThemeColors();
+  const activeColor = selectedColor ?? themeColors.accent;
+  // A custom selected color needs its own readable foreground; the theme's
+  // accentForeground is only guaranteed to contrast with the accent.
+  const activeForeground = selectedColor
+    ? getAccentForegroundColor(selectedColor)
+    : themeColors.accentForeground;
+  const contentColor = isSelected ? activeForeground : themeColors.textMuted;
+
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityLabel={label}
+      accessibilityState={{ checked: isSelected }}
+      onPress={onPress}
+      style={({ pressed }) => ({ flex: 1, opacity: pressed ? 0.72 : 1 })}
+    >
+      <ControlSurface
+        isSelected={isSelected}
+        radius={9}
+        borderColor={isSelected ? activeColor : undefined}
+        backgroundColor={isSelected ? activeColor : undefined}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 5,
+          paddingHorizontal: 9,
+          paddingVertical: 7,
+        }}
+      >
+        <SymbolView
+          name={isSelected ? selectedIcon : icon}
+          tintColor={contentColor}
+          size={13}
+        />
+        <Text
+          style={{
+            color: contentColor,
+            fontSize: 12,
+            fontWeight: isSelected ? "700" : "500",
+          }}
+        >
+          {label}
+        </Text>
+      </ControlSurface>
+    </Pressable>
+  );
+};
+
 type FilterOptionsSheetProps = {
   genreOptions: string[];
   tagOptions: string[];
@@ -269,6 +337,7 @@ type FilterOptionsSheetProps = {
   tagOperator: SearchFilterOperator;
   favoriteFilter: SearchFavoriteFilter;
   finishedOnly: boolean;
+  ebookOnly: boolean;
   onToggleGenre: (genre: string) => void;
   onToggleTag: (tag: string) => void;
   onGenreOperatorChange: (operator: SearchFilterOperator) => void;
@@ -277,6 +346,7 @@ type FilterOptionsSheetProps = {
   onClearTags: () => void;
   onFavoriteFilterChange: (filter: SearchFavoriteFilter) => void;
   onToggleFinishedOnly: () => void;
+  onToggleEbookOnly: () => void;
   onClose: () => void;
 };
 
@@ -289,6 +359,7 @@ export const FilterOptionsSheet = ({
   tagOperator,
   favoriteFilter,
   finishedOnly,
+  ebookOnly,
   onToggleGenre,
   onToggleTag,
   onGenreOperatorChange,
@@ -297,15 +368,16 @@ export const FilterOptionsSheet = ({
   onClearTags,
   onFavoriteFilterChange,
   onToggleFinishedOnly,
+  onToggleEbookOnly,
   onClose,
 }: FilterOptionsSheetProps) => {
   const themeColors = useThemeColors();
+  const ebookGreen = useEbookAccentColor();
   const [activeTab, setActiveTab] = useState<FilterSheetType>("genres");
   const [searchByTab, setSearchByTab] = useState<Record<FilterSheetType, string>>({
     genres: "",
     tags: "",
   });
-  const finishedTintColor = finishedOnly ? themeColors.accentForeground : themeColors.textMuted;
   const isGenres = activeTab === "genres";
   const facetLabel = isGenres ? "genres" : "tags";
   const options = isGenres ? genreOptions : tagOptions;
@@ -385,40 +457,24 @@ export const FilterOptionsSheet = ({
               );
             })}
           </ControlPanel>
+        </View>
 
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityState={{ checked: finishedOnly }}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <FilterToggle
+            label="Finished"
+            icon="checkmark.circle"
+            selectedIcon="checkmark.circle.fill"
+            isSelected={finishedOnly}
             onPress={onToggleFinishedOnly}
-            style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}
-          >
-            <ControlSurface
-              isSelected={finishedOnly}
-              radius={9}
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 4,
-                paddingHorizontal: 9,
-                paddingVertical: 6,
-              }}
-            >
-              <SymbolView
-                name={finishedOnly ? "checkmark.circle.fill" : "checkmark.circle"}
-                tintColor={finishedTintColor}
-                size={12}
-              />
-              <Text
-                style={{
-                  color: finishedOnly ? themeColors.accentForeground : themeColors.textMuted,
-                  fontSize: 12,
-                  fontWeight: finishedOnly ? "700" : "500",
-                }}
-              >
-                Finished
-              </Text>
-            </ControlSurface>
-          </Pressable>
+          />
+          <FilterToggle
+            label="EBook"
+            icon="book.badge.plus"
+            selectedIcon="book.badge.plus.fill"
+            isSelected={ebookOnly}
+            onPress={onToggleEbookOnly}
+            selectedColor={ebookGreen}
+          />
         </View>
 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>

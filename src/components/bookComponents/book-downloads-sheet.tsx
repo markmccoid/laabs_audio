@@ -9,36 +9,10 @@ import { useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import DownloadControls from "./download-controls";
+import { collectEbookFiles } from "./ebook-files";
 
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
-
-const normalizeFilenameWithExt = (
-  filename: string | undefined,
-  ext: string | undefined,
-  fallback: string,
-) => {
-  const trimmedFilename = (filename ?? "").trim();
-  const trimmedExt = (ext ?? "").trim().replace(/^\./, "");
-  const fallbackWithExt = trimmedExt ? `${fallback}.${trimmedExt}` : fallback;
-
-  if (!trimmedFilename) {
-    return fallbackWithExt;
-  }
-
-  if (!trimmedExt) {
-    return trimmedFilename;
-  }
-
-  const lowerName = trimmedFilename.toLowerCase();
-  const lowerExt = `.${trimmedExt.toLowerCase()}`;
-
-  if (lowerName.endsWith(lowerExt)) {
-    return trimmedFilename;
-  }
-
-  return `${trimmedFilename}.${trimmedExt}`;
-};
 
 export const BookDownloadsSheet = () => {
   const themeColors = useThemeColors();
@@ -76,46 +50,7 @@ export const BookDownloadsSheet = () => {
   }, [bookData?.audioFiles, cachedSummary?.numAudioFiles]);
 
   const summary = (bookData as LibraryItemSummary | undefined) ?? cachedSummary ?? null;
-  const ebookFiles = useMemo(() => {
-    const files = new Map<string, { ino: string; filenameWithExt: string; label: string }>();
-    const mediaEbook = bookData?.media?.ebookFile;
-
-    if (mediaEbook?.ino) {
-      const filenameWithExt = normalizeFilenameWithExt(
-        mediaEbook.metadata?.filename,
-        mediaEbook.metadata?.ext,
-        `ebook-${mediaEbook.ino}`,
-      );
-      files.set(mediaEbook.ino, {
-        ino: mediaEbook.ino,
-        filenameWithExt,
-        label: filenameWithExt,
-      });
-    }
-
-    for (const file of bookData?.libraryFiles ?? []) {
-      if (!file?.ino) continue;
-      const fileType = (file.fileType ?? "").toLowerCase();
-      const fileExt = (file.metadata?.ext ?? "").toLowerCase();
-      const isEbookFile =
-        fileType.includes("ebook") || ["epub", "pdf", "mobi", "azw3"].includes(fileExt);
-      if (!isEbookFile) continue;
-
-      const filenameWithExt = normalizeFilenameWithExt(
-        file.metadata?.filename,
-        file.metadata?.ext,
-        `ebook-${file.ino}`,
-      );
-
-      files.set(file.ino, {
-        ino: file.ino,
-        filenameWithExt,
-        label: filenameWithExt,
-      });
-    }
-
-    return Array.from(files.values());
-  }, [bookData?.libraryFiles, bookData?.media?.ebookFile]);
+  const ebookFiles = useMemo(() => collectEbookFiles(bookData), [bookData]);
 
   const handleShareEbook = async (fileIno: string, filenameWithExt: string) => {
     if (!libraryItemId) return;

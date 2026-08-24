@@ -4,6 +4,7 @@ import { IndicatorBookListItem } from "@/components/books/indicator-book-list-it
 import { sqliteRefreshCoordinator } from "@/data/sqlite/refresh-coordinator";
 import {
   useSearchFavoriteFilter,
+  useSearchEbookOnly,
   useSearchFinishedOnly,
   useSearchGenres,
   useSearchResultsViewMode,
@@ -47,6 +48,7 @@ const LibraryContainer = ({
   const searchActions = useSearchSessionActions();
   const favoriteFilter = useSearchFavoriteFilter();
   const finishedOnly = useSearchFinishedOnly();
+  const ebookOnly = useSearchEbookOnly();
   const selectedGenres = useSearchGenres();
   const selectedTags = useSearchTags();
   const viewMode = useSearchResultsViewMode();
@@ -155,11 +157,13 @@ const LibraryContainer = ({
           <LibraryFiltersHeader
             favoriteFilter={favoriteFilter}
             finishedOnly={finishedOnly}
+            ebookOnly={ebookOnly}
             selectedGenres={selectedGenres}
             selectedTags={selectedTags}
             resultCount={resultIds.length}
             onClearFavoriteFilter={() => searchActions.clearFavoriteFilter()}
             onClearFinishedOnly={() => searchActions.clearFinishedOnly()}
+            onClearEbookOnly={() => searchActions.clearEbookOnly()}
             onRemoveGenre={(genre) => searchActions.removeGenre(genre)}
             onRemoveTag={(tag) => searchActions.removeTag(tag)}
           />
@@ -194,6 +198,7 @@ const LibraryContainer = ({
       );
     },
     [
+      ebookOnly,
       favoriteFilter,
       favoriteIds,
       finishedIds,

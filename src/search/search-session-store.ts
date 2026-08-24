@@ -17,6 +17,7 @@ type SearchSessionState = {
   tagOperator: SearchFilterOperator;
   favoriteFilter: SearchFavoriteFilter;
   finishedOnly: boolean;
+  ebookOnly: boolean;
   sortedBy: SearchSortBy;
   sortDirection: SearchSortDirection;
   resultsViewMode: SearchResultsViewMode;
@@ -40,6 +41,8 @@ type SearchSessionActions = {
   clearFavoriteFilter: () => void;
   toggleFinishedOnly: () => void;
   clearFinishedOnly: () => void;
+  toggleEbookOnly: () => void;
+  clearEbookOnly: () => void;
   setSortedBy: (sortBy: SearchSortBy) => void;
   setSortDirection: (sortDirection: SearchSortDirection) => void;
   setResultsViewMode: (resultsViewMode: SearchResultsViewMode) => void;
@@ -65,6 +68,7 @@ export const useSearchSessionStore = create<SearchSessionState>()(
       tagOperator: DEFAULT_OPERATOR,
       favoriteFilter: DEFAULT_FAVORITE_FILTER,
       finishedOnly: false,
+      ebookOnly: false,
       sortedBy: DEFAULT_SORTED_BY,
       sortDirection: DEFAULT_SORT_DIRECTION,
       resultsViewMode: "list",
@@ -96,6 +100,8 @@ export const useSearchSessionStore = create<SearchSessionState>()(
         clearFavoriteFilter: () => set({ favoriteFilter: DEFAULT_FAVORITE_FILTER }),
         toggleFinishedOnly: () => set((state) => ({ finishedOnly: !state.finishedOnly })),
         clearFinishedOnly: () => set({ finishedOnly: false }),
+        toggleEbookOnly: () => set((state) => ({ ebookOnly: !state.ebookOnly })),
+        clearEbookOnly: () => set({ ebookOnly: false }),
         setSortedBy: (sortedBy) => set({ sortedBy }),
         setSortDirection: (sortDirection) => set({ sortDirection }),
         setResultsViewMode: (resultsViewMode) => set({ resultsViewMode }),
@@ -124,6 +130,7 @@ export const useSearchTagOperator = () => useSearchSessionStore((state) => state
 export const useSearchFavoriteFilter = () =>
   useSearchSessionStore((state) => state.favoriteFilter);
 export const useSearchFinishedOnly = () => useSearchSessionStore((state) => state.finishedOnly);
+export const useSearchEbookOnly = () => useSearchSessionStore((state) => state.ebookOnly);
 export const useSearchSortedBy = () => useSearchSessionStore((state) => state.sortedBy);
 export const useSearchSortDirection = () =>
   useSearchSessionStore((state) => state.sortDirection);

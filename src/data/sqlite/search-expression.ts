@@ -20,6 +20,7 @@ export type ShadowSearchParams = {
   narrator?: string;
   favoriteFilter?: "all" | "only" | "exclude";
   finishedOnly?: boolean;
+  ebookOnly?: boolean;
   sortBy?: "addedAt" | "author" | "title" | "duration" | "publishedYear";
   sortDirection?: "asc" | "desc";
 };
@@ -155,6 +156,12 @@ export const buildSearchExpression = (
         AND progress.library_item_id = item.library_item_id
         AND progress.is_finished = 1
     )`);
+  }
+
+  // ebook_format is written from the item summary on every catalog refresh, so
+  // a non-empty value is the catalog's record that an ebook is attached.
+  if (params.ebookOnly) {
+    clauses.push("COALESCE(item.ebook_format, '') != ''");
   }
 
   const sortDirection = params.sortDirection === "asc" ? "ASC" : "DESC";

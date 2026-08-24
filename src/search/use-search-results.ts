@@ -7,6 +7,7 @@ import { useWindowedItemSummaries } from "@/data/sqlite/use-windowed-item-summar
 import { queryKeys } from "@/query/query-keys";
 import {
   useSearchFavoriteFilter,
+  useSearchEbookOnly,
   useSearchFinishedOnly,
   useSearchGenreOperator,
   useSearchGenres,
@@ -29,6 +30,7 @@ const useSearchParams = () => {
   const tagOperator = useSearchTagOperator();
   const favoriteFilter = useSearchFavoriteFilter();
   const finishedOnly = useSearchFinishedOnly();
+  const ebookOnly = useSearchEbookOnly();
   const sortedBy = useSearchSortedBy();
   const sortDirection = useSearchSortDirection();
 
@@ -41,10 +43,12 @@ const useSearchParams = () => {
       tagOperator,
       favoriteFilter,
       finishedOnly,
+      ebookOnly,
       sortBy: sortedBy,
       sortDirection,
     }),
     [
+      ebookOnly,
       favoriteFilter,
       finishedOnly,
       genreOperator,
