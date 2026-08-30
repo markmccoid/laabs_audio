@@ -70,6 +70,7 @@ Routing guide for the `docs/` folder. Domain vocabulary lives in
 | Doc | Read it when you need… |
 | --- | --- |
 | [book-transcript-implementation-plan.md](./book-transcript-implementation-plan.md) | the approved v1 plan for whole-book transcription + EPUB export (see ADR-0034 and CONTEXT.md terms) |
+| [read-along-implementation-plan.md](./read-along-implementation-plan.md) | the approved plan for the synchronized Read-Along reading view built on Book Transcripts |
 
 ## Decisions (ADRs)
 

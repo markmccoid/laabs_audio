@@ -427,6 +427,10 @@ _Avoid_: caption, subtitle line
 The reading experience that displays a Book Transcript synchronized with the Listening Position.
 _Avoid_: karaoke mode, follow-along
 
+**Follow Mode**:
+The Read-Along state in which the view scrolls itself to keep the Listening Position's text in view. Follow Mode pauses when the user scrolls manually and resumes only by explicit request.
+_Avoid_: auto-scroll, sticky scroll
+
 **Transcript EPUB Export**:
 A user-initiated action that creates a shareable EPUB from a Book Transcript.
 _Avoid_: ebook export, Clip Transcript Export
@@ -642,6 +646,8 @@ _Avoid_: Five minute window, scrubber window
 - A **Transcript EPUB Export** belongs to exactly one Book Transcript.
 - A **Book Transcript** exists only while its audiobook has Downloaded Audio Assets; deleting the download deletes the Book Transcript, after the user is offered a Transcript EPUB Export.
 - A **Transcript EPUB Export** is available only for a complete Book Transcript.
+- **Read-Along** may display the completed sections of an incomplete Book Transcript; sections still being transcribed are shown as pending, not hidden.
+- **Read-Along** seeks the Listening Position to a Transcript Segment's start when the user taps that segment's text.
 - At most one **Book Transcript** may be in progress at a time.
 - A **Bookmark Backup Export** may contain Point Bookmarks and Clip Bookmarks.
 - A **Bookmark Backup Export** must include enough Bookmark Title, Bookmark Position, Clip Range, and Local Note data to support future restore.
