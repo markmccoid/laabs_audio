@@ -84,7 +84,12 @@ const findDetailsTrack = ({
   return tracks[audioFileIndex];
 };
 
-const resolveExportTracks = ({
+/**
+ * Ordered download tracks with rolling book offsets recomputed. Exported because
+ * Book Transcript planning (`src/transcription/book-transcription.ts`) needs the
+ * exact same zero-`startOffset` MP3 handling — never trust raw `startOffset`.
+ */
+export const resolveExportTracks = ({
   downloadInfo,
   itemDetails,
 }: {
