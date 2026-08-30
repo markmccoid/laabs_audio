@@ -175,6 +175,7 @@ export type SettingsState = {
   showFavoriteBadgeOnCovers: boolean;
   showFinishedBadgeOnCovers: boolean;
   restoreLastBookOnStartup: boolean;
+  openPlayerOnPlaybackStart: boolean;
   autoRewindEnabled: boolean;
   autoRewindRules: AutoRewindRule[];
   autoRewindLimitToChapter: boolean;
@@ -203,6 +204,7 @@ export type SettingsState = {
     setShowFavoriteBadgeOnCovers: (enabled: boolean) => void;
     setShowFinishedBadgeOnCovers: (enabled: boolean) => void;
     setRestoreLastBookOnStartup: (enabled: boolean) => void;
+    setOpenPlayerOnPlaybackStart: (enabled: boolean) => void;
     setAutoRewindEnabled: (enabled: boolean) => void;
     setAutoRewindRules: (rules: AutoRewindRule[]) => void;
     sortAutoRewindRules: () => void;
@@ -249,6 +251,7 @@ export const settingsStore = createStore<SettingsState>()(
       showFavoriteBadgeOnCovers: true,
       showFinishedBadgeOnCovers: true,
       restoreLastBookOnStartup: true,
+      openPlayerOnPlaybackStart: true,
       autoRewindEnabled: false,
       autoRewindRules: [],
       autoRewindLimitToChapter: true,
@@ -325,6 +328,8 @@ export const settingsStore = createStore<SettingsState>()(
           set({ showFinishedBadgeOnCovers }),
         setRestoreLastBookOnStartup: (restoreLastBookOnStartup) =>
           set({ restoreLastBookOnStartup }),
+        setOpenPlayerOnPlaybackStart: (openPlayerOnPlaybackStart) =>
+          set({ openPlayerOnPlaybackStart }),
         setAutoRewindEnabled: (autoRewindEnabled) =>
           set((state) => {
             return {
@@ -583,13 +588,14 @@ export const settingsStore = createStore<SettingsState>()(
         disableLockScreenSeek: state.disableLockScreenSeek,
         remoteCommandMode: state.remoteCommandMode,
         restoreLastBookOnStartup: state.restoreLastBookOnStartup,
+        openPlayerOnPlaybackStart: state.openPlayerOnPlaybackStart,
         autoRewindEnabled: state.autoRewindEnabled,
         autoRewindRules: state.autoRewindRules,
         autoRewindLimitToChapter: state.autoRewindLimitToChapter,
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
       }),
-      version: 17,
+      version: 18,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -612,6 +618,7 @@ export const settingsStore = createStore<SettingsState>()(
             disableLockScreenSeek: true,
             remoteCommandMode: DEFAULT_REMOTE_COMMAND_MODE,
             restoreLastBookOnStartup: true,
+            openPlayerOnPlaybackStart: true,
             autoRewindEnabled: false,
             autoRewindRules: [],
             autoRewindLimitToChapter: true,
@@ -693,6 +700,10 @@ export const settingsStore = createStore<SettingsState>()(
           restoreLastBookOnStartup:
             version >= 14
               ? state.restoreLastBookOnStartup ?? true
+              : true,
+          openPlayerOnPlaybackStart:
+            version >= 18
+              ? state.openPlayerOnPlaybackStart ?? true
               : true,
           autoRewindEnabled:
             version >= 15

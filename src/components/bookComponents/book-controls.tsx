@@ -4,6 +4,7 @@ import { canUseAudiobookshelfServer } from "@/auth/server-connection";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { router } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
@@ -13,6 +14,11 @@ import PlayPauseAnimation, { type PlaybackControlVisualState } from "./play-paus
 type Props = {
   libraryItemId?: string;
   variant?: "full" | "play-only";
+  /**
+   * Opt-in for the book detail screen: push the main player once this button has
+   * actually started playback. The caller owns the user setting behind it.
+   */
+  openMainPlayerOnStart?: boolean;
 };
 
 type ControlButtonProps = {
@@ -97,7 +103,11 @@ const showStreamedPlaybackStartFailureToast = () => {
   });
 };
 
-const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
+const BookControls = ({
+  libraryItemId,
+  variant = "full",
+  openMainPlayerOnStart = false,
+}: Props) => {
   const themeColors = useThemeColors();
   const isOnline = useAuthStore((state) => state.isOnline);
   const serverConnectionStatus = useAuthStore((state) => state.serverConnectionStatus);
@@ -173,6 +183,12 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
 
   const baseTintColor = canControl || canToggle ? themeColors.text : themeColors.textMuted;
 
+  // Only after playback actually started — a failed start keeps the user on the book.
+  const openMainPlayerAfterStart = () => {
+    if (!openMainPlayerOnStart) return;
+    router.push("/main-player");
+  };
+
   const handleToggle = async () => {
     if (!libraryItemId || isLoading || hasActivePlaybackControlIntent) return;
     if (!isBookActive) {
@@ -181,6 +197,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
       setPendingLoadBookId(libraryItemId);
       try {
         await playerService.requestStart(libraryItemId);
+        openMainPlayerAfterStart();
       } catch (error) {
         if (isStreamedPlaybackStartFailure(error)) {
           showStreamedPlaybackStartFailureToast();
@@ -197,6 +214,7 @@ const BookControls = ({ libraryItemId, variant = "full" }: Props) => {
         await playerService.requestPause();
       } else {
         await playerService.requestPlay();
+        openMainPlayerAfterStart();
       }
     } catch (error) {
       if (isStreamedPlaybackStartFailure(error)) {

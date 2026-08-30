@@ -419,6 +419,7 @@ const PlaybackSettingsFallback = () => {
   const disableLockScreenSeek = useSettingsStore((state) => state.disableLockScreenSeek);
   const remoteCommandMode = useSettingsStore((state) => state.remoteCommandMode);
   const restoreLastBookOnStartup = useSettingsStore((state) => state.restoreLastBookOnStartup);
+  const openPlayerOnPlaybackStart = useSettingsStore((state) => state.openPlayerOnPlaybackStart);
   const autoRewindEnabled = useSettingsStore((state) => state.autoRewindEnabled);
   const autoRewindRules = useSettingsStore((state) => state.autoRewindRules);
   const autoRewindLimitToChapter = useSettingsStore(
@@ -433,6 +434,7 @@ const PlaybackSettingsFallback = () => {
     setAutoRewindLimitToChapter,
     setDefaultBookProgressTimeDisplay,
     setDisableLockScreenSeek,
+    setOpenPlayerOnPlaybackStart,
     setRemoteCommandMode,
     setRestoreLastBookOnStartup,
     setSeekBackwardSeconds,
@@ -519,6 +521,39 @@ const PlaybackSettingsFallback = () => {
               onValueChange={setRestoreLastBookOnStartup}
               trackColor={{ false: themeColors.border, true: themeColors.accent }}
               thumbColor={restoreLastBookOnStartup ? themeColors.accentForeground : "#f4f4f5"}
+            />
+          </View>
+        </View>
+
+        <View
+          style={{
+            borderWidth: 1,
+            borderColor: themeColors.border,
+            borderRadius: 16,
+            borderCurve: "continuous",
+            padding: 14,
+            gap: 10,
+            backgroundColor: themeColors.surface,
+          }}
+        >
+          <Text selectable style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}>
+            Player Screen
+          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text selectable style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}>
+                Open player when playback starts
+              </Text>
+              <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
+                Starting a book from its detail screen opens the full player. Turn this off to stay
+                on the book and use the mini player instead.
+              </Text>
+            </View>
+            <Switch
+              value={openPlayerOnPlaybackStart}
+              onValueChange={setOpenPlayerOnPlaybackStart}
+              trackColor={{ false: themeColors.border, true: themeColors.accent }}
+              thumbColor={openPlayerOnPlaybackStart ? themeColors.accentForeground : "#f4f4f5"}
             />
           </View>
         </View>
@@ -914,6 +949,7 @@ export const SettingsPlaybackScreen = () => {
   const disableLockScreenSeek = useSettingsStore((state) => state.disableLockScreenSeek);
   const remoteCommandMode = useSettingsStore((state) => state.remoteCommandMode);
   const restoreLastBookOnStartup = useSettingsStore((state) => state.restoreLastBookOnStartup);
+  const openPlayerOnPlaybackStart = useSettingsStore((state) => state.openPlayerOnPlaybackStart);
   const autoRewindEnabled = useSettingsStore((state) => state.autoRewindEnabled);
   const autoRewindRules = useSettingsStore((state) => state.autoRewindRules);
   const autoRewindLimitToChapter = useSettingsStore(
@@ -926,6 +962,7 @@ export const SettingsPlaybackScreen = () => {
     setAutoRewindLimitToChapter,
     setDefaultBookProgressTimeDisplay,
     setDisableLockScreenSeek,
+    setOpenPlayerOnPlaybackStart,
     setPlaybackRateRangeMax,
     setPlaybackRateRangeMin,
     setRemoteCommandMode,
@@ -997,6 +1034,20 @@ export const SettingsPlaybackScreen = () => {
         >
           <Toggle isOn={restoreLastBookOnStartup} onIsOnChange={setRestoreLastBookOnStartup}>
             <SwiftText>Restore last book on startup</SwiftText>
+          </Toggle>
+        </Section>
+
+        <Section
+          title="Player Screen"
+          footer={
+            <SwiftText>
+              Starting a book from its detail screen opens the full player. Turn this off to stay on
+              the book and use the mini player instead.
+            </SwiftText>
+          }
+        >
+          <Toggle isOn={openPlayerOnPlaybackStart} onIsOnChange={setOpenPlayerOnPlaybackStart}>
+            <SwiftText>Open player when playback starts</SwiftText>
           </Toggle>
         </Section>
 

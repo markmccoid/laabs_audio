@@ -95,6 +95,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
   const defaultProgressTimeDisplay = useSettingsStore(
     (state) => state.defaultBookProgressTimeDisplay,
   );
+  const openPlayerOnPlaybackStart = useSettingsStore((state) => state.openPlayerOnPlaybackStart);
   const { width: viewportWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const bookTitle = bookData?.title ?? "Book";
@@ -585,7 +586,11 @@ const BookContainer = ({ libraryItemId }: Props) => {
                 />
               </View>
               <View style={{ alignItems: "center", gap: 6 }}>
-                <BookControls libraryItemId={libraryItemId} variant="play-only" />
+                <BookControls
+                  libraryItemId={libraryItemId}
+                  variant="play-only"
+                  openMainPlayerOnStart={openPlayerOnPlaybackStart}
+                />
                 <Text
                   selectable
                   style={{ color: themeColors.textMuted, fontSize: 11, fontWeight: "500" }}
