@@ -20,6 +20,10 @@ export const AmbientCoordinator = () => {
   const previousPlaybackState = useRef(playbackState);
 
   useEffect(() => {
+    ambientService.startNativeEventBridge();
+  }, []);
+
+  useEffect(() => {
     if (!isEnabled) {
       if (activeTrackId || activeLibraryItemId || ambientPlaybackState !== "idle") {
         ambientService.saveProgressAndStopActiveTrack();

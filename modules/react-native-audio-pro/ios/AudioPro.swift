@@ -28,6 +28,8 @@ class AudioPro: RCTEventEmitter {
 
 	private var ambientPlayer: AVPlayer?
 	private var ambientPlayerItem: AVPlayerItem?
+	private var ambientProgressTimer: Timer?
+	private let ambientProgressIntervalSeconds: TimeInterval = 1.0
 
 
 	// Event types
@@ -47,6 +49,7 @@ class AudioPro: RCTEventEmitter {
 	// Ambient audio event types
 	private let EVENT_TYPE_AMBIENT_TRACK_ENDED = "AMBIENT_TRACK_ENDED"
 	private let EVENT_TYPE_AMBIENT_ERROR = "AMBIENT_ERROR"
+	private let EVENT_TYPE_AMBIENT_PROGRESS = "AMBIENT_PROGRESS"
 
 	// States
 	private let STATE_IDLE = "IDLE"
@@ -1871,6 +1874,7 @@ class AudioPro: RCTEventEmitter {
 
 		// Start playback immediately
 		ambientPlayer?.play()
+		startAmbientProgressTimer()
 	}
 
 	/**
@@ -1879,6 +1883,8 @@ class AudioPro: RCTEventEmitter {
 	@objc(ambientStop)
 	func ambientStop() {
 		log("Ambient Stop")
+
+		stopAmbientProgressTimer()
 
 		// Remove observer for track completion
 		if let item = ambientPlayerItem {
@@ -1917,6 +1923,11 @@ class AudioPro: RCTEventEmitter {
 
 		// Pause the player if it exists
 		ambientPlayer?.pause()
+
+		// Emit the paused position before the ticker stops so JS records the
+		// exact place we stopped rather than extrapolating past it.
+		sendAmbientProgressEvent(force: true)
+		stopAmbientProgressTimer()
 	}
 
 	/**
@@ -1928,7 +1939,9 @@ class AudioPro: RCTEventEmitter {
 		log("Ambient Resume")
 
 		// Resume the player if it exists
-		ambientPlayer?.play()
+		guard let ambientPlayer = ambientPlayer else { return }
+		ambientPlayer.play()
+		startAmbientProgressTimer()
 	}
 
 	/**
@@ -1939,16 +1952,24 @@ class AudioPro: RCTEventEmitter {
 	 */
 	@objc(ambientSeekTo:)
 	func ambientSeekTo(positionMs: Double) {
-		log("Ambient Seek To", positionMs)
+		guard let ambientPlayer = ambientPlayer else { return }
 
-		// Convert milliseconds to seconds for CMTime
-		let seconds = positionMs / 1000.0
+		// A resume position saved across loops can exceed the file length, and
+		// seeking past the end lands on the last frame (which immediately fires
+		// end-of-item). Wrap it into the track instead. Duration is 0 until the
+		// item is ready, in which case the caller's value is used as-is.
+		var targetMs = max(0, positionMs)
+		let durationMs = ambientDurationMs()
+		if durationMs > 0, targetMs >= durationMs {
+			targetMs = targetMs.truncatingRemainder(dividingBy: durationMs)
+		}
 
-		// Create a CMTime value for the seek position
-		let time = CMTime(seconds: seconds, preferredTimescale: 1000)
+		log("Ambient Seek To", positionMs, "resolved:", targetMs)
 
-		// Seek to the specified position
-		ambientPlayer?.seek(to: time)
+		let time = CMTime(seconds: targetMs / 1000.0, preferredTimescale: 1000)
+		ambientPlayer.seek(to: time) { [weak self] _ in
+			self?.sendAmbientProgressEvent(force: true)
+		}
 	}
 
 	/**
@@ -1961,10 +1982,69 @@ class AudioPro: RCTEventEmitter {
 			// If looping is enabled, seek to beginning and continue playback
 			ambientPlayer?.seek(to: CMTime.zero)
 			ambientPlayer?.play()
+
+			// Report the wrap right away so JS does not keep extrapolating past
+			// the end of the file until the next tick.
+			sendAmbientProgressEvent(force: true)
 		} else {
 			// If looping is disabled, stop playback and emit event
 			ambientStop()
 			sendAmbientEvent(type: EVENT_TYPE_AMBIENT_TRACK_ENDED, payload: nil)
+		}
+	}
+
+	/**
+	 * Duration of the loaded ambient item in milliseconds, or 0 while unknown
+	 * (the item reports NaN/indefinite until it is ready to play).
+	 */
+	private func ambientDurationMs() -> Double {
+		guard let item = ambientPlayerItem else { return 0 }
+		let seconds = item.duration.seconds
+		guard seconds.isFinite, seconds > 0 else { return 0 }
+		return seconds * 1000
+	}
+
+	/**
+	 * Emit the ambient player's real position and duration.
+	 *
+	 * Ambient audio has no state tracking, so JS previously had to estimate the
+	 * position from a wall clock — which never wrapped at the end of a looping
+	 * file and drifted whenever the player was not actually advancing.
+	 *
+	 * @param force Emit even when the player is not currently playing (used for
+	 *              pause and seek, where the resting position is what matters).
+	 */
+	private func sendAmbientProgressEvent(force: Bool = false) {
+		guard let player = ambientPlayer else { return }
+		guard force || player.rate != 0 else { return }
+
+		let positionSeconds = player.currentTime().seconds
+		let positionMs = positionSeconds.isFinite ? max(0, positionSeconds * 1000) : 0
+
+		let payload: [String: Any] = [
+			"position": positionMs,
+			"duration": ambientDurationMs()
+		]
+		sendAmbientEvent(type: EVENT_TYPE_AMBIENT_PROGRESS, payload: payload)
+	}
+
+	private func startAmbientProgressTimer() {
+		DispatchQueue.main.async {
+			self.ambientProgressTimer?.invalidate()
+			self.sendAmbientProgressEvent(force: true)
+			let timer = Timer(timeInterval: self.ambientProgressIntervalSeconds, repeats: true) {
+				[weak self] _ in
+				self?.sendAmbientProgressEvent()
+			}
+			self.ambientProgressTimer = timer
+			RunLoop.main.add(timer, forMode: .common)
+		}
+	}
+
+	private func stopAmbientProgressTimer() {
+		DispatchQueue.main.async {
+			self.ambientProgressTimer?.invalidate()
+			self.ambientProgressTimer = nil
 		}
 	}
 

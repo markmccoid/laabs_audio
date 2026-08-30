@@ -11,8 +11,11 @@ Ambient audio provides a minimal, isolated layer for ambient or looping audio in
   - All function names, variables, and event keys must be **clearly prefixed** with `ambient`.
 - **Auto-plays** immediately when `playAmbient()` is called.
 - **Loops by default** unless `loop: false` is explicitly set.
-- **No state tracking** — ambient audio does not track volume, progress, or playback state.
-- **No volume getter**, state queries, or progress tracking.
+- **No state tracking** — ambient audio does not track volume or playback state.
+- **No volume getter** or state queries. Position is not *tracked*, but it is *reported*: an
+  `AMBIENT_PROGRESS` event carries the player's position and duration so consumers that need a
+  resume point do not have to estimate one from a wall clock (an estimate cannot know where a
+  looping track wrapped).
 - **All cleanup is internal** — calling `stopAmbient()` or letting playback end (if `loop: false`) tears down the player.
 - **Main player has no effect** on ambient audio: `play()`, `pause()`, `stop()`, `clear()` do **not** interact with it.
 - Ambient audio must stop and clean up automatically when the app is terminated.
@@ -37,6 +40,7 @@ Emitted on a **separate emitter key**: `AudioProAmbientEvent`
 
 | Event Type               | Payload              | Description                              |
 |--------------------------|----------------------|------------------------------------------|
+| `AMBIENT_PROGRESS`       | `{ position: number; duration: number }` | Emitted ~1x/second while a track is loaded, plus on pause, seek, and each loop restart. Milliseconds; `duration` is `0` until the track is ready. |
 | `AMBIENT_TRACK_ENDED`    | `{}`                 | Emitted when the ambient track ends and `loop` is `false`. |
 | `AMBIENT_ERROR`          | `{ error: string }`  | Emitted on playback error. Automatically triggers internal cleanup (same behavior as stopAmbient()). |
 

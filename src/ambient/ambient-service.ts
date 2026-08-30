@@ -1,5 +1,5 @@
 import * as FileSystem from "expo-file-system/legacy";
-import { AudioPro } from "react-native-audio-pro";
+import { AudioPro, AudioProAmbientEventType } from "react-native-audio-pro";
 import { playbackStore } from "@/player";
 import type { PlaybackState } from "@/player/types";
 import {
@@ -14,7 +14,9 @@ import {
   isAmbientTrackAvailable,
   selectAmbientPlaybackPreferenceForBook,
   selectAttachedAmbientTrackForBook,
+  wrapAmbientPositionMs,
 } from "@/store/store-ambient";
+import { ambientProgressStore } from "./ambient-progress-store";
 
 const sanitizeFileName = (value: string) =>
   value.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim();
@@ -54,35 +56,94 @@ const stopAmbientNative = () => {
   AudioPro.ambientStop();
 };
 
+/** Matches the native AMBIENT_PROGRESS tick interval. */
+const NATIVE_PROGRESS_INTERVAL_MS = 1000;
+
+/**
+ * How far the position may be extrapolated past the last native tick. Ticks
+ * arrive every second while ambient audio is really playing, so anything beyond
+ * a couple of intervals means the native player has gone quiet (error, teardown,
+ * suspension) and inventing more playback time would repeat the old estimator's
+ * mistake of drifting away from the file.
+ */
+const MAX_PROGRESS_INTERPOLATION_MS = 2 * NATIVE_PROGRESS_INTERVAL_MS + 500;
+
+/** How often a playing session writes its position through to the store. */
+const PROGRESS_PERSIST_INTERVAL_MS = 15_000;
+
+/**
+ * Mirror of the native ambient player's position, fed by AMBIENT_PROGRESS
+ * events. Between ticks the position is interpolated from the wall clock, which
+ * is only ever a sub-second smoothing detail — the anchor itself always comes
+ * from the player.
+ */
 const ambientSessionProgress = {
   activeTrackId: null as string | null,
   activeLibraryItemId: null as string | null,
   positionMs: 0,
-  startedAtMs: null as number | null,
+  durationMs: 0,
+  updatedAtMs: null as number | null,
+  isPlaying: false,
+  lastPersistedAtMs: 0,
+};
+
+/**
+ * Republish the mirror to the runtime progress store the ambient sheet follows.
+ *
+ * Publishes the last native tick rather than the interpolated value: the
+ * displayed position should step once per second and stop when the player
+ * does. Interpolation exists so a *persisted* position is not a tick stale, and
+ * showing it would make the readout creep between ticks.
+ */
+const publishAmbientProgress = () => {
+  const { activeTrackId, activeLibraryItemId, positionMs, durationMs } = ambientSessionProgress;
+  const actions = ambientProgressStore.getState().actions;
+
+  if (!activeTrackId || !activeLibraryItemId) {
+    actions.clear();
+    return;
+  }
+
+  actions.publish({
+    trackId: activeTrackId,
+    libraryItemId: activeLibraryItemId,
+    positionMs,
+    durationMs,
+  });
 };
 
 const resetAmbientSessionProgress = () => {
   ambientSessionProgress.activeTrackId = null;
   ambientSessionProgress.activeLibraryItemId = null;
   ambientSessionProgress.positionMs = 0;
-  ambientSessionProgress.startedAtMs = null;
+  ambientSessionProgress.durationMs = 0;
+  ambientSessionProgress.updatedAtMs = null;
+  ambientSessionProgress.isPlaying = false;
+  ambientSessionProgress.lastPersistedAtMs = 0;
+  publishAmbientProgress();
 };
 
 const startAmbientSessionProgress = ({
   trackId,
   libraryItemId,
   positionMs,
+  durationMs,
   playbackState,
 }: {
   trackId: string;
   libraryItemId: string;
   positionMs: number;
+  durationMs: number;
   playbackState: AmbientPlaybackState;
 }) => {
   ambientSessionProgress.activeTrackId = trackId;
   ambientSessionProgress.activeLibraryItemId = libraryItemId;
-  ambientSessionProgress.positionMs = clampAmbientPositionMs(positionMs);
-  ambientSessionProgress.startedAtMs = playbackState === "playing" ? Date.now() : null;
+  ambientSessionProgress.durationMs = clampAmbientPositionMs(durationMs);
+  ambientSessionProgress.positionMs = wrapAmbientPositionMs(positionMs, durationMs);
+  ambientSessionProgress.updatedAtMs = Date.now();
+  ambientSessionProgress.isPlaying = playbackState === "playing";
+  ambientSessionProgress.lastPersistedAtMs = Date.now();
+  publishAmbientProgress();
 };
 
 const getTrackedAmbientPositionMs = () => {
@@ -91,11 +152,17 @@ const getTrackedAmbientPositionMs = () => {
   }
 
   const elapsedMs =
-    ambientSessionProgress.startedAtMs === null
-      ? 0
-      : Math.max(0, Date.now() - ambientSessionProgress.startedAtMs);
+    ambientSessionProgress.isPlaying && ambientSessionProgress.updatedAtMs !== null
+      ? Math.min(
+          Math.max(0, Date.now() - ambientSessionProgress.updatedAtMs),
+          MAX_PROGRESS_INTERPOLATION_MS,
+        )
+      : 0;
 
-  return clampAmbientPositionMs(ambientSessionProgress.positionMs + elapsedMs);
+  return wrapAmbientPositionMs(
+    ambientSessionProgress.positionMs + elapsedMs,
+    ambientSessionProgress.durationMs,
+  );
 };
 
 const pauseAmbientSessionProgress = () => {
@@ -105,7 +172,9 @@ const pauseAmbientSessionProgress = () => {
 
   const positionMs = getTrackedAmbientPositionMs();
   ambientSessionProgress.positionMs = positionMs;
-  ambientSessionProgress.startedAtMs = null;
+  ambientSessionProgress.updatedAtMs = Date.now();
+  ambientSessionProgress.isPlaying = false;
+  publishAmbientProgress();
   return positionMs;
 };
 
@@ -114,7 +183,44 @@ const resumeAmbientSessionProgress = () => {
     return;
   }
 
-  ambientSessionProgress.startedAtMs = Date.now();
+  ambientSessionProgress.updatedAtMs = Date.now();
+  ambientSessionProgress.isPlaying = true;
+};
+
+const handleAmbientProgressEvent = (position?: number, duration?: number) => {
+  const { activeTrackId, activeLibraryItemId } = ambientSessionProgress;
+  if (!activeTrackId || !activeLibraryItemId) return;
+
+  const durationMs = clampAmbientPositionMs(duration ?? 0);
+  if (durationMs > 0 && durationMs !== ambientSessionProgress.durationMs) {
+    ambientSessionProgress.durationMs = durationMs;
+    // Remember the loop length so the next session can wrap its resume position
+    // before the first tick of that session arrives.
+    ambientStore.getState().actions.setTrackDurationMs(activeTrackId, durationMs);
+  }
+
+  ambientSessionProgress.positionMs = wrapAmbientPositionMs(
+    position ?? 0,
+    ambientSessionProgress.durationMs,
+  );
+  ambientSessionProgress.updatedAtMs = Date.now();
+  publishAmbientProgress();
+
+  // Write through periodically so a kill mid-playback resumes near where the
+  // listener actually was, not at the last explicit pause.
+  if (
+    ambientSessionProgress.isPlaying &&
+    Date.now() - ambientSessionProgress.lastPersistedAtMs >= PROGRESS_PERSIST_INTERVAL_MS
+  ) {
+    ambientSessionProgress.lastPersistedAtMs = Date.now();
+    ambientStore
+      .getState()
+      .actions.setResumeStateForBook(
+        activeLibraryItemId,
+        activeTrackId,
+        ambientSessionProgress.positionMs,
+      );
+  }
 };
 
 const getActiveSession = () => {
@@ -159,8 +265,9 @@ const loadTrackForBookSession = (
   if (!preference || preference.trackId !== trackId) {
     throw new Error("Ambient playback preference is unavailable in this build.");
   }
+  const durationMs = clampAmbientPositionMs(track.durationMs ?? 0);
   const resumePositionMs =
-    preference.trackId === trackId ? clampAmbientPositionMs(preference.positionMs) : 0;
+    preference.trackId === trackId ? wrapAmbientPositionMs(preference.positionMs, durationMs) : 0;
 
   stopAmbientNative();
   AudioPro.ambientPlay({
@@ -178,6 +285,7 @@ const loadTrackForBookSession = (
       trackId,
       libraryItemId,
       positionMs: resumePositionMs,
+      durationMs,
       playbackState: "playing",
     });
     actions.setResumeStateForBook(libraryItemId, trackId, resumePositionMs);
@@ -190,6 +298,7 @@ const loadTrackForBookSession = (
     trackId,
     libraryItemId,
     positionMs: resumePositionMs,
+    durationMs,
     playbackState: "paused",
   });
   actions.setResumeStateForBook(libraryItemId, trackId, resumePositionMs);
@@ -197,7 +306,34 @@ const loadTrackForBookSession = (
   return true;
 };
 
+let ambientEventSubscription: { remove: () => void } | null = null;
+
 export const ambientService = {
+  /**
+   * Bridge native ambient events into the session mirror. Idempotent and never
+   * torn down: this is an app-lifetime singleton, and dropping the subscription
+   * would silently put the position back to guesswork.
+   */
+  startNativeEventBridge() {
+    if (ambientEventSubscription) return;
+
+    ambientEventSubscription = AudioPro.addAmbientListener((event) => {
+      switch (event.type) {
+        case AudioProAmbientEventType.AMBIENT_PROGRESS:
+          handleAmbientProgressEvent(event.payload?.position, event.payload?.duration);
+          return;
+        case AudioProAmbientEventType.AMBIENT_ERROR:
+        case AudioProAmbientEventType.AMBIENT_TRACK_ENDED:
+          // Both tear the native player down on the native side. Without this
+          // the session would stay "playing" over silence.
+          this.saveProgressAndStopActiveTrack();
+          return;
+        default:
+          return;
+      }
+    });
+  },
+
   setEnabled(enabled: boolean) {
     if (!enabled) {
       persistActiveSessionPosition();
@@ -343,6 +479,7 @@ export const ambientService = {
       trackId: activeTrackId,
       libraryItemId: activeLibraryItemId,
       positionMs,
+      durationMs: ambientSessionProgress.durationMs,
       playbackState: "paused",
     });
     ambientStore.getState().actions.setPlaybackState("paused");
@@ -382,8 +519,53 @@ export const ambientService = {
 
     return {
       trackId: preference.trackId,
-      positionMs: isActiveForBook ? getTrackedAmbientPositionMs() : preference.positionMs,
+      positionMs: isActiveForBook
+        ? getTrackedAmbientPositionMs()
+        : wrapAmbientPositionMs(
+            preference.positionMs,
+            state.tracksById[preference.trackId]?.durationMs,
+          ),
     };
+  },
+
+  /**
+   * Move the ambient bed to a position the user picked in the sheet.
+   *
+   * Works with no live session too — the book may be unloaded, or the native
+   * player may have been torn down by an error — in which case the position is
+   * only stored and applied the next time the track loads.
+   */
+  seekToPositionForBook(libraryItemId: string | null, positionMs: number) {
+    if (!libraryItemId) return 0;
+
+    const state = ambientStore.getState();
+    const preference = selectAmbientPlaybackPreferenceForBook(state, libraryItemId);
+    if (!preference) return 0;
+
+    const { activeTrackId, activeLibraryItemId } = getActiveSession();
+    const isActiveForBook =
+      activeTrackId === preference.trackId && activeLibraryItemId === libraryItemId;
+    const durationMs =
+      isActiveForBook && ambientSessionProgress.durationMs > 0
+        ? ambientSessionProgress.durationMs
+        : clampAmbientPositionMs(state.tracksById[preference.trackId]?.durationMs ?? 0);
+    const targetPositionMs = wrapAmbientPositionMs(positionMs, durationMs);
+
+    if (isActiveForBook) {
+      AudioPro.ambientSeekTo(targetPositionMs);
+      // The native seek emits a forced tick of its own, but adopting the target
+      // right away keeps the slider from snapping back to the old anchor for the
+      // length of that round trip.
+      ambientSessionProgress.positionMs = targetPositionMs;
+      ambientSessionProgress.updatedAtMs = Date.now();
+      ambientSessionProgress.lastPersistedAtMs = Date.now();
+      publishAmbientProgress();
+    }
+
+    // Seeking from the sheet usually happens over a paused book, and the
+    // periodic write-through only runs while playing, so persist outright.
+    state.actions.setResumeStateForBook(libraryItemId, preference.trackId, targetPositionMs);
+    return targetPositionMs;
   },
 
   setPreferenceVolumeForBook(libraryItemId: string | null, volume: number) {

@@ -73,6 +73,8 @@ export enum AudioProAmbientEventType {
 	AMBIENT_TRACK_ENDED = 'AMBIENT_TRACK_ENDED',
 	/** Ambient audio error has occurred */
 	AMBIENT_ERROR = 'AMBIENT_ERROR',
+	/** Periodic ambient position/duration update while ambient audio is loaded */
+	AMBIENT_PROGRESS = 'AMBIENT_PROGRESS',
 }
 
 /**

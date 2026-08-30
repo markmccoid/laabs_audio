@@ -25,6 +25,9 @@ AudioPro.ambientSetVolume(0.5); // 50% volume
 // Listen for ambient audio events
 const subscription = AudioPro.addAmbientListener((event) => {
 	switch (event.type) {
+		case 'AMBIENT_PROGRESS':
+			console.log('Ambient position', event.payload?.position, 'of', event.payload?.duration);
+			break;
 		case 'AMBIENT_TRACK_ENDED':
 			console.log('Ambient track ended');
 			break;
@@ -48,7 +51,7 @@ subscription.remove();
 | **ambientStop()** | Stops the ambient audio playback. | `void` |
 | **ambientPause()** | Pauses ambient audio playback (no-op if already paused or not playing). | `void` |
 | **ambientResume()** | Resumes ambient audio playback if paused (no-op if already playing or no active track). | `void` |
-| **ambientSeekTo(positionMs: number)** | Seeks to the specified position (in milliseconds) in the ambient track (if supported). Silently ignored if unsupported or if no active ambient track. | `void` |
+| **ambientSeekTo(positionMs: number)** | Seeks to the specified position (in milliseconds) in the ambient track (if supported). A position past the end is wrapped back into the track once its duration is known, so a resume position saved across loops cannot seek off the end. Silently ignored if unsupported or if no active ambient track. | `void` |
 | **ambientSetVolume(volume: number)** | Sets the volume of ambient audio playback from `0.0` (mute) to `1.0` (full output). | `void` |
 | **addAmbientListener(callback: AudioProAmbientEventCallback)** | Listens for ambient audio events (e.g., track ended, errors). | `EmitterSubscription` — call `.remove()` to unsubscribe. |
 
@@ -58,6 +61,7 @@ subscription.remove();
 - Continues playing even when the main player is stopped or cleared
 - Minimal, stateless API that favors simple background loops
 - Ambient audio loops by default
+- Periodic `AMBIENT_PROGRESS` events carry the real position and duration
 - Event handling for track end and error scenarios
 - Supports both remote URLs and `file://` paths
 
@@ -69,6 +73,7 @@ subscription.remove();
 
 | Event | Description |
 | --- | --- |
+| `AMBIENT_PROGRESS` | Emitted once per second while an ambient track is loaded, plus on pause, seek, and each loop restart. Carries `position` and `duration` in milliseconds; `duration` is `0` until the track is ready. |
 | `AMBIENT_TRACK_ENDED` | Emitted when an ambient track completes playback naturally (when `loop` is set to `false`). |
 | `AMBIENT_ERROR` | Emitted when an error occurs during ambient audio playback. |
 
@@ -79,6 +84,10 @@ interface AudioProAmbientEvent {
 	type: AudioProAmbientEventType;
 	payload?: {
 		error?: string;
+		/** AMBIENT_PROGRESS: position within the ambient track, in ms */
+		position?: number;
+		/** AMBIENT_PROGRESS: length of the ambient track in ms, 0 while unknown */
+		duration?: number;
 	};
 }
 

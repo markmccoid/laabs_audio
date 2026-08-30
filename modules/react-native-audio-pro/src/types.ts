@@ -127,7 +127,16 @@ export interface AudioProAmbientEvent {
 	type: AudioProAmbientEventType;
 	payload?: {
 		error?: string;
+		/** AMBIENT_PROGRESS: current position within the ambient track, in ms */
+		position?: number;
+		/** AMBIENT_PROGRESS: length of the ambient track in ms, 0 while unknown */
+		duration?: number;
 	};
+}
+
+export interface AudioProAmbientProgressPayload {
+	position: number;
+	duration: number;
 }
 
 export interface AudioProAmbientErrorPayload {

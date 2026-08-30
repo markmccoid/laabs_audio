@@ -24,6 +24,8 @@ object AudioProAmbientController {
 	private const val AMBIENT_EVENT_NAME = "AudioProAmbientEvent"
 	private const val EVENT_TYPE_AMBIENT_TRACK_ENDED = "AMBIENT_TRACK_ENDED"
 	private const val EVENT_TYPE_AMBIENT_ERROR = "AMBIENT_ERROR"
+	private const val EVENT_TYPE_AMBIENT_PROGRESS = "AMBIENT_PROGRESS"
+	private const val AMBIENT_PROGRESS_INTERVAL_MS = 1000L
 
 	private var reactContext: ReactApplicationContext? = null
 	private var enginePlayerAmbient: ExoPlayer? = null
@@ -31,6 +33,8 @@ object AudioProAmbientController {
 	private var settingDebugAmbient: Boolean = false
 	private var settingLoopAmbient: Boolean = true
 	private var settingVolumeAmbient: Float = 1.0f
+	private val progressHandlerAmbient = Handler(Looper.getMainLooper())
+	private var progressRunnableAmbient: Runnable? = null
 
 	/**
 	 * Set the React context
@@ -87,11 +91,26 @@ object AudioProAmbientController {
 				// Set up listener
 				engineListenerAmbient = object : Player.Listener {
 					override fun onPlaybackStateChanged(state: Int) {
+						if (state == Player.STATE_READY) {
+							// Duration is C.TIME_UNSET until the item is ready, so this is
+							// the first tick that can tell JS how long the loop actually is.
+							emitAmbientProgress()
+						}
 						if (state == Player.STATE_ENDED && !settingLoopAmbient) {
 							// If playback ended and loop is disabled, emit event and clean up
 							emitAmbientTrackEnded()
 							ambientStop()
 						}
+					}
+
+					override fun onPositionDiscontinuity(
+						oldPosition: Player.PositionInfo,
+						newPosition: Player.PositionInfo,
+						reason: Int,
+					) {
+						// Includes the wrap back to 0 under REPEAT_MODE_ONE — report it
+						// immediately so JS never extrapolates past the end of the file.
+						emitAmbientProgress()
 					}
 
 					override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -115,6 +134,8 @@ object AudioProAmbientController {
 				volume = settingVolumeAmbient
 				play()
 			}
+
+			startAmbientProgressTicker()
 		}
 	}
 
@@ -123,6 +144,8 @@ object AudioProAmbientController {
 	 */
 	fun ambientStop() {
 		log("Ambient Stop")
+
+		stopAmbientProgressTicker()
 
 		runOnUiThread {
 			enginePlayerAmbient?.let { exo ->
@@ -144,6 +167,10 @@ object AudioProAmbientController {
 
 		runOnUiThread {
 			enginePlayerAmbient?.pause()
+			// Report the resting position before the ticker stops so JS records
+			// where we actually paused instead of extrapolating past it.
+			emitAmbientProgress()
+			stopAmbientProgressTicker()
 		}
 	}
 
@@ -156,6 +183,7 @@ object AudioProAmbientController {
 
 		runOnUiThread {
 			enginePlayerAmbient?.play()
+			startAmbientProgressTicker()
 		}
 	}
 
@@ -166,10 +194,22 @@ object AudioProAmbientController {
 	 * @param positionMs Position in milliseconds
 	 */
 	fun ambientSeekTo(positionMs: Long) {
-		log("Ambient Seek To", positionMs)
-
 		runOnUiThread {
-			enginePlayerAmbient?.seekTo(positionMs)
+			val exo = enginePlayerAmbient ?: return@runOnUiThread
+
+			// A resume position saved across loops can exceed the file length,
+			// and seeking past the end lands on the last frame (which ends the
+			// item immediately). Wrap it into the track instead. Duration is
+			// C.TIME_UNSET until the item is ready, so fall back to the request.
+			val duration = exo.duration
+			var target = positionMs.coerceAtLeast(0L)
+			if (duration > 0 && target >= duration) {
+				target %= duration
+			}
+
+			log("Ambient Seek To", positionMs, "resolved:", target)
+			exo.seekTo(target)
+			emitAmbientProgress()
 		}
 	}
 
@@ -183,6 +223,47 @@ object AudioProAmbientController {
 		runOnUiThread {
 			enginePlayerAmbient?.volume = volume
 		}
+	}
+
+	/**
+	 * Emit the ambient player's real position and duration.
+	 *
+	 * Ambient audio has no state tracking, so JS previously had to estimate the
+	 * position from a wall clock — which never wrapped at the end of a looping
+	 * file and drifted whenever the player was not actually advancing.
+	 *
+	 * Must be called on the UI thread (where the ExoPlayer instance lives).
+	 */
+	private fun emitAmbientProgress() {
+		val exo = enginePlayerAmbient ?: return
+
+		// duration is C.TIME_UNSET (negative) until the item is ready; report 0
+		// so JS treats the loop length as unknown rather than nonsense.
+		val duration = exo.duration
+		val payload = Arguments.createMap().apply {
+			putDouble("position", exo.currentPosition.coerceAtLeast(0L).toDouble())
+			putDouble("duration", if (duration > 0) duration.toDouble() else 0.0)
+		}
+
+		emitAmbientEvent(EVENT_TYPE_AMBIENT_PROGRESS, payload)
+	}
+
+	private fun startAmbientProgressTicker() {
+		stopAmbientProgressTicker()
+
+		val runnable = object : Runnable {
+			override fun run() {
+				emitAmbientProgress()
+				progressHandlerAmbient.postDelayed(this, AMBIENT_PROGRESS_INTERVAL_MS)
+			}
+		}
+		progressRunnableAmbient = runnable
+		progressHandlerAmbient.post(runnable)
+	}
+
+	private fun stopAmbientProgressTicker() {
+		progressRunnableAmbient?.let { progressHandlerAmbient.removeCallbacks(it) }
+		progressRunnableAmbient = null
 	}
 
 	/**

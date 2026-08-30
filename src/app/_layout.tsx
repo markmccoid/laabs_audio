@@ -685,7 +685,11 @@ export default function RootLayout() {
               />
               <Stack.Screen
                 name="player-ambient"
-                options={sheetScreenOptions(themeColors.surface)}
+                options={sheetScreenOptions(themeColors.surface, {
+                  // Opens expanded: the sheet carries the ambient track info,
+                  // volume, position scrubber and the track list.
+                  sheetInitialDetentIndex: 1,
+                })}
               />
               <Stack.Screen
                 name="book-bookshelves"

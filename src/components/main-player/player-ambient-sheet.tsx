@@ -1,9 +1,9 @@
+import { useAmbientProgressStore } from "@/ambient/ambient-progress-store";
 import { ambientService } from "@/ambient/ambient-service";
 import SliderWithBubble from "@/components/sliders/slider-with-bubble";
 import { usePlaybackStore } from "@/player";
 import {
   isAmbientTrackAvailable,
-  type AmbientTrackRecord,
   selectAmbientPlaybackPreferenceForBook,
   selectAttachedAmbientTrackForBook,
   useAmbientStore,
@@ -19,16 +19,191 @@ const formatVolumeLabel = (volume: number) => `${Math.round(volume * 100)}%`;
 const formatPositionLabel = (positionMs: number) =>
   formatSeconds(Math.max(0, Math.floor(positionMs / 1000)), "compact", true, true) ?? "00:00";
 
-const sortSelectedAmbientTrackFirst = (
-  tracks: AmbientTrackRecord[],
-  selectedTrackId?: string | null,
-) => {
-  if (!selectedTrackId) return tracks;
+type AmbientNowPlayingCardProps = {
+  libraryItemId: string | null;
+  trackId: string;
+  trackName: string;
+};
 
-  const selectedTrack = tracks.find((track) => track.id === selectedTrackId);
-  if (!selectedTrack) return tracks;
+/** Header card for the track attached to the current book. */
+const AmbientNowPlayingCard = ({
+  libraryItemId,
+  trackId,
+  trackName,
+}: AmbientNowPlayingCardProps) => {
+  const themeColors = useThemeColors();
+  const isActiveSession = useAmbientStore(
+    (state) => state.activeTrackId === trackId && state.activeLibraryItemId === libraryItemId,
+  );
+  const playbackState = useAmbientStore((state) => state.playbackState);
+  const statusLabel = !isActiveSession
+    ? "Not loaded"
+    : playbackState === "playing"
+      ? "Playing"
+      : playbackState === "paused"
+        ? "Paused"
+        : "Stopped";
 
-  return [selectedTrack, ...tracks.filter((track) => track.id !== selectedTrackId)];
+  return (
+    <View
+      style={{
+        borderRadius: 18,
+        borderCurve: "continuous",
+        backgroundColor: themeColors.surface,
+        borderWidth: 1,
+        borderColor: themeColors.border,
+        paddingHorizontal: 14,
+        paddingVertical: 14,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+      }}
+    >
+      <View
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 12,
+          borderCurve: "continuous",
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: themeColors.accent,
+        }}
+      >
+        <SymbolView
+          name="speaker.wave.2.fill"
+          size={20}
+          tintColor={themeColors.accentForeground}
+        />
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text
+          selectable
+          style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "700" }}
+        >
+          Ambient Track
+        </Text>
+        <Text
+          selectable
+          numberOfLines={1}
+          style={{ color: themeColors.text, fontSize: 16, fontWeight: "700" }}
+        >
+          {trackName}
+        </Text>
+        <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+          {statusLabel}
+        </Text>
+      </View>
+    </View>
+  );
+};
+
+type AmbientPositionControlProps = {
+  fallbackDurationMs: number;
+  fallbackPositionMs: number;
+  libraryItemId: string | null;
+  sliderWidth: number;
+  trackId: string;
+};
+
+/**
+ * Live position readout and scrubber for the attached ambient bed.
+ *
+ * The 1Hz subscription is deliberately isolated in this leaf so a ticking
+ * position does not rerender the sheet header or the track list every second.
+ */
+const AmbientPositionControl = ({
+  fallbackDurationMs,
+  fallbackPositionMs,
+  libraryItemId,
+  sliderWidth,
+  trackId,
+}: AmbientPositionControlProps) => {
+  const themeColors = useThemeColors();
+  // Primitive selectors, so an unrelated session publishing progress cannot
+  // rerender this control.
+  const livePositionMs = useAmbientProgressStore((state) =>
+    state.trackId === trackId && state.libraryItemId === libraryItemId ? state.positionMs : null,
+  );
+  const liveDurationMs = useAmbientProgressStore((state) =>
+    state.trackId === trackId && state.libraryItemId === libraryItemId ? state.durationMs : 0,
+  );
+  const [isSliding, setIsSliding] = useState(false);
+  const [draftPositionMs, setDraftPositionMs] = useState(0);
+
+  // The live duration is 0 until the native item is ready; the stored loop
+  // length from an earlier session covers that gap.
+  const durationMs = Math.max(liveDurationMs, fallbackDurationMs, 0);
+  // With no live session (book unloaded, or the player torn down by an error)
+  // the stored resume position is the truth, and nothing is advancing it.
+  const trackedPositionMs = Math.max(livePositionMs ?? fallbackPositionMs, 0);
+  const positionMs = durationMs > 0 ? Math.min(trackedPositionMs, durationMs) : trackedPositionMs;
+  const sliderValue = isSliding ? draftPositionMs : positionMs;
+  const canSeek = durationMs > 0;
+
+  return (
+    <View
+      style={{
+        borderRadius: 18,
+        borderCurve: "continuous",
+        backgroundColor: themeColors.surface,
+        borderWidth: 1,
+        borderColor: themeColors.border,
+        paddingHorizontal: 14,
+        paddingVertical: 14,
+        gap: 12,
+      }}
+    >
+      <View style={{ gap: 4 }}>
+        <Text selectable style={{ color: themeColors.text, fontSize: 16, fontWeight: "700" }}>
+          Ambient Position
+        </Text>
+        <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+          {canSeek
+            ? "Drag to move the loop to a different point."
+            : "Available once the track reports its length."}
+        </Text>
+      </View>
+      <SliderWithBubble
+        bubbleLabel={formatPositionLabel(sliderValue)}
+        bubbleMinWidth={76}
+        style={{ width: sliderWidth, alignSelf: "center" }}
+        minimumTrackTintColor={canSeek ? themeColors.accent : themeColors.textMuted}
+        maximumTrackTintColor={themeColors.border}
+        thumbTintColor={canSeek ? themeColors.accent : themeColors.textMuted}
+        disabled={!canSeek}
+        minimumValue={0}
+        maximumValue={canSeek ? durationMs : 1}
+        step={1000}
+        value={sliderValue}
+        onSlidingStart={() => {
+          setDraftPositionMs(positionMs);
+          setIsSliding(true);
+        }}
+        onValueChange={(value: number) => setDraftPositionMs(value)}
+        onSlidingComplete={(value: number) => {
+          setDraftPositionMs(value);
+          setIsSliding(false);
+          if (!canSeek) return;
+          ambientService.seekToPositionForBook(libraryItemId, value);
+        }}
+      />
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+        <Text
+          selectable
+          style={{ color: themeColors.text, fontSize: 12, fontWeight: "600", fontVariant: ["tabular-nums"] }}
+        >
+          {formatPositionLabel(sliderValue)}
+        </Text>
+        <Text
+          selectable
+          style={{ color: themeColors.textMuted, fontSize: 12, fontVariant: ["tabular-nums"] }}
+        >
+          {canSeek ? formatPositionLabel(durationMs) : "--:--"}
+        </Text>
+      </View>
+    </View>
+  );
 };
 
 type AmbientVolumeControlProps = {
@@ -138,8 +313,8 @@ const PlayerAmbientSheet = () => {
     () => allTracks.filter((track) => isAmbientTrackAvailable(track)),
     [allTracks],
   );
-  const orderedAmbientTracks = useMemo(
-    () => sortSelectedAmbientTrackFirst(ambientTracks, attachedTrack?.id),
+  const otherAmbientTracks = useMemo(
+    () => ambientTracks.filter((track) => track.id !== attachedTrack?.id),
     [ambientTracks, attachedTrack?.id],
   );
   const [positionSnapshot, setPositionSnapshot] = useState(() =>
@@ -191,6 +366,14 @@ const PlayerAmbientSheet = () => {
         contentContainerStyle={{ gap: 12, paddingBottom: 8 }}
       >
         {isEnabled && attachedTrack && ambientPreference ? (
+          <AmbientNowPlayingCard
+            libraryItemId={currentLibraryItemId}
+            trackId={attachedTrack.id}
+            trackName={attachedTrack.fileName}
+          />
+        ) : null}
+
+        {isEnabled && attachedTrack && ambientPreference ? (
           <AmbientVolumeControl
             key={[
               currentLibraryItemId ?? "none",
@@ -206,6 +389,30 @@ const PlayerAmbientSheet = () => {
           />
         ) : null}
 
+        {isEnabled && attachedTrack && ambientPreference ? (
+          <AmbientPositionControl
+            key={attachedTrack.id}
+            fallbackDurationMs={attachedTrack.durationMs ?? 0}
+            fallbackPositionMs={
+              positionSnapshot?.trackId === attachedTrack.id
+                ? positionSnapshot.positionMs
+                : ambientPreference.positionMs
+            }
+            libraryItemId={currentLibraryItemId}
+            sliderWidth={sliderWidth}
+            trackId={attachedTrack.id}
+          />
+        ) : null}
+
+        {isEnabled && attachedTrack && otherAmbientTracks.length ? (
+          <Text
+            selectable
+            style={{ color: themeColors.textMuted, fontSize: 12, fontWeight: "700" }}
+          >
+            Other Tracks
+          </Text>
+        ) : null}
+
         {isEnabled ? (
           <View
             style={{
@@ -217,13 +424,8 @@ const PlayerAmbientSheet = () => {
               overflow: "hidden",
             }}
           >
-            {orderedAmbientTracks.length ? (
-              orderedAmbientTracks.map((track, index) => {
-                const isSelected = attachedTrack?.id === track.id;
-                const positionAtOpen =
-                  isSelected && positionSnapshot?.trackId === track.id
-                    ? positionSnapshot.positionMs
-                    : null;
+            {otherAmbientTracks.length ? (
+              otherAmbientTracks.map((track, index) => {
                 return (
                   <Pressable
                     key={track.id}
@@ -234,12 +436,12 @@ const PlayerAmbientSheet = () => {
                     style={({ pressed }) => ({
                       paddingHorizontal: 14,
                       paddingVertical: 12,
-                      borderBottomWidth: index === orderedAmbientTracks.length - 1 ? 0 : 1,
+                      borderBottomWidth: index === otherAmbientTracks.length - 1 ? 0 : 1,
                       borderBottomColor: themeColors.border,
                       flexDirection: "row",
                       alignItems: "center",
                       gap: 12,
-                      backgroundColor: isSelected ? themeColors.bg : themeColors.surface,
+                      backgroundColor: themeColors.surface,
                       opacity: !canAttachTrack ? 0.45 : pressed ? 0.82 : 1,
                     })}
                   >
@@ -251,14 +453,10 @@ const PlayerAmbientSheet = () => {
                         borderCurve: "continuous",
                         alignItems: "center",
                         justifyContent: "center",
-                        backgroundColor: isSelected ? themeColors.accent : themeColors.bg,
+                        backgroundColor: themeColors.bg,
                       }}
                     >
-                      <SymbolView
-                        name={isSelected ? "speaker.wave.2.fill" : "waveform"}
-                        size={18}
-                        tintColor={isSelected ? themeColors.accentForeground : themeColors.accent}
-                      />
+                      <SymbolView name="waveform" size={18} tintColor={themeColors.accent} />
                     </View>
                     <View style={{ flex: 1, gap: 2 }}>
                       <Text
@@ -268,19 +466,7 @@ const PlayerAmbientSheet = () => {
                       >
                         {track.fileName}
                       </Text>
-                      {positionAtOpen !== null ? (
-                        <Text selectable style={{ color: themeColors.textMuted, fontSize: 12 }}>
-                          Position at open: {formatPositionLabel(positionAtOpen)}
-                        </Text>
-                      ) : null}
                     </View>
-                    {isSelected ? (
-                      <SymbolView
-                        name="checkmark.circle.fill"
-                        size={20}
-                        tintColor={themeColors.accent}
-                      />
-                    ) : null}
                   </Pressable>
                 );
               })
@@ -290,12 +476,14 @@ const PlayerAmbientSheet = () => {
                   selectable
                   style={{ color: themeColors.text, fontSize: 15, fontWeight: "600" }}
                 >
-                  No ambient tracks available
+                  {attachedTrack ? "No other ambient tracks" : "No ambient tracks available"}
                 </Text>
                 <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-                  {totalTrackCount > 0
-                    ? "Re-import ambient audio from Settings > Ambient Audio to use it in this build."
-                    : "Open Settings and import ambient audio from your device or iCloud Files."}
+                  {attachedTrack
+                    ? "Import more ambient audio from Settings > Ambient Audio to switch between beds."
+                    : totalTrackCount > 0
+                      ? "Re-import ambient audio from Settings > Ambient Audio to use it in this build."
+                      : "Open Settings and import ambient audio from your device or iCloud Files."}
                 </Text>
               </View>
             )}

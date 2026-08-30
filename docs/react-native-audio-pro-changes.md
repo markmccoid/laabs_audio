@@ -636,3 +636,46 @@ so rapid taps continue advancing while JavaScript applies and republishes the ra
 **Verify on hardware.** From `1x`, repeatedly tap the Now Playing rate button and confirm the
 visible value and audible speed advance through `1.2x`, `1.5x`, `1.7x`, `2x`, then wrap to
 `1x`. Pause and repeat the cycle; the button must never show `0x` or resume playback.
+
+---
+
+## Change 17 — Ambient audio reports a real position (`AMBIENT_PROGRESS`)
+
+**Files:** `ios/AudioPro.swift`, `android/…/AudioProAmbientController.kt`, `src/values.ts`,
+`src/types.ts`, `src/index.ts` (+ app-side `src/ambient/ambient-service.ts`,
+`src/store/store-ambient.ts`)
+**Date:** 2026-08-29
+
+**Problem.** Upstream ambient audio is deliberately stateless — it exposes no position getter
+and emits no progress. The app still needed a per-book ambient resume position, so
+`ambient-service.ts` estimated it with a wall clock (`Date.now() - startedAtMs`). That estimate
+was never folded back into the file, so a looping 45-minute bed reported **3:00:00** after four
+loops. The bogus value was persisted per book and fed straight back into `ambientSeekTo()` on
+the next load — a seek far past the end of the file, which lands on the last frame and
+immediately wraps. The clock also kept counting whenever the native player was not actually
+advancing (`AMBIENT_ERROR` tears the player down, and nothing in the app listened for it).
+
+**Fix.** Emit the ambient player's real position, and make JS mirror it.
+
+- **New event `AMBIENT_PROGRESS`** with `payload: { position, duration }`, both in ms.
+  `duration` is `0` while the item is not ready (iOS `AVPlayerItem.duration` is indefinite,
+  Android `ExoPlayer.duration` is `C.TIME_UNSET`).
+- **iOS** — a 1s `Timer` on the main run loop (mirroring the main player's progress timer),
+  started by `ambientPlay`/`ambientResume` and stopped by `ambientPause`/`ambientStop`. Pause
+  and seek emit a forced tick so the resting position is exact; the loop restart in
+  `ambientPlayerItemDidPlayToEndTime` emits one so the wrap is reported immediately.
+- **Android** — a `Handler` ticker at the same interval, plus `STATE_READY` (first point the
+  duration is known) and `onPositionDiscontinuity` (the `REPEAT_MODE_ONE` wrap).
+- **`ambientSeekTo` wraps past-the-end requests** on both platforms when the duration is
+  known, so a stale resume position can no longer seek off the end of the file.
+
+**App side.** `ambient-service.ts` keeps a mirror fed by `AMBIENT_PROGRESS` and interpolates at
+most ~2.5s past the last tick, so a dead native player stops advancing the position instead of
+drifting forever. The loop length is stored on the track record (`AmbientTrackRecord.durationMs`)
+so a resume position can be wrapped before the first tick of the next session arrives, and
+positions persisted by older builds are wrapped when the store rehydrates. The service also now
+subscribes to ambient events and clears the session on `AMBIENT_ERROR` / `AMBIENT_TRACK_ENDED`.
+
+**Verify.** Attach an ambient track, play a book past the end of the ambient file, and open the
+ambient sheet: `Position at open` must stay inside the track length and wrap to `00:00` at each
+loop. Regression coverage is in `src/ambient/ambient-position.test.ts`.

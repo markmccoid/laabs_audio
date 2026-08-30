@@ -54,6 +54,8 @@ export type {
 	AudioProAmbientEvent,
 	/** Payload for ambient audio error events */
 	AudioProAmbientErrorPayload,
+	/** Payload for ambient audio progress events */
+	AudioProAmbientProgressPayload,
 } from './types';
 
 /**

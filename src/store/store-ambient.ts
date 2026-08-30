@@ -17,6 +17,13 @@ export type AmbientTrackRecord = {
   relativePath: string;
   fileName: string;
   importedAt: number;
+  /**
+   * Length of the file in ms, learned from the first AMBIENT_PROGRESS event the
+   * track produces. 0/undefined until then. Ambient tracks loop, so this is what
+   * lets a stored resume position be wrapped back into the file instead of
+   * growing without bound across loops.
+   */
+  durationMs?: number;
 };
 
 export type AmbientPlaybackPreferenceRecord = {
@@ -51,6 +58,7 @@ export type AmbientStoreState = PersistedAmbientState &
       setEnabled: (enabled: boolean) => void;
       addTrack: (track: AmbientTrackRecord) => void;
       removeTrack: (trackId: string) => void;
+      setTrackDurationMs: (trackId: string, durationMs: number) => void;
       setPreferenceVolumeForBook: (libraryItemId: string, volume: number) => void;
       setPreferenceFineVolumeForBook: (libraryItemId: string, fineVolume: boolean) => void;
       attachTrackToBook: (trackId: string, libraryItemId: string) => void;
@@ -69,6 +77,17 @@ export type AmbientStoreState = PersistedAmbientState &
 
 const clampAmbientVolume = (value: number) => Math.max(0, Math.min(1, value));
 const clampAmbientPosition = (value: number) => Math.max(0, Math.round(value));
+
+/**
+ * Fold a position back into a looping track. A position beyond the end is not a
+ * position at all — it is elapsed listening time, which is what the old wall
+ * clock estimator produced (a 45 minute bed reporting 3:00:00 after 4 loops).
+ */
+export const wrapAmbientPositionMs = (value: number, durationMs?: number | null) => {
+  const positionMs = clampAmbientPosition(value);
+  if (!durationMs || durationMs <= 0) return positionMs;
+  return positionMs % Math.round(durationMs);
+};
 
 const extractFileNameFromUri = (uri: string) => {
   const normalized = uri.split(/[?#]/, 1)[0] ?? uri;
@@ -137,6 +156,10 @@ const normalizePersistedAmbientTracks = (tracksById: unknown) => {
           ? candidate.fileName
           : "Ambient Track",
       importedAt: typeof candidate.importedAt === "number" ? candidate.importedAt : 0,
+      durationMs:
+        typeof candidate.durationMs === "number" && candidate.durationMs > 0
+          ? clampAmbientPosition(candidate.durationMs)
+          : undefined,
     };
   });
 
@@ -175,8 +198,11 @@ const normalizeAmbientPlaybackPreferences = (
 
     nextPreferences[libraryItemId] = {
       trackId: candidate.trackId,
-      positionMs: clampAmbientPosition(
+      // Builds before ambient position came from the player stored elapsed
+      // listening time here, which can be many loops past the end of the file.
+      positionMs: wrapAmbientPositionMs(
         typeof candidate.positionMs === "number" ? candidate.positionMs : 0,
+        tracksById[candidate.trackId]?.durationMs,
       ),
       volume: Math.min(
         fineVolume ? 0.5 : 1,
@@ -227,6 +253,21 @@ export const ambientStore = createStore<AmbientStoreState>()(
               activeTrackId: isActiveTrack ? null : state.activeTrackId,
               activeLibraryItemId: isActiveTrack ? null : state.activeLibraryItemId,
               playbackState: isActiveTrack ? "idle" : state.playbackState,
+            };
+          }),
+        setTrackDurationMs: (trackId, durationMs) =>
+          set((state) => {
+            const track = state.tracksById[trackId];
+            if (!track) return state;
+
+            const nextDurationMs = clampAmbientPosition(durationMs);
+            if (nextDurationMs <= 0 || track.durationMs === nextDurationMs) return state;
+
+            return {
+              tracksById: {
+                ...state.tracksById,
+                [trackId]: { ...track, durationMs: nextDurationMs },
+              },
             };
           }),
         setPreferenceVolumeForBook: (libraryItemId, volume) =>
