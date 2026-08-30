@@ -415,6 +415,22 @@ _Avoid_: Transcription Source File, Clip Export File
 A temporary audio file created from a Clip Bookmark's Clip Range for Clip Transcription.
 _Avoid_: Clip Export File, transcription export
 
+**Book Transcript**:
+The durable machine-generated text of one audiobook, organized by chapter and aligned in time with the audio.
+_Avoid_: Clip Transcription, book text, subtitles
+
+**Transcript Segment**:
+One timed span of words within a Book Transcript.
+_Avoid_: caption, subtitle line
+
+**Read-Along**:
+The reading experience that displays a Book Transcript synchronized with the Listening Position.
+_Avoid_: karaoke mode, follow-along
+
+**Transcript EPUB Export**:
+A user-initiated action that creates a shareable EPUB from a Book Transcript.
+_Avoid_: ebook export, Clip Transcript Export
+
 **Bookmark Backup Export**:
 A user-initiated metadata export of saved Bookmarks intended to support future restore or import.
 _Avoid_: Clip export, audio export
@@ -620,6 +636,13 @@ _Avoid_: Five minute window, scrubber window
 - A **Clip Transcript Export File** is temporary and is removed after sharing finishes.
 - A **Transcription Source File** is not a **Clip Export File**.
 - A **Clip Transcript Export File** is not a **Transcription Source File**.
+- A **Book Transcript** belongs to exactly one audiobook.
+- A **Book Transcript** is not a **Clip Transcription**.
+- A **Transcript Segment** belongs to exactly one Book Transcript.
+- A **Transcript EPUB Export** belongs to exactly one Book Transcript.
+- A **Book Transcript** exists only while its audiobook has Downloaded Audio Assets; deleting the download deletes the Book Transcript, after the user is offered a Transcript EPUB Export.
+- A **Transcript EPUB Export** is available only for a complete Book Transcript.
+- At most one **Book Transcript** may be in progress at a time.
 - A **Bookmark Backup Export** may contain Point Bookmarks and Clip Bookmarks.
 - A **Bookmark Backup Export** must include enough Bookmark Title, Bookmark Position, Clip Range, and Local Note data to support future restore.
 - A **Clip Range** is the selected audio span of a Clip Bookmark.

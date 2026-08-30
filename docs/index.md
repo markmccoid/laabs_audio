@@ -65,6 +65,12 @@ Routing guide for the `docs/` folder. Domain vocabulary lives in
 | [theming-style-guide.md](./theming-style-guide.md) | theme tokens and how to style components |
 | [theming-implementation-plan.md](./theming-implementation-plan.md) | the original token plan and Uniwind references |
 
+## Book Transcripts
+
+| Doc | Read it when you need… |
+| --- | --- |
+| [book-transcript-implementation-plan.md](./book-transcript-implementation-plan.md) | the approved v1 plan for whole-book transcription + EPUB export (see ADR-0034 and CONTEXT.md terms) |
+
 ## Decisions (ADRs)
 
 Architecture Decision Records in [adr/](./adr/). Don't re-litigate these; if one blocks you,
