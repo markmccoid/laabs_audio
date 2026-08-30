@@ -32,6 +32,8 @@ export type PlaybackStoreState = {
   chapterIndex: ResolvedChapter[];
   currentTrackIndex: number;
   positionMs: number;
+  /** Wall clock (`Date.now()`) of the last `positionMs` update — the anchor for Read-Along's client-side interpolation between 1 Hz ticks. Not persisted. */
+  positionUpdatedAtMs: number;
   trackPositionMs: number;
   durationMs: number;
   trackDurationMs: number;
@@ -128,6 +130,7 @@ const getBaseState = () => ({
   chapterIndex: [] as ResolvedChapter[],
   currentTrackIndex: 0,
   positionMs: 0,
+  positionUpdatedAtMs: 0,
   trackPositionMs: 0,
   durationMs: 0,
   trackDurationMs: 0,
@@ -243,7 +246,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
           set({ currentTrackIndex, trackDurationMs, trackPositionMs: 0 }),
         setTrackDuration: (trackDurationMs) => set({ trackDurationMs }),
         setPosition: ({ positionMs, trackPositionMs }) =>
-          set({ positionMs, trackPositionMs }),
+          set({ positionMs, trackPositionMs, positionUpdatedAtMs: Date.now() }),
         setRate: (rate) => set({ rate }),
         setCurrentChapter: (currentChapterId) => set({ currentChapterId }),
         setLastSyncAt: (lastSyncAt) => set({ lastSyncAt }),
@@ -261,7 +264,12 @@ export const playbackStore = createStore<PlaybackStoreState>()(
             rate,
             error,
           }),
-        applyStatusUpdate: (payload) => set(payload),
+        applyStatusUpdate: (payload) =>
+          set(
+            payload.positionMs !== undefined
+              ? { ...payload, positionUpdatedAtMs: Date.now() }
+              : payload,
+          ),
       },
     }),
     {

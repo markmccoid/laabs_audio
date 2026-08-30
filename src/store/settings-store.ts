@@ -30,6 +30,9 @@ export const HOME_PREVIEW_SIZE_SMALL = "small";
 export const HOME_PREVIEW_SIZE_MEDIUM = "medium";
 export const HOME_PREVIEW_SIZE_LARGE = "large";
 export const DEFAULT_HOME_PREVIEW_SIZE = HOME_PREVIEW_SIZE_MEDIUM;
+export const MIN_READ_ALONG_FONT_SIZE = 14;
+export const MAX_READ_ALONG_FONT_SIZE = 24;
+export const DEFAULT_READ_ALONG_FONT_SIZE = 17;
 
 export type HomeShelfSettings = {
   isVisible: boolean;
@@ -101,6 +104,9 @@ export const clampHomeShelfItemCount = (value: number) =>
 
 export const clampSkipSeconds = (value: number) =>
   Math.max(MIN_SKIP_SECONDS, Math.min(MAX_SKIP_SECONDS, Math.round(value)));
+
+export const clampReadAlongFontSize = (value: number) =>
+  Math.max(MIN_READ_ALONG_FONT_SIZE, Math.min(MAX_READ_ALONG_FONT_SIZE, Math.round(value)));
 
 export const PLAYBACK_RATE_RANGE_OPTIONS = Array.from(
   {
@@ -181,6 +187,7 @@ export type SettingsState = {
   autoRewindLimitToChapter: boolean;
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>;
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
+  readAlongFontSize: number;
   actions: {
     setPlaybackRate: (rate: number) => void;
     setPlaybackRateRangeMin: (rate: number) => void;
@@ -220,6 +227,7 @@ export type SettingsState = {
       scopeKey: string | null,
       payload: { dateKey: string; seed: number; bookIds: string[]; updatedAt?: number },
     ) => void;
+    setReadAlongFontSize: (fontSize: number) => void;
   };
 };
 
@@ -257,6 +265,7 @@ export const settingsStore = createStore<SettingsState>()(
       autoRewindLimitToChapter: true,
       homeShelvesByScope: {},
       discoverShelfByScope: {},
+      readAlongFontSize: DEFAULT_READ_ALONG_FONT_SIZE,
       actions: {
         setPlaybackRate: (playbackRate) => set({ playbackRate }),
         setPlaybackRateRangeMin: (playbackRateRangeMin) =>
@@ -565,6 +574,8 @@ export const settingsStore = createStore<SettingsState>()(
             };
           });
         },
+        setReadAlongFontSize: (fontSize) =>
+          set({ readAlongFontSize: clampReadAlongFontSize(fontSize) }),
       },
     }),
     {
@@ -594,8 +605,9 @@ export const settingsStore = createStore<SettingsState>()(
         autoRewindLimitToChapter: state.autoRewindLimitToChapter,
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
+        readAlongFontSize: state.readAlongFontSize,
       }),
-      version: 18,
+      version: 19,
       migrate: (persistedState, version) => {
         const state = (persistedState as Partial<SettingsState> | undefined) ?? undefined;
 
@@ -624,6 +636,7 @@ export const settingsStore = createStore<SettingsState>()(
             autoRewindLimitToChapter: true,
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
+            readAlongFontSize: DEFAULT_READ_ALONG_FONT_SIZE,
           };
         }
 
@@ -725,6 +738,12 @@ export const settingsStore = createStore<SettingsState>()(
             version >= 11
               ? state.discoverShelfByScope ?? {}
               : {},
+          readAlongFontSize:
+            version >= 19
+              ? clampReadAlongFontSize(
+                  state.readAlongFontSize ?? DEFAULT_READ_ALONG_FONT_SIZE,
+                )
+              : DEFAULT_READ_ALONG_FONT_SIZE,
         };
       },
     }

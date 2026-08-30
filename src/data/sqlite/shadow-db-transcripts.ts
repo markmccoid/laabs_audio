@@ -70,6 +70,20 @@ export type TranscriptSegmentInput = {
   words: TranscriptSegmentWordTiming[] | null;
 };
 
+/**
+ * A Transcript Segment's text/timing only, without `words_json` — the lean
+ * shape for the Read-Along reader (`docs/read-along-implementation-plan.md`
+ * Phase 1), so loading a 150k-word book's text doesn't also pull every word
+ * timing into memory.
+ */
+export type TranscriptSegmentTextRow = {
+  id: number;
+  sectionIndex: number;
+  startMs: number;
+  endMs: number;
+  text: string;
+};
+
 type BookTranscriptSqlRow = {
   library_item_id: string;
   status: BookTranscriptStatus;
@@ -102,6 +116,24 @@ type TranscriptSegmentSqlRow = {
   text: string;
   words_json: string | null;
 };
+
+type TranscriptSegmentTextSqlRow = {
+  id: number;
+  section_index: number;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+};
+
+const toTranscriptSegmentTextRow = (
+  row: TranscriptSegmentTextSqlRow,
+): TranscriptSegmentTextRow => ({
+  id: row.id,
+  sectionIndex: row.section_index,
+  startMs: row.start_ms,
+  endMs: row.end_ms,
+  text: row.text,
+});
 
 const toBookTranscriptRow = (row: BookTranscriptSqlRow): BookTranscriptRow => ({
   libraryItemId: row.library_item_id,
@@ -346,6 +378,86 @@ export const getSegmentsForExport = async (
     [libraryItemId],
   );
   return rows.map(toTranscriptSegmentRow);
+};
+
+/**
+ * Text/timing only for every Transcript Segment of a Book Transcript, ordered
+ * for reading — excludes `words_json` (Read-Along Phase 1: a lean query so
+ * mounting the reader loads only hundreds of KB of text, not every word
+ * timing). Fetch a segment's word timings lazily via `getSegmentWords`.
+ */
+export const getSegmentTextRows = async (
+  libraryItemId: string,
+): Promise<TranscriptSegmentTextRow[]> => {
+  await initializeShadowDatabaseInternal();
+  const db = await getDb();
+  const rows = await db.getAllAsync<TranscriptSegmentTextSqlRow>(
+    `SELECT id, section_index, start_ms, end_ms, text
+     FROM book_transcript_segments
+     WHERE library_item_id = ?
+     ORDER BY section_index ASC, start_ms ASC`,
+    [libraryItemId],
+  );
+  return rows.map(toTranscriptSegmentTextRow);
+};
+
+/**
+ * Word timings for a single Transcript Segment, or null if the segment has
+ * none (or doesn't exist). Meant to be called lazily, one segment at a time,
+ * for whichever segment is currently active in the Read-Along reader.
+ */
+export const getSegmentWords = async (
+  segmentId: number,
+): Promise<TranscriptSegmentWordTiming[] | null> => {
+  await initializeShadowDatabaseInternal();
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ words_json: string | null }>(
+    `SELECT words_json FROM book_transcript_segments WHERE id = ?`,
+    [segmentId],
+  );
+  if (!row || !row.words_json) return null;
+  return JSON.parse(row.words_json) as TranscriptSegmentWordTiming[];
+};
+
+/**
+ * Pure contiguity walk over Book Transcript track rows (ordered by
+ * `track_index` ascending): walks forward while `status === 'complete'`,
+ * stopping at the first pending/incomplete track. The frontier is the last
+ * contiguous complete track's `startOffsetMs + durationMs` — a gap caps the
+ * frontier there even if later tracks are already complete (e.g. an
+ * out-of-order resume). Empty input or a pending track 0 yields 0. Exported
+ * standalone so the walk is unit-testable without a database.
+ */
+export const computeTranscriptFrontierMs = (
+  orderedTracks: Pick<BookTranscriptTrackRow, "startOffsetMs" | "durationMs" | "status">[],
+): number => {
+  let frontierMs = 0;
+  for (const track of orderedTracks) {
+    if (track.status !== "complete") break;
+    frontierMs = track.startOffsetMs + track.durationMs;
+  }
+  return frontierMs;
+};
+
+/**
+ * Book-absolute ms up to which a Book Transcript is complete — see
+ * `computeTranscriptFrontierMs` for the contiguity rule. A section is
+ * readable iff `section.endMs <= frontierMs`.
+ */
+export const getTranscriptFrontierMs = async (
+  libraryItemId: string,
+): Promise<number> => {
+  await initializeShadowDatabaseInternal();
+  const db = await getDb();
+  const rows = await db.getAllAsync<BookTranscriptTrackSqlRow>(
+    `SELECT library_item_id, track_ino, track_index, start_offset_ms, duration_ms,
+            status, completed_at
+     FROM book_transcript_tracks
+     WHERE library_item_id = ?
+     ORDER BY track_index ASC`,
+    [libraryItemId],
+  );
+  return computeTranscriptFrontierMs(rows.map(toBookTranscriptTrackRow));
 };
 
 /** Delete a Book Transcript and all its tracks/segments (dies with the download). */
