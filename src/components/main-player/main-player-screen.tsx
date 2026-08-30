@@ -8,10 +8,17 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { Link } from "expo-router";
+import { Link, router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useMemo } from "react";
-import { StyleSheet, Text, View, useColorScheme, useWindowDimensions } from "react-native";
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useColorScheme,
+  useWindowDimensions,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUniwind } from "uniwind";
 import BookControls from "../bookComponents/book-controls";
@@ -265,6 +272,54 @@ const MainPlayerScreen = () => {
         ) : (
           <MainPlayerActionsBar libraryItemId={loadedActionLibraryItemId} />
         )}
+      </View>
+      {/* Dismissal affordances. The route is a `card` with only a swipe-down gesture, so
+          the grabber teaches that gesture (matching every player sheet, which sets
+          `sheetGrabberVisible`) and the chevron gives a tap target to users who never
+          try the drag. Absolutely positioned so the artwork and controls never shift. */}
+      <View
+        pointerEvents="box-none"
+        style={{
+          position: "absolute",
+          top: insets.top + 8,
+          left: 20,
+          right: 20,
+          height: 34,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <View
+          style={{
+            width: 36,
+            height: 5,
+            borderRadius: 999,
+            backgroundColor: themeColors.textMuted,
+            opacity: 0.35,
+          }}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close player"
+          hitSlop={10}
+          onPress={() => router.back()}
+          style={({ pressed }) => ({
+            position: "absolute",
+            left: 0,
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            borderCurve: "continuous",
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: themeColors.border,
+            backgroundColor: themeColors.surface,
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: pressed ? 0.7 : 1,
+          })}
+        >
+          <SymbolView name="chevron.down" size={17} tintColor={themeColors.textMuted} />
+        </Pressable>
       </View>
     </View>
   );
