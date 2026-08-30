@@ -228,6 +228,16 @@ const TranscribeControls = ({ libraryItemId }: Props) => {
   if (!availability) return null;
 
   const status = isActiveBook ? "active" : (uiStatus?.status ?? storeStatus);
+  // Availability can flip false AFTER a transcript exists (Apple Intelligence
+  // turned off, the speech model evicted). Existing transcript state must keep
+  // its actions — a complete transcript would otherwise lose Export EPUB and
+  // Delete Transcript with no way back — so the unavailable message only
+  // replaces the card when there is no state worth showing.
+  const hasTranscriptState =
+    status === "complete" ||
+    status === "resumable" ||
+    status === "failed" ||
+    (status === "active" && Boolean(activeTask));
   const progressPercent = (() => {
     if (!isActiveBook || !activeTask) return 0;
     if (activeTask.phase === "preparing_model") {
@@ -257,7 +267,7 @@ const TranscribeControls = ({ libraryItemId }: Props) => {
         Transcript
       </Text>
 
-      {!availability.available ? (
+      {!availability.available && !hasTranscriptState ? (
         <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
           {describeTranscriptionUnavailable(availability)}
         </Text>

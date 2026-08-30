@@ -7,7 +7,7 @@ import {
 } from "@/transcription/book-transcription";
 import { resolveBookLocale } from "@/transcription/transcription-planning";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { hasEbookAvailable } from "./ebook-files";
@@ -43,6 +43,17 @@ export const BookTranscribeSheet = () => {
   const didConfirmLanguage = localeOverride !== null;
   const activeLocale = localeOverride ?? resolvedLocale.localeIdentifier;
   const showEbookNudge = hasEbookAvailable(bookData);
+
+  // A deep link into `book-transcribe` while this sheet is already open swaps it
+  // to another book WITHOUT remounting, so the local state survives. A language
+  // the user picked for one book must never carry over to a different one —
+  // reset it whenever the sheet changes book.
+  useEffect(() => {
+    // The reset only runs when the route param actually changes books, so the
+    // extra render it costs is not a cascade — it mirrors `BookDownloadsSheet`.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLocaleOverride(null);
+  }, [libraryItemId]);
 
   const handleStart = () => {
     if (!libraryItemId) return;
@@ -104,6 +115,9 @@ export const BookTranscribeSheet = () => {
           </Text>
 
           <TranscriptionLanguageRow
+            // Keyed on the book so a picker left expanded on the previous book
+            // does not stay open when a deep link swaps this sheet to another.
+            key={libraryItemId ?? "none"}
             localeIdentifier={activeLocale}
             needsConfirmation={resolvedLocale.isNonEnglish && !didConfirmLanguage}
             onChange={setLocaleOverride}
