@@ -33,6 +33,7 @@ import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
 import { ReadAlongControls } from "./read-along-controls";
+import { ReadAlongEmptyState } from "./read-along-empty-state";
 import { ReadAlongHeader } from "./read-along-header";
 import { ReadAlongPendingBlock } from "./read-along-pending-block";
 import { ReadAlongSegmentItem } from "./read-along-segment-item";
@@ -54,12 +55,12 @@ import { ReadAlongSegmentItem } from "./read-along-segment-item";
  * - Segment items are memoized on `(row.id, isActive, fontSize, palette)` — see
  *   `read-along-segment-item.tsx` — so a word tick re-renders exactly one row.
  *
- * ## Not this phase
+ * ## When there is nothing to read
  *
- * The no-transcript pitch screen and the player's entry button are Phase 4.
- * When the transcript is not reader-ready this screen renders
- * {@link ReadAlongStatePlaceholder}, the slot Phase 4 fills; the reader path
- * below it assumes readable text and stays clean.
+ * Everything that is not the reader — no transcript yet, a transcription still
+ * running, an interrupted or failed one — lives in `ReadAlongEmptyState`
+ * (Phase 4). This screen only decides *whether* the reader has content; that
+ * component decides what the alternative looks like.
  */
 
 /** Accent opacity for the active segment's tint (plan: ~12-15%). */
@@ -74,28 +75,12 @@ type TranscriptSnapshot = {
   frontierMs: number;
   status: BookTranscriptionRuntimeStatus;
   localeIdentifier: string | null;
+  errorCode: string | null;
 };
 
 type ReadAlongScreenProps = {
   libraryItemId?: string;
 };
-
-/**
- * Phase 4 slot. Every non-reader status (no transcript yet, nothing readable
- * below the frontier, a load failure) lands here; Phase 4 replaces the body
- * with the pitch / progress / resume screen.
- */
-const ReadAlongStatePlaceholder = ({
-  message,
-  textColor,
-}: {
-  message: string;
-  textColor: string;
-}) => (
-  <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
-    <Text style={{ fontSize: 14, color: textColor, textAlign: "center" }}>{message}</Text>
-  </View>
-);
 
 const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
   const themeColors = useThemeColors();
@@ -128,6 +113,13 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
   const runtimeStatus = useTranscriptionStore((state) =>
     boundLibraryItemId ? (state.statusById[boundLibraryItemId] ?? "idle") : "idle",
   );
+  // The transcript row (and its frozen sections) is only written once the speech
+  // model is ready, i.e. when the phase leaves `preparing_model`. Reloading on
+  // that flip is what turns the "Preparing speech model..." state into the
+  // reader's pending blocks without waiting for the first track to finish.
+  const activePhase = useTranscriptionStore((state) =>
+    state.activeTask?.libraryItemId === boundLibraryItemId ? state.activeTask.phase : null,
+  );
 
   // Guards against an out-of-order reply when a frontier advance (or a Switch)
   // starts a second load before the first resolves.
@@ -154,6 +146,7 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
           frontierMs,
           status: uiStatus.status,
           localeIdentifier: uiStatus.localeIdentifier,
+          errorCode: uiStatus.errorCode,
         };
       })
       .catch(
@@ -167,6 +160,7 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
           frontierMs: 0,
           status: "idle",
           localeIdentifier: null,
+          errorCode: null,
         }),
       )
       .then((next) => {
@@ -179,7 +173,7 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
   useEffect(() => {
     if (!boundLibraryItemId) return;
     void loadSnapshot(boundLibraryItemId);
-  }, [boundLibraryItemId, completedTracks, runtimeStatus, loadSnapshot]);
+  }, [boundLibraryItemId, completedTracks, runtimeStatus, activePhase, loadSnapshot]);
 
   const model = useMemo(
     () =>
@@ -506,12 +500,14 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 8 }}>
           <ActivityIndicator color={themeColors.accent} />
         </View>
-      ) : !boundLibraryItemId ? (
-        <ReadAlongStatePlaceholder message="No book selected." textColor={themeColors.textMuted} />
       ) : !hasReaderContent ? (
-        <ReadAlongStatePlaceholder
-          message="There is no transcript for this book yet."
-          textColor={themeColors.textMuted}
+        <ReadAlongEmptyState
+          libraryItemId={boundLibraryItemId}
+          status={snapshot?.status ?? "idle"}
+          errorCode={snapshot?.errorCode ?? null}
+          themeColors={themeColors}
+          onResume={handleResumeTranscription}
+          onRetry={handleRetryTranscription}
         />
       ) : (
         <FlashList

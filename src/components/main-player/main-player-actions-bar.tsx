@@ -61,7 +61,10 @@ const ActionIconButton = ({
       style={({ pressed }) => ({
         alignItems: "center",
         justifyContent: "center",
-        minWidth: 70,
+        // Flex, not a fixed minWidth: the book bar carries five buttons and a
+        // fixed 70pt each overflows the frame at iPhone-SE width. Sharing the
+        // row means the bar fits any width and any button count.
+        flex: 1,
         paddingVertical: 4,
         opacity: disabled ? 0.45 : pressed ? 0.72 : 1,
       })}
@@ -181,7 +184,7 @@ const RateActionButton = ({ libraryItemId, onPress }: RateActionButtonProps) => 
   };
 
   return (
-    <View style={{ minWidth: 70, alignItems: "center", justifyContent: "center", paddingVertical: 4 }}>
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 4 }}>
       <Animated.View
         pointerEvents="none"
         style={[
@@ -226,7 +229,9 @@ const RateActionButton = ({ libraryItemId, onPress }: RateActionButtonProps) => 
             style={({ pressed }) => ({
               alignItems: "center",
               justifyContent: "center",
-              minWidth: 70,
+              // The 42pt icon plus Apple's minimum tap target — the cell around
+              // it is now flex-sized, so this can no longer widen the row.
+              minWidth: 44,
               opacity: !targetLibraryItemId ? 0.45 : pressed ? 0.72 : 1,
             })}
           >
@@ -377,6 +382,16 @@ const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
     });
   };
 
+  // Always open — the Read-Along route decides what a book without a readable
+  // transcript sees (pitch, progress, resume), so nothing is gated here.
+  const openReadAlong = () => {
+    if (!libraryItemId) return;
+    router.push({
+      pathname: "/read-along",
+      params: { libraryItemId },
+    });
+  };
+
   return (
     <PlayerActionsFrame>
       <SleepTimerAction />
@@ -393,6 +408,12 @@ const MainPlayerActionsBar = ({ libraryItemId }: MainPlayerActionsBarProps) => {
         icon="book.badge.plus.fill"
         label="Add bookmark"
         onPress={openAddBookmark}
+        disabled={!libraryItemId}
+      />
+      <ActionIconButton
+        icon="text.book.closed"
+        label="Read Along"
+        onPress={openReadAlong}
         disabled={!libraryItemId}
       />
       <RateActionButton libraryItemId={libraryItemId} onPress={openRate} />
