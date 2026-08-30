@@ -1,7 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 const DATABASE_NAME = "laabs-shadow-library.db";
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -504,6 +504,42 @@ CREATE TABLE IF NOT EXISTS timing_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_timing_logs_category
   ON timing_logs(category, created_at);
+
+CREATE TABLE IF NOT EXISTS book_transcripts (
+  library_item_id TEXT PRIMARY KEY NOT NULL,
+  status TEXT NOT NULL,               -- 'in_progress' | 'complete' | 'failed'
+  locale_identifier TEXT NOT NULL,    -- e.g. 'en-US'
+  source_structure TEXT NOT NULL,     -- 'chapters' | 'files'
+  sections_json TEXT NOT NULL,        -- frozen [{index,title,startMs,endMs}] at start time
+  book_title TEXT NOT NULL,
+  book_author TEXT,
+  error_code TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS book_transcript_tracks (   -- resume unit = one audio file
+  library_item_id TEXT NOT NULL,
+  track_ino TEXT NOT NULL,
+  track_index INTEGER NOT NULL,
+  start_offset_ms INTEGER NOT NULL,   -- recomputed rolling offset, NOT raw startOffset
+  duration_ms INTEGER NOT NULL,
+  status TEXT NOT NULL,               -- 'pending' | 'complete'
+  completed_at INTEGER,
+  PRIMARY KEY (library_item_id, track_ino)
+);
+
+CREATE TABLE IF NOT EXISTS book_transcript_segments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_item_id TEXT NOT NULL,
+  section_index INTEGER NOT NULL,
+  start_ms INTEGER NOT NULL,          -- book-absolute
+  end_ms INTEGER NOT NULL,            -- book-absolute
+  text TEXT NOT NULL,
+  words_json TEXT                     -- [[startMs,endMs,"word"], ...] book-absolute; null if unavailable
+);
+CREATE INDEX IF NOT EXISTS idx_transcript_segments_book_section
+  ON book_transcript_segments(library_item_id, section_index, start_ms);
 `;
 
 export const initializeShadowDatabaseInternal = async () => {
