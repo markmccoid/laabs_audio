@@ -14,6 +14,7 @@ import {
 } from "../api/me-api";
 import { playlistsApi, type PlaylistSummary } from "../api/playlists-api";
 import { authStore } from "../auth/auth-store";
+import { deleteBookTranscript } from "../data/sqlite/shadow-db-transcripts";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import {
@@ -3275,6 +3276,24 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         },
 
         deleteDownloadedBookData: async (libraryItemId) => {
+          // A Book Transcript dies with its download (CONTEXT.md lifetime rule).
+          // Doing it here rather than only in the delete UI makes EVERY path —
+          // including `cancelDownload`'s cleanup — drop the transcript.
+          //
+          // Lazily required: `@/transcription/book-transcription` imports this
+          // store (and subscribes to it at module scope), so a static import
+          // back would be a cycle that breaks module initialization order.
+          try {
+            const transcription =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy on purpose: see the cycle note above
+              require("../transcription/book-transcription") as typeof import("../transcription/book-transcription");
+            transcription.cancelTranscribeAfterDownload(libraryItemId);
+            await transcription.cancelActiveTranscription(libraryItemId);
+          } catch {
+            // Transcription is iOS-only and optional — never block a deletion on it.
+          }
+          await deleteBookTranscript(libraryItemId).catch(() => undefined);
+
           const downloadInfo = get().downloadedBookData[libraryItemId];
 
           if (downloadInfo) {

@@ -35,6 +35,7 @@ import { playerService } from "../player/player-service";
 import { playbackStore, usePlaybackStore } from "../player/playback-store";
 import { configureRevenueCat } from "../purchases/revenuecat";
 import { settingsStore } from "../store/settings-store";
+import { initializeTranscribeAfterDownloadWatcher } from "../transcription/book-transcription";
 import { SleepTimerCoordinator } from "../player/sleep-timer-coordinator";
 import { FIVE_MINUTES_MS, queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
@@ -469,6 +470,10 @@ export default function RootLayout() {
 
   useEffect(() => {
     playerService.init();
+    // The "also transcribe after download" watcher installs itself on import;
+    // calling it here is the explicit, idempotent wiring so the subscription
+    // exists even before any transcription UI mounts.
+    initializeTranscribeAfterDownloadWatcher();
     return startActiveAudiobookWidgetCoordinator();
   }, []);
 
@@ -700,6 +705,10 @@ export default function RootLayout() {
               />
               <Stack.Screen
                 name="book-downloads"
+                options={sheetScreenOptions(themeColors.surface)}
+              />
+              <Stack.Screen
+                name="book-transcribe"
                 options={sheetScreenOptions(themeColors.surface)}
               />
               <Stack.Screen

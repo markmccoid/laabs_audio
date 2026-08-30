@@ -12,6 +12,7 @@ const PLAYER_UTILITY_SHEETS = new Set([
 const BOOK_UTILITY_SHEETS = new Set([
   "book-bookshelves",
   "book-downloads",
+  "book-transcribe",
   "book-bookmarks",
   "book-bookmark-detail",
   "book-addbookmark",

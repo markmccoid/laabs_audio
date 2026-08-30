@@ -48,6 +48,7 @@ const RESERVED_ROOT_SEGMENTS = new Set([
   "player-sleep-timer",
   "book-bookshelves",
   "book-downloads",
+  "book-transcribe",
   "book-bookmarks",
   "book-addbookmark",
   "book-series",

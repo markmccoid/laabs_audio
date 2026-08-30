@@ -1,4 +1,6 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
+import { getBookTranscriptStatus } from "@/data/sqlite/shadow-db-transcripts";
+import { exportTranscriptEpub, TranscriptEpubExportError } from "@/sharing/transcript-epub-export";
 import {
   selectIsAnotherDownloadActive,
   selectIsBookActivelyDownloading,
@@ -11,7 +13,8 @@ import { playerService } from "@/player";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { formatMegabytes } from "@/utils/formatUtils";
 import { router, usePathname } from "expo-router";
-import { Pressable, Text, View } from "react-native";
+import { Alert, Pressable, Text, View } from "react-native";
+import { toast } from "react-native-sonner";
 const logDownloadControls = (_event: string, _payload?: Record<string, unknown>) => {};
 
 const formatPercent = (value: number | undefined) => {
@@ -19,11 +22,76 @@ const formatPercent = (value: number | undefined) => {
   return `${Math.max(0, Math.min(100, value as number))}%`;
 };
 
+/**
+ * Ask the user what should happen to this book's Book Transcript before its
+ * download is deleted — the Transcript dies with the download (CONTEXT.md
+ * lifetime rule), so a complete transcript gets one last Transcript EPUB Export
+ * offer. Resolves `true` when the deletion should go ahead.
+ *
+ * Dismissing the iOS share sheet is NOT a cancellation: only an export FAILURE
+ * sends the user back to the choice.
+ */
+const confirmTranscriptBeforeDelete = async (libraryItemId: string): Promise<boolean> => {
+  const transcript = await getBookTranscriptStatus(libraryItemId).catch(() => null);
+  if (!transcript) return true;
+
+  if (transcript.status === "in_progress") {
+    return new Promise<boolean>((resolve) => {
+      Alert.alert(
+        "Stop transcription?",
+        "Deleting will stop and discard the in-progress transcription for this book.",
+        [
+          { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+          { text: "Continue", style: "destructive", onPress: () => resolve(true) },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) },
+      );
+    });
+  }
+
+  if (transcript.status !== "complete") return true;
+
+  return new Promise<boolean>((resolve) => {
+    Alert.alert(
+      "Delete transcript too?",
+      "Removing this download also removes its transcript. Export it as an EPUB first?",
+      [
+        {
+          text: "Export EPUB then delete",
+          onPress: () => {
+            void exportTranscriptEpub({ libraryItemId })
+              .then(() => resolve(true))
+              .catch(async (error: unknown) => {
+                toast.error("Export failed", {
+                  description:
+                    error instanceof TranscriptEpubExportError || error instanceof Error
+                      ? error.message
+                      : undefined,
+                });
+                // Export failed — re-ask rather than silently destroying the transcript.
+                resolve(await confirmTranscriptBeforeDelete(libraryItemId));
+              });
+          },
+        },
+        {
+          text: "Delete without exporting",
+          style: "destructive",
+          onPress: () => resolve(true),
+        },
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
+};
+
 type Props = {
   libraryItemId?: string;
   summary?: LibraryItemSummary | null;
   context?: "inline" | "sheet";
   sourceBookRoute?: BookDetailRouteSource | null;
+  /** Fired just before `downloadBook` — the download sheet's "also transcribe" hook. */
+  onDownloadStart?: () => void;
 };
 
 const DownloadControls = ({
@@ -31,6 +99,7 @@ const DownloadControls = ({
   summary,
   context = "inline",
   sourceBookRoute,
+  onDownloadStart,
 }: Props) => {
   const themeColors = useThemeColors();
   const pathname = usePathname();
@@ -71,6 +140,7 @@ const DownloadControls = ({
       activeDownloadLibraryItemId:
         activeDownloadSession?.libraryItemId ?? downloadProgress?.libraryItemId ?? null,
     });
+    onDownloadStart?.();
     void downloadBook(libraryItemId, {
       summary: summary ?? undefined,
       sourceBookRoute,
@@ -80,6 +150,9 @@ const DownloadControls = ({
   const handleDelete = async () => {
     if (!libraryItemId) return;
     logDownloadControls("remove:pressed", { libraryItemId, pathname, context });
+    // The Book Transcript dies with the download — offer the export first.
+    const shouldDelete = await confirmTranscriptBeforeDelete(libraryItemId);
+    if (!shouldDelete) return;
     const playbackSnapshot = await playerService.prepareForDownloadedBookDeletion(libraryItemId);
     await deleteDownloadedBookData(libraryItemId);
     await playerService.resumeAfterDownloadedBookDeletion(playbackSnapshot);

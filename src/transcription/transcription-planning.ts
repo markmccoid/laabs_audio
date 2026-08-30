@@ -344,6 +344,49 @@ const LOCALE_BY_LANGUAGE_TOKEN: Record<string, string> = {
   czech: "cs-CZ",
 };
 
+/** One entry in the language picker offered by the start sheet / download sheet. */
+export type TranscriptionLanguageOption = {
+  localeIdentifier: string;
+  label: string;
+};
+
+/**
+ * The common languages the UI offers when the user overrides the resolved
+ * locale. Deliberately a short, curated list rather than every locale
+ * `SpeechTranscriber` might support — an unsupported pick still fails cleanly
+ * with `locale_unsupported` at start time.
+ */
+export const TRANSCRIPTION_LANGUAGE_OPTIONS: TranscriptionLanguageOption[] = [
+  { localeIdentifier: "en-US", label: "English (US)" },
+  { localeIdentifier: "en-GB", label: "English (UK)" },
+  { localeIdentifier: "de-DE", label: "German" },
+  { localeIdentifier: "fr-FR", label: "French" },
+  { localeIdentifier: "es-ES", label: "Spanish" },
+  { localeIdentifier: "it-IT", label: "Italian" },
+  { localeIdentifier: "pt-PT", label: "Portuguese" },
+  { localeIdentifier: "nl-NL", label: "Dutch" },
+  { localeIdentifier: "sv-SE", label: "Swedish" },
+  { localeIdentifier: "nb-NO", label: "Norwegian" },
+  { localeIdentifier: "da-DK", label: "Danish" },
+  { localeIdentifier: "fi-FI", label: "Finnish" },
+  { localeIdentifier: "pl-PL", label: "Polish" },
+  { localeIdentifier: "ru-RU", label: "Russian" },
+  { localeIdentifier: "tr-TR", label: "Turkish" },
+  { localeIdentifier: "ja-JP", label: "Japanese" },
+  { localeIdentifier: "zh-CN", label: "Chinese (Mandarin)" },
+  { localeIdentifier: "ko-KR", label: "Korean" },
+  { localeIdentifier: "ar-SA", label: "Arabic" },
+  { localeIdentifier: "hi-IN", label: "Hindi" },
+  { localeIdentifier: "uk-UA", label: "Ukrainian" },
+  { localeIdentifier: "cs-CZ", label: "Czech" },
+];
+
+/** Human label for a locale, falling back to the raw identifier for overrides. */
+export const describeTranscriptionLocale = (localeIdentifier: string) =>
+  TRANSCRIPTION_LANGUAGE_OPTIONS.find(
+    (option) => option.localeIdentifier.toLowerCase() === localeIdentifier.toLowerCase(),
+  )?.label ?? localeIdentifier;
+
 const normalizeLanguageValue = (value: string) =>
   value
     .trim()
