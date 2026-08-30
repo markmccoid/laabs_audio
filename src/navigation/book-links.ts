@@ -43,6 +43,7 @@ const RESERVED_ROOT_SEGMENTS = new Set([
   "library-picker",
   "chapter-viewer",
   "main-player",
+  "read-along",
   "player-rate",
   "player-bookmarks",
   "player-sleep-timer",

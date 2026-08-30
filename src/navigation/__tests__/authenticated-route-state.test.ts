@@ -22,6 +22,13 @@ describe("authenticated route gate", () => {
     expect(isKnownAuthenticatedRoute(getAuthenticatedRouteState(["book-downloads"]))).toBe(true);
   });
 
+  it("treats the Read-Along reader as a known authenticated root route", () => {
+    const routeState = getAuthenticatedRouteState(["read-along"]);
+
+    expect(routeState.inReadAlong).toBe(true);
+    expect(isKnownAuthenticatedRoute(routeState)).toBe(true);
+  });
+
   it("treats Episode downloads sheet as a known authenticated root route", () => {
     const routeState = getAuthenticatedRouteState(["episode-downloads"]);
 

@@ -35,6 +35,7 @@ export type AuthenticatedRouteState = {
   inLibraryPicker: boolean;
   inChapterViewer: boolean;
   inMainPlayer: boolean;
+  inReadAlong: boolean;
   inPlayerUtilitySheet: boolean;
   inBookUtilitySheet: boolean;
   inEpisodeUtilitySheet: boolean;
@@ -53,6 +54,7 @@ export const getAuthenticatedRouteState = (
     inLibraryPicker: rootSegment === "library-picker",
     inChapterViewer: rootSegment === "chapter-viewer",
     inMainPlayer: rootSegment === "main-player",
+    inReadAlong: rootSegment === "read-along",
     inPlayerUtilitySheet: Boolean(rootSegment && PLAYER_UTILITY_SHEETS.has(rootSegment)),
     inBookUtilitySheet: Boolean(rootSegment && BOOK_UTILITY_SHEETS.has(rootSegment)),
     inEpisodeUtilitySheet: Boolean(rootSegment && EPISODE_UTILITY_SHEETS.has(rootSegment)),
@@ -66,6 +68,7 @@ export const isKnownAuthenticatedRoute = (routeState: AuthenticatedRouteState) =
   routeState.inLibraryPicker ||
   routeState.inChapterViewer ||
   routeState.inMainPlayer ||
+  routeState.inReadAlong ||
   routeState.inPlayerUtilitySheet ||
   routeState.inBookUtilitySheet ||
   routeState.inEpisodeUtilitySheet;

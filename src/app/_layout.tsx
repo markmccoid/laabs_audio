@@ -670,6 +670,20 @@ export default function RootLayout() {
                 }}
               />
               <Stack.Screen
+                name="read-along"
+                options={{
+                  presentation: "card",
+                  headerShown: false,
+                  gestureDirection: "vertical",
+                  gestureEnabled: true,
+                  contentStyle: {
+                    borderTopLeftRadius: 25,
+                    borderTopRightRadius: 25,
+                    overflow: "hidden",
+                  },
+                }}
+              />
+              <Stack.Screen
                 name="player-rate"
                 options={sheetScreenOptions(themeColors.surface, {
                   sheetAllowedDetents: [0.5, 0.9],
