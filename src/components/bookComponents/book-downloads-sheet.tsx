@@ -91,6 +91,15 @@ export const BookDownloadsSheet = () => {
     !isDownloaded &&
     Boolean(transcriptionAvailability?.available);
 
+  // A deep link into `book-downloads` while this sheet is already open swaps it
+  // to another book WITHOUT remounting, so the local state survives. The
+  // checkbox is the consent step, and consent must never carry over to a
+  // different book — reset it whenever the sheet changes book.
+  useEffect(() => {
+    setTranscribeAfterDownload(false);
+    setLocaleOverride(null);
+  }, [libraryItemId]);
+
   // The orchestrator already toasts when it has to drop the intent (no queue),
   // so this sheet must not toast again — it only clears the flag once seen.
   useEffect(() => {
