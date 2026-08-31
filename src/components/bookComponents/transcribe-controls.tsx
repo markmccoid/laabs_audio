@@ -308,7 +308,8 @@ const TranscribeControls = ({ libraryItemId }: Props) => {
             />
           </View>
           <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
-            Transcription runs only while the app is open.
+            Keeps going with the screen off while you are listening. If you stop playback, leave
+            the app open to continue.
           </Text>
           <CardButton label="Cancel Transcription" onPress={handleCancel} />
         </View>
@@ -332,7 +333,7 @@ const TranscribeControls = ({ libraryItemId }: Props) => {
       ) : status === "resumable" ? (
         <View style={{ gap: 8 }}>
           <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
-            Transcription was interrupted. It picks up from the next unfinished file.
+            Transcription was interrupted. It picks up from where it left off.
           </Text>
           <CardButton label="Resume Transcription" onPress={handleResume} tone="primary" />
         </View>

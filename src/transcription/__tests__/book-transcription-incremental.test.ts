@@ -59,6 +59,12 @@ jest.mock("react-native-sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() },
 }));
 
+// Phase 4 gave the orchestrator a `playbackStore` dependency (the adaptive
+// wake lock reads it), and that store is MMKV-persisted.
+jest.mock("@/store/mmkv-storage", () => ({
+  mmkvStorage: { getItem: jest.fn(() => null), setItem: jest.fn(), removeItem: jest.fn() },
+}));
+
 jest.mock("@/native/book-transcriber", () => ({
   getBookTranscriptionAvailability: async () => ({
     available: true,
@@ -67,6 +73,8 @@ jest.mock("@/native/book-transcriber", () => ({
   }),
   ensureLanguageModel: async () => undefined,
   cancelBookTranscription: async () => undefined,
+  beginBackgroundAssertion: async () => 0,
+  endBackgroundAssertion: async () => undefined,
   transcribeBookFile: (options: {
     taskId: string;
     sourceFileUri: string;
@@ -134,7 +142,11 @@ jest.mock("@/store/device-books-store", () => ({
 //~~ Harness
 //~~ ========================================================
 
-import { startBookTranscription, cancelActiveTranscription } from "../book-transcription";
+import {
+  cancelActiveTranscription,
+  settlePendingTranscriptionWrites,
+  startBookTranscription,
+} from "../book-transcription";
 import { transcriptionStore } from "@/store/transcription-store";
 
 const LIBRARY_ITEM_ID = "li-1";
@@ -341,6 +353,61 @@ describe("resume from the watermark", () => {
 
     mockSettleTranscribe?.resolve();
     await run;
+  });
+});
+
+describe("background flush settle seam", () => {
+  /**
+   * Phase 4 (`docs/transcription-background-execution-plan.md`) needs to await
+   * "the current flush work is settled" from outside `transcribeOneTrack`, which
+   * still privately owns the queue. `settlePendingTranscriptionWrites` is that
+   * seam — these cover the two properties the background assertion depends on.
+   */
+  it("resolves immediately when no file is in flight", async () => {
+    await expect(settlePendingTranscriptionWrites()).resolves.toBeUndefined();
+  });
+
+  it("waits for an outstanding append before resolving", async () => {
+    const releases: (() => void)[] = [];
+    mockAppendImpl = async () => {
+      await new Promise<void>((resolve) => releases.push(resolve));
+    };
+
+    const { run } = await startRunAndWaitForNative();
+
+    emitSegments([nativeSegment("One.", 0, 4)]);
+    await waitFor(() => mockAppendCalls.length === 1, "the flush to start");
+
+    let didSettle = false;
+    const settled = settlePendingTranscriptionWrites().then(() => {
+      didSettle = true;
+    });
+    await tick();
+    expect(didSettle).toBe(false);
+
+    releases[0]();
+    await settled;
+    expect(didSettle).toBe(true);
+
+    mockSettleTranscribe?.resolve();
+    await expect(run).resolves.toMatchObject({ outcome: "complete" });
+  });
+
+  it("does not reject when the outstanding append fails", async () => {
+    mockAppendImpl = async () => {
+      throw new Error("disk full");
+    };
+
+    const { run } = await startRunAndWaitForNative();
+    emitSegments([nativeSegment("One.", 0, 4)]);
+    await waitFor(() => mockAppendCalls.length === 1, "the failing flush");
+
+    // The run still reports the failure; the settle hook must not, or the
+    // background assertion would leak on the way out.
+    await expect(settlePendingTranscriptionWrites()).resolves.toBeUndefined();
+
+    mockSettleTranscribe?.resolve();
+    await expect(run).resolves.toMatchObject({ outcome: "failed" });
   });
 });
 

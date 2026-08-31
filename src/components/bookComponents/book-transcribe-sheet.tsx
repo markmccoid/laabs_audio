@@ -21,8 +21,14 @@ import { TranscriptionLanguageRow } from "./transcription-language-row";
  * nudge — never a block.
  */
 
+/**
+ * Says what actually happens, not what we wish happened. Unattended completion
+ * needs BGProcessingTask (Phase 5 of
+ * `docs/transcription-background-execution-plan.md`) and is not built, so the
+ * copy promises only the two cases that do work: playing, or app open.
+ */
 const EXPECTATION_COPY =
-  "Transcription runs on this device while the app is open. A full book can take a while and uses significant battery. The text is machine-generated and will contain errors.";
+  "Transcription runs on this device and keeps going with the screen off while you are listening. If you stop playback, leave the app open to continue. A full book can take a while and uses significant battery. The text is machine-generated and will contain errors.";
 
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;

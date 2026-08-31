@@ -4,7 +4,9 @@ import {
   addFileProgressListener,
   addModelDownloadProgressListener,
   addSegmentsListener,
+  beginBackgroundAssertion,
   cancelBookTranscription,
+  endBackgroundAssertion,
   ensureLanguageModel,
   getBookTranscriptionAvailability,
   transcribeBookFile,
@@ -22,6 +24,7 @@ import {
   markTranscriptFailed,
   type BookTranscriptSection,
 } from "@/data/sqlite/shadow-db-transcripts";
+import { playbackStore } from "@/player/playback-store";
 import { resolveExportTracks } from "@/sharing/clip-export";
 import {
   deviceBooksStore,
@@ -46,6 +49,11 @@ import {
   type TranscriptionPlanTrack,
   type TranscriptionSourceTrack,
 } from "./transcription-planning";
+import {
+  beginTranscriptionWakefulness,
+  endTranscriptionWakefulness,
+  type TranscriptionWakefulnessDependencies,
+} from "./transcription-wakefulness";
 
 /**
  * Book Transcript orchestrator (docs/book-transcript-implementation-plan.md
@@ -61,8 +69,12 @@ import {
  * - Cancel leaves the row `in_progress` (resumable) and KEEPS the work done so
  *   far; only hard errors set `failed`.
  * - No auto-resume on launch; `resumeIfNeeded` is invoked from the UI.
+ * - The screen-wake lock belongs to the task, not to a screen: it is taken with
+ *   the task and released on every exit path
+ *   (`docs/transcription-background-execution-plan.md` Phase 4).
  *
- * The pure planning logic lives in `./transcription-planning.ts`.
+ * The pure planning logic lives in `./transcription-planning.ts`; the pure
+ * wake-lock rules live in `./transcription-wakefulness.ts`.
  */
 
 export {
@@ -121,6 +133,13 @@ export type BookTranscriptUiStatus = {
 let activeNativeTaskId: string | null = null;
 /** Set by `cancelActiveTranscription` so the sequential loop stops between files. */
 let cancelRequested = false;
+/**
+ * Reads the tail of the flush queue owned by the file currently in flight, or
+ * `null` when no file is. The queue itself stays private to `transcribeOneTrack`
+ * (Phase 3); this is the smallest seam that lets Phase 4's background flush ask
+ * "has the outstanding write landed?" from outside it.
+ */
+let readFlushTail: (() => Promise<void>) | null = null;
 
 const actions = () => transcriptionStore.getState().actions;
 
@@ -135,6 +154,54 @@ const toErrorCode = (error: unknown, fallback: string) => {
   const code = (error as { code?: unknown } | null)?.code;
   return typeof code === "string" && code ? code : fallback;
 };
+
+//~~ ========================================================
+//~~ Wakefulness (Phase 4: adaptive keep-awake + background flush)
+//~~ ========================================================
+
+/**
+ * How many times `settlePendingTranscriptionWrites` re-checks the queue tail.
+ * A batch that arrives *while* we are draining pushes the tail forwards, so one
+ * await is not proof of quiet; a handful of passes is, and bounds the wait when
+ * the analyzer is still streaming.
+ */
+const MAX_FLUSH_SETTLE_PASSES = 5;
+
+/**
+ * Resolve once every SQLite write the in-flight file has queued has landed.
+ * Never rejects — flush failures are already captured by `transcribeOneTrack`
+ * and rethrown into the run, and a background assertion must be handed back
+ * regardless.
+ */
+export const settlePendingTranscriptionWrites = async (): Promise<void> => {
+  for (let pass = 0; pass < MAX_FLUSH_SETTLE_PASSES; pass += 1) {
+    const readTail = readFlushTail;
+    if (!readTail) return;
+    const pending = readTail();
+    await pending.catch(() => undefined);
+    // The tail is reassigned on every enqueue: an unchanged identity means
+    // nothing was queued behind what we just waited for.
+    if (readFlushTail === null || readFlushTail() === pending) return;
+  }
+};
+
+/**
+ * The non-pure half of `./transcription-wakefulness.ts`, supplied here because
+ * the orchestrator owns the task lifetime — and because keeping SQLite, MMKV
+ * and `requireNativeModule` out of that module is what keeps its decision table
+ * unit-testable.
+ */
+const wakefulnessDependencies: TranscriptionWakefulnessDependencies = {
+  isTranscriptionActive: () => transcriptionStore.getState().activeTask !== null,
+  subscribeTranscription: (listener) => transcriptionStore.subscribe(() => listener()),
+  getPlaybackState: () => playbackStore.getState().playbackState,
+  subscribePlayback: (listener) => playbackStore.subscribe(() => listener()),
+  beginBackgroundAssertion,
+  endBackgroundAssertion,
+  settlePendingWork: settlePendingTranscriptionWrites,
+};
+
+const beginWakefulness = () => beginTranscriptionWakefulness(wakefulnessDependencies);
 
 //~~ ========================================================
 //~~ Planning helpers
@@ -268,6 +335,9 @@ export const startBookTranscription = async (
 
   const totalTracks = plan.planTracks.length;
   actions().beginTask({ libraryItemId, totalTracks, phase: "preparing_model" });
+  // From `beginTask`, not from `runPendingTracks`: a model download with nothing
+  // playing suspends exactly like recognition does.
+  beginWakefulness();
 
   // ---- Prepare the on-device speech model (first use downloads it).
   let modelSubscription: EventSubscription | null = null;
@@ -279,6 +349,7 @@ export const startBookTranscription = async (
     await ensureLanguageModel({ localeIdentifier });
   } catch (error) {
     actions().endTask();
+    await endTranscriptionWakefulness();
     actions().setStatus(libraryItemId, resuming ? "resumable" : "idle");
     throw new BookTranscriptionError(
       "model_unavailable",
@@ -290,20 +361,31 @@ export const startBookTranscription = async (
 
   if (cancelRequested) {
     actions().endTask();
+    await endTranscriptionWakefulness();
     actions().setStatus(libraryItemId, resuming ? "resumable" : "idle");
     return { libraryItemId, outcome: "cancelled" };
   }
 
   if (!resuming) {
-    await createBookTranscript({
-      libraryItemId,
-      localeIdentifier,
-      sourceStructure: plan.sourceStructure,
-      sections: plan.sections,
-      bookTitle: plan.bookTitle,
-      bookAuthor: plan.bookAuthor,
-      tracks: plan.planTracks,
-    });
+    try {
+      await createBookTranscript({
+        libraryItemId,
+        localeIdentifier,
+        sourceStructure: plan.sourceStructure,
+        sections: plan.sections,
+        bookTitle: plan.bookTitle,
+        bookAuthor: plan.bookAuthor,
+        tracks: plan.planTracks,
+      });
+    } catch (error) {
+      // The last path that can fail before `runPendingTracks`' finally takes
+      // over the teardown. Without this the task — and with it the screen-wake
+      // lock — would stay live until the app restarted.
+      actions().endTask();
+      await endTranscriptionWakefulness();
+      actions().setStatus(libraryItemId, resuming ? "resumable" : "idle");
+      throw error;
+    }
   }
 
   actions().setPhase("transcribing");
@@ -387,6 +469,9 @@ const runPendingTracks = async ({
   } finally {
     activeNativeTaskId = null;
     cancelRequested = false;
+    // Every exit path — complete, cancelled, failed, thrown — releases the
+    // screen-wake lock and drops the playback/AppState subscriptions.
+    await endTranscriptionWakefulness();
   }
 };
 
@@ -501,6 +586,9 @@ const transcribeOneTrack = async ({
   };
 
   try {
+    // Publish the queue tail for `settlePendingTranscriptionWrites`. The closure
+    // re-reads `flushTail` on every call, so it always names the current tail.
+    readFlushTail = () => flushTail;
     actions().setCurrentFileFraction(reportedFraction);
 
     segmentsSubscription = addSegmentsListener((event) => {
@@ -528,6 +616,7 @@ const transcribeOneTrack = async ({
     await drainPendingSegmentEvents();
     segmentsSubscription?.remove();
     await flushTail;
+    readFlushTail = null;
   }
 
   if (flushError) throw flushError;
