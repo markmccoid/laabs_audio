@@ -1,7 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 const DATABASE_NAME = "laabs-shadow-library.db";
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -526,6 +526,7 @@ CREATE TABLE IF NOT EXISTS book_transcript_tracks (   -- resume unit = one audio
   duration_ms INTEGER NOT NULL,
   status TEXT NOT NULL,               -- 'pending' | 'complete'
   completed_at INTEGER,
+  transcribed_through_ms INTEGER NOT NULL DEFAULT 0, -- TRACK-relative resume watermark (0 = file start)
   PRIMARY KEY (library_item_id, track_ino)
 );
 
@@ -605,6 +606,17 @@ export const initializeShadowDatabaseInternal = async () => {
       .execAsync(
         `
     ALTER TABLE libraries ADD COLUMN last_podcast_series_index_refresh_at INTEGER;
+  `,
+      )
+      .catch(() => undefined);
+    // Schema v7: intra-file transcription resume watermark. Track-relative ms,
+    // so it maps straight onto the native `startSeconds`. `0` on every existing
+    // row is correct — an upgraded in-progress transcript restarts its pending
+    // track from the beginning, which is the pre-v7 behaviour.
+    await db
+      .execAsync(
+        `
+    ALTER TABLE book_transcript_tracks ADD COLUMN transcribed_through_ms INTEGER NOT NULL DEFAULT 0;
   `,
       )
       .catch(() => undefined);

@@ -48,6 +48,12 @@ export type BookTranscriptTrackRow = {
   durationMs: number;
   status: BookTranscriptTrackStatus;
   completedAt: number | null;
+  /**
+   * Intra-file resume watermark: ms of this track already transcribed and
+   * persisted. **Track-relative** (0 = start of that audio file), not
+   * book-absolute, so it maps straight onto the native `startSeconds`.
+   */
+  transcribedThroughMs: number;
 };
 
 /** One Transcript Segment as persisted (row id + book-absolute timing). */
@@ -105,6 +111,7 @@ type BookTranscriptTrackSqlRow = {
   duration_ms: number;
   status: BookTranscriptTrackStatus;
   completed_at: number | null;
+  transcribed_through_ms: number;
 };
 
 type TranscriptSegmentSqlRow = {
@@ -158,6 +165,7 @@ const toBookTranscriptTrackRow = (
   durationMs: row.duration_ms,
   status: row.status,
   completedAt: row.completed_at,
+  transcribedThroughMs: row.transcribed_through_ms,
 });
 
 const toTranscriptSegmentRow = (
@@ -230,14 +238,15 @@ export const createBookTranscript = (payload: {
         await db.runAsync(
           `INSERT INTO book_transcript_tracks (
             library_item_id, track_ino, track_index, start_offset_ms, duration_ms,
-            status, completed_at
-          ) VALUES (?, ?, ?, ?, ?, 'pending', NULL)
+            status, completed_at, transcribed_through_ms
+          ) VALUES (?, ?, ?, ?, ?, 'pending', NULL, 0)
           ON CONFLICT(library_item_id, track_ino) DO UPDATE SET
             track_index = excluded.track_index,
             start_offset_ms = excluded.start_offset_ms,
             duration_ms = excluded.duration_ms,
             status = 'pending',
-            completed_at = NULL`,
+            completed_at = NULL,
+            transcribed_through_ms = 0`,
           [
             payload.libraryItemId,
             track.trackIno,
@@ -266,7 +275,11 @@ export const getBookTranscriptStatus = async (
   return row ? toBookTranscriptRow(row) : null;
 };
 
-/** Pending (not-yet-transcribed) tracks for a Book Transcript, in file order. */
+/**
+ * Pending (not-yet-transcribed) tracks for a Book Transcript, in file order.
+ * Each row carries its `transcribedThroughMs` watermark so a resumed run can
+ * start the native analyzer mid-file instead of at frame 0.
+ */
 export const listPendingTracks = async (
   libraryItemId: string,
 ): Promise<BookTranscriptTrackRow[]> => {
@@ -274,7 +287,7 @@ export const listPendingTracks = async (
   const db = await getDb();
   const rows = await db.getAllAsync<BookTranscriptTrackSqlRow>(
     `SELECT library_item_id, track_ino, track_index, start_offset_ms, duration_ms,
-            status, completed_at
+            status, completed_at, transcribed_through_ms
      FROM book_transcript_tracks
      WHERE library_item_id = ? AND status = 'pending'
      ORDER BY track_index ASC`,
@@ -284,20 +297,29 @@ export const listPendingTracks = async (
 };
 
 /**
- * Insert every Transcript Segment produced for one track AND mark that track
- * complete, in a single transaction — the crash-safe resume unit. Either both
- * happen or neither does, so a kill mid-file never leaves partial segments
- * without a resumable pending track (or vice versa).
+ * Persist one batch of Transcript Segments for a track AND advance that
+ * track's resume watermark, in a single transaction — the crash-safe unit
+ * (`docs/transcription-background-execution-plan.md` Phase 1). Either both
+ * happen or neither does, so a kill between the two can never duplicate or
+ * lose a batch on resume.
+ *
+ * `transcribedThroughMs` is **track-relative** and applied with `MAX(...)`, so
+ * an out-of-order batch can never move the watermark backwards.
  */
-export const insertSegmentsForTrack = (
-  libraryItemId: string,
-  trackIno: string,
-  segments: TranscriptSegmentInput[],
-) =>
+export const appendTrackSegments = ({
+  libraryItemId,
+  trackIno,
+  segments,
+  transcribedThroughMs,
+}: {
+  libraryItemId: string;
+  trackIno: string;
+  segments: TranscriptSegmentInput[];
+  transcribedThroughMs: number;
+}) =>
   withWriteGuard(async (): Promise<void> => {
     await initializeShadowDatabaseInternal();
     const db = await getDb();
-    const timestamp = now();
 
     await runInTransaction(db, async () => {
       for (const segment of segments) {
@@ -318,12 +340,56 @@ export const insertSegmentsForTrack = (
 
       await db.runAsync(
         `UPDATE book_transcript_tracks
-         SET status = 'complete', completed_at = ?
+         SET transcribed_through_ms = MAX(transcribed_through_ms, ?)
          WHERE library_item_id = ? AND track_ino = ?`,
-        [timestamp, libraryItemId, trackIno],
+        [transcribedThroughMs, libraryItemId, trackIno],
       );
     });
   });
+
+/**
+ * Mark one track complete: `status = 'complete'`, `completed_at` stamped, and
+ * the watermark pinned to the track's full `duration_ms` so a later resume
+ * pass can never re-read the tail of a finished file.
+ */
+export const completeTrack = (libraryItemId: string, trackIno: string) =>
+  withWriteGuard(async (): Promise<void> => {
+    await initializeShadowDatabaseInternal();
+    const db = await getDb();
+    await db.runAsync(
+      `UPDATE book_transcript_tracks
+       SET status = 'complete', completed_at = ?, transcribed_through_ms = duration_ms
+       WHERE library_item_id = ? AND track_ino = ?`,
+      [now(), libraryItemId, trackIno],
+    );
+  });
+
+/**
+ * Whole-file write path: append every Transcript Segment produced for a track,
+ * then mark it complete.
+ *
+ * @deprecated Transitional wrapper kept so the pre-incremental orchestrator
+ * keeps compiling; Phase 3 of
+ * `docs/transcription-background-execution-plan.md` switches
+ * `book-transcription.ts` to `appendTrackSegments` + `completeTrack` and this
+ * goes away. Two separate transactions — new callers must not rely on them
+ * being atomic together. It passes watermark `0` (its `segments` are
+ * book-absolute, so it has no track-relative value to offer); `completeTrack`
+ * pins the watermark to `duration_ms` a moment later anyway.
+ */
+export const insertSegmentsForTrack = async (
+  libraryItemId: string,
+  trackIno: string,
+  segments: TranscriptSegmentInput[],
+): Promise<void> => {
+  await appendTrackSegments({
+    libraryItemId,
+    trackIno,
+    segments,
+    transcribedThroughMs: 0,
+  });
+  await completeTrack(libraryItemId, trackIno);
+};
 
 /** Mark a Book Transcript complete once every track has finished. */
 export const markTranscriptComplete = (libraryItemId: string) =>
@@ -451,7 +517,7 @@ export const getTranscriptFrontierMs = async (
   const db = await getDb();
   const rows = await db.getAllAsync<BookTranscriptTrackSqlRow>(
     `SELECT library_item_id, track_ino, track_index, start_offset_ms, duration_ms,
-            status, completed_at
+            status, completed_at, transcribed_through_ms
      FROM book_transcript_tracks
      WHERE library_item_id = ?
      ORDER BY track_index ASC`,
