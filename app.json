@@ -57,6 +57,7 @@
       "expo-web-browser",
       "expo-sqlite",
       "./plugins/with-carplay",
+      "./plugins/with-transcription-background",
       [
         "expo-widgets",
         {

@@ -22,13 +22,20 @@ import { TranscriptionLanguageRow } from "./transcription-language-row";
  */
 
 /**
- * Says what actually happens, not what we wish happened. Unattended completion
- * needs BGProcessingTask (Phase 5 of
- * `docs/transcription-background-execution-plan.md`) and is not built, so the
- * copy promises only the two cases that do work: playing, or app open.
+ * Says what actually happens, not what we wish happened.
+ *
+ * Phase 5 of `docs/transcription-background-execution-plan.md` added
+ * `BGProcessingTask` windows, so unattended progress on a charger is now real —
+ * but only while the app is still in memory. A window granted to a *terminated*
+ * app is deliberately declined (the JS orchestrator cannot be driven reliably in
+ * a cold headless launch; see `docs/carplay-debugging-log.md`), so the copy says
+ * "leave the app running" rather than promising the phone will finish a book on
+ * its own overnight after a force-quit. "May" is doing real work in that
+ * sentence: iOS grants processing windows opportunistically and can decline for
+ * days.
  */
 const EXPECTATION_COPY =
-  "Transcription runs on this device and keeps going with the screen off while you are listening. If you stop playback, leave the app open to continue. A full book can take a while and uses significant battery. The text is machine-generated and will contain errors.";
+  "Transcription runs on this device and keeps going with the screen off while you are listening. If you stop playback, leave the app open. With the phone on a charger and idle, iOS may also let it carry on in the background — that is up to iOS, and only while the app is still running, so avoid force-quitting it. A full book can take a while and uses significant battery. The text is machine-generated and will contain errors.";
 
 const resolveParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;

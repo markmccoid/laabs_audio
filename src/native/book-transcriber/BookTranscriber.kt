@@ -5,7 +5,14 @@ class BookTranscriber : Module() {
   override fun definition() = ModuleDefinition {
     Name("BookTranscriber")
 
-    Events("onSegments", "onFileProgress", "onModelDownloadProgress")
+    Events(
+      "onSegments",
+      "onFileProgress",
+      "onFileFinished",
+      "onModelDownloadProgress",
+      "onBackgroundTaskStart",
+      "onBackgroundTaskExpire",
+    )
 
     AsyncFunction("getBookTranscriptionAvailability") { _: Map<String, Any?> ->
       mapOf(
@@ -34,6 +41,24 @@ class BookTranscriber : Module() {
     }
 
     AsyncFunction("endBackgroundAssertion") { _: Int ->
+      Unit
+    }
+
+    // BGProcessingTask has no Android counterpart in this build; every call is an inert no-op so
+    // the shared JS controller never has to branch on platform.
+    AsyncFunction("setBackgroundTranscriptionReady") { _: Boolean ->
+      Unit
+    }
+
+    AsyncFunction("scheduleBackgroundTranscription") { _: Map<String, Any?> ->
+      false
+    }
+
+    AsyncFunction("cancelBackgroundTranscription") {
+      Unit
+    }
+
+    AsyncFunction("completeBackgroundTranscriptionRun") { _: String, _: Boolean ->
       Unit
     }
   }

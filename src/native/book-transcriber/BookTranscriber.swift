@@ -18,7 +18,32 @@ class BookTranscriber: Module {
   func definition() -> ModuleDefinition {
     Name("BookTranscriber")
 
-    Events("onSegments", "onFileProgress", "onModelDownloadProgress")
+    Events(
+      "onSegments",
+      "onFileProgress",
+      "onFileFinished",
+      "onModelDownloadProgress",
+      "onBackgroundTaskStart",
+      "onBackgroundTaskExpire"
+    )
+
+    // The launch handler itself is registered from the AppDelegate — see
+    // `BookTranscriptionBackgroundTask.swift` for why `OnCreate` is far too late for that. All this
+    // does is hand the already-registered coordinator a route into JS.
+    OnCreate {
+      BookTranscriptionBackgroundTaskCoordinator.shared.attach(
+        onStart: { [weak self] runId in
+          self?.sendEvent("onBackgroundTaskStart", ["runId": runId])
+        },
+        onExpire: { [weak self] runId in
+          self?.sendEvent("onBackgroundTaskExpire", ["runId": runId])
+        }
+      )
+    }
+
+    OnDestroy {
+      BookTranscriptionBackgroundTaskCoordinator.shared.detach()
+    }
 
     AsyncFunction("getBookTranscriptionAvailability") { (options: [String: Any], promise: Promise) in
       guard #available(iOS 26.0, *) else {
@@ -57,11 +82,13 @@ class BookTranscriber: Module {
 
       guard let sourceFileUri = options["sourceFileUri"] as? String,
             let sourceURL = Self.resolveFileURL(sourceFileUri) else {
+        self.finishFile(taskId, reason: "failed")
         promise.reject("invalid_file", "Invalid transcription source file URL")
         return
       }
 
       guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+        self.finishFile(taskId, reason: "failed")
         promise.reject("invalid_file", "Transcription source file does not exist")
         return
       }
@@ -89,6 +116,35 @@ class BookTranscriber: Module {
 
     AsyncFunction("endBackgroundAssertion") { (identifier: Int) in
       self.endBackgroundAssertion(identifier)
+    }
+
+    // MARK: Background processing task (Phase 5)
+
+    AsyncFunction("setBackgroundTranscriptionReady") { (ready: Bool) in
+      BookTranscriptionBackgroundTaskCoordinator.shared.setReady(ready)
+    }
+
+    AsyncFunction("scheduleBackgroundTranscription") { (options: [String: Any], promise: Promise) in
+      let earliestBeginSeconds = (options["earliestBeginSeconds"] as? NSNumber)?.doubleValue
+
+      do {
+        let didSchedule = try BookTranscriptionBackgroundTaskCoordinator.shared.schedule(
+          earliestBeginSeconds: earliestBeginSeconds
+        )
+        promise.resolve(didSchedule)
+      } catch {
+        // Simulator, a device with Background App Refresh switched off, or an identifier missing
+        // from the Info.plist. Never fatal: transcription still runs in the foreground.
+        promise.reject("background_task_unavailable", error.localizedDescription)
+      }
+    }
+
+    AsyncFunction("cancelBackgroundTranscription") {
+      BookTranscriptionBackgroundTaskCoordinator.shared.cancelScheduled()
+    }
+
+    AsyncFunction("completeBackgroundTranscriptionRun") { (runId: String, success: Bool) in
+      BookTranscriptionBackgroundTaskCoordinator.shared.complete(runId: runId, success: success)
     }
   }
 
@@ -212,6 +268,7 @@ class BookTranscriber: Module {
 
       guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: requestedLocale) else {
         self.endSession(taskId)
+        self.finishFile(taskId, reason: "failed")
         promise.reject(
           "unavailable",
           "Speech transcription does not support locale \(requestedLocale.identifier)"
@@ -222,6 +279,7 @@ class BookTranscriber: Module {
       let installedLocales = await SpeechTranscriber.installedLocales
       guard installedLocales.contains(where: { Self.localesMatch($0, locale) }) else {
         self.endSession(taskId)
+        self.finishFile(taskId, reason: "failed")
         promise.reject(
           "model_missing",
           "The speech model for \(locale.identifier) is not installed"
@@ -234,6 +292,7 @@ class BookTranscriber: Module {
         audioFile = try AVAudioFile(forReading: sourceURL)
       } catch {
         self.endSession(taskId)
+        self.finishFile(taskId, reason: "failed")
         promise.reject("invalid_file", "Unable to read the audio file: \(error.localizedDescription)")
         return
       }
@@ -241,6 +300,7 @@ class BookTranscriber: Module {
       let durationSeconds = Self.resolveDurationSeconds(audioFile)
       guard durationSeconds > 0 else {
         self.endSession(taskId)
+        self.finishFile(taskId, reason: "failed")
         promise.reject("invalid_file", "The audio file has no readable audio")
         return
       }
@@ -267,6 +327,7 @@ class BookTranscriber: Module {
 
       guard self.setCancelHandler(taskId, { Task { await analyzer.cancelAndFinishNow() } }) else {
         self.endSession(taskId)
+        self.finishFile(taskId, reason: "cancelled")
         promise.reject("cancelled", "Book transcription was cancelled")
         return
       }
@@ -342,6 +403,7 @@ class BookTranscriber: Module {
         analysisTask.cancel()
         await analyzer.cancelAndFinishNow()
         let wasCancelled = self.endSession(taskId)
+        self.finishFile(taskId, reason: wasCancelled ? "cancelled" : "failed")
         if wasCancelled {
           promise.reject("cancelled", "Book transcription was cancelled")
         } else {
@@ -353,13 +415,28 @@ class BookTranscriber: Module {
       flushPending()
 
       if self.endSession(taskId) {
+        self.finishFile(taskId, reason: "cancelled")
         promise.reject("cancelled", "Book transcription was cancelled")
         return
       }
 
       self.sendEvent("onFileProgress", ["taskId": taskId, "fractionComplete": 1.0])
+      self.finishFile(taskId, reason: "complete")
       promise.resolve(["durationSeconds": durationSeconds] as [String: Any])
     }
+  }
+
+  /// The last thing every `transcribeBookFile` path does before settling its promise.
+  ///
+  /// JS cannot tear its `onSegments` subscription down the moment that promise settles: native
+  /// flushes its pending segments *before* rejecting with `cancelled`, and the event and the
+  /// settlement reach JS by different routes, so the final batch can land afterwards. Before Phase 5
+  /// JS covered that with a 250 ms `setTimeout` — which never fires in a background launch
+  /// (`docs/carplay-debugging-log.md`, Attempt D), hanging the run forever. This marker replaces the
+  /// wait with an ordering guarantee: it is emitted on the same event channel as `onSegments`, after
+  /// the last flush, so seeing it means nothing more is coming.
+  private func finishFile(_ taskId: String, reason: String) {
+    sendEvent("onFileFinished", ["taskId": taskId, "reason": reason])
   }
 
   private func flush(

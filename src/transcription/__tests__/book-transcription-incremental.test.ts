@@ -19,6 +19,7 @@ import type { BookTranscriptionSegment } from "@/native/book-transcriber/BookTra
 
 type SegmentsListener = (event: { taskId: string; segments: BookTranscriptionSegment[] }) => void;
 type ProgressListener = (event: { taskId: string; fractionComplete: number }) => void;
+type FinishedListener = (event: { taskId: string; reason: string }) => void;
 
 type AppendCall = {
   libraryItemId: string;
@@ -29,6 +30,7 @@ type AppendCall = {
 
 const mockSegmentsListeners = new Set<SegmentsListener>();
 const mockProgressListeners = new Set<ProgressListener>();
+const mockFinishedListeners = new Set<FinishedListener>();
 const mockTranscribeCalls: {
   taskId: string;
   sourceFileUri: string;
@@ -93,7 +95,20 @@ jest.mock("@/native/book-transcriber", () => ({
     mockProgressListeners.add(listener);
     return { remove: () => mockProgressListeners.delete(listener) };
   },
+  addFileFinishedListener: (listener: FinishedListener) => {
+    mockFinishedListeners.add(listener);
+    return { remove: () => mockFinishedListeners.delete(listener) };
+  },
   addModelDownloadProgressListener: () => ({ remove: () => undefined }),
+  // Phase 5. The background-window controller installs itself on import, so the
+  // whole BGProcessingTask surface has to exist even though this suite is about
+  // the per-file path.
+  setBackgroundTranscriptionReady: async () => undefined,
+  scheduleBackgroundTranscription: async () => true,
+  cancelBackgroundTranscription: async () => undefined,
+  completeBackgroundTranscriptionRun: async () => undefined,
+  addBackgroundTaskStartListener: () => ({ remove: () => undefined }),
+  addBackgroundTaskExpireListener: () => ({ remove: () => undefined }),
 }));
 
 jest.mock("@/data/sqlite/shadow-db-transcripts", () => ({
@@ -170,7 +185,12 @@ const nativeSegment = (
   endSeconds: number,
 ): BookTranscriptionSegment => ({ text, startSeconds, endSeconds, words: [] });
 
-const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+/**
+ * Flush one level of the microtask queue. Deliberately NOT a `setTimeout`: the
+ * drain suite below runs under fake timers to prove the transcription path never
+ * depends on one firing, and a timer-based tick would deadlock there.
+ */
+const tick = () => Promise.resolve().then(() => undefined);
 
 const waitFor = async (predicate: () => boolean, label: string) => {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -191,6 +211,27 @@ const emitFileProgress = (fractionComplete: number) => {
   const taskId = mockTranscribeCalls[mockTranscribeCalls.length - 1]?.taskId;
   if (!taskId) throw new Error("No native transcription in flight");
   for (const listener of [...mockProgressListeners]) listener({ taskId, fractionComplete });
+};
+
+/**
+ * The terminal `onFileFinished` marker. Native emits this as the last thing it
+ * does on every path, after its final flush — it is what ends the segment drain
+ * without a timer.
+ */
+const emitFileFinished = (reason: "complete" | "cancelled" | "failed") => {
+  const taskId = mockTranscribeCalls[mockTranscribeCalls.length - 1]?.taskId;
+  if (!taskId) throw new Error("No native transcription in flight");
+  for (const listener of [...mockFinishedListeners]) listener({ taskId, reason });
+};
+
+/** Native's real ordering: marker first, then the promise settles. */
+const finishNative = (reason: "complete" | "cancelled" | "failed" = "complete") => {
+  emitFileFinished(reason);
+  if (reason === "complete") {
+    mockSettleTranscribe?.resolve();
+  } else {
+    mockSettleTranscribe?.reject({ code: reason, message: reason });
+  }
 };
 
 /**
@@ -215,6 +256,7 @@ const startRunAndWaitForNative = async () => {
 beforeEach(() => {
   mockSegmentsListeners.clear();
   mockProgressListeners.clear();
+  mockFinishedListeners.clear();
   mockTranscribeCalls.length = 0;
   mockAppendCalls.length = 0;
   mockCompletedTracks.length = 0;
@@ -243,7 +285,7 @@ describe("incremental flush", () => {
     // Nothing is marked complete until the file's promise resolves.
     expect(mockCompletedTracks).toEqual([]);
 
-    mockSettleTranscribe?.resolve();
+    finishNative();
     await expect(run).resolves.toMatchObject({ outcome: "complete" });
 
     expect(mockAppendCalls[0]).toMatchObject({
@@ -282,7 +324,7 @@ describe("incremental flush", () => {
     releases[1]();
     await waitFor(() => order.length === 4, "the second flush to finish");
 
-    mockSettleTranscribe?.resolve();
+    finishNative();
     await expect(run).resolves.toMatchObject({ outcome: "complete" });
   });
 
@@ -295,7 +337,7 @@ describe("incremental flush", () => {
     emitSegments([nativeSegment("One.", 0, 4)]);
     await waitFor(() => mockAppendCalls.length === 1, "the failing flush");
 
-    mockSettleTranscribe?.resolve();
+    finishNative();
     await expect(run).resolves.toMatchObject({ outcome: "failed" });
     expect(mockCompletedTracks).toEqual([]);
     expect(mockFailures).toHaveLength(1);
@@ -322,7 +364,7 @@ describe("resume from the watermark", () => {
     ]);
     await waitFor(() => mockAppendCalls.length === 1, "the first flush");
 
-    mockSettleTranscribe?.resolve();
+    finishNative();
     await expect(run).resolves.toMatchObject({ outcome: "complete" });
 
     // Book-absolute segments (+30 min for track 2), track-relative watermark.
@@ -351,7 +393,7 @@ describe("resume from the watermark", () => {
     await waitFor(() => fractionOf() > 120_000 / TRACK_DURATION_MS, "progress to advance");
     expect(fractionOf()).toBeCloseTo(300_000 / TRACK_DURATION_MS, 5);
 
-    mockSettleTranscribe?.resolve();
+    finishNative();
     await run;
   });
 });
@@ -389,7 +431,7 @@ describe("background flush settle seam", () => {
     await settled;
     expect(didSettle).toBe(true);
 
-    mockSettleTranscribe?.resolve();
+    finishNative();
     await expect(run).resolves.toMatchObject({ outcome: "complete" });
   });
 
@@ -406,8 +448,64 @@ describe("background flush settle seam", () => {
     // background assertion would leak on the way out.
     await expect(settlePendingTranscriptionWrites()).resolves.toBeUndefined();
 
-    mockSettleTranscribe?.resolve();
+    finishNative();
     await expect(run).resolves.toMatchObject({ outcome: "failed" });
+  });
+});
+
+describe("headless-safe segment drain", () => {
+  /**
+   * The teardown window between `transcribeBookFile` settling and the
+   * `onSegments` subscription being dropped used to be
+   * `new Promise(resolve => setTimeout(resolve, 250))`. JS timers do not fire in
+   * a background/headless launch on this app (`docs/carplay-debugging-log.md`,
+   * Attempt D), so that promise never resolved there and the run hung forever
+   * holding a background assertion. These tests pin the replacement: the drain
+   * ends on native's terminal `onFileFinished` event, with no timer involved.
+   */
+  it("finishes without any timer firing, on the native marker alone", async () => {
+    jest.useFakeTimers();
+    try {
+      const { run } = await startRunAndWaitForNative();
+
+      emitSegments([nativeSegment("One.", 0, 4)]);
+      await waitFor(() => mockAppendCalls.length === 1, "the flush");
+
+      // Deliberately never advance the fake clock: this is the headless case.
+      finishNative();
+      await expect(run).resolves.toMatchObject({ outcome: "complete" });
+      expect(mockCompletedTracks).toEqual(["ino-1"]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("still keeps a straggler batch that lands after the promise settles", async () => {
+    jest.useFakeTimers();
+    try {
+      const { run } = await startRunAndWaitForNative();
+
+      mockSettleTranscribe?.reject({ code: "cancelled", message: "cancelled" });
+      await tick();
+
+      // Native flushed on its way out; the batch crosses after the rejection.
+      emitSegments([nativeSegment("Flushed on the way out.", 0, 9)]);
+      emitFileFinished("cancelled");
+
+      await expect(run).resolves.toMatchObject({ outcome: "cancelled" });
+      expect(mockAppendCalls).toHaveLength(1);
+      expect(mockAppendCalls[0]).toMatchObject({ transcribedThroughMs: 9_000 });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("terminates on the backstop when the marker never arrives at all", async () => {
+    // A JS/native build mismatch — Metro against an older binary. The drain must
+    // still end rather than hang the run.
+    const { run } = await startRunAndWaitForNative();
+    mockSettleTranscribe?.resolve();
+    await expect(run).resolves.toMatchObject({ outcome: "complete" });
   });
 });
 
@@ -422,8 +520,11 @@ describe("cancel", () => {
 
     // Phase 2 flushes native's pending segments before rejecting; the event and
     // the rejection reach JS by different routes, so the batch can land after.
+    // The `onFileFinished` marker is what closes the window behind it.
     mockSettleTranscribe?.reject({ code: "cancelled", message: "cancelled" });
-    setTimeout(() => emitSegments([nativeSegment("Flushed on the way out.", 10, 18)]), 10);
+    await tick();
+    emitSegments([nativeSegment("Flushed on the way out.", 10, 18)]);
+    emitFileFinished("cancelled");
 
     await expect(run).resolves.toMatchObject({ outcome: "cancelled" });
 

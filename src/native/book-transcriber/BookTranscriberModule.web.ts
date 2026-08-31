@@ -4,6 +4,7 @@ import type {
   BookTranscriptionAvailability,
   BookTranscriptionResult,
   EnsureLanguageModelOptions,
+  ScheduleBackgroundTranscriptionOptions,
   TranscribeBookFileOptions,
 } from "./BookTranscriber.types";
 
@@ -39,6 +40,20 @@ class BookTranscriberModule extends NativeModule<BookTranscriberEvents> {
   }
 
   async endBackgroundAssertion(_identifier: number): Promise<void> {}
+
+  //~~ BGProcessingTask — iOS only; every call is an inert no-op elsewhere.
+
+  async setBackgroundTranscriptionReady(_ready: boolean): Promise<void> {}
+
+  async scheduleBackgroundTranscription(
+    _options: ScheduleBackgroundTranscriptionOptions
+  ): Promise<boolean> {
+    return false;
+  }
+
+  async cancelBackgroundTranscription(): Promise<void> {}
+
+  async completeBackgroundTranscriptionRun(_runId: string, _success: boolean): Promise<void> {}
 }
 
 export default registerWebModule(BookTranscriberModule, "BookTranscriber");

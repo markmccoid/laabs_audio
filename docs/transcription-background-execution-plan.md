@@ -32,7 +32,8 @@ The consequence that matters: a whole book transcribes inside a normal listening
 | Cancel semantics | Unchanged from `CONTEXT.md`: cancel leaves the row `in_progress` (resumable); only hard errors set `failed`. Cancel now *keeps* the work done so far rather than discarding the current file. |
 | Concurrency | Unchanged: exactly one active Book Transcript, no queue. |
 | Chunking | Still no audio chunker (ADR-0034). Mid-file resume is a seek, not a chunk — segmentation and punctuation quality are unaffected except at a resume boundary. |
-| BGProcessingTask | **Designed here, built in Phase 5, shipped separately.** Phases 1–4 deliver the stated goal without it. |
+| BGProcessingTask | **Built in Phase 5**, native route, scoped to a live-but-suspended process — a window granted to a terminated app is declined. See Phase 5 for why. |
+| JS timers in the transcription path | **Banned.** They do not fire in a background/headless launch (`docs/carplay-debugging-log.md`, Attempt D). Every clock here is an incoming event; a time value may only ever be *checked* on one. |
 
 ## Existing code to reuse (verified paths)
 
@@ -136,7 +137,7 @@ ALTER TABLE book_transcript_tracks
 - resume playback → screen is allowed to sleep again;
 - background the app while paused → progress is persisted to the pause point.
 
-## Phase 5 — BGProcessingTask (separate ship)
+## Phase 5 — BGProcessingTask (built; scope narrowed, see below)
 
 At ~25× realtime a single 3-minute background window transcribes roughly an hour of audio, so a 12h book is ~10 windows — an overnight job on a charger. This is the App Store legal way to finish with the phone in a pocket, and it is only viable because Phases 1–3 make the work resumable at second granularity.
 
@@ -147,7 +148,64 @@ Two routes. **Prefer the native one**: expiration handling is the entire require
 
 Constraints to design around: scheduling is opportunistic (typically charging + locked + idle; you cannot request "now"), windows are minutes and terminable with seconds of grace, and `BGProcessingTaskRequest.requiresExternalPower` should be `true` for a job this heavy.
 
-**Not in scope for Phases 1–4. Do not start it until Phase 4 is verified on a device.**
+### What was built
+
+The native route, as recommended. Files:
+
+- `src/native/book-transcriber/BookTranscriptionBackgroundTask.swift` — the coordinator: launch-handler
+  registration, `BGProcessingTaskRequest` submit/cancel, window adoption, expiration.
+- `plugins/with-transcription-background.js` — `processing` appended to `UIBackgroundModes`, the
+  identifier added to `BGTaskSchedulerPermittedIdentifiers`, and the registration call injected into
+  `AppDelegate.didFinishLaunchingWithOptions`. Registered in `app.json`.
+- `src/transcription/transcription-background-task.ts` — the JS controller, split pure-decisions /
+  effects the way `transcription-wakefulness.ts` is.
+
+**Registration cannot live in the Expo module.** `BGTaskScheduler.register` must be called before
+`didFinishLaunchingWithOptions` returns, and an Expo module's `OnCreate` fires far too late: Expo
+builds its `AppContext` — and every `ModuleHolder`, which is what posts `.moduleCreate` — inside
+`EXReactNativeFactory host:didInitializeRuntime:` (`node_modules/expo/ios/AppDelegates/ExpoReactNativeFactory.mm`),
+on the JS thread, after that method has returned. Hence the `withAppDelegate` mod. Inline modules
+under `src/native/` are compiled straight into the app target (a `PBXFileSystemSynchronizedRootGroup`),
+so the coordinator is visible to `AppDelegate.swift` with no extra project wiring.
+
+### Scope: a live process, not a cold launch
+
+**A window granted to a terminated app is declined**, rescheduled, and completed immediately. Only a
+window granted while the process is alive-but-suspended is adopted.
+
+This is a deliberate narrowing, not an oversight. `docs/carplay-debugging-log.md` (Attempt D) proves
+that in a headless launch on this app JS `setTimeout` never fires and one missed event hangs a promise
+forever; and the launch handler runs before the JS runtime exists at all (see above). Driving a
+multi-minute transcription plus SQLite writes through a runtime in that state is not something this
+codebase can currently claim. The decline path is not wasted: it leaves a request behind, and by then
+the process is running, so the next grant lands on the case that works.
+
+Widening to a cold launch later means proving, on a device, that the JS orchestrator boots and runs to
+completion in a background launch. Do not assume it; the CarPlay log is the cautionary tale.
+
+### The headless-timer landmine this had to fix first
+
+`drainPendingSegmentEvents` was `new Promise(resolve => setTimeout(resolve, 250))`, awaited in
+`transcribeOneTrack`'s `finally`. Under a background launch it would never resolve — the run would hang
+holding a background assertion until iOS killed the app. It is now ended by a native event: native
+emits `onFileFinished` as the last thing it does on every path, after its final flush, on the same
+channel as `onSegments`. The 250 ms remains only as a build-mismatch backstop, armed after the promise
+settles and checked on incoming events.
+
+### Verifying it by hand
+
+iOS grants processing windows opportunistically; you cannot request one. To force one, run a debug
+build from Xcode, pause the debugger just after launch, and:
+
+```
+e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"com.markmccoid.laabs-audio.transcription"]
+```
+
+then continue. `_simulateExpirationForTaskWithIdentifier:` exercises the expiration path. Both require
+a real device for the transcription itself — the simulator cannot run `SpeechAnalyzer`.
+
+Native breadcrumbs are os_log, subsystem `laabs.transcription`, category `BackgroundTask`:
+`register handler … ok=`, `scheduled earliestBegin=`, `window adopted/declined/expiring/completed/force-completed`.
 
 ---
 

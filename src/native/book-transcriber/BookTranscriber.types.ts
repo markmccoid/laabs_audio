@@ -78,6 +78,38 @@ export type BookTranscriptionFileProgressEvent = {
   fractionComplete: number;
 };
 
+export type BookTranscriptionFinishReason = "complete" | "cancelled" | "failed";
+
+/**
+ * The last event a file ever emits, sent immediately before `transcribeBookFile`'s promise settles
+ * on every path. Its only job is ordering: `onSegments` and the promise settlement reach JS by
+ * different routes, so a cancel's final batch can arrive *after* the rejection. Seeing this marker
+ * means every batch for `taskId` has already been delivered and the listener can be torn down.
+ *
+ * That is what makes the teardown headless-safe — a wall-clock wait for the straggler would never
+ * resolve in a background launch (`docs/carplay-debugging-log.md`, Attempt D).
+ */
+export type BookTranscriptionFileFinishedEvent = {
+  taskId: string;
+  reason: BookTranscriptionFinishReason;
+};
+
+/**
+ * A `BGProcessingTask` window was granted and adopted. JS owns it until it calls
+ * `completeBackgroundTranscriptionRun` with the same `runId`.
+ */
+export type BookTranscriptionBackgroundTaskEvent = {
+  runId: string;
+};
+
+export type ScheduleBackgroundTranscriptionOptions = {
+  /**
+   * Floor on how soon the window may run, in seconds. A floor only — iOS schedules processing tasks
+   * opportunistically (typically charging, idle and locked) and may take far longer, or never.
+   */
+  earliestBeginSeconds?: number;
+};
+
 export type BookTranscriptionModelDownloadProgressEvent = {
   localeIdentifier: string;
   /** 0..1 for the on-device speech model download/install. */
@@ -87,5 +119,8 @@ export type BookTranscriptionModelDownloadProgressEvent = {
 export type BookTranscriberEvents = {
   onSegments: (event: BookTranscriptionSegmentsEvent) => void;
   onFileProgress: (event: BookTranscriptionFileProgressEvent) => void;
+  onFileFinished: (event: BookTranscriptionFileFinishedEvent) => void;
   onModelDownloadProgress: (event: BookTranscriptionModelDownloadProgressEvent) => void;
+  onBackgroundTaskStart: (event: BookTranscriptionBackgroundTaskEvent) => void;
+  onBackgroundTaskExpire: (event: BookTranscriptionBackgroundTaskEvent) => void;
 };

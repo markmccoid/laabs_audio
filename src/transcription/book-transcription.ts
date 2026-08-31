@@ -1,14 +1,22 @@
+import { Platform } from "react-native";
 import { toast } from "react-native-sonner";
 import type { EventSubscription } from "expo-modules-core";
 import {
+  addBackgroundTaskExpireListener,
+  addBackgroundTaskStartListener,
+  addFileFinishedListener,
   addFileProgressListener,
   addModelDownloadProgressListener,
   addSegmentsListener,
   beginBackgroundAssertion,
+  cancelBackgroundTranscription,
   cancelBookTranscription,
+  completeBackgroundTranscriptionRun,
   endBackgroundAssertion,
   ensureLanguageModel,
   getBookTranscriptionAvailability,
+  scheduleBackgroundTranscription,
+  setBackgroundTranscriptionReady,
   transcribeBookFile,
   type BookTranscriptionSegment,
 } from "@/native/book-transcriber";
@@ -49,6 +57,12 @@ import {
   type TranscriptionPlanTrack,
   type TranscriptionSourceTrack,
 } from "./transcription-planning";
+import {
+  applyTranscriptionRunOutcome,
+  initializeTranscriptionBackgroundTask,
+  requestTranscriptionBackgroundWindow,
+  type TranscriptionBackgroundTaskDependencies,
+} from "./transcription-background-task";
 import {
   beginTranscriptionWakefulness,
   endTranscriptionWakefulness,
@@ -209,6 +223,34 @@ const wakefulnessDependencies: TranscriptionWakefulnessDependencies = {
 };
 
 const beginWakefulness = () => beginTranscriptionWakefulness(wakefulnessDependencies);
+
+//~~ ========================================================
+//~~ Background windows (Phase 5: BGProcessingTask)
+//~~ ========================================================
+
+/**
+ * The non-pure half of `./transcription-background-task.ts`. Same arrangement as
+ * the wakefulness wiring above, and for the same reason: that module must not
+ * import SQLite or the orchestrator, or its decision tables stop being testable —
+ * and importing the orchestrator would be a cycle besides.
+ */
+const backgroundTaskDependencies: TranscriptionBackgroundTaskDependencies = {
+  getActiveLibraryItemId: () =>
+    transcriptionStore.getState().activeTask?.libraryItemId ?? null,
+  subscribeTranscription: (listener) => transcriptionStore.subscribe(() => listener()),
+  findResumableLibraryItemId: async () => (await findResumableTranscript())?.libraryItemId ?? null,
+  resumeTranscription: async (libraryItemId) => {
+    await resumeIfNeeded(libraryItemId);
+  },
+  cancelTranscription: () => cancelActiveTranscription(),
+  settlePendingWrites: settlePendingTranscriptionWrites,
+  setReady: setBackgroundTranscriptionReady,
+  schedule: () => scheduleBackgroundTranscription(),
+  cancelScheduled: cancelBackgroundTranscription,
+  completeRun: completeBackgroundTranscriptionRun,
+  addStartListener: addBackgroundTaskStartListener,
+  addExpireListener: addBackgroundTaskExpireListener,
+};
 
 //~~ ========================================================
 //~~ Planning helpers
@@ -414,6 +456,14 @@ const runPendingTracks = async ({
   plan: BookTranscriptionPlan;
   totalTracks: number;
 }): Promise<BookTranscriptionRunResult> => {
+  // Ask for a processing window up front rather than on the way out. From this
+  // moment the book is unfinished work, and the run can end in a way that never
+  // reaches the code below — a jetsam, a force-quit — with the row still
+  // `in_progress`. A request costs nothing if the book finishes first; the
+  // `complete` path cancels it.
+  await requestTranscriptionBackgroundWindow();
+
+  let outcome: BookTranscriptionRunOutcome = "failed";
   try {
     const pendingTracks = await listPendingTracks(libraryItemId);
     let completedTracks = Math.max(0, totalTracks - pendingTracks.length);
@@ -423,7 +473,8 @@ const runPendingTracks = async ({
       if (cancelRequested) {
         actions().endTask();
         actions().setStatus(libraryItemId, "resumable");
-        return { libraryItemId, outcome: "cancelled" };
+        outcome = "cancelled";
+        return { libraryItemId, outcome };
       }
 
       const downloadTrack = plan.downloadTrackByIno.get(track.trackIno);
@@ -458,13 +509,15 @@ const runPendingTracks = async ({
     actions().endTask();
     actions().setStatus(libraryItemId, "complete");
     toast.success("Transcript ready", { description: plan.bookTitle });
-    return { libraryItemId, outcome: "complete" };
+    outcome = "complete";
+    return { libraryItemId, outcome };
   } catch (error) {
     if (cancelRequested || isCancellationError(error)) {
       // Cancel keeps the row `in_progress` so the book stays resumable.
       actions().endTask();
       actions().setStatus(libraryItemId, "resumable");
-      return { libraryItemId, outcome: "cancelled" };
+      outcome = "cancelled";
+      return { libraryItemId, outcome };
     }
 
     const errorCode = toErrorCode(error, "recognition_failed");
@@ -483,13 +536,19 @@ const runPendingTracks = async ({
     actions().endTask();
     actions().setStatus(libraryItemId, "failed");
     toast.error("Transcription failed", { description: plan.bookTitle });
-    return { libraryItemId, outcome: "failed", errorCode };
+    outcome = "failed";
+    return { libraryItemId, outcome, errorCode };
   } finally {
     activeNativeTaskId = null;
     cancelRequested = false;
     // Every exit path — complete, cancelled, failed, thrown — releases the
-    // screen-wake lock and drops the playback/AppState subscriptions.
+    // screen-wake lock and drops the playback/AppState subscriptions, and
+    // settles the pending processing request against what actually happened
+    // (`decideScheduleAfterRun`). `outcome` still reads `failed` for a throw
+    // that escapes the catch, which cancels the request — the conservative
+    // answer, since nothing above proved the book is still resumable.
     await endTranscriptionWakefulness();
+    await applyTranscriptionRunOutcome(outcome);
   }
 };
 
@@ -503,21 +562,92 @@ const runPendingTracks = async ({
 const RESUME_REWIND_MS = 5_000;
 
 /**
- * How long the segments listener stays attached after the native promise
- * settles. On cancel, native flushes its pending segments *before* rejecting
- * with `cancelled`, but that event and the promise settlement cross the bridge
- * by different routes — tearing the subscription down in the same tick would
- * throw away exactly the batch Phase 2 went to the trouble of flushing.
+ * The backstop window for the segment drain, used only when the terminal
+ * `onFileFinished` marker never arrives at all — which in practice means JS from
+ * Metro running against an older native binary. Never the primary mechanism; see
+ * `createSegmentDrain`.
  */
 const SEGMENT_DRAIN_MS = 250;
 
 const clampFraction = (value: number) =>
   Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
 
-const drainPendingSegmentEvents = () =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, SEGMENT_DRAIN_MS);
+type SegmentDrain = {
+  /** Resolves once no further `onSegments` batch can arrive for this file. */
+  readonly settled: Promise<void>;
+  /** The terminal `onFileFinished` marker arrived — nothing more is coming. */
+  finish: () => void;
+  /** Any other native event for this file arrived; re-check the backstop deadline. */
+  noteEvent: () => void;
+  /** The native promise settled: from here on the drain may time out. */
+  open: () => void;
+};
+
+/**
+ * The teardown window between `transcribeBookFile`'s promise settling and the
+ * `onSegments` subscription being torn down.
+ *
+ * It has to exist: on cancel, native flushes its pending segments *before*
+ * rejecting, and the event and the settlement reach JS by different routes, so
+ * the final batch can land after the rejection. Dropping the subscription in the
+ * same tick would throw away exactly the batch Phase 2 went to the trouble of
+ * flushing.
+ *
+ * What it must NOT be is a wall-clock wait. This ran as
+ * `new Promise(resolve => setTimeout(resolve, 250))`, and JS timers do not fire
+ * in a background or headless launch on this app — proven at length during the
+ * CarPlay work (`docs/carplay-debugging-log.md`, Attempt D: "JS timers do not
+ * fire in a headless CarPlay launch"). Awaited in `transcribeOneTrack`'s
+ * `finally`, that promise would simply never resolve: the run would hang holding
+ * a background assertion until iOS killed the app — the exact failure mode
+ * Phase 5 exists to survive.
+ *
+ * So the drain is resolved by an **event**: native emits `onFileFinished` as the
+ * last thing it does on every path, after its final flush, on the same channel as
+ * `onSegments`. Seeing it is positive proof that nothing more is coming, and it
+ * arrives whether or not timers are running.
+ *
+ * The time component that remains is a backstop for a JS/native build mismatch
+ * (Metro against an older binary), never the mechanism: it is armed only once the
+ * native promise has settled, it is checked on every incoming native event (the
+ * `settleStateWaiters` pattern `audio-engine` adopted for the same reason), and
+ * the `setTimeout` arm is what still terminates the drain if no event of any kind
+ * ever arrives. A timer armed while suspended fires on the way back in, so even
+ * that path terminates rather than hanging.
+ */
+const createSegmentDrain = (): SegmentDrain => {
+  let resolveSettled: () => void = () => undefined;
+  const settled = new Promise<void>((resolve) => {
+    resolveSettled = resolve;
   });
+
+  let isSettled = false;
+  let deadlineAt: number | null = null;
+  let backstop: ReturnType<typeof setTimeout> | null = null;
+
+  const finish = () => {
+    if (isSettled) return;
+    isSettled = true;
+    if (backstop !== null) {
+      clearTimeout(backstop);
+      backstop = null;
+    }
+    resolveSettled();
+  };
+
+  return {
+    settled,
+    finish,
+    noteEvent: () => {
+      if (deadlineAt !== null && Date.now() >= deadlineAt) finish();
+    },
+    open: () => {
+      if (isSettled || deadlineAt !== null) return;
+      deadlineAt = Date.now() + SEGMENT_DRAIN_MS;
+      backstop = setTimeout(finish, SEGMENT_DRAIN_MS);
+    },
+  };
+};
 
 /**
  * Transcribe a single audio file from `startFromMs`, persisting each
@@ -555,6 +685,8 @@ const transcribeOneTrack = async ({
   const taskId = `${libraryItemId}:${trackIno}:${Date.now()}`;
   let segmentsSubscription: EventSubscription | null = null;
   let progressSubscription: EventSubscription | null = null;
+  let finishedSubscription: EventSubscription | null = null;
+  const drain = createSegmentDrain();
 
   /** Track-relative watermark for THIS run, seeded from what SQLite already has. */
   let watermarkMs = Math.max(0, startFromMs);
@@ -609,13 +741,21 @@ const transcribeOneTrack = async ({
     readFlushTail = () => flushTail;
     actions().setCurrentFileFraction(reportedFraction);
 
+    // Subscribed BEFORE the native call: the terminal marker is what ends the
+    // drain, and native can emit it before `transcribeBookFile` settles.
+    finishedSubscription = addFileFinishedListener((event) => {
+      if (event.taskId !== taskId) return;
+      drain.finish();
+    });
     segmentsSubscription = addSegmentsListener((event) => {
       if (event.taskId !== taskId) return;
       enqueueFlush(event.segments);
+      drain.noteEvent();
     });
     progressSubscription = addFileProgressListener((event) => {
       if (event.taskId !== taskId) return;
       reportFraction(event.fractionComplete);
+      drain.noteEvent();
     });
 
     activeNativeTaskId = taskId;
@@ -627,12 +767,14 @@ const transcribeOneTrack = async ({
     });
   } finally {
     activeNativeTaskId = null;
-    progressSubscription?.remove();
 
-    // Stay subscribed across the drain window so a cancel's final flush is
-    // persisted, then wait for the queue so no write outlives this function.
-    await drainPendingSegmentEvents();
+    // Stay subscribed across the drain so a cancel's final flush is persisted,
+    // then wait for the queue so no write outlives this function.
+    drain.open();
+    await drain.settled;
     segmentsSubscription?.remove();
+    progressSubscription?.remove();
+    finishedSubscription?.remove();
     await flushTail;
     readFlushTail = null;
   }
@@ -769,6 +911,27 @@ export const initializeTranscribeAfterDownloadWatcher = () => {
 };
 
 initializeTranscribeAfterDownloadWatcher();
+
+//~~ ========================================================
+//~~ Background-window install
+//~~ ========================================================
+
+/**
+ * Stand the `BGProcessingTask` controller up for this process
+ * (`docs/transcription-background-execution-plan.md` Phase 5). Installed on
+ * import, like the download watcher above: until it runs, native declines every
+ * granted window, which is exactly the behaviour we want on a cold headless
+ * launch.
+ *
+ * iOS only — the Android module stubs the whole surface out, and there is no
+ * Book Transcript there to schedule (ADR-0034).
+ */
+export const initializeTranscriptionBackgroundWindows = () => {
+  if (Platform.OS !== "ios") return null;
+  return initializeTranscriptionBackgroundTask(backgroundTaskDependencies);
+};
+
+initializeTranscriptionBackgroundWindows();
 
 //~~ ========================================================
 //~~ UI status

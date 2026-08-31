@@ -75,8 +75,13 @@ export const shouldHoldScreenLock = ({
  * The rule is still worth applying: it is correct, cheap, and covers every
  * foreground case, and the controller re-syncs on the return to `"active"` so a
  * frozen transcription takes the lock the instant the app is foreground again.
- * Closing the background gap properly is Phase 5 (BGProcessingTask), which is
- * NOT built.
+ *
+ * That background gap is what Phase 5 closes, in
+ * `./transcription-background-task.ts`: a `BGProcessingTask` window resumes the
+ * suspended process on a charger and lets the transcription run without the
+ * screen. It closes the gap for a *suspended* process only — a window granted to
+ * a terminated app is declined on purpose — so this lock still matters whenever
+ * the phone is off charge.
  */
 
 /**
