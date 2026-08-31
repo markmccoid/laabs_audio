@@ -16,7 +16,7 @@ Settled decisions (do not relitigate):
 | Consent | Start sheet = expectations (time, battery, machine-generated text) + language row. Checkbox = consent; language resolved at checkbox time; no second sheet. |
 | Language | Default English silently. Only demand attention when book metadata (`media.metadata.language`) indicates non-English (start sheet highlights the row; download sheet shows a language note beside the checkbox). |
 | Concurrency | Exactly one active Book Transcript. No queue — alert "wait for the current transcription to finish". Download-sheet checkbox is disabled while one runs. Transcribing while listening (any book) is allowed. |
-| Processing | Foreground-first. No BGProcessingTask in v1. File-level resume across app kills. |
+| Processing | **Superseded** by `docs/transcription-background-execution-plan.md`: segments persist per batch with a track-relative watermark, resume is intra-file, and a BGProcessingTask continues an unfinished transcript while the process is alive. Originally: foreground-first, no BGProcessingTask, file-level resume. |
 | Storage | SQLite (`laabs-shadow-library.db`), keyed by `libraryItemId`. Zustand holds only runtime status. No transcript data in MMKV-persisted stores. |
 | Lifetime | Transcript **dies with the download**: the delete-download flow first offers a Transcript EPUB Export, then deletes both. No orphan management. |
 | Chapterless books | One section per audio file ("Part 1", "Part 2", …). Single-file chapterless book ⇒ one giant section (accepted for v1). |
@@ -161,7 +161,7 @@ Per project `CLAUDE.md`: **all runtime testing is delegated to an Agent with `mo
 
 - iOS < 26 → gated message, nothing crashes. Locale unsupported by SpeechTranscriber → clear error on start sheet.
 - Chapterless book; single-file chapterless book; chapter starting exactly at a file boundary; zero-`startOffset` MP3 downloads.
-- App killed / backgrounded mid-file (file-level resume; in-flight file's partial segments are discarded — never inserted outside the per-track transaction).
+- App killed / backgrounded mid-file (**superseded** — intra-file resume: each batch is persisted with the track watermark, so a kill costs seconds rather than the file. See `docs/transcription-background-execution-plan.md`).
 - Book deleted mid-transcription (cancel → rows removed); user signs out mid-transcription (transcription is device-scoped, keep running).
 - Metadata language empty, junk, or a name like "English"; user overrides language on the sheet.
 - Start attempted while another book transcribes (alert); checkbox during active transcription (disabled); download completes but another transcription became active (intent dropped + toast).
@@ -169,4 +169,4 @@ Per project `CLAUDE.md`: **all runtime testing is delegated to an Agent with `mo
 
 ## Explicitly out of scope for v1
 
-Read-Along UI (incl. sub-second position interpolation — playback position is 1 Hz via `UPDATE_INTERVAL_MS` in `src/player/audio-engine.ts:82`; AudioPro's `setProgressInterval` exists when that milestone comes), BGProcessingTask, FTS over transcripts, partial EPUB export, Android, SFSpeechRecognizer fallback, transcript survival past download deletion, queueing.
+Read-Along UI (incl. sub-second position interpolation — playback position is 1 Hz via `UPDATE_INTERVAL_MS` in `src/player/audio-engine.ts:82`; AudioPro's `setProgressInterval` exists when that milestone comes) and BGProcessingTask were both out of scope for v1 and have both since shipped — see `docs/read-along-implementation-plan.md` and `docs/transcription-background-execution-plan.md`. Still out of scope: FTS over transcripts, partial EPUB export, Android, SFSpeechRecognizer fallback, transcript survival past download deletion, queueing.

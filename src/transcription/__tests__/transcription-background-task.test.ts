@@ -56,8 +56,8 @@ describe("decideScheduleAfterRun", () => {
     expect(decideScheduleAfterRun("complete")).toBe("cancel");
   });
 
-  it("schedules after a cancel, because the row stays resumable", () => {
-    expect(decideScheduleAfterRun("cancelled")).toBe("schedule");
+  it("cancels after a cancel — a stopped book must not resume itself", () => {
+    expect(decideScheduleAfterRun("cancelled")).toBe("cancel");
   });
 
   it("cancels after a failure — a failed row is never auto-resumed", () => {
@@ -326,13 +326,13 @@ describe("expiration", () => {
 });
 
 describe("applyRunOutcome", () => {
-  it("schedules a window when a run is cancelled", async () => {
+  it("cancels the pending window when a run is cancelled", async () => {
     const harness = createHarness();
     await harness.settle();
     harness.calls.length = 0;
 
     await harness.controller.applyRunOutcome("cancelled");
-    expect(harness.calls).toEqual(["schedule"]);
+    expect(harness.calls).toEqual(["cancelScheduled"]);
   });
 
   it("cancels the request when a run completes", async () => {

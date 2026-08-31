@@ -56,6 +56,7 @@ let mockPendingTracks: {
 }[] = [];
 let mockAppendImpl: ((call: AppendCall) => Promise<void>) | null = null;
 let mockTranscriptComplete = 0;
+let mockResumableRow: { libraryItemId: string } | null = null;
 
 jest.mock("react-native-sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() },
@@ -114,7 +115,7 @@ jest.mock("@/native/book-transcriber", () => ({
 jest.mock("@/data/sqlite/shadow-db-transcripts", () => ({
   createBookTranscript: async () => undefined,
   deleteBookTranscript: async () => undefined,
-  findResumableTranscript: async () => null,
+  findResumableTranscript: async () => mockResumableRow,
   getBookTranscriptStatus: async () => null,
   listPendingTracks: async () => mockPendingTracks,
   appendTrackSegments: async (call: AppendCall) => {
@@ -264,6 +265,7 @@ beforeEach(() => {
   mockSettleTranscribe = null;
   mockAppendImpl = null;
   mockTranscriptComplete = 0;
+  mockResumableRow = null;
   mockPendingTracks = [pendingTrack("ino-1", 0)];
   transcriptionStore.getState().actions.reset();
 });
@@ -538,5 +540,51 @@ describe("cancel", () => {
     expect(mockFailures).toEqual([]);
     expect(mockTranscriptComplete).toBe(0);
     expect(transcriptionStore.getState().statusById[LIBRARY_ITEM_ID]).toBe("resumable");
+  });
+});
+
+describe("one transcription at a time", () => {
+  it("rejects a second book while the first is still claiming the slot", async () => {
+    // Both starts race the awaits between the activeTask check and `beginTask`
+    // — the download watcher versus the sheet's Start button. The synchronous
+    // claim is what makes the second one lose.
+    const { run } = await startRunAndWaitForNative();
+
+    await expect(startBookTranscription("some-other-book")).rejects.toMatchObject({
+      code: "already_active",
+    });
+
+    finishNative();
+    await expect(run).resolves.toMatchObject({ outcome: "complete" });
+  });
+
+  it("returns nothing_to_do when the same book is started twice", async () => {
+    const { run } = await startRunAndWaitForNative();
+
+    await expect(startBookTranscription(LIBRARY_ITEM_ID)).resolves.toMatchObject({
+      outcome: "nothing_to_do",
+    });
+
+    finishNative();
+    await run;
+  });
+
+  it("rejects when another book holds an unfinished row in SQLite", async () => {
+    // The in-memory claim dies with the process; the durable row is what stops a
+    // second `status='in_progress'` book after a cold start.
+    mockResumableRow = { libraryItemId: "a-book-from-a-previous-launch" };
+
+    await expect(startBookTranscription(LIBRARY_ITEM_ID)).rejects.toMatchObject({
+      code: "already_active",
+    });
+    expect(mockTranscribeCalls).toHaveLength(0);
+  });
+
+  it("allows the book that owns the unfinished row to resume", async () => {
+    mockResumableRow = { libraryItemId: LIBRARY_ITEM_ID };
+
+    const { run } = await startRunAndWaitForNative();
+    finishNative();
+    await expect(run).resolves.toMatchObject({ outcome: "complete" });
   });
 });

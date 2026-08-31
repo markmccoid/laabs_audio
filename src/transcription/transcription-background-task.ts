@@ -103,19 +103,18 @@ export type BackgroundScheduleIntent = "schedule" | "cancel" | "leave";
  * | Run outcome     | Pending request | Why |
  * |-----------------|-----------------|-----|
  * | `complete`      | `cancel`        | Nothing left to finish |
- * | `cancelled`     | `schedule`      | The row stays `in_progress`, so the book is resumable and a window can continue it |
+ * | `cancelled`     | `cancel`        | Cancel means stopped — the row stays resumable, but only the user restarts it |
  * | `failed`        | `cancel`        | A `failed` row is never auto-resumed — the user retries by hand |
  * | `nothing_to_do` | `leave`         | Nothing ran; whatever was scheduled is still right |
  *
- * A cancel the *user* asked for schedules a window too. That is intended: cancel
- * means "stop spending my battery now", and a processing window only ever runs on
- * external power. The user's real off-switch is deleting the transcript, which
- * drops the row and takes `schedule` off the table for good.
+ * A cancel is always the user's, so it never schedules a window. Re-arming one
+ * would let a book the user stopped resume itself unattended on a charger, and
+ * `CONTEXT.md` makes resuming a deliberate UI action ("No auto-resume on
+ * launch"). The row stays `in_progress`, so Resume is there when they want it.
  */
 export const decideScheduleAfterRun = (
   outcome: BookTranscriptionRunOutcome,
 ): BackgroundScheduleIntent => {
-  if (outcome === "cancelled") return "schedule";
   if (outcome === "nothing_to_do") return "leave";
   return "cancel";
 };

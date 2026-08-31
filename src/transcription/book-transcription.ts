@@ -155,6 +155,19 @@ let activeNativeTaskId: string | null = null;
 /** Set by `cancelActiveTranscription` so the sequential loop stops between files. */
 let cancelRequested = false;
 /**
+ * The book that has claimed the single transcription slot, held from the moment
+ * `startBookTranscription` is entered until the run is over.
+ *
+ * `activeTask` alone cannot enforce CONTEXT.md's "at most one Book Transcript in
+ * progress": it is only set by `beginTask`, several awaits later (plan lookup,
+ * availability, resume validation, model prep), so two starts racing through
+ * that window — the download-completion watcher and the sheet's Start button —
+ * both saw no active task and both proceeded. This is claimed synchronously
+ * before the first await, which on a single JS thread is what makes the check
+ * and the claim atomic.
+ */
+let claimedLibraryItemId: string | null = null;
+/**
  * Reads the tail of the flush queue owned by the file currently in flight, or
  * `null` when no file is. The queue itself stays private to `transcribeOneTrack`
  * (Phase 3); this is the smallest seam that lets Phase 4's background flush ask
@@ -329,9 +342,10 @@ export const startBookTranscription = async (
   libraryItemId: string,
   options?: { localeIdentifier?: string },
 ): Promise<BookTranscriptionRunResult> => {
-  const existingTask = transcriptionStore.getState().activeTask;
-  if (existingTask) {
-    if (existingTask.libraryItemId === libraryItemId) {
+  const activeLibraryItemId =
+    claimedLibraryItemId ?? transcriptionStore.getState().activeTask?.libraryItemId ?? null;
+  if (activeLibraryItemId) {
+    if (activeLibraryItemId === libraryItemId) {
       return { libraryItemId, outcome: "nothing_to_do" };
     }
     throw new BookTranscriptionError(
@@ -340,7 +354,37 @@ export const startBookTranscription = async (
     );
   }
 
+  // Claim the slot before the first await — see `claimedLibraryItemId`.
+  claimedLibraryItemId = libraryItemId;
+
+  try {
+    return await startClaimedTranscription(libraryItemId, options);
+  } finally {
+    claimedLibraryItemId = null;
+  }
+};
+
+/**
+ * The body of `startBookTranscription`, run with the single transcription slot
+ * already claimed.
+ */
+const startClaimedTranscription = async (
+  libraryItemId: string,
+  options?: { localeIdentifier?: string },
+): Promise<BookTranscriptionRunResult> => {
   const plan = buildBookTranscriptionPlan(libraryItemId, options?.localeIdentifier);
+  // The in-memory claim dies with the process, so a cold start would otherwise
+  // let a second book open a second `status='in_progress'` row — which
+  // `findResumableTranscript` tacitly concedes by taking the most recent of
+  // several. SQLite is the durable record, so ask it too.
+  const otherResumable = await findResumableTranscript();
+  if (otherResumable && otherResumable.libraryItemId !== libraryItemId) {
+    throw new BookTranscriptionError(
+      "already_active",
+      "Another book has an unfinished transcript. Finish or delete it before starting this one.",
+    );
+  }
+
   const existingRow = await getBookTranscriptStatus(libraryItemId);
   const localeIdentifier =
     existingRow?.status === "in_progress" && !options?.localeIdentifier

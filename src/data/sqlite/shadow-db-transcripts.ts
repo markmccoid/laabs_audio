@@ -3,8 +3,9 @@ import {
   initializeShadowDatabaseInternal,
   runInTransaction,
   withWriteGuard,
+  type Db,
 } from "./shadow-db-core";
-import { now } from "./shadow-shared";
+import { now, type BindValues } from "./shadow-shared";
 
 // Book Transcript persistence (CONTEXT.md glossary: Book Transcript, Transcript
 // Segment). Keyed by libraryItemId only — the Book Transcript is device-scoped,
@@ -182,6 +183,42 @@ const toTranscriptSegmentRow = (
     : null,
 });
 
+//~~ ========================================================
+//~~ Chunked writes
+//~~ ========================================================
+
+/**
+ * Rows per multi-row `VALUES` statement, matching `OVERLAY_WRITE_CHUNK_SIZE` in
+ * `overlay-writes.ts` (`docs/shadow-sqlite-architecture.md` → Writes: bulk row
+ * sets use chunked multi-row statements, never per-row awaited INSERT loops).
+ */
+const TRANSCRIPT_WRITE_CHUNK_SIZE = 50;
+
+/**
+ * The chunked-write idiom of `bulkUpsertRows` in `overlay-writes.ts`, minus its
+ * `yieldToNextFrame` between chunks.
+ *
+ * That yield is `requestAnimationFrame` (`shadow-shared.ts:27`), and a
+ * BGProcessingTask window renders no frames — so awaiting it there would never
+ * resolve and would hang the background run, the same class of bug as the
+ * segment drain's old `setTimeout` (`docs/carplay-debugging-log.md`). Dropping
+ * it is safe here in a way it would not be for the overlay refresh: a batch is
+ * one flush interval of speech (native caps it at 25 segments), so this is
+ * almost always a single statement, and the yield's `index > 0` guard would not
+ * fire anyway.
+ */
+const insertChunkedRows = async (
+  db: Db,
+  sql: { prefix: string; rowPlaceholder: string; suffix?: string },
+  rows: BindValues[],
+) => {
+  for (let index = 0; index < rows.length; index += TRANSCRIPT_WRITE_CHUNK_SIZE) {
+    const chunk = rows.slice(index, index + TRANSCRIPT_WRITE_CHUNK_SIZE);
+    const placeholders = chunk.map(() => sql.rowPlaceholder).join(",\n");
+    await db.runAsync(`${sql.prefix} VALUES ${placeholders}${sql.suffix ?? ""}`, chunk.flat());
+  }
+};
+
 /**
  * Create a Book Transcript row plus its pending track rows in one
  * transaction: `status: 'in_progress'` and every track `status: 'pending'`.
@@ -234,12 +271,15 @@ export const createBookTranscript = (payload: {
         ],
       );
 
-      for (const track of payload.tracks) {
-        await db.runAsync(
-          `INSERT INTO book_transcript_tracks (
+      await insertChunkedRows(
+        db,
+        {
+          prefix: `INSERT INTO book_transcript_tracks (
             library_item_id, track_ino, track_index, start_offset_ms, duration_ms,
             status, completed_at, transcribed_through_ms
-          ) VALUES (?, ?, ?, ?, ?, 'pending', NULL, 0)
+          )`,
+          rowPlaceholder: "(?, ?, ?, ?, ?, 'pending', NULL, 0)",
+          suffix: `
           ON CONFLICT(library_item_id, track_ino) DO UPDATE SET
             track_index = excluded.track_index,
             start_offset_ms = excluded.start_offset_ms,
@@ -247,15 +287,15 @@ export const createBookTranscript = (payload: {
             status = 'pending',
             completed_at = NULL,
             transcribed_through_ms = 0`,
-          [
-            payload.libraryItemId,
-            track.trackIno,
-            track.trackIndex,
-            track.startOffsetMs,
-            track.durationMs,
-          ],
-        );
-      }
+        },
+        payload.tracks.map((track) => [
+          payload.libraryItemId,
+          track.trackIno,
+          track.trackIndex,
+          track.startOffsetMs,
+          track.durationMs,
+        ]),
+      );
     });
   });
 
@@ -322,21 +362,23 @@ export const appendTrackSegments = ({
     const db = await getDb();
 
     await runInTransaction(db, async () => {
-      for (const segment of segments) {
-        await db.runAsync(
-          `INSERT INTO book_transcript_segments (
+      await insertChunkedRows(
+        db,
+        {
+          prefix: `INSERT INTO book_transcript_segments (
             library_item_id, section_index, start_ms, end_ms, text, words_json
-          ) VALUES (?, ?, ?, ?, ?, ?)`,
-          [
-            libraryItemId,
-            segment.sectionIndex,
-            segment.startMs,
-            segment.endMs,
-            segment.text,
-            segment.words ? JSON.stringify(segment.words) : null,
-          ],
-        );
-      }
+          )`,
+          rowPlaceholder: "(?, ?, ?, ?, ?, ?)",
+        },
+        segments.map((segment) => [
+          libraryItemId,
+          segment.sectionIndex,
+          segment.startMs,
+          segment.endMs,
+          segment.text,
+          segment.words ? JSON.stringify(segment.words) : null,
+        ]),
+      );
 
       await db.runAsync(
         `UPDATE book_transcript_tracks

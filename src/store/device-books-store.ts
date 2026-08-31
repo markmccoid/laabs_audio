@@ -3289,6 +3289,13 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               require("../transcription/book-transcription") as typeof import("../transcription/book-transcription");
             transcription.cancelTranscribeAfterDownload(libraryItemId);
             await transcription.cancelActiveTranscription(libraryItemId);
+            // Cancelling stops the analyzer, but the run's last segment batch may
+            // still be queued. Without this the flush lands AFTER the delete
+            // below and re-inserts segments for a download that no longer
+            // exists — `appendTrackSegments` is a blind INSERT with no cascade,
+            // so those rows would outlive their book (CONTEXT.md: the transcript
+            // dies with the download; the plan says "No orphan management").
+            await transcription.settlePendingTranscriptionWrites();
           } catch {
             // Transcription is iOS-only and optional — never block a deletion on it.
           }

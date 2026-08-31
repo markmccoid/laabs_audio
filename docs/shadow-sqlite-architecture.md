@@ -24,6 +24,10 @@ src/data/sqlite/
 ├── overlay-writes.ts        Overlay refresh (server progress, favorites, bookmarks, pending
 │                            intents) via chunked multi-row upserts, plus the single-row
 │                            mutation projections (favorite toggle, progress upserts)
+├── shadow-db-transcripts.ts Book Transcript rows, track rows with the intra-file resume
+│                            watermark, and Transcript Segments; the reader/export queries and
+│                            the frontier walk. Named for the concern, not the `shadow-db-*`
+│                            core, for historical reasons
 ├── search-reads.ts          Ids-first production reader (queryShadowSearchResults), chunked
 │                            summary resolution (getShadowItemSummariesByIds), diagnostic
 │                            sampler (runShadowSearchTest)

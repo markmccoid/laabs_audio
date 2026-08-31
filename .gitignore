@@ -48,4 +48,3 @@ app-example
 logs/
 
 # Device syslog captures (large, machine-specific)
-logs/
