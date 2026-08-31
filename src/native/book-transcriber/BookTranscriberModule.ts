@@ -14,6 +14,8 @@ declare class BookTranscriberModule extends NativeModule<BookTranscriberEvents> 
   ensureLanguageModel(options: EnsureLanguageModelOptions): Promise<void>;
   transcribeBookFile(options: TranscribeBookFileOptions): Promise<BookTranscriptionResult>;
   cancelBookTranscription(taskId: string): Promise<void>;
+  beginBackgroundAssertion(): Promise<number>;
+  endBackgroundAssertion(identifier: number): Promise<void>;
 }
 
 export default requireNativeModule<BookTranscriberModule>("BookTranscriber");

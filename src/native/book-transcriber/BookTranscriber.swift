@@ -1,14 +1,19 @@
 import AVFoundation
 internal import ExpoModulesCore
 import Speech
+import UIKit
 
 class BookTranscriber: Module {
   private static let segmentBatchSize = 25
   private static let segmentFlushIntervalSeconds: TimeInterval = 2.0
+  private static let backgroundAssertionName = "BookTranscriber.flush"
 
   private let sessionQueue = DispatchQueue(label: "BookTranscriber.sessions")
   private var cancelHandlers: [String: () -> Void] = [:]
   private var cancelledSessionIds: Set<String> = []
+
+  /// Only ever touched on the main thread (UIKit's rule), so it needs no extra locking.
+  private var activeBackgroundAssertions: Set<Int> = []
 
   func definition() -> ModuleDefinition {
     Name("BookTranscriber")
@@ -61,16 +66,29 @@ class BookTranscriber: Module {
         return
       }
 
+      // Where recognition begins, in file-relative seconds. The caller owns any rewind-for-context;
+      // native never rewinds on its own. Times emitted back to JS stay file-absolute either way.
+      let startSeconds = max(0, (options["startSeconds"] as? NSNumber)?.doubleValue ?? 0)
+
       self.startTranscription(
         taskId: taskId,
         sourceURL: sourceURL,
         localeIdentifier: options["localeIdentifier"] as? String,
+        startSeconds: startSeconds,
         promise: promise
       )
     }
 
     AsyncFunction("cancelBookTranscription") { (taskId: String) in
       self.cancelSession(taskId)
+    }
+
+    AsyncFunction("beginBackgroundAssertion") { (promise: Promise) in
+      self.beginBackgroundAssertion(promise: promise)
+    }
+
+    AsyncFunction("endBackgroundAssertion") { (identifier: Int) in
+      self.endBackgroundAssertion(identifier)
     }
   }
 
@@ -181,6 +199,7 @@ class BookTranscriber: Module {
     taskId: String,
     sourceURL: URL,
     localeIdentifier: String?,
+    startSeconds: Double,
     promise: Promise
   ) {
     let requestedLocale = Self.resolveLocale(localeIdentifier)
@@ -229,6 +248,23 @@ class BookTranscriber: Module {
       let transcriber = Self.makeTranscriber(locale: locale)
       let analyzer = SpeechAnalyzer(modules: [transcriber])
 
+      // `analyzeSequence(from:)` always ingests a file from frame 0, so a resumed file feeds the
+      // analyzer its own buffers from the offset instead.
+      let resumeSequence: AudioFileAnalyzerInputSequence?
+      if startSeconds > 0 {
+        let analysisFormat = await SpeechAnalyzer.bestAvailableAudioFormat(
+          compatibleWith: [transcriber],
+          considering: audioFile.processingFormat
+        )
+        resumeSequence = AudioFileAnalyzerInputSequence(
+          audioFile: audioFile,
+          startSeconds: startSeconds,
+          analysisFormat: analysisFormat ?? audioFile.processingFormat
+        )
+      } else {
+        resumeSequence = nil
+      }
+
       guard self.setCancelHandler(taskId, { Task { await analyzer.cancelAndFinishNow() } }) else {
         self.endSession(taskId)
         promise.reject("cancelled", "Book transcription was cancelled")
@@ -236,7 +272,14 @@ class BookTranscriber: Module {
       }
 
       let analysisTask = Task {
-        if let lastSample = try await analyzer.analyzeSequence(from: audioFile) {
+        let lastSample: CMTime?
+        if let resumeSequence {
+          lastSample = try await analyzer.analyzeSequence(resumeSequence)
+        } else {
+          lastSample = try await analyzer.analyzeSequence(from: audioFile)
+        }
+
+        if let lastSample {
           try await analyzer.finalizeAndFinish(through: lastSample)
         } else {
           await analyzer.cancelAndFinishNow()
@@ -247,9 +290,27 @@ class BookTranscriber: Module {
       var lastFlushAt = Date()
       var furthestEndSeconds: Double = 0
 
+      // Never drop a batch the analyzer already produced — cancellation and hard errors alike hand
+      // JS whatever was recognized before things stopped.
+      func flushPending() {
+        guard !pendingSegments.isEmpty else {
+          return
+        }
+
+        self.flush(
+          taskId: taskId,
+          segments: pendingSegments,
+          furthestEndSeconds: furthestEndSeconds,
+          durationSeconds: durationSeconds
+        )
+        pendingSegments.removeAll(keepingCapacity: true)
+        lastFlushAt = Date()
+      }
+
       do {
         for try await result in transcriber.results {
           if self.isCancelled(taskId) {
+            flushPending()
             break
           }
 
@@ -271,19 +332,13 @@ class BookTranscriber: Module {
           let elapsed = Date().timeIntervalSince(lastFlushAt)
           if pendingSegments.count >= Self.segmentBatchSize
             || elapsed >= Self.segmentFlushIntervalSeconds {
-            self.flush(
-              taskId: taskId,
-              segments: pendingSegments,
-              furthestEndSeconds: furthestEndSeconds,
-              durationSeconds: durationSeconds
-            )
-            pendingSegments.removeAll(keepingCapacity: true)
-            lastFlushAt = Date()
+            flushPending()
           }
         }
 
         try await analysisTask.value
       } catch {
+        flushPending()
         analysisTask.cancel()
         await analyzer.cancelAndFinishNow()
         let wasCancelled = self.endSession(taskId)
@@ -295,17 +350,13 @@ class BookTranscriber: Module {
         return
       }
 
+      flushPending()
+
       if self.endSession(taskId) {
         promise.reject("cancelled", "Book transcription was cancelled")
         return
       }
 
-      self.flush(
-        taskId: taskId,
-        segments: pendingSegments,
-        furthestEndSeconds: furthestEndSeconds,
-        durationSeconds: durationSeconds
-      )
       self.sendEvent("onFileProgress", ["taskId": taskId, "fractionComplete": 1.0])
       promise.resolve(["durationSeconds": durationSeconds] as [String: Any])
     }
@@ -462,6 +513,49 @@ class BookTranscriber: Module {
     handler?()
   }
 
+  // MARK: - Background assertion
+
+  /// Wraps `UIApplication.beginBackgroundTask` so JS can keep the process alive long enough to
+  /// finish a pending flush after the app is backgrounded. Nothing here touches SpeechAnalyzer, so
+  /// it is deliberately not gated on iOS 26.
+  private func beginBackgroundAssertion(promise: Promise) {
+    DispatchQueue.main.async { [weak self] in
+      // `beginBackgroundTask` only returns the identifier the handler needs *after* capturing the
+      // handler, so the two meet in a box.
+      let handle = BackgroundAssertionHandle()
+      handle.identifier = UIApplication.shared.beginBackgroundTask(
+        withName: Self.backgroundAssertionName
+      ) {
+        // iOS ran out of patience before JS released the assertion — end it ourselves rather than
+        // be terminated for holding it.
+        self?.endBackgroundAssertion(handle.identifier.rawValue)
+      }
+
+      if handle.identifier != .invalid {
+        self?.activeBackgroundAssertions.insert(handle.identifier.rawValue)
+      }
+
+      promise.resolve(handle.identifier.rawValue)
+    }
+  }
+
+  /// Tolerates an unknown, invalid or already-ended identifier: JS can race the expiration handler.
+  private func endBackgroundAssertion(_ identifier: Int) {
+    let end = { [weak self] in
+      guard let self, self.activeBackgroundAssertions.remove(identifier) != nil else {
+        return
+      }
+
+      UIApplication.shared.endBackgroundTask(UIBackgroundTaskIdentifier(rawValue: identifier))
+    }
+
+    if Thread.isMainThread {
+      end()
+    } else {
+      DispatchQueue.main.async(execute: end)
+    }
+  }
+
   // MARK: - Helpers
 
   private static func unsupportedAvailabilityPayload() -> [String: Any] {
@@ -496,5 +590,185 @@ class BookTranscriber: Module {
     }
 
     return URL(string: value)
+  }
+}
+
+// MARK: - Background assertion handle
+
+/// Only ever read and written on the main thread, alongside the assertion it identifies.
+private final class BackgroundAssertionHandle: @unchecked Sendable {
+  var identifier: UIBackgroundTaskIdentifier = .invalid
+}
+
+// MARK: - Mid-file input sequence
+
+/// A pull-based `AnalyzerInput` sequence over an `AVAudioFile`, starting at an arbitrary offset.
+///
+/// `SpeechAnalyzer.analyzeSequence(from:)` always ingests a file from frame 0, so resuming a
+/// partially transcribed file means feeding the analyzer ourselves. Every buffer carries an
+/// explicit `bufferStartTime` measured from the start of the *file*, which is what keeps the times
+/// emitted to JS file-absolute — JS has no idea a resume happened.
+///
+/// Buffers are read inside `next()` and never ahead of the analyzer, so a 12-hour M4B streams
+/// rather than being pulled into memory.
+@available(iOS 26.0, *)
+private struct AudioFileAnalyzerInputSequence: AsyncSequence, Sendable {
+  typealias Element = AnalyzerInput
+
+  private let reader: AudioFileAnalyzerInputReader
+
+  init(audioFile: AVAudioFile, startSeconds: Double, analysisFormat: AVAudioFormat) {
+    reader = AudioFileAnalyzerInputReader(
+      audioFile: audioFile,
+      startSeconds: startSeconds,
+      analysisFormat: analysisFormat
+    )
+  }
+
+  func makeAsyncIterator() -> Iterator {
+    Iterator(reader: reader)
+  }
+
+  struct Iterator: AsyncIteratorProtocol {
+    let reader: AudioFileAnalyzerInputReader
+
+    func next() async throws -> AnalyzerInput? {
+      try reader.readNext()
+    }
+  }
+}
+
+/// Reads and format-converts one chunk of audio per `readNext()`.
+///
+/// Serialised by construction — the analyzer pulls a single buffer at a time — so the mutable read
+/// cursor is never touched concurrently. Deliberately not nested inside the sequence: `AsyncSequence`
+/// declares its own `min`/`max`, which would shadow the stdlib ones in a nested scope.
+@available(iOS 26.0, *)
+private final class AudioFileAnalyzerInputReader: @unchecked Sendable {
+  private static let chunkSeconds: Double = 10
+
+  private let audioFile: AVAudioFile
+  private let readFormat: AVAudioFormat
+  private let analysisFormat: AVAudioFormat
+  private let converter: AVAudioConverter?
+  private let startFrame: AVAudioFramePosition
+  private let framesPerChunk: AVAudioFrameCount
+  private let outputCapacity: AVAudioFrameCount
+  private let outputTimescale: CMTimeScale
+
+  private var nextOutputFrame: Int64
+  private var didSeek = false
+  private var reachedEndOfFile = false
+
+  init(audioFile: AVAudioFile, startSeconds: Double, analysisFormat: AVAudioFormat) {
+    self.audioFile = audioFile
+    self.analysisFormat = analysisFormat
+
+    let readFormat = audioFile.processingFormat
+    self.readFormat = readFormat
+
+    let readSampleRate = readFormat.sampleRate > 0 ? readFormat.sampleRate : 1
+    let outputSampleRate = analysisFormat.sampleRate > 0 ? analysisFormat.sampleRate : readSampleRate
+
+    // Clamping past the end is not an error: the sequence then yields nothing and the file is
+    // reported complete.
+    let requestedFrame = AVAudioFramePosition((startSeconds * readSampleRate).rounded())
+    startFrame = max(0, min(requestedFrame, audioFile.length))
+    framesPerChunk = AVAudioFrameCount(max(1, (Self.chunkSeconds * readSampleRate).rounded()))
+
+    // Rate conversion can emit a frame or two more than the ratio suggests; the headroom keeps a
+    // chunk from spilling into a second `convert` call.
+    outputCapacity = AVAudioFrameCount(
+      (Double(framesPerChunk) * outputSampleRate / readSampleRate).rounded(.up)
+    ) + 1024
+    outputTimescale = CMTimeScale(outputSampleRate.rounded())
+
+    // The analyzer measures time in the analysis format, so anchor the first buffer at the resume
+    // point and let the accumulated output frame count carry it forward without drift.
+    nextOutputFrame = Int64((Double(startFrame) / readSampleRate * outputSampleRate).rounded())
+
+    if readFormat.isEqual(analysisFormat) {
+      converter = nil
+    } else {
+      let converter = AVAudioConverter(from: readFormat, to: analysisFormat)
+      // Priming would shift the output relative to the timestamps we stamp onto it.
+      converter?.primeMethod = .none
+      self.converter = converter
+    }
+  }
+
+  func readNext() throws -> AnalyzerInput? {
+    if !didSeek {
+      audioFile.framePosition = startFrame
+      didSeek = true
+    }
+
+    while !reachedEndOfFile {
+      guard let inputBuffer = AVAudioPCMBuffer(
+        pcmFormat: readFormat,
+        frameCapacity: framesPerChunk
+      ) else {
+        reachedEndOfFile = true
+        return nil
+      }
+
+      try audioFile.read(into: inputBuffer, frameCount: framesPerChunk)
+      if inputBuffer.frameLength == 0 {
+        reachedEndOfFile = true
+        return nil
+      }
+
+      if inputBuffer.frameLength < framesPerChunk {
+        reachedEndOfFile = true
+      }
+
+      guard let outputBuffer = try convert(inputBuffer) else {
+        continue
+      }
+
+      let bufferStartTime = CMTime(value: nextOutputFrame, timescale: outputTimescale)
+      nextOutputFrame += Int64(outputBuffer.frameLength)
+      return AnalyzerInput(buffer: outputBuffer, bufferStartTime: bufferStartTime)
+    }
+
+    return nil
+  }
+
+  private func convert(_ buffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer? {
+    guard let converter else {
+      return buffer
+    }
+
+    guard let outputBuffer = AVAudioPCMBuffer(
+      pcmFormat: analysisFormat,
+      frameCapacity: outputCapacity
+    ) else {
+      return nil
+    }
+
+    var consumed = false
+    var conversionError: NSError?
+    let status = converter.convert(to: outputBuffer, error: &conversionError) { _, inputStatus in
+      if consumed {
+        inputStatus.pointee = .noDataNow
+        return nil
+      }
+
+      consumed = true
+      inputStatus.pointee = .haveData
+      return buffer
+    }
+
+    if status == .error {
+      throw conversionError ?? NSError(
+        domain: "BookTranscriber",
+        code: -1,
+        userInfo: [NSLocalizedDescriptionKey: "Unable to convert audio for analysis"]
+      )
+    }
+
+    // Anything the converter still holds back is emitted on the next call, timestamped from the
+    // running output frame count, so a short buffer here costs nothing.
+    return outputBuffer.frameLength > 0 ? outputBuffer : nil
   }
 }

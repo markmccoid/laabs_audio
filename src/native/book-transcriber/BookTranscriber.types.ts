@@ -13,7 +13,8 @@ export type BookTranscriptionWord = {
 
 /**
  * One recognized phrase/sentence (a Transcript Segment). Times are relative to the
- * transcribed *file*, not the book — the orchestrator adds the track offset.
+ * transcribed *file*, not the book — the orchestrator adds the track offset. They stay
+ * file-absolute even when recognition resumed mid-file via `startSeconds`.
  */
 export type BookTranscriptionSegment = {
   text: string;
@@ -56,6 +57,14 @@ export type TranscribeBookFileOptions = {
   taskId: string;
   sourceFileUri: string;
   localeIdentifier?: string;
+  /**
+   * File-relative offset, in seconds, at which recognition begins. Defaults to `0`.
+   *
+   * The caller owns any rewind-for-context (pass `max(0, watermark - rewind)`); native never
+   * rewinds on its own. Emitted segment and word times remain file-absolute regardless, so a
+   * resumed file needs no offsetting on the JS side.
+   */
+  startSeconds?: number;
 };
 
 export type BookTranscriptionSegmentsEvent = {

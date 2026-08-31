@@ -27,5 +27,14 @@ class BookTranscriber : Module() {
     AsyncFunction("cancelBookTranscription") { _: String ->
       Unit
     }
+
+    // No UIKit background assertion to take; 0 is the "invalid identifier" sentinel.
+    AsyncFunction("beginBackgroundAssertion") {
+      0
+    }
+
+    AsyncFunction("endBackgroundAssertion") { _: Int ->
+      Unit
+    }
   }
 }

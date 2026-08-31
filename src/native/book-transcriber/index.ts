@@ -36,6 +36,20 @@ export function cancelBookTranscription(taskId: string): Promise<void> {
   return BookTranscriberModule.cancelBookTranscription(taskId);
 }
 
+/**
+ * Takes a UIKit background assertion so a pending flush can finish after the app is backgrounded.
+ * Resolves with the identifier to hand back to `endBackgroundAssertion`; `0` means none was
+ * granted (or the platform has no such concept). Always pair it with `endBackgroundAssertion`.
+ */
+export function beginBackgroundAssertion(): Promise<number> {
+  return BookTranscriberModule.beginBackgroundAssertion();
+}
+
+/** Safe to call with a stale, already-expired or `0` identifier. */
+export function endBackgroundAssertion(identifier: number): Promise<void> {
+  return BookTranscriberModule.endBackgroundAssertion(identifier);
+}
+
 export function addSegmentsListener(
   listener: (event: BookTranscriptionSegmentsEvent) => void
 ): EventSubscription {

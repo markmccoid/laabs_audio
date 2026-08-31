@@ -32,6 +32,13 @@ class BookTranscriberModule extends NativeModule<BookTranscriberEvents> {
   }
 
   async cancelBookTranscription(_taskId: string): Promise<void> {}
+
+  /** No process to keep alive off iOS — `0` is the "invalid identifier" sentinel. */
+  async beginBackgroundAssertion(): Promise<number> {
+    return 0;
+  }
+
+  async endBackgroundAssertion(_identifier: number): Promise<void> {}
 }
 
 export default registerWebModule(BookTranscriberModule, "BookTranscriber");
