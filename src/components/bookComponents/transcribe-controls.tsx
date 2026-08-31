@@ -33,6 +33,29 @@ import { toast } from "react-native-sonner";
  * downloaded audio files and dies with them (CONTEXT.md lifetime rule).
  */
 
+/**
+ * What to tell the user about a failed Book Transcript.
+ *
+ * `recognition_failed` is both the native recognizer's own error and the
+ * catch-all `toErrorCode` fallback, so it cannot be narrowed further here. On a
+ * real device it has meant the audio input failed mid-file — SpeechAnalyzer
+ * reports `Input loop ending with error` while recognition itself is healthy —
+ * which points at the audio rather than at the transcriber. Hence the hedge:
+ * name the likely cause without asserting it.
+ */
+const describeTranscriptionFailure = (errorCode: string | null) => {
+  if (errorCode === "recognition_failed") {
+    return "Transcription failed. One of this book's audio files may be damaged or in a format this device cannot read — other books should still transcribe normally.";
+  }
+  if (errorCode === "transcript_write_failed") {
+    return "Transcription failed while saving to this device. Check that there is free space and try again.";
+  }
+  if (errorCode === "missing_file") {
+    return "Transcription failed because an audio file is missing. Re-download the book and try again.";
+  }
+  return "Transcription failed.";
+};
+
 export const showTranscriptionBusyAlert = () => {
   Alert.alert(
     "Transcription in progress",
@@ -340,7 +363,9 @@ const TranscribeControls = ({ libraryItemId }: Props) => {
       ) : status === "failed" ? (
         <View style={{ gap: 8 }}>
           <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
-            {`Transcription failed${uiStatus?.errorCode ? ` (${uiStatus.errorCode})` : ""}.`}
+            {`${describeTranscriptionFailure(uiStatus?.errorCode ?? null)}${
+              uiStatus?.errorCode ? ` (${uiStatus.errorCode})` : ""
+            }`}
           </Text>
           <CardButton label="Retry Transcription" onPress={handleRetry} tone="primary" />
         </View>
