@@ -89,7 +89,14 @@ export type BookTranscriptionErrorCode =
   | "unavailable"
   | "model_unavailable"
   | "missing_file"
-  | "recognition_failed";
+  | "recognition_failed"
+  /**
+   * A SQLite write failed while persisting a batch. Distinct from
+   * `recognition_failed` on purpose: that is the fallback `toErrorCode` gives
+   * ANY unclassified throw, so without this a failed insert reported itself as
+   * a recognition problem and sent diagnosis to the wrong half of the stack.
+   */
+  | "transcript_write_failed";
 
 export class BookTranscriptionError extends Error {
   readonly code: BookTranscriptionErrorCode;
@@ -461,6 +468,15 @@ const runPendingTracks = async ({
     }
 
     const errorCode = toErrorCode(error, "recognition_failed");
+    // The card shows only the code, and `recognition_failed` is also the
+    // catch-all fallback — so log what actually threw. Native rejections carry
+    // SpeechAnalyzer's own `localizedDescription` in the message.
+    console.error("[BookTranscript] transcription failed", {
+      libraryItemId,
+      errorCode,
+      message: error instanceof Error ? error.message : String(error),
+      error,
+    });
     await markTranscriptFailed(libraryItemId, errorCode).catch(() => undefined);
     actions().endTask();
     actions().setStatus(libraryItemId, "failed");
@@ -619,7 +635,17 @@ const transcribeOneTrack = async ({
     readFlushTail = null;
   }
 
-  if (flushError) throw flushError;
+  if (flushError) {
+    console.error("[BookTranscript] persisting a segment batch failed", {
+      libraryItemId,
+      trackIno,
+      error: flushError,
+    });
+    throw new BookTranscriptionError(
+      "transcript_write_failed",
+      flushError instanceof Error ? flushError.message : String(flushError),
+    );
+  }
 };
 
 //~~ ========================================================

@@ -468,12 +468,27 @@ export const getSegmentWords = async (
  * standalone so the walk is unit-testable without a database.
  */
 export const computeTranscriptFrontierMs = (
-  orderedTracks: Pick<BookTranscriptTrackRow, "startOffsetMs" | "durationMs" | "status">[],
+  orderedTracks: Pick<
+    BookTranscriptTrackRow,
+    "startOffsetMs" | "durationMs" | "status" | "transcribedThroughMs"
+  >[],
 ): number => {
   let frontierMs = 0;
   for (const track of orderedTracks) {
-    if (track.status !== "complete") break;
-    frontierMs = track.startOffsetMs + track.durationMs;
+    if (track.status === "complete") {
+      frontierMs = track.startOffsetMs + track.durationMs;
+      continue;
+    }
+    // Since segments are persisted per batch rather than per file
+    // (`docs/transcription-background-execution-plan.md` Phase 3), a pending
+    // track already holds readable text up to its watermark. Stopping at the
+    // track boundary would hide everything transcribed so far and show the
+    // reader "Transcription stopped" over text that is sitting in SQLite.
+    const transcribedThroughMs = Math.max(0, Math.min(track.transcribedThroughMs, track.durationMs));
+    if (transcribedThroughMs > 0) {
+      frontierMs = track.startOffsetMs + transcribedThroughMs;
+    }
+    break;
   }
   return frontierMs;
 };
