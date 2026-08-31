@@ -659,6 +659,7 @@ private final class AudioFileAnalyzerInputReader: @unchecked Sendable {
   private var nextOutputFrame: Int64
   private var didSeek = false
   private var reachedEndOfFile = false
+  private var didDrainConverter = false
 
   init(audioFile: AVAudioFile, startSeconds: Double, analysisFormat: AVAudioFormat) {
     self.audioFile = audioFile
@@ -709,29 +710,45 @@ private final class AudioFileAnalyzerInputReader: @unchecked Sendable {
         frameCapacity: framesPerChunk
       ) else {
         reachedEndOfFile = true
-        return nil
+        break
       }
 
       try audioFile.read(into: inputBuffer, frameCount: framesPerChunk)
       if inputBuffer.frameLength == 0 {
         reachedEndOfFile = true
-        return nil
+        break
       }
 
       if inputBuffer.frameLength < framesPerChunk {
         reachedEndOfFile = true
       }
 
-      guard let outputBuffer = try convert(inputBuffer) else {
-        continue
+      if let outputBuffer = try convert(inputBuffer) {
+        return input(from: outputBuffer)
       }
 
-      let bufferStartTime = CMTime(value: nextOutputFrame, timescale: outputTimescale)
-      nextOutputFrame += Int64(outputBuffer.frameLength)
-      return AnalyzerInput(buffer: outputBuffer, bufferStartTime: bufferStartTime)
+      // The converter had nothing to give for this chunk. If that was the last one, the loop
+      // condition drops us into the drain below rather than ending the sequence early.
+    }
+
+    // The file is exhausted, but the converter may still be holding a tail. Hand it back one buffer
+    // per call so the sequence ends only once it is genuinely empty. `reachedEndOfFile` stays set,
+    // so this can never re-enter the file read.
+    while !didDrainConverter {
+      if let outputBuffer = try drainConverter() {
+        return input(from: outputBuffer)
+      }
     }
 
     return nil
+  }
+
+  /// Stamps a buffer with the running output frame count. Every buffer leaving the reader — drained
+  /// ones included — goes through here, so timestamps stay continuous and file-absolute.
+  private func input(from buffer: AVAudioPCMBuffer) -> AnalyzerInput {
+    let bufferStartTime = CMTime(value: nextOutputFrame, timescale: outputTimescale)
+    nextOutputFrame += Int64(buffer.frameLength)
+    return AnalyzerInput(buffer: buffer, bufferStartTime: bufferStartTime)
   }
 
   private func convert(_ buffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer? {
@@ -760,15 +777,58 @@ private final class AudioFileAnalyzerInputReader: @unchecked Sendable {
     }
 
     if status == .error {
-      throw conversionError ?? NSError(
-        domain: "BookTranscriber",
-        code: -1,
-        userInfo: [NSLocalizedDescriptionKey: "Unable to convert audio for analysis"]
-      )
+      throw conversionError ?? Self.conversionFailure()
     }
 
-    // Anything the converter still holds back is emitted on the next call, timestamped from the
-    // running output frame count, so a short buffer here costs nothing.
+    // Anything the converter holds back is emitted by a later call — the next chunk's, or the drain
+    // once the file runs out — timestamped from the running output frame count, so a short buffer
+    // here costs nothing.
     return outputBuffer.frameLength > 0 ? outputBuffer : nil
+  }
+
+  /// Pulls whatever the converter is still holding once the file is exhausted.
+  ///
+  /// Sample-rate conversion keeps a short tail buffered internally; without this it would die with
+  /// the reader, clipping the final word of a resumed track. Returns one buffer per call and sets
+  /// `didDrainConverter` the moment there is nothing left, so the caller cannot spin on it.
+  /// Yielding nothing at all is the normal case.
+  private func drainConverter() throws -> AVAudioPCMBuffer? {
+    guard let converter else {
+      didDrainConverter = true
+      return nil
+    }
+
+    guard let outputBuffer = AVAudioPCMBuffer(
+      pcmFormat: analysisFormat,
+      frameCapacity: outputCapacity
+    ) else {
+      didDrainConverter = true
+      return nil
+    }
+
+    var conversionError: NSError?
+    let status = converter.convert(to: outputBuffer, error: &conversionError) { _, inputStatus in
+      inputStatus.pointee = .endOfStream
+      return nil
+    }
+
+    if status == .error {
+      didDrainConverter = true
+      throw conversionError ?? Self.conversionFailure()
+    }
+
+    if status == .endOfStream || outputBuffer.frameLength == 0 {
+      didDrainConverter = true
+    }
+
+    return outputBuffer.frameLength > 0 ? outputBuffer : nil
+  }
+
+  private static func conversionFailure() -> NSError {
+    NSError(
+      domain: "BookTranscriber",
+      code: -1,
+      userInfo: [NSLocalizedDescriptionKey: "Unable to convert audio for analysis"]
+    )
   }
 }
