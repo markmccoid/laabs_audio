@@ -471,12 +471,14 @@ const runPendingTracks = async ({
     // The card shows only the code, and `recognition_failed` is also the
     // catch-all fallback — so log what actually threw. Native rejections carry
     // SpeechAnalyzer's own `localizedDescription` in the message.
-    console.error("[BookTranscript] transcription failed", {
-      libraryItemId,
-      errorCode,
-      message: error instanceof Error ? error.message : String(error),
-      error,
-    });
+    // One flat string on purpose: os_log truncates a structured payload, and a
+    // real failure log was cut off right after `libraryItemId` — losing the code
+    // and the message, which were the only parts worth capturing.
+    console.error(
+      `[BookTranscript] transcription failed book=${libraryItemId} code=${errorCode} message=${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     await markTranscriptFailed(libraryItemId, errorCode).catch(() => undefined);
     actions().endTask();
     actions().setStatus(libraryItemId, "failed");
@@ -636,11 +638,11 @@ const transcribeOneTrack = async ({
   }
 
   if (flushError) {
-    console.error("[BookTranscript] persisting a segment batch failed", {
-      libraryItemId,
-      trackIno,
-      error: flushError,
-    });
+    console.error(
+      `[BookTranscript] persisting a segment batch failed book=${libraryItemId} track=${trackIno} message=${
+        flushError instanceof Error ? flushError.message : String(flushError)
+      }`,
+    );
     throw new BookTranscriptionError(
       "transcript_write_failed",
       flushError instanceof Error ? flushError.message : String(flushError),

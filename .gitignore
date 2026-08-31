@@ -46,3 +46,6 @@ app-example
 /ios
 /android
 logs/
+
+# Device syslog captures (large, machine-specific)
+logs/
