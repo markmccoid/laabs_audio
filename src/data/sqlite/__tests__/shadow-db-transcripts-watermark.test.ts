@@ -266,18 +266,4 @@ describe("book_transcript_tracks.transcribed_through_ms", () => {
 
     expect(readWatermark()?.watermark).toBe(0);
   });
-
-  it("keeps insertSegmentsForTrack working as an append-then-complete wrapper", async () => {
-    const transcripts = loadTranscriptsModule();
-    await createTrack(transcripts);
-
-    await transcripts.insertSegmentsForTrack(LIBRARY_ITEM_ID, TRACK_INO, [
-      segment(0, 20_000, "one"),
-      segment(20_000, 40_000, "two"),
-    ]);
-
-    expect(countSegments()).toBe(2);
-    expect(readWatermark()?.watermark).toBe(TRACK_DURATION_MS);
-    await expect(transcripts.listPendingTracks(LIBRARY_ITEM_ID)).resolves.toEqual([]);
-  });
 });

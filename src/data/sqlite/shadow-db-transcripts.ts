@@ -364,33 +364,6 @@ export const completeTrack = (libraryItemId: string, trackIno: string) =>
     );
   });
 
-/**
- * Whole-file write path: append every Transcript Segment produced for a track,
- * then mark it complete.
- *
- * @deprecated Transitional wrapper kept so the pre-incremental orchestrator
- * keeps compiling; Phase 3 of
- * `docs/transcription-background-execution-plan.md` switches
- * `book-transcription.ts` to `appendTrackSegments` + `completeTrack` and this
- * goes away. Two separate transactions — new callers must not rely on them
- * being atomic together. It passes watermark `0` (its `segments` are
- * book-absolute, so it has no track-relative value to offer); `completeTrack`
- * pins the watermark to `duration_ms` a moment later anyway.
- */
-export const insertSegmentsForTrack = async (
-  libraryItemId: string,
-  trackIno: string,
-  segments: TranscriptSegmentInput[],
-): Promise<void> => {
-  await appendTrackSegments({
-    libraryItemId,
-    trackIno,
-    segments,
-    transcribedThroughMs: 0,
-  });
-  await completeTrack(libraryItemId, trackIno);
-};
-
 /** Mark a Book Transcript complete once every track has finished. */
 export const markTranscriptComplete = (libraryItemId: string) =>
   withWriteGuard(async (): Promise<void> => {

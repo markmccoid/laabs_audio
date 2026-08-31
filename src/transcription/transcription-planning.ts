@@ -191,6 +191,58 @@ export const mapSegmentsToBookAbsolute = ({
   });
 
 //~~ ========================================================
+//~~ Intra-file resume watermark
+//~~ ========================================================
+
+/** What survives the overlap drop, plus the watermark the batch earned. */
+export type WatermarkSelection = {
+  /** The batch's segments that are genuinely new, in the order they arrived. */
+  segments: BookTranscriptionSegment[];
+  /** Track-relative ms transcribed through after this batch — never regresses. */
+  watermarkMs: number;
+};
+
+/**
+ * Apply the intra-file resume rules to one raw `onSegments` batch
+ * (`docs/transcription-background-execution-plan.md` Phase 3).
+ *
+ * A resumed file is started at `watermark - 5s` so recognition has some context
+ * to warm up on, which means the first batches re-cover audio already persisted.
+ * Segments starting **before** the watermark are that overlap and are dropped;
+ * a segment starting exactly *at* it opens new audio and is kept.
+ *
+ * Times here are the native module's own — **file-relative seconds**, which for
+ * one track is the same as track-relative, the units `transcribed_through_ms`
+ * speaks. Run this BEFORE `mapSegmentsToBookAbsolute`: comparing a book-absolute
+ * start against a track-relative watermark silently corrupts every track but the
+ * first.
+ *
+ * Known accepted imprecision (settled for v1, do not add reconciliation): a
+ * segment straddling the watermark may be re-segmented differently on resume and
+ * dropped, leaving a sub-second gap at the resume boundary.
+ */
+export const selectSegmentsAfterWatermark = ({
+  segments,
+  watermarkMs,
+}: {
+  segments: BookTranscriptionSegment[];
+  watermarkMs: number;
+}): WatermarkSelection => {
+  const incomingMs = Math.max(0, watermarkMs);
+  const kept: BookTranscriptionSegment[] = [];
+  let nextWatermarkMs = incomingMs;
+
+  for (const segment of segments) {
+    const startMs = secondsToMs(segment.startSeconds);
+    if (startMs < incomingMs) continue;
+    kept.push(segment);
+    nextWatermarkMs = Math.max(nextWatermarkMs, startMs, secondsToMs(segment.endSeconds));
+  }
+
+  return { segments: kept, watermarkMs: nextWatermarkMs };
+};
+
+//~~ ========================================================
 //~~ Resume validation
 //~~ ========================================================
 

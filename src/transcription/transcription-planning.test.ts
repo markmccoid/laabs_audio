@@ -6,6 +6,7 @@ import {
   planTranscriptionSections,
   resolveBookLocale,
   resolveSectionIndexForStartMs,
+  selectSegmentsAfterWatermark,
   toTranscriptionPlanTracks,
   type TranscriptionSourceTrack,
 } from "./transcription-planning";
@@ -175,6 +176,101 @@ describe("mapSegmentsToBookAbsolute", () => {
       [1_803_000, 1_803_400, "Two"],
       [1_803_400, 1_804_000, "words"],
     ]);
+  });
+});
+
+describe("selectSegmentsAfterWatermark", () => {
+  const texts = (selection: { segments: BookTranscriptionSegment[] }) =>
+    selection.segments.map((segment) => segment.text);
+
+  it("keeps everything on a fresh run, where the watermark is 0", () => {
+    const selection = selectSegmentsAfterWatermark({
+      segments: [nativeSegment("Opening line.", 0, 4.5), nativeSegment("Second line.", 4.5, 9)],
+      watermarkMs: 0,
+    });
+
+    expect(texts(selection)).toEqual(["Opening line.", "Second line."]);
+    expect(selection.watermarkMs).toBe(9_000);
+  });
+
+  it("returns an unchanged watermark for an empty batch", () => {
+    expect(selectSegmentsAfterWatermark({ segments: [], watermarkMs: 42_000 })).toEqual({
+      segments: [],
+      watermarkMs: 42_000,
+    });
+  });
+
+  it("drops the 5s rewind overlap a resumed file re-covers", () => {
+    // Resumed at 115s for a 120s watermark: the first three segments are audio
+    // whose Transcript Segments the previous run already persisted.
+    const selection = selectSegmentsAfterWatermark({
+      segments: [
+        nativeSegment("Already stored.", 115, 117),
+        nativeSegment("Also stored.", 117, 119.5),
+        nativeSegment("Stored, ends on the mark.", 119.5, 120),
+        nativeSegment("Genuinely new.", 120, 124),
+      ],
+      watermarkMs: 120_000,
+    });
+
+    expect(texts(selection)).toEqual(["Genuinely new."]);
+    expect(selection.watermarkMs).toBe(124_000);
+  });
+
+  it("leaves the watermark alone when the whole batch is overlap", () => {
+    const selection = selectSegmentsAfterWatermark({
+      segments: [nativeSegment("Old.", 115, 117), nativeSegment("Older still.", 117, 119)],
+      watermarkMs: 120_000,
+    });
+
+    expect(selection.segments).toEqual([]);
+    expect(selection.watermarkMs).toBe(120_000);
+  });
+
+  it("drops a segment straddling the watermark — the accepted v1 sub-second gap", () => {
+    const selection = selectSegmentsAfterWatermark({
+      segments: [
+        nativeSegment("Re-segmented across the resume boundary.", 119.4, 122),
+        nativeSegment("After the boundary.", 122, 126),
+      ],
+      watermarkMs: 120_000,
+    });
+
+    expect(texts(selection)).toEqual(["After the boundary."]);
+    expect(selection.watermarkMs).toBe(126_000);
+  });
+
+  it("takes the batch's maximum end, not its last segment's, when a batch is out of order", () => {
+    const selection = selectSegmentsAfterWatermark({
+      segments: [
+        nativeSegment("Longest.", 121, 130),
+        nativeSegment("Earlier but later-arriving.", 120.5, 123),
+      ],
+      watermarkMs: 120_000,
+    });
+
+    expect(texts(selection)).toEqual(["Longest.", "Earlier but later-arriving."]);
+    expect(selection.watermarkMs).toBe(130_000);
+  });
+
+  it("never regresses below the incoming watermark", () => {
+    const selection = selectSegmentsAfterWatermark({
+      // A zero-length segment exactly on the watermark is kept but earns nothing.
+      segments: [nativeSegment("Blip.", 120, 120)],
+      watermarkMs: 120_000,
+    });
+
+    expect(selection.watermarkMs).toBe(120_000);
+  });
+
+  it("treats a negative incoming watermark as 0", () => {
+    const selection = selectSegmentsAfterWatermark({
+      segments: [nativeSegment("From the top.", 0, 3)],
+      watermarkMs: -1_000,
+    });
+
+    expect(texts(selection)).toEqual(["From the top."]);
+    expect(selection.watermarkMs).toBe(3_000);
   });
 });
 

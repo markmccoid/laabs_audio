@@ -8,18 +8,19 @@ import {
   ensureLanguageModel,
   getBookTranscriptionAvailability,
   transcribeBookFile,
+  type BookTranscriptionSegment,
 } from "@/native/book-transcriber";
 import {
+  appendTrackSegments,
+  completeTrack,
   createBookTranscript,
   deleteBookTranscript,
   findResumableTranscript,
   getBookTranscriptStatus,
-  insertSegmentsForTrack,
   listPendingTracks,
   markTranscriptComplete,
   markTranscriptFailed,
   type BookTranscriptSection,
-  type TranscriptSegmentInput,
 } from "@/data/sqlite/shadow-db-transcripts";
 import { resolveExportTracks } from "@/sharing/clip-export";
 import {
@@ -40,6 +41,7 @@ import {
   mapSegmentsToBookAbsolute,
   planTranscriptionSections,
   resolveBookLocale,
+  selectSegmentsAfterWatermark,
   toTranscriptionPlanTracks,
   type TranscriptionPlanTrack,
   type TranscriptionSourceTrack,
@@ -52,9 +54,12 @@ import {
  *
  * Invariants it enforces (CONTEXT.md):
  * - At most one Book Transcript is in progress at a time. No queue.
- * - A file's segments are written only when that whole file finishes, inside the
- *   per-track transaction — a kill mid-file discards its partial segments.
- * - Cancel leaves the row `in_progress` (resumable); only hard errors set `failed`.
+ * - Every `onSegments` batch is persisted as it arrives, in the same transaction
+ *   that advances the track's resume watermark
+ *   (`docs/transcription-background-execution-plan.md` Phase 3) — a kill mid-file
+ *   costs one batch, not a file, and no whole book is ever held in a JS array.
+ * - Cancel leaves the row `in_progress` (resumable) and KEEPS the work done so
+ *   far; only hard errors set `failed`.
  * - No auto-resume on launch; `resumeIfNeeded` is invoked from the UI.
  *
  * The pure planning logic lives in `./transcription-planning.ts`.
@@ -341,17 +346,20 @@ const runPendingTracks = async ({
         );
       }
 
-      const segments = await transcribeOneTrack({
+      // Segments were persisted batch-by-batch as they arrived; all that is left
+      // is to close the track out and pin its watermark to the file's duration.
+      await transcribeOneTrack({
         libraryItemId,
         localeIdentifier,
         sourceFileUri,
         trackIno: track.trackIno,
         trackStartOffsetMs: track.startOffsetMs,
+        trackDurationMs: track.durationMs,
+        startFromMs: track.transcribedThroughMs,
         sections: plan.sections,
       });
 
-      // Insert + mark complete in one transaction: the crash-safe resume unit.
-      await insertSegmentsForTrack(libraryItemId, track.trackIno, segments);
+      await completeTrack(libraryItemId, track.trackIno);
       completedTracks += 1;
       actions().setTrackProgress(completedTracks, totalTracks);
       actions().setCurrentFileFraction(0);
@@ -383,9 +391,43 @@ const runPendingTracks = async ({
 };
 
 /**
- * Transcribe a single audio file, buffering its segments in memory. Nothing is
- * persisted here — the caller writes them only once the file's promise resolves,
- * so partial segments of an unfinished file are never stored.
+ * How far before the watermark a resumed file restarts. Recognition starting
+ * cold at an arbitrary point degrades its first sentence or two, so the caller
+ * — this function — rewinds for context; native never rewinds on its own. The
+ * re-covered Transcript Segments are dropped again by
+ * `selectSegmentsAfterWatermark`.
+ */
+const RESUME_REWIND_MS = 5_000;
+
+/**
+ * How long the segments listener stays attached after the native promise
+ * settles. On cancel, native flushes its pending segments *before* rejecting
+ * with `cancelled`, but that event and the promise settlement cross the bridge
+ * by different routes — tearing the subscription down in the same tick would
+ * throw away exactly the batch Phase 2 went to the trouble of flushing.
+ */
+const SEGMENT_DRAIN_MS = 250;
+
+const clampFraction = (value: number) =>
+  Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+
+const drainPendingSegmentEvents = () =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, SEGMENT_DRAIN_MS);
+  });
+
+/**
+ * Transcribe a single audio file from `startFromMs`, persisting each
+ * `onSegments` batch as it arrives (`docs/transcription-background-execution-plan.md`
+ * Phase 3). Nothing is buffered for the caller: by the time this resolves every
+ * Transcript Segment the file produced is already in SQLite, and the track's
+ * watermark says how far through it we got. The caller only has to
+ * `completeTrack`.
+ *
+ * Units matter here. Native segment times are file-relative seconds, and one
+ * track is one file, so they are already in the track-relative ms the watermark
+ * speaks — the overlap drop and the watermark advance therefore run on the RAW
+ * batch, before `mapSegmentsToBookAbsolute` shifts it into book time.
  */
 const transcribeOneTrack = async ({
   libraryItemId,
@@ -393,6 +435,8 @@ const transcribeOneTrack = async ({
   sourceFileUri,
   trackIno,
   trackStartOffsetMs,
+  trackDurationMs,
+  startFromMs,
   sections,
 }: {
   libraryItemId: string;
@@ -400,37 +444,93 @@ const transcribeOneTrack = async ({
   sourceFileUri: string;
   trackIno: string;
   trackStartOffsetMs: number;
+  trackDurationMs: number;
+  /** Track-relative ms already transcribed and persisted; 0 for a fresh file. */
+  startFromMs: number;
   sections: BookTranscriptSection[];
-}): Promise<TranscriptSegmentInput[]> => {
+}): Promise<void> => {
   const taskId = `${libraryItemId}:${trackIno}:${Date.now()}`;
-  const buffered: TranscriptSegmentInput[] = [];
   let segmentsSubscription: EventSubscription | null = null;
   let progressSubscription: EventSubscription | null = null;
 
+  /** Track-relative watermark for THIS run, seeded from what SQLite already has. */
+  let watermarkMs = Math.max(0, startFromMs);
+  /**
+   * Tail of the flush queue. Every batch chains onto it, so two
+   * `appendTrackSegments` transactions can never interleave and batches land in
+   * arrival order. The first write failure is captured rather than thrown into
+   * an event handler nobody awaits; it is rethrown once the run winds down.
+   */
+  let flushTail: Promise<void> = Promise.resolve();
+  let flushError: unknown = null;
+
+  // A resumed file's native fraction restarts from the span it was asked to
+  // transcribe, which would read as lost progress. The watermark is the honest
+  // measure, so it seeds the floor and this only ever moves forwards.
+  let reportedFraction = trackDurationMs > 0 ? clampFraction(watermarkMs / trackDurationMs) : 0;
+  const reportFraction = (fraction: number) => {
+    const next = clampFraction(fraction);
+    if (next <= reportedFraction) return;
+    reportedFraction = next;
+    actions().setCurrentFileFraction(next);
+  };
+
+  const enqueueFlush = (batch: BookTranscriptionSegment[]) => {
+    const selection = selectSegmentsAfterWatermark({ segments: batch, watermarkMs });
+    if (!selection.segments.length && selection.watermarkMs === watermarkMs) return;
+
+    // Advance in memory synchronously: the next event must not re-select audio
+    // this batch has already claimed, whether or not its write has landed yet.
+    watermarkMs = selection.watermarkMs;
+    const transcribedThroughMs = selection.watermarkMs;
+    const segments = mapSegmentsToBookAbsolute({
+      segments: selection.segments,
+      trackStartOffsetMs,
+      sections,
+    });
+
+    flushTail = flushTail.then(async () => {
+      if (flushError) return;
+      try {
+        await appendTrackSegments({ libraryItemId, trackIno, segments, transcribedThroughMs });
+        if (trackDurationMs > 0) reportFraction(transcribedThroughMs / trackDurationMs);
+      } catch (error) {
+        flushError = error;
+      }
+    });
+  };
+
   try {
+    actions().setCurrentFileFraction(reportedFraction);
+
     segmentsSubscription = addSegmentsListener((event) => {
       if (event.taskId !== taskId) return;
-      buffered.push(
-        ...mapSegmentsToBookAbsolute({
-          segments: event.segments,
-          trackStartOffsetMs,
-          sections,
-        }),
-      );
+      enqueueFlush(event.segments);
     });
     progressSubscription = addFileProgressListener((event) => {
       if (event.taskId !== taskId) return;
-      actions().setCurrentFileFraction(event.fractionComplete);
+      reportFraction(event.fractionComplete);
     });
 
     activeNativeTaskId = taskId;
-    await transcribeBookFile({ taskId, sourceFileUri, localeIdentifier });
-    return buffered;
+    await transcribeBookFile({
+      taskId,
+      sourceFileUri,
+      localeIdentifier,
+      startSeconds: Math.max(0, watermarkMs - RESUME_REWIND_MS) / 1000,
+    });
   } finally {
     activeNativeTaskId = null;
-    segmentsSubscription?.remove();
     progressSubscription?.remove();
+
+    // Stay subscribed across the drain window so a cancel's final flush is
+    // persisted, then wait for the queue so no write outlives this function.
+    await drainPendingSegmentEvents();
+    segmentsSubscription?.remove();
+    await flushTail;
   }
+
+  if (flushError) throw flushError;
 };
 
 //~~ ========================================================
