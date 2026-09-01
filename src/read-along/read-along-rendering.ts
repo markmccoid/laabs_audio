@@ -98,3 +98,65 @@ export const buildWordSpans = (
 
   return spans;
 };
+
+/**
+ * How the currently spoken word is marked inside the active Transcript Segment
+ * (`docs/read-along-implementation-plan.md`, "v1.1 — Highlight styles").
+ *
+ * The segment's own accent block is not part of this choice: it is always on,
+ * in every style, including `none`.
+ */
+export type ReadAlongWordHighlightStyle = "highlight" | "color" | "bold" | "none";
+
+export const READ_ALONG_WORD_HIGHLIGHT_STYLES: readonly ReadAlongWordHighlightStyle[] = [
+  "highlight",
+  "color",
+  "bold",
+  "none",
+];
+
+export const DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE: ReadAlongWordHighlightStyle = "highlight";
+
+/** Accent opacity for the `highlight` style's bar. Deliberately one value for both themes. */
+export const WORD_HIGHLIGHT_ALPHA = 0.32;
+
+/** A persisted or hand-edited value that is not one of the four styles reads as the default. */
+export const normalizeReadAlongWordHighlightStyle = (
+  value: unknown,
+): ReadAlongWordHighlightStyle =>
+  READ_ALONG_WORD_HIGHLIGHT_STYLES.includes(value as ReadAlongWordHighlightStyle)
+    ? (value as ReadAlongWordHighlightStyle)
+    : DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE;
+
+/** The `<Text>` style applied to the active word. Shaped to spread straight into a text style. */
+export type ReadAlongWordAppearance = {
+  color?: string;
+  fontWeight?: "600";
+  backgroundColor?: string;
+};
+
+/**
+ * Resolve a highlight style into the span style for the active word, or `null`
+ * when the word gets no treatment at all (`none`).
+ *
+ * `highlight` deliberately leaves the text colour alone: the bar behind it
+ * carries the signal, and recolouring on top of a tinted background reduces
+ * contrast rather than adding emphasis. `bold` is the original v1 treatment,
+ * kept as a choice — it is the only style that changes glyph metrics, so it is
+ * also the only one that reflows the line as the highlight moves.
+ */
+export const resolveWordHighlightStyle = (
+  style: ReadAlongWordHighlightStyle,
+  palette: { accent: string },
+): ReadAlongWordAppearance | null => {
+  switch (style) {
+    case "highlight":
+      return { backgroundColor: withAlpha(palette.accent, WORD_HIGHLIGHT_ALPHA) };
+    case "color":
+      return { color: palette.accent };
+    case "bold":
+      return { color: palette.accent, fontWeight: "600" };
+    default:
+      return null;
+  }
+};

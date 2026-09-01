@@ -11,6 +11,11 @@ import {
 } from "../player/auto-rewind";
 import type { PitchCorrectionQuality } from "../player/types";
 import { DEFAULT_DARK_ACCENT_COLOR, DEFAULT_LIGHT_ACCENT_COLOR, normalizeAccentHex } from "../theme/accent-color";
+import {
+  DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE,
+  normalizeReadAlongWordHighlightStyle,
+  type ReadAlongWordHighlightStyle,
+} from "../read-along/read-along-rendering";
 
 export const DEFAULT_HOME_SHELF_ITEM_COUNT = 15;
 export const MIN_HOME_SHELF_ITEM_COUNT = 5;
@@ -188,6 +193,7 @@ export type SettingsState = {
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>;
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
   readAlongFontSize: number;
+  readAlongWordHighlightStyle: ReadAlongWordHighlightStyle;
   actions: {
     setPlaybackRate: (rate: number) => void;
     setPlaybackRateRangeMin: (rate: number) => void;
@@ -228,6 +234,7 @@ export type SettingsState = {
       payload: { dateKey: string; seed: number; bookIds: string[]; updatedAt?: number },
     ) => void;
     setReadAlongFontSize: (fontSize: number) => void;
+    setReadAlongWordHighlightStyle: (style: ReadAlongWordHighlightStyle) => void;
   };
 };
 
@@ -266,6 +273,7 @@ export const settingsStore = createStore<SettingsState>()(
       homeShelvesByScope: {},
       discoverShelfByScope: {},
       readAlongFontSize: DEFAULT_READ_ALONG_FONT_SIZE,
+      readAlongWordHighlightStyle: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE,
       actions: {
         setPlaybackRate: (playbackRate) => set({ playbackRate }),
         setPlaybackRateRangeMin: (playbackRateRangeMin) =>
@@ -576,6 +584,8 @@ export const settingsStore = createStore<SettingsState>()(
         },
         setReadAlongFontSize: (fontSize) =>
           set({ readAlongFontSize: clampReadAlongFontSize(fontSize) }),
+        setReadAlongWordHighlightStyle: (style) =>
+          set({ readAlongWordHighlightStyle: normalizeReadAlongWordHighlightStyle(style) }),
       },
     }),
     {
@@ -606,6 +616,7 @@ export const settingsStore = createStore<SettingsState>()(
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
         readAlongFontSize: state.readAlongFontSize,
+        readAlongWordHighlightStyle: state.readAlongWordHighlightStyle,
       }),
       version: 19,
       migrate: (persistedState, version) => {
@@ -637,6 +648,7 @@ export const settingsStore = createStore<SettingsState>()(
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
             readAlongFontSize: DEFAULT_READ_ALONG_FONT_SIZE,
+            readAlongWordHighlightStyle: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE,
           };
         }
 
@@ -744,6 +756,11 @@ export const settingsStore = createStore<SettingsState>()(
                   state.readAlongFontSize ?? DEFAULT_READ_ALONG_FONT_SIZE,
                 )
               : DEFAULT_READ_ALONG_FONT_SIZE,
+          // Added after version 19 without a bump: absent on every older blob,
+          // and the normalizer turns that absence into the default.
+          readAlongWordHighlightStyle: normalizeReadAlongWordHighlightStyle(
+            state.readAlongWordHighlightStyle,
+          ),
         };
       },
     }

@@ -1,5 +1,12 @@
 import type { TranscriptSegmentWordTiming } from "@/data/sqlite/shadow-db-transcripts";
-import { buildWordSpans, withAlpha } from "./read-along-rendering";
+import {
+  buildWordSpans,
+  normalizeReadAlongWordHighlightStyle,
+  READ_ALONG_WORD_HIGHLIGHT_STYLES,
+  resolveWordHighlightStyle,
+  withAlpha,
+  WORD_HIGHLIGHT_ALPHA,
+} from "./read-along-rendering";
 
 describe("withAlpha", () => {
   it("converts six-digit hex", () => {
@@ -74,5 +81,45 @@ describe("buildWordSpans", () => {
 
   it("bails out on an empty token", () => {
     expect(buildWordSpans("Hello", [[0, 10, ""]])).toBeNull();
+  });
+});
+
+describe("normalizeReadAlongWordHighlightStyle", () => {
+  it("passes through every known style", () => {
+    for (const style of READ_ALONG_WORD_HIGHLIGHT_STYLES) {
+      expect(normalizeReadAlongWordHighlightStyle(style)).toBe(style);
+    }
+  });
+
+  it("falls back to the default for anything else", () => {
+    expect(normalizeReadAlongWordHighlightStyle(undefined)).toBe("highlight");
+    expect(normalizeReadAlongWordHighlightStyle(null)).toBe("highlight");
+    expect(normalizeReadAlongWordHighlightStyle("underline")).toBe("highlight");
+    expect(normalizeReadAlongWordHighlightStyle(7)).toBe("highlight");
+  });
+});
+
+describe("resolveWordHighlightStyle", () => {
+  const palette = { accent: "#3b82f6" };
+
+  it("tints the background and leaves the text colour alone for `highlight`", () => {
+    expect(resolveWordHighlightStyle("highlight", palette)).toEqual({
+      backgroundColor: withAlpha(palette.accent, WORD_HIGHLIGHT_ALPHA),
+    });
+  });
+
+  it("recolours without changing glyph metrics for `color`", () => {
+    expect(resolveWordHighlightStyle("color", palette)).toEqual({ color: palette.accent });
+  });
+
+  it("keeps the original accent-plus-weight treatment for `bold`", () => {
+    expect(resolveWordHighlightStyle("bold", palette)).toEqual({
+      color: palette.accent,
+      fontWeight: "600",
+    });
+  });
+
+  it("returns null for `none`, so the word gets no treatment at all", () => {
+    expect(resolveWordHighlightStyle("none", palette)).toBeNull();
   });
 });
