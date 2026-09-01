@@ -88,13 +88,22 @@ of preset speeds, so changing speed never means leaving the reader.
 | Off-ladder current rate | No row is checked and the pill shows the true rate. No synthetic row, and never snap the display to the nearest preset — the pill must not claim a speed the book is not playing at. |
 | Placement | The transport trio stays optically centred; the pill is absolutely positioned at the trailing edge. The play button being dead-centre is worth protecting. |
 | Persistence | The book's rate, via `playerService.setRate` — the same per-book write (`device-books-store`) every other rate surface makes. A Read-Along-only rate would silently disagree with the main player. |
-| Disabled state | The pill is disabled when the bound book is not loaded, exactly as the skip buttons already are; it still displays the book's stored rate. |
+| Disabled state | The pill is disabled when the bound book is not loaded (`isBoundBookLoaded`), and still displays the book's stored rate. Deliberately a weaker condition than the skip buttons' `canSkip`, which also requires playing/paused: a rate can usefully be set on a loaded-but-not-yet-started book, a skip cannot. |
 | No drag gesture | `usePlaybackRateGesture`'s drag-to-scrub stays a main-player affordance — a vertical drag over a scrolling reader would fight the list and Follow Mode. |
 | Format | `rate.toFixed(2)` + `x`, tabular-nums, matching every other rate surface. |
 
 Both reader popovers (appearance and rate) close on an outside tap via
 `ReadAlongPopoverBackdrop`. Without it a dismiss tap on the transcript would also
-seek playback and leave the card open.
+seek playback and leave the card open. Two deliberate limits: the footer bar is
+not "outside" — play/pause and the skips stay live with the rate menu open, so
+pausing does not cost you your place in the menu — and the header's `Aa` button
+sits above the rate menu's backdrop, so both cards can be open at once. Making
+that impossible would mean lifting "which popover is open" into the screen, which
+re-renders the transcript list for a purely cosmetic gain.
+
+The rate menu lifts by `RESUME_PILL_CLEARANCE` when the "Resume following" pill is
+showing. Both float above the bar at the same offset and the menu is wide enough
+to clip the pill's label mid-word; the menu yields because it is the transient one.
 
 
 ## Existing code to reuse (verified paths)

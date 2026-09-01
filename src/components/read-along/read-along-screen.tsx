@@ -431,6 +431,9 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
 
   const bookTitle = snapshot?.bookTitle ?? "Read Along";
   const hasReaderContent = model.items.length > 0;
+  // The footer needs this too: its rate menu lifts to clear the pill rather
+  // than covering it.
+  const isResumePillVisible = !followEnabled && activeListIndex >= 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
@@ -536,7 +539,7 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
         />
       )}
 
-      {!followEnabled && activeListIndex >= 0 ? (
+      {isResumePillVisible ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Resume following the narration"
@@ -565,6 +568,7 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
           boundLibraryItemId={boundLibraryItemId}
           themeColors={themeColors}
           bottomInset={insets.bottom}
+          isResumePillVisible={isResumePillVisible}
         />
       ) : null}
     </View>

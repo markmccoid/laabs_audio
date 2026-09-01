@@ -32,6 +32,16 @@ import { ReadAlongPopoverBackdrop } from "./read-along-popover-backdrop";
 /** Every rate surface in the app renders this way; the reader matches it. */
 const formatRate = (rate: number) => `${rate.toFixed(2)}x`;
 
+/**
+ * How far the rate menu lifts to clear the "Resume following" pill.
+ *
+ * Both float above the bar at the same offset, and the menu is wide enough to
+ * cover the pill's trailing third and clip its label mid-word. The menu yields
+ * because it is the transient one — the pill is a state indicator the reader may
+ * still need to see and press.
+ */
+const RESUME_PILL_CLEARANCE = 42;
+
 const resolveSeekBackwardIcon = (seconds: number): SFSymbol => {
   switch (Math.round(seconds)) {
     case 10:
@@ -70,6 +80,8 @@ type ReadAlongControlsProps = {
   boundLibraryItemId: string;
   themeColors: ThemeColors;
   bottomInset: number;
+  /** Whether the screen is currently floating its "Resume following" pill. */
+  isResumePillVisible: boolean;
 };
 
 const ControlButton = ({
@@ -160,6 +172,7 @@ export const ReadAlongControls = ({
   boundLibraryItemId,
   themeColors,
   bottomInset,
+  isResumePillVisible,
 }: ReadAlongControlsProps) => {
   const colorScheme = useColorScheme();
   const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
@@ -236,9 +249,10 @@ export const ReadAlongControls = ({
           style={{
             position: "absolute",
             right: 12,
-            // Matches the "Resume following" pill's offset, so the two float at
-            // the same height above the bar.
-            bottom: Math.max(bottomInset, 10) + 80,
+            bottom:
+              Math.max(bottomInset, 10) +
+              80 +
+              (isResumePillVisible ? RESUME_PILL_CLEARANCE : 0),
             width: 150,
             gap: 2,
             borderRadius: 16,
