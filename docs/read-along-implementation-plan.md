@@ -74,6 +74,29 @@ Code: `resolveWordHighlightStyle` + `normalizeReadAlongWordHighlightStyle` in
 rides inside the memoized `palette` object so
 `read-along-segment-item.tsx`'s comparator contract needs no new branch.
 
+
+## v1.1 — Rate selector
+
+The reader's footer carries a trailing rate pill (`1.50x`) that opens a small menu
+of preset speeds, so changing speed never means leaving the reader.
+
+| Decision | Choice |
+|---|---|
+| Ladder | 0.25 steps across the intersection of a reading window (0.75–2.5) and the user's configured `playbackRateRangeMin/Max`. `buildReadAlongRateLadder` in `src/read-along/read-along-rate-ladder.ts` (pure, unit-tested). |
+| Why not the app's preset list | The main list (`0.5 0.75 1 1.25 1.5 1.75 2 2.5 3 3.5 4`) is irregular — it skips 2.25 and 2.75. A regular ladder is easier to step one tap at a time while reading, and the reader is not where anyone reaches for 4x. |
+| Out-of-window rates | A **"More…"** row opens the existing `/player-rate` sheet (presets + slider), passing the bound `libraryItemId`. An empty ladder (a range starting above 2.5) shows only that row. |
+| Off-ladder current rate | No row is checked and the pill shows the true rate. No synthetic row, and never snap the display to the nearest preset — the pill must not claim a speed the book is not playing at. |
+| Placement | The transport trio stays optically centred; the pill is absolutely positioned at the trailing edge. The play button being dead-centre is worth protecting. |
+| Persistence | The book's rate, via `playerService.setRate` — the same per-book write (`device-books-store`) every other rate surface makes. A Read-Along-only rate would silently disagree with the main player. |
+| Disabled state | The pill is disabled when the bound book is not loaded, exactly as the skip buttons already are; it still displays the book's stored rate. |
+| No drag gesture | `usePlaybackRateGesture`'s drag-to-scrub stays a main-player affordance — a vertical drag over a scrolling reader would fight the list and Follow Mode. |
+| Format | `rate.toFixed(2)` + `x`, tabular-nums, matching every other rate surface. |
+
+Both reader popovers (appearance and rate) close on an outside tap via
+`ReadAlongPopoverBackdrop`. Without it a dismiss tap on the transcript would also
+seek playback and leave the card open.
+
+
 ## Existing code to reuse (verified paths)
 
 - **Player screen & actions bar**: `src/app/main-player.tsx` → `src/components/main-player/main-player-screen.tsx`; the actions bar is `src/components/main-player/main-player-actions-bar.tsx` — `PlayerActionsFrame` row (~line 260) with four `ActionIconButton`s (~line 352-401); `ActionIconButton` (~line 43) takes `icon`, `label`, `onPress`, `badgeCount`, `isActive`. Note `minWidth: 70` per button — five buttons need width tuning.

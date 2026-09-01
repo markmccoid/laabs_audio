@@ -9,6 +9,7 @@ import {
   useSettingsActions,
 } from "@/store/settings-store";
 import type { ThemeColors } from "@/theme/use-app-theme";
+import { ReadAlongPopoverBackdrop } from "./read-along-popover-backdrop";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -252,6 +253,14 @@ export const ReadAlongHeader = ({
           </Text>
         </Pressable>
       </View>
+
+      {isAppearanceOpen ? (
+        <ReadAlongPopoverBackdrop
+          onPress={() => setIsAppearanceOpen(false)}
+          offsetTop={-(topInset + 8)}
+          offsetLeft={-12}
+        />
+      ) : null}
 
       {isAppearanceOpen ? (
         <View
