@@ -2,7 +2,10 @@ import type {
   TranscriptSegmentTextRow,
   TranscriptSegmentWordTiming,
 } from "@/data/sqlite/shadow-db-transcripts";
-import { buildWordSpans } from "@/read-along/read-along-rendering";
+import {
+  buildWordSpans,
+  type ReadAlongWordAppearance,
+} from "@/read-along/read-along-rendering";
 import { memo, useEffect, useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
@@ -24,16 +27,25 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-na
  * the screen passes the same props down to every row.
  *
  * The consequences for callers:
- * - `palette` must be a memoized object, not rebuilt per render.
+ * - `palette` must be a memoized object, not rebuilt per render. The chosen
+ *   word highlight style rides inside it, so changing the style re-renders
+ *   every visible row exactly once and needs no extra prop.
  * - `onPress` must be a stable identity (it is intentionally not compared).
  * - Never add a prop that changes per tick without extending the comparator.
  */
 
 export type ReadAlongSegmentPalette = {
   text: string;
-  accent: string;
   /** Accent at ~13% — the active segment's tint. */
   activeTint: string;
+  /**
+   * How to mark the active word, already resolved from the user's chosen
+   * highlight style. `null` means the word gets no treatment (`none`).
+   *
+   * It rides in the palette rather than arriving as its own prop so the memo
+   * comparator below needs no new branch — see the contract above.
+   */
+  wordAppearance: ReadAlongWordAppearance | null;
 };
 
 /** Matches the plan's "gentle cross-fade" on the segment tint. */
@@ -97,11 +109,10 @@ const ReadAlongSegmentItemBase = ({
         <Text style={textStyle}>
           {spans
             ? spans.map((span, index) =>
-                span.wordIndex === activeWordIndex && span.wordIndex >= 0 ? (
-                  <Text
-                    key={index}
-                    style={{ color: palette.accent, fontWeight: "600" }}
-                  >
+                span.wordIndex === activeWordIndex &&
+                span.wordIndex >= 0 &&
+                palette.wordAppearance ? (
+                  <Text key={index} style={palette.wordAppearance}>
                     {span.text}
                   </Text>
                 ) : (

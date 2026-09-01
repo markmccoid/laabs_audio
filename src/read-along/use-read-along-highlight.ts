@@ -39,6 +39,16 @@ export type UseReadAlongHighlightArgs = {
   boundLibraryItemId: string | null;
   /** The rendered segments, in reading order (`ReadAlongListModel.readableSegments`). */
   segments: readonly TranscriptSegmentTextRow[];
+  /**
+   * False when the reader's highlight style is `none`. Word timings are then
+   * never fetched and no word index is resolved, so a long book ticks at
+   * segment rate — roughly one render per sentence instead of 2-4 a second.
+   *
+   * Switching back to a word style resumes highlighting at the next segment,
+   * not mid-sentence: the fetch is keyed on the active segment, and re-running
+   * it immediately would buy a fraction of a sentence for an extra effect.
+   */
+  isWordHighlightEnabled: boolean;
 };
 
 export type UseReadAlongHighlightResult = {
@@ -58,6 +68,7 @@ export type UseReadAlongHighlightResult = {
 export const useReadAlongHighlight = ({
   boundLibraryItemId,
   segments,
+  isWordHighlightEnabled,
 }: UseReadAlongHighlightArgs): UseReadAlongHighlightResult => {
   const [wordsEntry, setWordsEntry] = useState<WordsEntry | null>(null);
 
@@ -65,7 +76,10 @@ export const useReadAlongHighlight = ({
     useReadAlongPosition({
       boundLibraryItemId,
       segments,
-      activeSegmentWords: wordsEntry?.timings ?? null,
+      // Withholding the timings is what makes `none` cheap: the position hook
+      // then resolves no word index at all, so it stops re-rendering at word
+      // rate instead of resolving an index nothing displays.
+      activeSegmentWords: isWordHighlightEnabled ? (wordsEntry?.timings ?? null) : null,
     });
 
   const activeSegment =
@@ -113,6 +127,7 @@ export const useReadAlongHighlight = ({
   );
 
   useEffect(() => {
+    if (!isWordHighlightEnabled) return;
     if (activeSegmentId === null) {
       // Keep the last entry: it stays keyed to its own segment, so it can never
       // be mistaken for another one, and re-entering that segment is instant.
@@ -132,10 +147,10 @@ export const useReadAlongHighlight = ({
     return () => {
       isCancelled = true;
     };
-  }, [activeSegmentId, readWords]);
+  }, [activeSegmentId, isWordHighlightEnabled, readWords]);
 
   const wordsForActiveSegment =
-    activeSegmentId !== null && wordsEntry?.segmentId === activeSegmentId
+    isWordHighlightEnabled && activeSegmentId !== null && wordsEntry?.segmentId === activeSegmentId
       ? wordsEntry.timings
       : null;
 

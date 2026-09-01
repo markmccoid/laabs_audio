@@ -14,7 +14,7 @@ Settled decisions (do not relitigate):
 | Entry | A 5th `ActionIconButton` on the main player's actions bar (SF Symbol `text.book.closed` or `captions.bubble`), **always visible**. With a transcript (complete or partial): opens Read-Along. Without: opens a lightweight state screen pitching the feature with a Generate Transcript action (routes to the existing `book-transcribe` start sheet) — also the status surface while a transcription runs. |
 | Presentation | Full-screen view (its own route, card-style like `main-player`), pushed above the player. |
 | Book binding | Bound to the book it opened for. If the loaded book changes while open: un-highlight, quiet notice "Now playing a different book" with **Switch** (if that book has a transcript) / **Close**. Never auto-switch or auto-dismiss. |
-| Highlight | Hybrid: current segment = soft accent-tinted rounded background block with gentle cross-fade; current word = accent color + semibold within it. No per-word background boxes. Past/future text plain `text` color, future NOT dimmed. Segments with null word timings degrade to segment tint only. |
+| Highlight | Hybrid: current segment = soft accent-tinted rounded background block with gentle cross-fade; current word = **one of four user-selectable treatments** within it (see "v1.1 — Highlight styles" below). Past/future text plain `text` color, future NOT dimmed. Segments with null word timings degrade to segment tint only. |
 | Position sync | Client-side interpolation between the existing 1 Hz ticks: anchor `(positionMs, wallClock)` on each store update, display position = anchor + elapsed × `rate` while `playbackState === "playing"`. Active only while the view is mounted. Do NOT change the global progress interval. |
 | Follow Mode | Auto-scrolls to keep the active segment ~40% from the top. Pauses on user-initiated scroll; a "Resume following" pill re-enables it. No auto-resume timer. |
 | Tap-to-seek | Tapping a segment seeks playback to that segment's `start_ms` (segment-level only, no word-level seek). |
@@ -23,6 +23,56 @@ Settled decisions (do not relitigate):
 | Controls | Minimal overlay: play/pause + skip back/forward (reusing the player's configured skip seconds). Reader never has to leave the view. |
 | Comfort | Adjustable font size persisted in settings (net-new preference); screen kept awake while the view is open (`expo-keep-awake` added as a direct dependency); theme from existing `useThemeColors` tokens only. |
 | Platform | iOS-first like the transcript feature; the view itself is plain RN and needs no platform gate beyond "a transcript exists" (transcripts only exist on iOS 26+ devices anyway). |
+
+
+## v1.1 — Highlight styles
+
+The v1 word treatment was accent colour + `fontWeight: "600"`. Bolding changes glyph
+metrics, so the line reflowed every time the highlight advanced — distracting at
+2-4 words a second. The treatment is now a preference with four choices; the three
+new ones all leave metrics untouched.
+
+| Style | Word treatment |
+|---|---|
+| `highlight` (default) | Accent background bar at `WORD_HIGHLIGHT_ALPHA` (0.32), text colour unchanged — the bar carries the signal rather than competing with it. |
+| `color` | Accent colour only, weight unchanged. |
+| `bold` | The original v1 treatment, kept as a choice. The only one that reflows. |
+| `none` | No word treatment; the segment block alone tracks position. |
+
+Settled decisions:
+
+- **Word only.** The segment's accent block and its 220ms cross-fade are unchanged in
+  all four styles, `none` included — hence the heading "Word highlight" in the UI.
+- **No animation on the word.** It snaps. A fade at word cadence leaves two words
+  half-lit and reads as lag; the segment tint keeps its fade.
+- **Square bars, by constraint.** React Native cannot give a nested `<Text>` span
+  padding or rounded corners, so the `highlight` bar is a sharp rectangle as tall as
+  the line height. Rounded pills would need measured word rects behind the text —
+  rejected as fragile under re-wrap and font-size changes. If the bar reads as too
+  chunky, lower `LINE_HEIGHT_RATIO` for that style before reaching for measurement.
+- **One alpha for both themes**, matching `ACTIVE_TINT_ALPHA`'s precedent. If dark
+  mode reads washed out, split `WORD_HIGHLIGHT_ALPHA` per theme — the reader already
+  has `useColorScheme()` in its footer.
+- **`none` short-circuits the machinery.** `useReadAlongHighlight` takes
+  `isWordHighlightEnabled`; when false it never fetches `words_json` and withholds
+  timings from the position hook, so the reader re-renders at segment rate (~1 per
+  sentence) instead of word rate. Switching back resumes at the next segment
+  boundary, not mid-sentence — accepted rather than adding a re-fetch effect.
+- **Persisted globally** as `readAlongWordHighlightStyle`, alongside
+  `readAlongFontSize`. **No settings-store version bump**: a new key is absent from
+  every persisted blob and zustand's shallow merge resolves that to the initial-state
+  default. It still has to appear in both of `migrate`'s exhaustive returns to
+  typecheck against `partialize`.
+- **Selector lives in the reader's `Aa` popover**, which becomes a two-section
+  appearance card (Text size / Word highlight). Nothing in global Settings — an
+  appearance preference belongs where you can see its effect, as font size already
+  established. Each style row renders a sample word in its own style, so the labels
+  never have to describe the look.
+
+Code: `resolveWordHighlightStyle` + `normalizeReadAlongWordHighlightStyle` in
+`src/read-along/read-along-rendering.ts` (pure, unit-tested); the resolved appearance
+rides inside the memoized `palette` object so
+`read-along-segment-item.tsx`'s comparator contract needs no new branch.
 
 ## Existing code to reuse (verified paths)
 

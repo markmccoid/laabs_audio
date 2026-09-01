@@ -11,7 +11,10 @@ import {
   findListIndexForPosition,
   type ReadAlongListItem,
 } from "@/read-along/read-along-list-model";
-import { withAlpha } from "@/read-along/read-along-rendering";
+import {
+  resolveWordHighlightStyle,
+  withAlpha,
+} from "@/read-along/read-along-rendering";
 import { useFollowMode } from "@/read-along/use-follow-mode";
 import { useReadAlongHighlight } from "@/read-along/use-read-along-highlight";
 import { useSettingsStore } from "@/store/settings-store";
@@ -99,6 +102,7 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
   const [isLoading, setIsLoading] = useState(Boolean(libraryItemId));
 
   const fontSize = useSettingsStore((state) => state.readAlongFontSize);
+  const wordHighlightStyle = useSettingsStore((state) => state.readAlongWordHighlightStyle);
   const playingLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
 
   //~~ Data assembly ------------------------------------------------------
@@ -191,6 +195,7 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
     useReadAlongHighlight({
       boundLibraryItemId,
       segments: model.readableSegments,
+      isWordHighlightEnabled: wordHighlightStyle !== "none",
     });
 
   // Where Follow Mode should park the viewport. The active segment when there
@@ -324,13 +329,18 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
   }, [playingLibraryItemId]);
 
   //~~ Rendering ----------------------------------------------------------
+  // The chosen word treatment rides inside the palette so a style change costs
+  // one re-render of the visible rows and the item comparator stays untouched
+  // (see the memoization contract in `read-along-segment-item.tsx`).
   const segmentPalette = useMemo(
     () => ({
       text: themeColors.text,
-      accent: themeColors.accent,
       activeTint: withAlpha(themeColors.accent, ACTIVE_TINT_ALPHA),
+      wordAppearance: resolveWordHighlightStyle(wordHighlightStyle, {
+        accent: themeColors.accent,
+      }),
     }),
-    [themeColors.text, themeColors.accent],
+    [themeColors.text, themeColors.accent, wordHighlightStyle],
   );
 
   const pendingPalette = useMemo(
@@ -427,6 +437,7 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
       <ReadAlongHeader
         title={bookTitle}
         fontSize={fontSize}
+        wordHighlightStyle={wordHighlightStyle}
         themeColors={themeColors}
         topInset={insets.top}
         onClose={() => router.back()}
