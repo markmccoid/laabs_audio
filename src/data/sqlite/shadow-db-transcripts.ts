@@ -483,6 +483,34 @@ export const getSegmentTextRows = async (
 };
 
 /**
+ * Every Transcript Segment that **overlaps** a book-absolute ms range, ordered
+ * for reading. Powers Clip Transcription's transcript-derived path (ADR 0036):
+ * a 90-second clip needs its own segments, not the whole book's text that
+ * {@link getSegmentTextRows} deliberately loads for the reader.
+ *
+ * Overlap, not containment — a segment straddling either edge carries words the
+ * clip covers, and ADR 0036 takes such segments whole rather than trimming them.
+ * `selectSegmentsForRange` mirrors this predicate in JS for the bulk path, which
+ * slices one in-memory load per clip; the two must agree.
+ */
+export const getSegmentsInRange = async (
+  libraryItemId: string,
+  startMs: number,
+  endMs: number,
+): Promise<TranscriptSegmentTextRow[]> => {
+  await initializeShadowDatabaseInternal();
+  const db = await getDb();
+  const rows = await db.getAllAsync<TranscriptSegmentTextSqlRow>(
+    `SELECT id, section_index, start_ms, end_ms, text
+     FROM book_transcript_segments
+     WHERE library_item_id = ? AND start_ms < ? AND end_ms > ?
+     ORDER BY section_index ASC, start_ms ASC`,
+    [libraryItemId, endMs, startMs],
+  );
+  return rows.map(toTranscriptSegmentTextRow);
+};
+
+/**
  * Word timings for a single Transcript Segment, or null if the segment has
  * none (or doesn't exist). Meant to be called lazily, one segment at a time,
  * for whichever segment is currently active in the Read-Along reader.

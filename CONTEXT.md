@@ -400,8 +400,12 @@ The audio artifact created by a Clip Export.
 _Avoid_: Shared clip, exported bookmark
 
 **Clip Transcription**:
-A user-initiated action that creates text from a Clip Bookmark's Clip Range.
+A user-initiated action that creates text from a Clip Bookmark's Clip Range. It has a Clip Text Source.
 _Avoid_: Audio clip text, speech note
+
+**Clip Text Source**:
+Where a Clip Transcription's text came from: an existing Book Transcript, or speech recognized from the clip's audio.
+_Avoid_: Transcription engine, recognizer
 
 **Clip Transcript Export**:
 A user-initiated action that creates a shareable text artifact from a Clip Transcription.
@@ -431,9 +435,25 @@ _Avoid_: karaoke mode, follow-along
 The Read-Along state in which the view scrolls itself to keep the Listening Position's text in view. Follow Mode pauses when the user scrolls manually and resumes only by explicit request.
 _Avoid_: auto-scroll, sticky scroll
 
+**Clip Selection**:
+The contiguous run of Transcript Segments a reader is choosing in Read-Along before it becomes a Clip Bookmark.
+_Avoid_: highlight, text selection, selection mode
+
+**Bookmark Gutter**:
+The Read-Along margin lane that marks where the audiobook's saved Bookmarks fall in the transcript.
+_Avoid_: margin marks, bookmark rail, bookmark list
+
 **Transcript EPUB Export**:
 A user-initiated action that creates a shareable EPUB from a Book Transcript.
 _Avoid_: ebook export, Clip Transcript Export
+
+**Book Clip Text Export**:
+A user-initiated action that creates one shareable text document holding the text of every Clip Bookmark of one audiobook.
+_Avoid_: Clip Transcript Export, bulk clip export, clip digest
+
+**Book Clip Text Export File**:
+The text document created by a Book Clip Text Export.
+_Avoid_: Clip Transcript Export File, Bookmark Backup Export
 
 **Bookmark Backup Export**:
 A user-initiated metadata export of saved Bookmarks intended to support future restore or import.
@@ -633,7 +653,11 @@ _Avoid_: Five minute window, scrubber window
 - A **Clip Export File** contains the audio from a Clip Bookmark's Clip Range.
 - A **Clip Transcription** belongs to exactly one Clip Bookmark.
 - A **Clip Transcription** creates text from a Clip Bookmark's Clip Range.
-- A **Clip Transcription** may use a **Transcription Source File**.
+- A **Clip Transcription** derives its text from the audiobook's **Book Transcript** whenever that transcript already covers the Clip Range; otherwise it recognizes speech from the clip's audio.
+- A **Clip Transcription** that derives from a **Book Transcript** uses no **Transcription Source File** and may span tracks.
+- A **Clip Transcription** that recognizes speech uses a **Transcription Source File** and cannot span tracks.
+- A **Clip Transcription** with no words in its Clip Range produces empty text, which is an answer and not a failure.
+- The user does not choose a **Clip Text Source**.
 - A **Clip Transcript Export** belongs to exactly one Clip Transcription.
 - A **Clip Transcript Export File** contains text from a Clip Transcription.
 - A **Clip Transcript Export File** includes the Book Title, Bookmark Title, Clip Range, and transcribed text.
@@ -648,7 +672,21 @@ _Avoid_: Five minute window, scrubber window
 - A **Transcript EPUB Export** is available only for a complete Book Transcript.
 - **Read-Along** may display the completed sections of an incomplete Book Transcript; sections still being transcribed are shown as pending, not hidden.
 - **Read-Along** seeks the Listening Position to a Transcript Segment's start when the user taps that segment's text.
+- A **Clip Selection** covers one or more consecutive Transcript Segments and may span sections of the Book Transcript.
+- A **Clip Selection** suspends **Follow Mode** for as long as it exists.
+- A **Clip Selection** becomes a **Clip Bookmark** only through the **Add Bookmark Sheet**, and produces no other kind of record.
+- A **Clip Bookmark** created from a **Clip Selection** stores no transcript text; its words belong to the **Book Transcript**.
+- The **Bookmark Gutter** marks both Point Bookmarks and Clip Bookmarks, and opens **Bookmark Detail** for the mark the reader presses.
 - At most one **Book Transcript** may be in progress at a time.
+- A **Book Clip Text Export** belongs to exactly one audiobook.
+- A **Book Clip Text Export** covers the audiobook's Clip Bookmarks and no Point Bookmarks.
+- A **Book Clip Text Export File** orders its clips by Clip Range start.
+- A **Book Clip Text Export File** includes each clip's Bookmark Title, the Book Transcript section containing it, its Clip Range, its text, and its Local Note when one exists.
+- A **Book Clip Text Export** takes text only from the **Book Transcript** and never recognizes speech.
+- A **Book Clip Text Export File** marks each Clip Bookmark the Book Transcript does not yet cover, rather than omitting it.
+- A **Book Clip Text Export** is refused when the **Book Transcript** covers none of the audiobook's Clip Bookmarks.
+- A **Book Clip Text Export File** is temporary and is removed after sharing finishes.
+- A **Book Clip Text Export** is not a **Bookmark Backup Export**.
 - A **Bookmark Backup Export** may contain Point Bookmarks and Clip Bookmarks.
 - A **Bookmark Backup Export** must include enough Bookmark Title, Bookmark Position, Clip Range, and Local Note data to support future restore.
 - A **Clip Range** is the selected audio span of a Clip Bookmark.

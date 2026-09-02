@@ -1,8 +1,16 @@
 import * as FileSystem from "expo-file-system/legacy";
-import type { ClipTranscriptionResult } from "@/native/clip-transcriber";
-import { formatSeconds } from "@/utils/formatUtils";
+import type { ClipTextSource } from "@/transcription/clip-text-from-transcript";
+import { buildClipTextDocument } from "./clip-text-document";
 import type { ClipExportRange } from "./clip-export";
 
+/**
+ * Clip Transcript Export — one Clip Bookmark's text, shared as Markdown.
+ *
+ * The document is a Book Clip Text Export of a single clip and renders through
+ * the same builder (ADR 0036), so a passage reads identically whichever button
+ * produced it. `source` is stated in the file rather than in the UI: the user
+ * cannot choose it, so it is provenance, not a setting.
+ */
 export type ClipTranscriptExportInput = {
   bookTitle: string;
   sourceLabel?: string;
@@ -10,7 +18,14 @@ export type ClipTranscriptExportInput = {
   secondaryTitle?: string | null;
   bookmarkTitle: string;
   range: ClipExportRange;
-  transcription: ClipTranscriptionResult;
+  text: string;
+  source: ClipTextSource;
+  /** The Book Transcript section containing the clip, when one is known. */
+  sectionTitle?: string | null;
+  /** The Clip Bookmark's Local Note, when the user wrote one. */
+  note?: string | null;
+  /** Injectable for deterministic tests; defaults to `new Date()`. */
+  generatedAt?: Date;
 };
 
 export type ClipTranscriptExportResult = {
@@ -38,30 +53,34 @@ const ensureClipTranscriptExportCacheDirectory = async () => {
   return directoryUri;
 };
 
-const formatClipRange = (range: ClipExportRange) => {
-  const start = formatSeconds(range.startTimeSeconds, "compact", true, true) ?? "00:00";
-  const end = formatSeconds(range.endTimeSeconds, "compact", true, true) ?? "00:00";
-  return `${start}-${end}`;
-};
-
-const buildClipTranscriptExportBody = ({
+export const buildClipTranscriptExportBody = ({
   bookTitle,
-  sourceLabel = "Book",
   sourceTitle,
   secondaryTitle,
   bookmarkTitle,
   range,
-  transcription,
+  text,
+  source,
+  sectionTitle,
+  note,
+  generatedAt,
 }: ClipTranscriptExportInput) =>
-  [
-    `${sourceLabel}: ${sourceTitle ?? bookTitle}`,
-    ...(secondaryTitle ? [`Podcast: ${secondaryTitle}`] : []),
-    `Bookmark: ${bookmarkTitle}`,
-    `Clip Range: ${formatClipRange(range)}`,
-    "",
-    transcription.text.trim(),
-    "",
-  ].join("\n");
+  buildClipTextDocument({
+    title: sourceTitle ?? bookTitle,
+    subtitle: secondaryTitle ?? null,
+    source,
+    sections: [
+      {
+        bookmarkTitle,
+        startTimeSeconds: range.startTimeSeconds,
+        endTimeSeconds: range.endTimeSeconds,
+        sectionTitle,
+        text,
+        note,
+      },
+    ],
+    generatedAt,
+  });
 
 const buildOutputFileUri = async ({
   bookTitle,
@@ -77,7 +96,7 @@ const buildOutputFileUri = async ({
     sourceTitle && secondaryTitle ? `${secondaryTitle} - ${sourceTitle}` : (sourceTitle ?? bookTitle);
   const safeBookTitle = sanitizeFileSegment(exportTitle) || "Media";
   const safeBookmarkTitle = sanitizeFileSegment(bookmarkTitle) || "Clip";
-  return `${directoryUri}${safeBookTitle} - ${safeBookmarkTitle} Transcript.txt`;
+  return `${directoryUri}${safeBookTitle} - ${safeBookmarkTitle} Transcript.md`;
 };
 
 export const createClipTranscriptExportFile = async (
@@ -91,8 +110,8 @@ export const createClipTranscriptExportFile = async (
 
   return {
     fileUri: outputFileUri,
-    mimeType: "text/plain",
-    uti: "public.plain-text",
+    mimeType: "text/markdown",
+    uti: "net.daringfireball.markdown",
   };
 };
 

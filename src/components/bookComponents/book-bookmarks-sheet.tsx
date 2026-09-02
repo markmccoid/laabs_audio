@@ -9,6 +9,10 @@ import {
   useTemporaryPlaybackStore,
 } from "@/player";
 import {
+  exportBookClipText,
+  getBookClipTextExportErrorMessage,
+} from "@/sharing/book-clip-text-export";
+import {
   useDeviceBooksActions,
   useDeviceBooksStore,
   type LocalBookmarkRecord,
@@ -385,6 +389,47 @@ export const BookBookmarksSheet = () => {
     openExportFormatPicker();
   };
 
+  /**
+   * Book Clip Text Export (ADR 0036) — a separate action from Bookmark Backup
+   * Export above, not a third format in its picker: this exports clip prose,
+   * that exports bookmark metadata, and CONTEXT.md keeps them distinct.
+   */
+  const handleExportClipText = async () => {
+    if (!libraryItemId || isExporting) return;
+    const clips = bookmarks
+      .filter((bookmark) => bookmark.kind === "clip" && bookmark.endTimeSeconds)
+      .map((bookmark) => ({
+        bookmarkTitle: getBookmarkDisplayTitle(bookmark),
+        startTimeSeconds: bookmark.startTimeSeconds,
+        endTimeSeconds: bookmark.endTimeSeconds as number,
+        note: bookmark.note,
+      }));
+    if (!clips.length) {
+      toast.info("This book has no clips to export");
+      return;
+    }
+
+    await returnToListeningPosition();
+    setIsExporting(true);
+    try {
+      const { uncoveredCount } = await exportBookClipText({
+        libraryItemId,
+        bookTitle: bookName,
+        clips,
+      });
+      if (uncoveredCount > 0) {
+        toast.info(
+          `${uncoveredCount} clip${uncoveredCount === 1 ? " is" : "s are"} not transcribed yet`,
+        );
+      }
+    } catch (error) {
+      console.warn("[BookBookmarksSheet] Clip text export failed", error);
+      toast.error(getBookClipTextExportErrorMessage(error));
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <>
       <Stack.Screen
@@ -426,6 +471,7 @@ export const BookBookmarksSheet = () => {
         actions={{
           onClose: () => void closeBookmarks(),
           onExport: () => void handleExport(),
+          onExportClipText: () => void handleExportClipText(),
           onTogglePlayback: (record) => {
             const bookmark = bookmarks.find((candidate) => candidate.id === record.id);
             if (bookmark) void handleTemporaryPlayback(bookmark);

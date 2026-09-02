@@ -101,6 +101,8 @@ propose superseding it.
 | [0020](./adr/0020-single-user-session-entry-module.md) | Single User Session Entry module crosses the boundary after identity is confirmed |
 | [0023](./adr/0023-sqlite-read-model-for-collections.md) | Server-owned Collections use a normalized SQLite read model |
 | [0032](./adr/0032-local-episode-bookmarks-and-clips.md) | Episode bookmarks and clips remain local until ABS supports Episode identity |
+| [0035](./adr/0035-read-along-clip-selections-produce-ordinary-clip-bookmarks.md) | Read-Along Clip Selections produce ordinary Clip Bookmarks |
+| [0036](./adr/0036-clip-text-prefers-the-book-transcript.md) | Clip text prefers the Book Transcript over re-recognition |
 
 Note: ADRs are point-in-time records. ADR-0017's phased-cutover details are completed and
 superseded in part by ADR-0019; read 0017 for the why, 0019 plus

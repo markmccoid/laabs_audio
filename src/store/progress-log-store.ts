@@ -140,6 +140,7 @@ export type ClipTranscriptExportLogEntry = ProgressLogBase & {
   result: "failed";
   stage:
     | "restore_listening_position"
+    | "derive_clip_text"
     | "transcribe_clip"
     | "create_export_file"
     | "check_sharing"

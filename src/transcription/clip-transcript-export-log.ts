@@ -4,6 +4,7 @@ import { progressLogStore } from "@/store/progress-log-store";
 
 export type ClipTranscriptExportStage =
   | "restore_listening_position"
+  | "derive_clip_text"
   | "transcribe_clip"
   | "create_export_file"
   | "check_sharing"

@@ -18,8 +18,12 @@ import {
   type LocalBookmarkRecord,
 } from "@/store/device-books-store";
 import {
+  deriveClipTextForRange,
+  isClipRangeTranscribed,
   resolveClipTranscriptionAvailability,
+  resolveSectionTitle,
   transcribeClipSourcePlan,
+  type ClipTextSource,
 } from "@/transcription";
 import {
   logClipTranscriptExportFailure,
@@ -114,6 +118,30 @@ export const BookBookmarkDetailSheet = () => {
       }),
     [downloadInfo?.audioTracks.length, savedPlan],
   );
+  /**
+   * Whether the Book Transcript already covers this clip (ADR 0036). Checked on
+   * open rather than at export time so the button's enabled state tells the
+   * truth: a cross-track clip the recognizer refuses can still be exported when
+   * the transcript reaches it, and only this answer knows that.
+   */
+  const [isTranscribed, setIsTranscribed] = useState(false);
+  const clipEndSeconds = bookmark?.kind === "clip" ? (bookmark.endTimeSeconds ?? null) : null;
+  useEffect(() => {
+    let cancelled = false;
+    const resolveCoverage = async () => {
+      if (!libraryItemId || !clipEndSeconds) return false;
+      return isClipRangeTranscribed({ libraryItemId, endSeconds: clipEndSeconds });
+    };
+    void resolveCoverage()
+      .catch(() => false)
+      .then((covered) => {
+        if (!cancelled) setIsTranscribed(covered);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clipEndSeconds, libraryItemId]);
+
   const activeDownload = Boolean(libraryItemId && activeDownloadLibraryItemId === libraryItemId);
   const audioUnavailableReason =
     bookmark?.kind !== "clip"
@@ -132,11 +160,13 @@ export const BookBookmarkDetailSheet = () => {
         ? "Save changes before exporting"
         : activeDownload
           ? "Download is still finishing"
-          : process.env.EXPO_OS !== "ios"
-            ? "Clip Transcription is unavailable on this platform"
-            : transcriptAvailability.available
-              ? null
-              : transcriptAvailability.reason;
+          : isTranscribed
+            ? null
+            : process.env.EXPO_OS !== "ios"
+              ? "Clip Transcription is unavailable on this platform"
+              : transcriptAvailability.available
+                ? null
+                : transcriptAvailability.reason;
   const isBusy = isSaving || isExporting || isExportingTranscript;
   const canSave = Boolean(bookmark && draft.title.trim() && hasUnsavedChanges && !isBusy);
   const canExportAudio = Boolean(
@@ -150,8 +180,9 @@ export const BookBookmarkDetailSheet = () => {
     bookmark?.kind === "clip" &&
       !hasUnsavedChanges &&
       !activeDownload &&
-      process.env.EXPO_OS === "ios" &&
-      transcriptAvailability.available &&
+      // The transcript path needs no recognizer, no extractable audio plan and
+      // no platform gate — only words already in SQLite (ADR 0036).
+      (isTranscribed || (process.env.EXPO_OS === "ios" && transcriptAvailability.available)) &&
       !isBusy,
   );
 
@@ -259,25 +290,58 @@ export const BookBookmarkDetailSheet = () => {
   };
 
   const handleExportTranscript = async () => {
-    if (!bookmark || !savedPlan || !transcriptAvailability.available || !canExportTranscript) {
+    if (!bookmark || !libraryItemId || !canExportTranscript) {
       if (transcriptUnavailableReason) toast.info(transcriptUnavailableReason);
       return;
     }
+    const range = savedPlan?.range ?? {
+      startTimeSeconds: bookmark.startTimeSeconds,
+      endTimeSeconds: bookmark.endTimeSeconds ?? bookmark.startTimeSeconds,
+    };
     let fileUri: string | null = null;
     let stage: ClipTranscriptExportStage = "unknown";
     try {
       setIsExportingTranscript(true);
       stage = "restore_listening_position";
       await playerService.restoreListeningPositionAfterPreview();
-      stage = "transcribe_clip";
-      const transcription = await transcribeClipSourcePlan({ plan: savedPlan });
-      if (!transcription.text.trim()) throw new Error("Clip Transcription did not return text");
+
+      // Source selection (ADR 0036): the Book Transcript answers when it covers
+      // the range, and the recognizer runs only when it does not. An empty
+      // derived result is an answer, not a reason to fall back — SpeechAnalyzer
+      // found no words in that audio, so SFSpeechRecognizer will not either.
+      stage = "derive_clip_text";
+      const derived = await deriveClipTextForRange({
+        libraryItemId,
+        startSeconds: range.startTimeSeconds,
+        endSeconds: range.endTimeSeconds,
+      });
+
+      let text: string;
+      let source: ClipTextSource;
+      let sectionTitle: string | null = null;
+      if (derived.covered) {
+        text = derived.text;
+        source = "transcript";
+        sectionTitle = await resolveSectionTitle(libraryItemId, range.startTimeSeconds);
+      } else {
+        if (!transcriptAvailability.available) throw new Error(transcriptAvailability.reason);
+        if (!savedPlan) throw new Error("Downloaded audio is unavailable");
+        stage = "transcribe_clip";
+        const transcription = await transcribeClipSourcePlan({ plan: savedPlan });
+        if (!transcription.text.trim()) throw new Error("Clip Transcription did not return text");
+        text = transcription.text;
+        source = "recognized";
+      }
+
       stage = "create_export_file";
       const result = await createClipTranscriptExportFile({
         bookTitle,
         bookmarkTitle: bookmark.title,
-        range: savedPlan.range,
-        transcription,
+        range,
+        text,
+        source,
+        sectionTitle,
+        note: bookmark.note,
       });
       fileUri = result.fileUri;
       stage = "check_sharing";
@@ -299,7 +363,7 @@ export const BookBookmarkDetailSheet = () => {
         bookTitle,
         bookmarkId: bookmark.id,
         bookmarkTitle: bookmark.title,
-        range: savedPlan.range,
+        range,
         stage,
         error,
       });

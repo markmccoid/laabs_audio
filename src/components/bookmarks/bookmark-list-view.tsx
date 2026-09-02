@@ -32,6 +32,12 @@ export type BookmarkListModel = {
 export type BookmarkListActions = {
   onClose: () => void;
   onExport: () => void;
+  /**
+   * Book Clip Text Export (ADR 0036). Optional because it is books-only —
+   * episodes have no Book Transcript to derive clip text from, so their list
+   * renders without the button rather than with a disabled one.
+   */
+  onExportClipText?: () => void;
   onTogglePlayback: (record: BookmarkViewRecord) => void;
   onToggleHeaderPlayback: () => void;
   onReturn: () => void;
@@ -161,6 +167,32 @@ export const BookmarkListView = ({
                 size={15}
               />
             </Pressable>
+            {actions.onExportClipText ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Export clip text"
+                onPress={actions.onExportClipText}
+                disabled={headerDisabled}
+                style={({ pressed }) => ({
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
+                  borderCurve: "continuous",
+                  borderWidth: 1,
+                  borderColor: themeColors.border,
+                  backgroundColor: themeColors.bg,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  opacity: pressed || headerDisabled ? 0.65 : 1,
+                })}
+              >
+                <SymbolView
+                  name={model.isExporting ? "hourglass" : "text.quote"}
+                  tintColor={themeColors.textMuted}
+                  size={15}
+                />
+              </Pressable>
+            ) : null}
           </View>
           <Pressable
             accessibilityRole="button"

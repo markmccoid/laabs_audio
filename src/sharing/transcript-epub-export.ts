@@ -10,6 +10,7 @@ import {
   deviceBooksStore,
   resolveStoredDownloadCoverUri,
 } from "@/store/device-books-store";
+import { groupSegmentsIntoParagraphs } from "@/transcription/transcript-paragraphs";
 
 // Transcript EPUB Export (CONTEXT.md: Transcript EPUB Export; plan Phase 5 in
 // docs/book-transcript-implementation-plan.md). `buildTranscriptEpub` is the
@@ -18,7 +19,6 @@ import {
 // the zip to cache, shares it, and cleans up — mirroring the
 // `clip-transcript-export.ts` cache → share → delete pattern.
 
-const PARAGRAPH_GAP_MS = 2000;
 const TRANSCRIPT_EPUB_EXPORT_CACHE_DIRECTORY = "transcript_epub_exports";
 
 /** One Transcript Segment as consumed by the EPUB builder — book-absolute ms timing. */
@@ -77,29 +77,6 @@ const escapeXml = (value: string) =>
 const formatModifiedTimestamp = (date: Date) => date.toISOString().replace(/\.\d+Z$/, "Z");
 
 const formatDisclaimerDate = (date: Date) => date.toISOString().slice(0, 10);
-
-/** Group segments into paragraphs, starting a new paragraph on a >2s gap. */
-const buildParagraphs = (segments: TranscriptEpubSegment[]): string[] => {
-  const paragraphs: string[] = [];
-  let current: string[] = [];
-  let previousEndMs: number | null = null;
-
-  for (const segment of segments) {
-    const text = segment.text.trim();
-    if (!text) continue;
-
-    if (previousEndMs !== null && segment.startMs - previousEndMs > PARAGRAPH_GAP_MS) {
-      if (current.length) paragraphs.push(current.join(" "));
-      current = [];
-    }
-
-    current.push(text);
-    previousEndMs = segment.endMs;
-  }
-
-  if (current.length) paragraphs.push(current.join(" "));
-  return paragraphs;
-};
 
 const buildContainerXml = () =>
   [
@@ -301,7 +278,7 @@ export const buildTranscriptEpub = (input: BuildTranscriptEpubInput): Uint8Array
   sortedSections.forEach((section, i) => {
     const chapterNumber = i + 1;
     const sectionSegments = segmentsBySection.get(section.index) ?? [];
-    const paragraphs = buildParagraphs(sectionSegments);
+    const paragraphs = groupSegmentsIntoParagraphs(sectionSegments);
     zipEntries[`OEBPS/chapter-${chapterNumber}.xhtml`] = strToU8(
       buildChapterXhtml({ title: section.title, paragraphs }),
     );

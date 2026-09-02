@@ -255,7 +255,11 @@ export const EpisodeBookmarkEditorScreen = () => {
         secondaryTitle: draft.podcastTitle,
         bookmarkTitle: savedBookmark.title,
         range: savedPlan.range,
-        transcription,
+        // Episodes have no Book Transcript, so this path is always recognized
+        // speech (ADR 0036 is books-only).
+        text: transcription.text,
+        source: "recognized",
+        note: savedBookmark.note,
       });
       fileUri = result.fileUri;
       if (!(await Sharing.isAvailableAsync())) {
