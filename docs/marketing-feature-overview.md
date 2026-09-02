@@ -117,6 +117,8 @@ You can create:
 
 Clip bookmarks can be up to one hour long. The clip editor gives you controls for start position, duration, end position locking, and previewing the selected range before saving.
 
+If the book has been transcribed, there is a second and much faster way to make one: pick the sentences you want in the Read-Along reader. See **Read Along With the Narration** below.
+
 ## Export Clips and Transcriptions
 
 > Screenshot breadcrumb: `[IMAGE: CLIP_BOOKMARK_EXPORT_ACTIONS]`
@@ -132,6 +134,38 @@ This turns an audiobook into something you can actively work with:
 - Export a short audio excerpt for personal review.
 - Create a text transcript of a selected passage.
 - Keep local notes alongside the bookmark.
+
+## Read Along With the Narration
+
+> Screenshot breadcrumb: `[IMAGE: READ_ALONG_READER]`
+
+LAABS Audio can transcribe a downloaded audiobook on your own device and then show you that text while the book plays, with the current sentence and the current word highlighted as you listen.
+
+Transcription runs entirely on the phone — nothing is uploaded, and no subscription or account is involved. It is typically faster than real time, and you can keep listening to anything you like while it works. One book is transcribed at a time.
+
+> Screenshot breadcrumb: `[IMAGE: READ_ALONG_FOLLOW_MODE]`
+
+In the reader you can:
+
+- Follow the narration hands-free while the page scrolls itself, and scroll away whenever you want without it snatching the page back.
+- Tap any sentence to jump the audio to it.
+- Jump to a chapter, change the reading text size, and change speed without leaving the page.
+- Choose how the current word is marked — a highlight bar, a colour change, bold, or nothing at all.
+- Start reading before the transcription has finished; the parts that are ready are readable, and the rest is clearly shown as still being transcribed.
+
+The screen stays awake while you are reading.
+
+> Screenshot breadcrumb: `[IMAGE: READ_ALONG_CLIP_SELECTION]`
+
+Reading also becomes the easiest way to save a passage. Press and hold a sentence, tap along to take in as many sentences as you want, and save the result as a clip bookmark — no scrubbing back and forth to find the exact start and end. Clips and bookmarks you have already saved appear as marks in the reader's margin, so you can see what you flagged earlier and tap straight through to it.
+
+A finished transcript can also be exported as an **EPUB** and opened in Apple Books or any e-reader.
+
+Worth knowing before you try it:
+
+- Read-Along requires **iOS 26 or later**. On earlier versions the feature is cleanly unavailable rather than half-working.
+- A book must be **downloaded** to be transcribed, and its transcript is removed when you delete the download — LAABS Audio offers you the EPUB export first.
+- The text is machine-generated. It is very good for following along and finding a passage, but it is not a proofread copy of the book, and it has no publisher formatting.
 
 ## Offline-Friendly by Design
 
@@ -162,5 +196,8 @@ Try LAABS Audio if you want:
 - Bookmarks that can become one-hour audio clips.
 - Clip export as M4A.
 - Optional clip transcription export on supported iOS devices.
+- On-device whole-book transcription and a synced read-along reader, on iOS 26 and later.
+- Clips made by selecting sentences of text rather than hunting for timestamps.
+- Transcript export as EPUB.
 
 LAABS Audio is for listeners who want their Audiobookshelf server to stay in control of the library while the mobile app makes listening, organizing, clipping, and revisiting books feel more personal.

@@ -54,24 +54,51 @@ export {
   formatBookmarkDraftTime,
 } from "@/bookmarks/bookmark-draft";
 
+const resolveSecondsParam = (value: string | string[] | undefined) => {
+  const raw = resolveParam(value);
+  if (raw === undefined) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : null;
+};
+
 export const BookAddBookmarkDraftProvider = ({ children }: { children: ReactNode }) => {
   const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const playbackPositionMs = usePlaybackStore((state) => state.positionMs);
-  const { libraryItemId: libraryItemIdParam } = useLocalSearchParams<{
+  const {
+    libraryItemId: libraryItemIdParam,
+    clipStartSeconds: clipStartSecondsParam,
+    clipEndSeconds: clipEndSecondsParam,
+  } = useLocalSearchParams<{
     libraryItemId?: string | string[];
+    clipStartSeconds?: string | string[];
+    clipEndSeconds?: string | string[];
   }>();
   const libraryItemId = resolveParam(libraryItemIdParam) ?? playbackLibraryItemId ?? undefined;
-  const [draft, setDraft] = useState<BookmarkDraftState>(() => ({
-    kind: "point",
-    sourceBookmarkId: null,
-    sourceBookmarkKind: null,
-    libraryItemId,
-    title: "",
-    localNote: "",
-    positionSeconds: Math.max(0, Math.round(playbackPositionMs / 1000)),
-    clipEndSeconds: null,
-    createdAt: Date.now(),
-  }));
+  const [draft, setDraft] = useState<BookmarkDraftState>(() => {
+    // Read-Along hands over an already-derived Clip Range (ADR 0035). Both bounds
+    // must be present and ordered, or the draft falls back to a Point Bookmark at
+    // the Listening Position — a half-supplied range is a caller bug, not a clip.
+    const seededStartSeconds = resolveSecondsParam(clipStartSecondsParam);
+    const seededEndSeconds = resolveSecondsParam(clipEndSecondsParam);
+    const hasSeededClip =
+      seededStartSeconds !== null &&
+      seededEndSeconds !== null &&
+      seededEndSeconds - seededStartSeconds >= MIN_CLIP_DURATION_SECONDS;
+
+    return {
+      kind: hasSeededClip ? "clip" : "point",
+      sourceBookmarkId: null,
+      sourceBookmarkKind: null,
+      libraryItemId,
+      title: "",
+      localNote: "",
+      positionSeconds: hasSeededClip
+        ? seededStartSeconds
+        : Math.max(0, Math.round(playbackPositionMs / 1000)),
+      clipEndSeconds: hasSeededClip ? seededEndSeconds : null,
+      createdAt: Date.now(),
+    };
+  });
 
   const value = useMemo<BookmarkDraftContextValue>(
     () => ({

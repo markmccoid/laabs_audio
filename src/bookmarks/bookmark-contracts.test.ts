@@ -1,4 +1,8 @@
-import { areBookmarkDraftAndRecordEqual, type BookmarkViewRecord } from "./bookmark-contracts";
+import {
+  areBookmarkDraftAndRecordEqual,
+  findBookmarkAtStartSecond,
+  type BookmarkViewRecord,
+} from "./bookmark-contracts";
 
 const record: BookmarkViewRecord = {
   id: "bookmark-1",
@@ -52,5 +56,35 @@ describe("bookmark editor contracts", () => {
         record,
       ),
     ).toBe(false);
+  });
+});
+
+describe("findBookmarkAtStartSecond", () => {
+  const records = [
+    { id: "a", libraryItemId: "book-1", startTimeSeconds: 412 },
+    { id: "b", libraryItemId: "book-1", startTimeSeconds: 900 },
+    { id: "c", libraryItemId: "book-2", startTimeSeconds: 412 },
+  ];
+
+  it("finds the record already occupying that second in the same book", () => {
+    expect(findBookmarkAtStartSecond(records, "book-1", 412)?.id).toBe("a");
+  });
+
+  it("does not reach across books", () => {
+    expect(findBookmarkAtStartSecond(records, "book-3", 412)).toBeNull();
+  });
+
+  it("floors like the store does, so 412.9s collides with 412s", () => {
+    expect(findBookmarkAtStartSecond(records, "book-1", 412.9)?.id).toBe("a");
+  });
+
+  it("ignores the record being edited, so saving in place is not a collision", () => {
+    expect(
+      findBookmarkAtStartSecond(records, "book-1", 412, { ignoreBookmarkId: "a" }),
+    ).toBeNull();
+  });
+
+  it("returns null when the second is free", () => {
+    expect(findBookmarkAtStartSecond(records, "book-1", 500)).toBeNull();
   });
 });

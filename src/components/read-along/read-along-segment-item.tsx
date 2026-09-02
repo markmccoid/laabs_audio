@@ -1,76 +1,48 @@
-import type {
-  TranscriptSegmentTextRow,
-  TranscriptSegmentWordTiming,
-} from "@/data/sqlite/shadow-db-transcripts";
+import { buildWordSpans } from "@/read-along/read-along-rendering";
 import {
-  buildWordSpans,
-  type ReadAlongWordAppearance,
-} from "@/read-along/read-along-rendering";
+  areSegmentPropsEqual,
+  type ReadAlongSegmentItemProps,
+} from "@/read-along/read-along-segment-props";
 import { memo, useEffect, useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 
 /**
- * One Transcript Segment in the Read-Along reader
- * (`docs/read-along-implementation-plan.md` Phase 3.2).
- *
- * ## Memoization contract (load-bearing)
- *
- * The word highlight ticks 2-4 times a second. Every one of those ticks must
- * re-render **exactly one** item — the active one — or a 5k-segment book pays
- * for the whole viewport on every word.
- *
- * That is what {@link areSegmentPropsEqual} enforces: an item re-renders only
- * when `row.id`, `isActive`, `fontSize` or `palette` change, and word-level
- * props (`words`, `activeWordIndex`) are compared **only while the item is
- * active**. Inactive items therefore ignore word ticks entirely, even though
- * the screen passes the same props down to every row.
- *
- * The consequences for callers:
- * - `palette` must be a memoized object, not rebuilt per render. The chosen
- *   word highlight style rides inside it, so changing the style re-renders
- *   every visible row exactly once and needs no extra prop.
- * - `onPress` must be a stable identity (it is intentionally not compared).
- * - Never add a prop that changes per tick without extending the comparator.
+ * One Transcript Segment in the Read-Along reader. Its props and the
+ * memoization contract that governs when this re-renders live in
+ * `@/read-along/read-along-segment-props` — read that before changing anything
+ * here, and especially before adding a prop.
  */
-
-export type ReadAlongSegmentPalette = {
-  text: string;
-  /** Accent at ~13% — the active segment's tint. */
-  activeTint: string;
-  /**
-   * How to mark the active word, already resolved from the user's chosen
-   * highlight style. `null` means the word gets no treatment (`none`).
-   *
-   * It rides in the palette rather than arriving as its own prop so the memo
-   * comparator below needs no new branch — see the contract above.
-   */
-  wordAppearance: ReadAlongWordAppearance | null;
-};
 
 /** Matches the plan's "gentle cross-fade" on the segment tint. */
 const TINT_FADE_DURATION_MS = 220;
 const LINE_HEIGHT_RATIO = 1.5;
 
-type ReadAlongSegmentItemProps = {
-  row: TranscriptSegmentTextRow;
-  isActive: boolean;
-  fontSize: number;
-  palette: ReadAlongSegmentPalette;
-  /** Word timings for THIS segment, or null (segment-tint-only mode). */
-  words: readonly TranscriptSegmentWordTiming[] | null;
-  activeWordIndex: number;
-  onPress: (row: TranscriptSegmentTextRow) => void;
-};
+/**
+ * The Bookmark Gutter's lane. Wide enough for two stacked markers, because
+ * overlapping clips are ordinary once a reader has clipped the same passage
+ * twice; a third is drawn on top of the second rather than widening the lane and
+ * shoving the text around.
+ */
+const GUTTER_WIDTH = 14;
+const MARKER_RULE_WIDTH = 3;
+const MARKER_SPACING = 5;
+const MAX_VISIBLE_MARKERS = 2;
+/** The dot's diameter, sized to read as a marker rather than a stray glyph. */
+const MARKER_DOT_SIZE = 6;
 
 const ReadAlongSegmentItemBase = ({
   row,
   isActive,
+  isSelected,
   fontSize,
   palette,
   words,
   activeWordIndex,
+  markers,
   onPress,
+  onLongPress,
+  onPressMarker,
 }: ReadAlongSegmentItemProps) => {
   const tintProgress = useSharedValue(isActive ? 1 : 0);
 
@@ -93,12 +65,15 @@ const ReadAlongSegmentItemBase = ({
     color: palette.text,
   };
 
+  const visibleMarkers = markers.slice(0, MAX_VISIBLE_MARKERS);
+
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={row.text}
-      accessibilityHint="Play from here"
+      accessibilityHint={isSelected ? "Shorten the selection to here" : "Play from here"}
       onPress={() => onPress(row)}
+      onLongPress={() => onLongPress(row)}
       style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1 })}
     >
       <View style={styles.block}>
@@ -106,6 +81,53 @@ const ReadAlongSegmentItemBase = ({
           pointerEvents="none"
           style={[styles.tint, { backgroundColor: palette.activeTint }, tintStyle]}
         />
+        {isSelected ? (
+          <View
+            pointerEvents="none"
+            style={[styles.tint, { backgroundColor: palette.selectionTint }]}
+          />
+        ) : null}
+        {visibleMarkers.map((marker, index) => (
+          <Pressable
+            key={marker.bookmarkId}
+            accessibilityRole="button"
+            accessibilityLabel={
+              marker.kind === "clip" ? `Clip: ${marker.title}` : `Bookmark: ${marker.title}`
+            }
+            hitSlop={{ top: 6, bottom: 6, left: 10, right: 10 }}
+            onPress={() => onPressMarker(marker)}
+            style={[
+              styles.marker,
+              { left: index * (MARKER_RULE_WIDTH + MARKER_SPACING) },
+            ]}
+          >
+            {marker.kind === "clip" ? (
+              <View
+                style={{
+                  flex: 1,
+                  width: MARKER_RULE_WIDTH,
+                  backgroundColor: palette.markerColor,
+                  // Cap the rule only where the clip actually begins and ends, so
+                  // a run of segments reads as one continuous mark.
+                  borderTopLeftRadius: marker.isRangeStart ? MARKER_RULE_WIDTH : 0,
+                  borderTopRightRadius: marker.isRangeStart ? MARKER_RULE_WIDTH : 0,
+                  borderBottomLeftRadius: marker.isRangeEnd ? MARKER_RULE_WIDTH : 0,
+                  borderBottomRightRadius: marker.isRangeEnd ? MARKER_RULE_WIDTH : 0,
+                }}
+              />
+            ) : (
+              <View
+                style={{
+                  width: MARKER_DOT_SIZE,
+                  height: MARKER_DOT_SIZE,
+                  borderRadius: MARKER_DOT_SIZE / 2,
+                  marginLeft: (MARKER_RULE_WIDTH - MARKER_DOT_SIZE) / 2,
+                  backgroundColor: palette.markerColor,
+                }}
+              />
+            )}
+          </Pressable>
+        ))}
         <Text style={textStyle}>
           {spans
             ? spans.map((span, index) =>
@@ -130,7 +152,18 @@ const styles = StyleSheet.create({
   block: {
     position: "relative",
     paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingRight: 10,
+    // The Bookmark Gutter lives in this padding; text starts after it whether or
+    // not the segment carries a marker, so nothing shifts when one is added.
+    paddingLeft: GUTTER_WIDTH + 6,
+  },
+  marker: {
+    position: "absolute",
+    top: 6,
+    bottom: 6,
+    width: MARKER_RULE_WIDTH,
+    alignItems: "center",
+    justifyContent: "center",
   },
   tint: {
     position: "absolute",
@@ -142,22 +175,5 @@ const styles = StyleSheet.create({
     borderCurve: "continuous",
   },
 });
-
-export const areSegmentPropsEqual = (
-  previous: ReadAlongSegmentItemProps,
-  next: ReadAlongSegmentItemProps,
-) => {
-  if (
-    previous.row.id !== next.row.id ||
-    previous.isActive !== next.isActive ||
-    previous.fontSize !== next.fontSize ||
-    previous.palette !== next.palette
-  ) {
-    return false;
-  }
-  // Word props only matter to the segment that is actually showing them.
-  if (!next.isActive) return true;
-  return previous.words === next.words && previous.activeWordIndex === next.activeWordIndex;
-};
 
 export const ReadAlongSegmentItem = memo(ReadAlongSegmentItemBase, areSegmentPropsEqual);

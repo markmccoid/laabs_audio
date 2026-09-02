@@ -72,7 +72,7 @@ Settled decisions:
 Code: `resolveWordHighlightStyle` + `normalizeReadAlongWordHighlightStyle` in
 `src/read-along/read-along-rendering.ts` (pure, unit-tested); the resolved appearance
 rides inside the memoized `palette` object so
-`read-along-segment-item.tsx`'s comparator contract needs no new branch.
+`read-along-segment-props.ts`'s comparator contract needs no new branch.
 
 
 ## v1.1 — Rate selector
@@ -105,6 +105,28 @@ The rate menu lifts by `RESUME_PILL_CLEARANCE` when the "Resume following" pill 
 showing. Both float above the bar at the same offset and the menu is wide enough
 to clip the pill's label mid-word; the menu yields because it is the transient one.
 
+
+## v1.2 — Clip Selection and the Bookmark Gutter
+
+Creating a Clip Bookmark from the reader, plus showing the book's saved
+bookmarks in the margin. Design authority: `docs/adr/0035-read-along-clip-selections-produce-ordinary-clip-bookmarks.md`;
+terms in `CONTEXT.md` (**Clip Selection**, **Bookmark Gutter**).
+
+| Decision | Choice |
+|---|---|
+| Entry | Long-press a sentence. No mode button — the selection bar's presence *is* the mode, and Cancel/Save are the only exits. |
+| Growing the run | Anchor/focus: the long-press sets the anchor, every tap moves the focus, the run is `[min, max]`. Extends forward, extends backwards, and shrinks to a tapped sentence with one rule. `read-along-clip-selection.ts` (pure, unit-tested). |
+| Tap overloading | While a selection is live, a tap on text extends it instead of seeking. Nothing else is overloaded: the gutter marker is its own hit target, so this stays the single fork. |
+| Follow Mode | Suspended by the long-press via the new `suspendFollowing`, exactly as a manual scroll suspends it. Audio is untouched and the word highlight keeps ticking. Resuming stays explicit. |
+| Resume pill | Hidden while selecting — it and the selection bar float at the same offset, and resuming mid-selection would scroll the page out from under the sentence being picked. |
+| Clip Range | `floor(first.startMs / 1000)` → `ceil(last.endMs / 1000)`. Outward rounding is the padding; no lead-in constant. Under `MIN_CLIP_DURATION_SECONDS` the end extends; extension past `MAX_CLIP_DURATION_SECONDS` is refused with a toast rather than truncated. Both adjustments are stated on the selection bar, not sprung in the sheet. |
+| Section boundaries | Crossed freely. A section is only a track boundary when `sourceStructure` is `files`, and export availability is Bookmark Detail's job (ADR 0002). |
+| Saving | Pushes `/book-addbookmark` with `libraryItemId + clipStartSeconds + clipEndSeconds`; `BookAddBookmarkDraftProvider` seeds a clip draft from them. One save path — the sheet's title, note, validation and Clip Editor all come along, and its clip toggle lets a reader demote the selection to a Point Bookmark. |
+| Start-second collisions | The sheet looks for a record already holding that second (`findBookmarkAtStartSecond`) and asks **Replace** / **Save as new** / Cancel. Save as new passes `forceNewRecord` to `addBookmark`. Applies to the player's add flow too, which had the same silent-overwrite behaviour. |
+| Selection lifecycle | Inferred on focus: a clip matching the range means the save happened and the selection clears; anything else means cancel and the selection stays. expo-router has no return channel and inventing one for a single flag was rejected. |
+| Gutter | A margin lane: Clip Bookmarks as a rule spanning their segments (capped at the run's ends), Point Bookmarks as a dot, both pressable to Bookmark Detail. `read-along-bookmark-markers.ts` (pure, unit-tested) maps bookmarks onto segments by **midpoint**, which absorbs the floor/ceil slop in both directions. |
+| Gutter width | Fixed padding on every segment whether or not it carries a marker, so adding a bookmark never reflows the text. Two markers stack; a third draws over the second rather than widening the lane. |
+| Render budget | `isSelected` and `markers` are compared unconditionally by the segment item's comparator — a deliberate exemption, argued in that file's contract, on the grounds that both change at user frequency. `markers` is compared by identity, so unmarked rows share a frozen `NO_MARKERS`. |
 
 ## Existing code to reuse (verified paths)
 

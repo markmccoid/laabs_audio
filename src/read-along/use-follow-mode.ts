@@ -48,6 +48,12 @@ export type UseFollowModeResult = {
   resumeFollowing: () => void;
   /** Wire to the list's `onScrollBeginDrag`. */
   handleScrollBeginDrag: () => void;
+  /**
+   * Pause Follow Mode without a scroll gesture, for anything that needs the page
+   * to hold still — a Clip Selection does (ADR 0035). Resuming stays explicit,
+   * exactly as it is after a manual scroll.
+   */
+  suspendFollowing: () => void;
 };
 
 export const useFollowMode = ({
@@ -116,5 +122,9 @@ export const useFollowMode = ({
     scrollToIndex(activeListIndexRef.current);
   }, [scrollToIndex]);
 
-  return { followEnabled, resumeFollowing, handleScrollBeginDrag };
+  const suspendFollowing = useCallback(() => {
+    setFollowEnabled(false);
+  }, []);
+
+  return { followEnabled, resumeFollowing, handleScrollBeginDrag, suspendFollowing };
 };

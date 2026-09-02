@@ -1,3 +1,4 @@
+import { useResolvedListeningOwnerKey } from "@/auth/listening-owner";
 import {
   getBookTranscriptStatus,
   getSegmentTextRows,
@@ -6,6 +7,20 @@ import {
   type TranscriptSegmentTextRow,
 } from "@/data/sqlite/shadow-db-transcripts";
 import { playbackStore, playerService, usePlaybackStore } from "@/player";
+import {
+  buildBookmarkMarkerMap,
+  getMarkersForSegment,
+  type ReadAlongBookmarkMarker,
+} from "@/read-along/read-along-bookmark-markers";
+import {
+  deriveClipSelectionRange,
+  extendSelection,
+  getSelectionBounds,
+  isSegmentSelected,
+  startSelection,
+  wouldExceedMaximumDuration,
+  type ClipSelection,
+} from "@/read-along/read-along-clip-selection";
 import {
   buildReadAlongListModel,
   findListIndexForPosition,
@@ -17,6 +32,7 @@ import {
 } from "@/read-along/read-along-rendering";
 import { useFollowMode } from "@/read-along/use-follow-mode";
 import { useReadAlongHighlight } from "@/read-along/use-read-along-highlight";
+import { deviceBooksStore, useDeviceBooksStore } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
 import {
   useTranscriptionStore,
@@ -30,7 +46,7 @@ import {
 } from "@/transcription/book-transcription";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useKeepAwake } from "expo-keep-awake";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -40,6 +56,7 @@ import { ReadAlongEmptyState } from "./read-along-empty-state";
 import { ReadAlongHeader } from "./read-along-header";
 import { ReadAlongPendingBlock } from "./read-along-pending-block";
 import { ReadAlongSegmentItem } from "./read-along-segment-item";
+import { ReadAlongSelectionBar } from "./read-along-selection-bar";
 
 /**
  * The Read-Along reader (`docs/read-along-implementation-plan.md` Phase 3).
@@ -56,7 +73,7 @@ import { ReadAlongSegmentItem } from "./read-along-segment-item";
  *   subscribes for itself (`ReadAlongControls`, `ReadAlongPendingBlock`), never
  *   in this component's props.
  * - Segment items are memoized on `(row.id, isActive, fontSize, palette)` — see
- *   `read-along-segment-item.tsx` — so a word tick re-renders exactly one row.
+ *   `read-along-segment-props.ts` — so a word tick re-renders exactly one row.
  *
  * ## When there is nothing to read
  *
@@ -64,10 +81,30 @@ import { ReadAlongSegmentItem } from "./read-along-segment-item";
  * running, an interrupted or failed one — lives in `ReadAlongEmptyState`
  * (Phase 4). This screen only decides *whether* the reader has content; that
  * component decides what the alternative looks like.
+ *
+ * ## Clip Selection and the Bookmark Gutter (ADR 0035)
+ *
+ * A long-press starts a **Clip Selection**; while one exists, taps extend or
+ * shrink it instead of seeking, and Follow Mode is suspended so the page holds
+ * still (audio keeps playing — the reader wants to hear what they are clipping).
+ * Saving hands a seeded clip draft to the Add Bookmark Sheet rather than writing
+ * a bookmark here, so there stays exactly one save path.
+ *
+ * Both selection state and the per-row bookmark markers are ordinary screen
+ * state and are compared by the segment item's memo comparator. That is a
+ * deliberate exemption from the render budget above, on the grounds that both
+ * change at *user* frequency — a tap, a save — not at playback frequency. The
+ * marker map is memoized so each row's `markers` array keeps a stable identity.
  */
 
 /** Accent opacity for the active segment's tint (plan: ~12-15%). */
 const ACTIVE_TINT_ALPHA = 0.13;
+/**
+ * The Clip Selection's tint, deliberately stronger than the active segment's so
+ * the two are separable when playback runs through a selection — which it does,
+ * because selecting only suspends Follow Mode, never the audio (ADR 0035).
+ */
+const SELECTION_TINT_ALPHA = 0.28;
 
 type TranscriptSnapshot = {
   libraryItemId: string;
@@ -212,10 +249,9 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
       ? (model.listIndexBySegmentIndex[activeSegmentIndex] ?? -1)
       : coarseListIndex;
 
-  const { followEnabled, resumeFollowing, handleScrollBeginDrag } = useFollowMode({
-    listRef,
-    activeListIndex,
-  });
+  const { followEnabled, resumeFollowing, handleScrollBeginDrag, suspendFollowing } = useFollowMode(
+    { listRef, activeListIndex },
+  );
 
   // FlashList v2 can leave its render window behind after a data swap (see
   // src/components/Library/LibraryContainer.tsx:116-124). A frontier advance is
@@ -242,9 +278,152 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listGeneration]);
 
+  //~~ Bookmark Gutter ----------------------------------------------------
+  // Bookmarks belong to the *bound* book's listening owner, not the player's,
+  // so the reader stays correct while another book is loaded.
+  const resolvedUserKey = useResolvedListeningOwnerKey(boundLibraryItemId ?? undefined);
+  const localBookmarksForUser = useDeviceBooksStore((state) =>
+    resolvedUserKey ? state.localBookmarksByUser[resolvedUserKey] : undefined,
+  );
+  const bookmarksForBook = useMemo(() => {
+    if (!boundLibraryItemId) return [];
+    return Object.values(localBookmarksForUser ?? {})
+      .filter((bookmark) => bookmark.libraryItemId === boundLibraryItemId)
+      .sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+  }, [boundLibraryItemId, localBookmarksForUser]);
+
+  // Rebuilt only when the bookmarks or the readable segments change, which is
+  // what makes each row's `markers` array a stable identity between renders —
+  // the segment item compares it by reference (see its memoization contract).
+  const markerMap = useMemo(
+    () => buildBookmarkMarkerMap({ bookmarks: bookmarksForBook, segments: model.readableSegments }),
+    [bookmarksForBook, model.readableSegments],
+  );
+
+  const handlePressMarker = useCallback(
+    (marker: ReadAlongBookmarkMarker) => {
+      if (!boundLibraryItemId) return;
+      router.push({
+        pathname: "/book-bookmark-detail",
+        params: { libraryItemId: boundLibraryItemId, bookmarkId: marker.bookmarkId },
+      });
+    },
+    [boundLibraryItemId],
+  );
+
+  //~~ Clip Selection -----------------------------------------------------
+  // Segment id -> index into `readableSegments`. Every selection gesture needs
+  // that index and only has the row, and a scan would be over every segment in
+  // the book — ~5k on a long one — on each tap.
+  const segmentIndexById = useMemo(() => {
+    const index = new Map<number, number>();
+    model.readableSegments.forEach((segment, position) => index.set(segment.id, position));
+    return index;
+  }, [model.readableSegments]);
+
+  /**
+   * Selection state is mirrored into a ref and every mutation goes through
+   * {@link setSelection}, which writes the ref **synchronously**.
+   *
+   * This is not belt-and-braces. `areSegmentPropsEqual` does not compare the
+   * gesture callbacks — the memo contract requires them to be stable identities
+   * — so a row whose other props are unchanged keeps whichever closure it last
+   * rendered with. A handler that closed over `selection` would therefore go
+   * stale on exactly the rows that were not re-rendered: the first tap after a
+   * long-press would seek instead of extending, and a tap after a cancel would
+   * extend from the *previous* selection's anchor. Reading through the ref keeps
+   * the handlers stable and the contract intact.
+   */
+  const [selection, setSelectionState] = useState<ClipSelection | null>(null);
+  const selectionRef = useRef<ClipSelection | null>(null);
+  const setSelection = useCallback((next: ClipSelection | null) => {
+    selectionRef.current = next;
+    setSelectionState(next);
+  }, []);
+
+  // Same reasoning for the data the handlers read. A frontier advance grows both
+  // without unmounting the list, so a handler that closed over them would keep
+  // resolving against the shorter transcript.
+  const readableSegmentsRef = useRef(model.readableSegments);
+  const segmentIndexByIdRef = useRef(segmentIndexById);
+  useEffect(() => {
+    readableSegmentsRef.current = model.readableSegments;
+    segmentIndexByIdRef.current = segmentIndexById;
+  }, [model.readableSegments, segmentIndexById]);
+
+  const selectionBounds = selection ? getSelectionBounds(selection) : null;
+  const selectionRange = useMemo(
+    () =>
+      selection
+        ? deriveClipSelectionRange({ segments: model.readableSegments, selection })
+        : null,
+    [selection, model.readableSegments],
+  );
+
+  const handleLongPressSegment = useCallback(
+    (row: TranscriptSegmentTextRow) => {
+      const segmentIndex = segmentIndexByIdRef.current.get(row.id);
+      if (segmentIndex === undefined) return;
+      // The page must hold still to be selectable; the audio deliberately does
+      // not stop, so the reader can hear the passage they are clipping.
+      suspendFollowing();
+      setSelection(startSelection(segmentIndex));
+    },
+    [suspendFollowing, setSelection],
+  );
+
+  const handleCancelSelection = useCallback(() => {
+    setSelection(null);
+  }, [setSelection]);
+
+  const handleSaveSelection = useCallback(() => {
+    if (!boundLibraryItemId || !selectionRange) return;
+    router.push({
+      pathname: "/book-addbookmark",
+      params: {
+        libraryItemId: boundLibraryItemId,
+        clipStartSeconds: String(selectionRange.startSeconds),
+        clipEndSeconds: String(selectionRange.endSeconds),
+      },
+    });
+  }, [boundLibraryItemId, selectionRange]);
+
+  // Whether the selection survived the trip to the Add Bookmark Sheet is
+  // inferred rather than reported: expo-router gives no return channel, and a
+  // saved clip is visible in the store the moment we come back. A clip covering
+  // the range means the save happened, so the selection gives way to its new
+  // gutter rule; anything else means cancel, and the selection is still there to
+  // adjust (ADR 0035).
+  //
+  // The check must fire on a focus *regain* and nothing else. Keying it on the
+  // selection instead would run it the instant a reader selects a passage they
+  // had already clipped, clearing the selection under their finger and reading
+  // as a broken long-press. Hence the ref for the range and a direct store read
+  // rather than the rendered values, which would drag both into the deps.
+  const selectionRangeRef = useRef(selectionRange);
+  useEffect(() => {
+    selectionRangeRef.current = selectionRange;
+  }, [selectionRange]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const range = selectionRangeRef.current;
+      if (!range || !boundLibraryItemId || !resolvedUserKey) return;
+      const records = deviceBooksStore.getState().localBookmarksByUser[resolvedUserKey] ?? {};
+      const wasSaved = Object.values(records).some(
+        (bookmark) =>
+          bookmark.libraryItemId === boundLibraryItemId &&
+          bookmark.kind === "clip" &&
+          bookmark.startTimeSeconds === range.startSeconds &&
+          bookmark.endTimeSeconds === range.endSeconds,
+      );
+      if (wasSaved) setSelection(null);
+    }, [boundLibraryItemId, resolvedUserKey, setSelection]),
+  );
+
   //~~ Tap to seek --------------------------------------------------------
   const isSeekPendingRef = useRef(false);
-  const handlePressSegment = useCallback(
+  const handleSeekToSegment = useCallback(
     (row: TranscriptSegmentTextRow) => {
       if (!boundLibraryItemId) return;
       if (isSeekPendingRef.current) return;
@@ -270,6 +449,33 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
       });
     },
     [boundLibraryItemId],
+  );
+
+  // One tap, two meanings, decided by whether a selection is live. Nothing else
+  // in the reader overloads a gesture — the gutter marker is its own hit target
+  // precisely so this stays the only fork.
+  const handlePressSegment = useCallback(
+    (row: TranscriptSegmentTextRow) => {
+      const currentSelection = selectionRef.current;
+      if (!currentSelection) {
+        handleSeekToSegment(row);
+        return;
+      }
+      const segmentIndex = segmentIndexByIdRef.current.get(row.id);
+      if (segmentIndex === undefined) return;
+      if (
+        wouldExceedMaximumDuration({
+          segments: readableSegmentsRef.current,
+          selection: currentSelection,
+          segmentIndex,
+        })
+      ) {
+        toast.info("That is longer than a clip can be");
+        return;
+      }
+      setSelection(extendSelection(currentSelection, segmentIndex));
+    },
+    [handleSeekToSegment, setSelection],
   );
 
   //~~ Pending block actions ---------------------------------------------
@@ -331,11 +537,13 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
   //~~ Rendering ----------------------------------------------------------
   // The chosen word treatment rides inside the palette so a style change costs
   // one re-render of the visible rows and the item comparator stays untouched
-  // (see the memoization contract in `read-along-segment-item.tsx`).
+  // (see the memoization contract in `read-along-segment-props.ts`).
   const segmentPalette = useMemo(
     () => ({
       text: themeColors.text,
       activeTint: withAlpha(themeColors.accent, ACTIVE_TINT_ALPHA),
+      selectionTint: withAlpha(themeColors.accent, SELECTION_TINT_ALPHA),
+      markerColor: themeColors.accent,
       wordAppearance: resolveWordHighlightStyle(wordHighlightStyle, {
         accent: themeColors.accent,
       }),
@@ -404,11 +612,15 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
         <ReadAlongSegmentItem
           row={item.row}
           isActive={isActive}
+          isSelected={isSegmentSelected(selection, item.segmentIndex)}
           fontSize={fontSize}
           palette={segmentPalette}
           words={isActive ? activeSegmentWords : null}
           activeWordIndex={activeWordIndex}
+          markers={getMarkersForSegment(markerMap, item.row.id)}
           onPress={handlePressSegment}
+          onLongPress={handleLongPressSegment}
+          onPressMarker={handlePressMarker}
         />
       );
     },
@@ -421,19 +633,27 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
       handleResumeTranscription,
       handleRetryTranscription,
       activeSegmentId,
+      selection,
       fontSize,
       segmentPalette,
       activeSegmentWords,
       activeWordIndex,
+      markerMap,
       handlePressSegment,
+      handleLongPressSegment,
+      handlePressMarker,
     ],
   );
 
   const bookTitle = snapshot?.bookTitle ?? "Read Along";
   const hasReaderContent = model.items.length > 0;
   // The footer needs this too: its rate menu lifts to clear the pill rather
-  // than covering it.
-  const isResumePillVisible = !followEnabled && activeListIndex >= 0;
+  // than covering it. The selection bar takes the pill's slot outright — both
+  // float at the same offset, and resuming Follow Mode mid-selection would
+  // scroll the page out from under the sentence being picked.
+  const isSelecting = selection !== null;
+  const isResumePillVisible = !followEnabled && activeListIndex >= 0 && !isSelecting;
+  const floatingBottomOffset = Math.max(insets.bottom, 10) + 80;
 
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
@@ -547,7 +767,7 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
           style={({ pressed }) => ({
             position: "absolute",
             alignSelf: "center",
-            bottom: Math.max(insets.bottom, 10) + 80,
+            bottom: floatingBottomOffset,
             borderRadius: 999,
             borderCurve: "continuous",
             backgroundColor: themeColors.accent,
@@ -561,6 +781,17 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
             Resume following
           </Text>
         </Pressable>
+      ) : null}
+
+      {isSelecting && selectionBounds ? (
+        <ReadAlongSelectionBar
+          segmentCount={selectionBounds.segmentCount}
+          range={selectionRange}
+          bottomOffset={floatingBottomOffset}
+          themeColors={themeColors}
+          onCancel={handleCancelSelection}
+          onSave={handleSaveSelection}
+        />
       ) : null}
 
       {boundLibraryItemId ? (
