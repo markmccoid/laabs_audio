@@ -34,11 +34,14 @@ import {
 import {
   getAlignmentResources,
   getAlignmentUnit,
+  getResourceUnits,
   getTimedAlignmentUnits,
   type AlignmentResourceRow,
   type AlignmentTimedUnitRow,
   type AlignmentUnitRow,
 } from "@/data/sqlite/shadow-db-alignment";
+import { resolveTapUnit } from "@/alignment/alignment-tap-point";
+import { playbackStore, playerService } from "@/player";
 import {
   buildReaderPreferences,
   toDecorationStyleType,
@@ -54,7 +57,11 @@ import {
   type DecorationGroup,
   type Locator,
   type ReadiumViewRef,
+  type TapEvent,
 } from "react-native-readium";
+
+/** One instance, so the "no units yet" branch does not re-run every consumer. */
+const NO_UNITS: AlignmentUnitRow[] = [];
 
 export type EpubReadAlongViewProps = {
   boundLibraryItemId: string | null;
@@ -127,7 +134,67 @@ export const EpubReadAlongView = ({
   const [activeUnit, setActiveUnit] = useState<AlignmentUnitRow | null>(null);
   const [renderedHref, setRenderedHref] = useState<string | null>(null);
 
-  const [decorationGroups, setDecorationGroups] = useState<DecorationGroup[]>([]);
+  /**
+   * What to hand Readium next — **only the groups that changed**.
+   *
+   * Native `updateDecorations` iterates exactly the groups present in this array
+   * and leaves every other group painted and untouched (D21). That is not a
+   * quirk to work around, it is the property the whole design rests on: the
+   * one-decoration highlight re-applies in ~0.4 s while the ~61-decoration tap
+   * window sits beside it costing nothing. Send both every time and the window's
+   * ~1.5 s apply is paid once a sentence.
+   */
+  const [outgoingGroups, setOutgoingGroups] = useState<DecorationGroup[]>([]);
+  /**
+   * The group values Readium is believed to be holding, by name. Written after
+   * a send rather than during one, so `queueGroups` can drop anything already
+   * applied without a render of its own.
+   */
+  const appliedGroupsRef = useRef(new Map<string, DecorationGroup>());
+
+  const queueGroups = useCallback((groups: DecorationGroup[]) => {
+    setOutgoingGroups((current) => {
+      const merged = new Map(current.map((group) => [group.name, group]));
+      for (const group of groups) merged.set(group.name, group);
+      // Merging with `current` rather than replacing it matters on a resource
+      // turn, where the highlight moves and the window repaints in the same
+      // commit — a plain overwrite would drop whichever ran first. Filtering
+      // against what is already applied is what stops the array accumulating
+      // into "re-send everything" one send later.
+      const changed = [...merged.values()].filter(
+        (group) => appliedGroupsRef.current.get(group.name) !== group,
+      );
+      // Nothing new: hand back the same array so React bails out of the render
+      // instead of handing Readium a fresh identity holding what it already has.
+      return changed.length > 0 ? changed : current;
+    });
+  }, []);
+
+  useEffect(() => {
+    for (const group of outgoingGroups) appliedGroupsRef.current.set(group.name, group);
+  }, [outgoingGroups]);
+
+  //~~ Tap-to-seek --------------------------------------------------------
+  /**
+   * The units, tagged with the resource they were loaded for.
+   *
+   * Kept as a pair rather than cleared on every turn: a resource turn and its
+   * load are separated by a query, and a bare array would show the *previous*
+   * chapter's units for that gap — long enough to paint a window of quotes that
+   * are not on the page.
+   */
+  const [loadedResourceUnits, setLoadedResourceUnits] = useState<{
+    resourceIndex: number;
+    units: AlignmentUnitRow[];
+  } | null>(null);
+  /**
+   * Read by the tap handler, which must see the units the tap was painted
+   * against rather than whatever the last render closed over — a tap can land
+   * during the repaint it triggered.
+   */
+  const resourceUnitsRef = useRef<AlignmentUnitRow[]>([]);
+  /** One seek at a time; a double tap on two sentences would otherwise race. */
+  const isSeekPendingRef = useRef(false);
 
   /**
    * Follow Mode, on the same contract as Transcript Read-Along: the view scrolls
@@ -256,8 +323,8 @@ export const EpubReadAlongView = ({
   }, [activeUnit, target, themeColors.accent, sentenceHighlightStyle]);
 
   useEffect(() => {
-    setDecorationGroups(groups);
-  }, [groups]);
+    queueGroups(groups);
+  }, [groups, queueGroups]);
 
   /**
    * Follow the narration *within* a resource.
@@ -278,6 +345,118 @@ export const EpubReadAlongView = ({
     armSelfScroll(target.href, "follow");
     readerRef.current?.goTo(toFollowLocator(activeUnit, target));
   }, [isFollowing, activeUnit, target, renderedHref, armSelfScroll]);
+
+  /**
+   * The rendered resource, as an index into the map. `renderedHref` is the only
+   * thing Readium tells us about what is on screen, and it is the wrong shape
+   * for every query.
+   */
+  const renderedResource = useMemo(
+    () => resources.find((resource) => resource.href === renderedHref) ?? null,
+    [resources, renderedHref],
+  );
+
+  // Every unit of the rendered resource, with quotes — what a tap is matched
+  // against. One query per resource turn; the units are needed in full because a
+  // tap can land anywhere in the document and must resolve without going back to
+  // SQLite on the tap path.
+  useEffect(() => {
+    if (!boundLibraryItemId || !renderedResource) return;
+
+    const { resourceIndex } = renderedResource;
+    let cancelled = false;
+    void getResourceUnits(boundLibraryItemId, resourceIndex)
+      .then((units) => {
+        if (cancelled) return;
+        setLoadedResourceUnits({ resourceIndex, units });
+      })
+      .catch((error: unknown) => {
+        // Tap-to-seek simply stops working if this fails, with the page looking
+        // completely normal — so it has to say so.
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(
+          `[EpubReadAlong] resource units failed resource=${renderedResource.resourceIndex} ${message}`,
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boundLibraryItemId, renderedResource]);
+
+  const resourceUnits = useMemo(
+    () =>
+      loadedResourceUnits &&
+      loadedResourceUnits.resourceIndex === renderedResource?.resourceIndex
+        ? loadedResourceUnits.units
+        : NO_UNITS,
+    [loadedResourceUnits, renderedResource?.resourceIndex],
+  );
+
+  useEffect(() => {
+    resourceUnitsRef.current = resourceUnits;
+  }, [resourceUnits]);
+
+  /**
+   * A tap on the page: seek the narration to whatever was tapped.
+   *
+   * The binding resolves the tap inside the document with
+   * `caretRangeFromPoint`, so this receives a character offset rather than a
+   * point — see `alignment-tap-point.ts` for why that is the one measurement
+   * comparable to a unit's progression.
+   *
+   * Resuming Follow Mode is deliberate. Tapping a sentence is the clearest
+   * statement a reader can make about where they want to be, and leaving
+   * following suspended would strand them there while the audio walked away.
+   */
+  const handleTap = useCallback(
+    (event: TapEvent) => {
+      if (isSeekPendingRef.current) return;
+
+      const resolved = resolveTapUnit({
+        units: resourceUnitsRef.current,
+        charOffset: event.charOffset,
+        totalChars: event.totalChars,
+      });
+      if (!resolved) {
+        // Front matter, a caption, a footnote, an unaligned tail — text the map
+        // never covered. Saying so beats a silent no-op that reads as a dead
+        // tap, and beats a wild seek even more.
+        console.log(
+          `[EpubReadAlong] tap unresolved offset=${Math.round(event.charOffset)}/${Math.round(
+            event.totalChars,
+          )} "${event.text.slice(0, 40)}"`,
+        );
+        return;
+      }
+
+      const state = playbackStore.getState();
+      // Read-Along binds to the playing book; a tap while another book is loaded
+      // has nowhere to seek to.
+      if (state.libraryItemId !== boundLibraryItemId || state.queue.length === 0) return;
+
+      console.log(
+        `[EpubReadAlong] tap seek -> unit=${resolved.unitIndex} at ${resolved.seekMs}ms (d=${resolved.distance.toFixed(4)})`,
+      );
+      isSeekPendingRef.current = true;
+      const wasPlaying = state.playbackState === "playing";
+      void (async () => {
+        try {
+          await playerService.seekTo(resolved.seekMs);
+          // Seeking must not start playback that was paused — the reader tapped
+          // to move, not to play.
+          if (!wasPlaying && playbackStore.getState().playbackState === "playing") {
+            await playerService.pause();
+          }
+          setIsFollowing(true);
+        } finally {
+          isSeekPendingRef.current = false;
+        }
+      })();
+    },
+    [boundLibraryItemId],
+  );
 
   const handleLocationChange = useCallback((locator: Locator) => {
     // Carries `href` and `progression` and an empty `text` (E2), so this says
@@ -310,8 +489,15 @@ export const EpubReadAlongView = ({
    * opening.
    */
   const handlePublicationReady = useCallback(() => {
-    setDecorationGroups((current) =>
-      current.length > 0 ? [...current] : [{ name: ACTIVE_DECORATION_GROUP, decorations: [] }],
+    // A remount drops everything painted without saying so, which makes the
+    // record of what is applied a lie. Clearing it is what lets the re-send
+    // past `queueGroups`' "Readium already has this" filter — without that, the
+    // recovery would be filtered out as a no-op and the page would come back
+    // bare.
+    const known = [...appliedGroupsRef.current.values()];
+    appliedGroupsRef.current.clear();
+    setOutgoingGroups(
+      known.length > 0 ? known : [{ name: ACTIVE_DECORATION_GROUP, decorations: [] }],
     );
   }, []);
 
@@ -364,9 +550,10 @@ export const EpubReadAlongView = ({
         ref={readerRef}
         file={{ url: epubUri }}
         preferences={readerPreferences}
-        decorations={decorationGroups}
+        decorations={outgoingGroups}
         onLocationChange={handleLocationChange}
         onPublicationReady={handlePublicationReady}
+        onTap={handleTap}
         style={{ flex: 1 }}
       />
     </View>

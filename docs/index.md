@@ -73,6 +73,7 @@ Routing guide for the `docs/` folder. Domain vocabulary lives in
 | [read-along-implementation-plan.md](./read-along-implementation-plan.md) | the approved plan for the synchronized Read-Along reading view built on Book Transcripts |
 | [epub-read-along-implementation-plan.md](./epub-read-along-implementation-plan.md) | the phased plan for EPUB Read-Along, and which phases are done |
 | [epub-read-along.md](./epub-read-along.md) | **how EPUB Read-Along actually works** — module map, the Readium binding facts earned on device, what every log line means, and what is still open |
+| [epub-read-along-todo.md](./epub-read-along-todo.md) | the follow-on work after v1 — tap-to-seek, clip marks, appearance — with the decisions already taken |
 
 ## Decisions (ADRs)
 

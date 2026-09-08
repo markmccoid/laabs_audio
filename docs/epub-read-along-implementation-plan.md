@@ -180,13 +180,15 @@ decoration cost that shapes the whole design is invisible on the simulator.
 
 ## Deferred
 
-- **Tap-to-seek from the EPUB, and keeping the highlight on screen within a long Resource.** One item,
-  not two: both need the passive `(g, progression)` calibration, because `g` is a character ratio and
-  Readium's `progression` is a rendered-pixel ratio and comparing them directly is a category error
-  rather than an approximation. `onLocationChange` returns an empty `text`, so there is no fallback.
-  **v1 consequence worth stating plainly:** inside a long chapter the highlight is correct but the view
-  does not follow it.
-- **Selection to clip.** See ADR-0039.
+- ~~**Tap-to-seek from the EPUB**~~ — **no longer deferred.** This was held behind the passive
+  `(g, progression)` calibration, on the grounds that `g` is a character ratio and Readium's
+  `progression` a rendered-pixel one. `onDecorationActivated` sidesteps that entirely: it returns the
+  unit index outright, so the two quantities never meet. Verified firing on device (E9). Tracked in
+  [epub-read-along-todo.md](./epub-read-along-todo.md).
+- **Keeping the highlight on screen within a long Resource** still wants the calibration, and
+  `onLocationChange` returns an empty `text`, so there is no fallback.
+- **Selection to clip.** See ADR-0039, and the decision record in
+  [epub-read-along-todo.md](./epub-read-along-todo.md).
 - **Android.** iOS Podfile wiring only, and the cost model is a WKWebView number.
 - **Percent-encoded hrefs.** Unexercised — no book under test has a space or accent in a chapter
   filename.

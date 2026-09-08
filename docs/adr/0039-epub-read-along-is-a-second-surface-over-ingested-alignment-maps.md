@@ -41,7 +41,7 @@ map and its ~1.7 MB EPUB are pulled on first open of EPUB Read-Along and kept.
   keeping the highlight on screen *within* a long Resource both require comparing Readium's
   `progression` — a rendered-pixel ratio — against the map's `g`, a character ratio. Those are different
   quantities, so both wait on the same passive `(g, progression)` calibration and ship together or not
-  at all.
+  at all. **Superseded — see Amendment 1.**
 - Selection-to-clip is not offered here. On iOS `onSelectionChange` never fires, and the only
   alternative — a custom `selectionActions` entry — makes Readium drop `EditingAction.defaultActions`
   and replace the system Copy / Look Up menu wholesale. Transcript Read-Along already makes clips
@@ -50,3 +50,30 @@ map and its ~1.7 MB EPUB are pulled on first open of EPUB Read-Along and kept.
   the native `updateDecorations` only iterates groups present in the incoming array. The same property
   is what lets a narrow, frequently-updated group and a wide, rarely-updated one coexist without either
   repaying the other's cost.
+
+---
+
+## Amendment 1 — tap-to-seek does not need the calibration (2026-09-07)
+
+The third consequence above bundled two features on the grounds that both must compare `progression`
+against `g`. That was true of the approach in view at the time and false of the problem.
+
+**Tap-to-seek never has to make that comparison.** Two routes were built. The first used
+`onDecorationActivated`, which returns the tapped decoration's own id — the unit index outright, with
+no ratio in the loop at all. It worked, but it could only offer taps where decorations had been
+painted, and painting the whole book is barred by the cost model and by not wanting our markup over
+the publisher's page. The second, which shipped, resolves the tap *inside the document* with
+`caretRangeFromPoint` and returns a **character offset**. A Text Unit's `g` is a character ratio by
+definition, so that comparison is like-for-like — the one place in this feature where `g` is the right
+shape, and it needs no calibration because nothing is being converted between quantities.
+
+**Keeping the highlight on screen within a long Resource is unaffected** and still wants the
+calibration. The two were never one item; bundling them was the error.
+
+This amendment changes no decision in the ADR — the surface, the addressing and the ingest are all
+unchanged. It corrects a consequence that stated a constraint more broadly than the evidence
+supported. The remaining consequences stand, including that selection-to-clip is not offered here.
+
+It costs a patch to `react-native-readium`, which the ADR did not contemplate: the binding leaves
+`didTapAt` on the protocol's default no-op, so taps reached nothing. See
+[react-native-readium-ios.md](../react-native-readium-ios.md).

@@ -94,6 +94,97 @@ The `preferences` prop is **memoized**. It is a native `didSet`, so an inline ob
 re-submits the entire preference set on every render — several times a sentence, for a value that
 changes only when the popover is open.
 
+### Two decoration groups, and why only the changed one is sent
+
+`decorations` is not a description of what should be painted — it is a list of groups to *apply*.
+Native `updateDecorations` iterates exactly the groups present in the array and leaves every other
+group painted and untouched (D21). Since the fixed cost is paid per group (E8/D47), that is what lets
+groups of very different sizes coexist:
+
+| Group | Size | Repainted |
+|---|---|---|
+| `laabs-active` | 1 | every sentence (~0.4 s) |
+| clip marks | a few | on a resource turn *(not built)* |
+
+So the prop carries **only the groups that changed**. `queueGroups` in `EpubReadAlongView` merges
+what is queued in one commit — a resource turn can move the highlight and repaint another group
+together, and a plain overwrite would drop whichever ran first — then drops any group Readium already
+holds. Send every group each time and the wide one's apply is paid once a sentence, which is the whole
+architecture undone.
+
+**Only one group exists today**, so `queueGroups` currently earns nothing: the tap window that
+justified it is gone (see "Tap-to-seek"), and clip marks are not built. It is kept rather than
+inlined because clip marks are the next thing to land and are precisely the wide, rarely-repainted
+group it exists for — and because the alternative, a single `setState` of the whole array, is the
+shape that silently reintroduces the cost the moment a second group appears. If clip marks are
+abandoned, delete this with them.
+
+The record of what is applied is cleared on `onPublicationReady`: a remount silently drops every
+painted decoration, so the record becomes a lie, and without clearing it the recovery re-send would
+be filtered out as a no-op and the page would come back bare.
+
+### Tap-to-seek
+
+Tapping anywhere in the book seeks the narration to that point and **resumes Follow Mode** — tapping
+is the clearest statement a reader can make about where they want to be, and leaving following
+suspended would strand them while the audio walked away.
+
+**This needs a patch to `react-native-readium`** — see
+[react-native-readium-ios.md](./react-native-readium-ios.md).
+
+#### Why not decorations
+
+The first build used `onDecorationActivated` over a rolling window of tappable decorations. It worked
+— E9 proved the callback fires — but it could only ever be partly right. Taps landed only where
+decorations had been painted, and painting them everywhere is barred twice over: by the cost model
+(`0.4 s + 0.018 s × N`, so a 400-unit chapter is 7.6 s) and by not wanting our markup over the
+publisher's page at all. A reader who scrolled away to browse found nothing tappable exactly where
+they were looking, which is when tapping is most wanted, because tapping is how they get back.
+
+Two things about that attempt are worth keeping in mind, because both were assumptions worth
+correcting:
+
+- **The tint never made text tappable.** The decoration did; the tint was only how it looked.
+- **The window's real limit was its anchor**, not its colour. Fixing the colour would have fixed
+  nothing.
+
+#### How it works now
+
+`caretRangeFromPoint`, run inside the document, in response to the document's own click event. The
+binding installs a passive capture-phase listener per spread and reads what it recorded when Readium
+reports a tap. Three properties matter:
+
+- **Nothing is added to the DOM.** Wrapping words in elements to make them clickable would change the
+  text layout that quote anchoring matches against — which would break the active highlight and every
+  decoration with it.
+- **No coordinate conversion.** The native tap point is in the navigator's space and would have to be
+  pushed through the spread view's scroll offset and scale to mean anything. The document answers in
+  its own coordinates, which removes the whole class of bug where the answer is subtly wrong only
+  after the reader has scrolled.
+- **The listener never calls `preventDefault`**, so Readium's own gestures are untouched.
+
+`didTapAt` and the DOM's `click` are two independent paths out of one finger and their order is not
+guaranteed, so the read retries briefly and discards anything recorded too long ago to belong to the
+tap in hand. A stale reading would seek to somewhere tapped a minute earlier — worse than not seeking.
+
+#### Why a character ratio, and not the tapped text
+
+Matching the tapped text against unit quotes is the same fuzzy problem that deferred selection-to-clip,
+made worse by the producer defect where some quotes run across block boundaries with no separator.
+
+A character offset avoids it entirely. A unit's `progression` **is** a character ratio — that is its
+definition — so `charOffset / totalChars` is the same kind of quantity and the comparison is finally
+like-for-like. This is the one place in the feature where `g` is the right shape; everywhere else it
+has been useless precisely because it kept being compared against rendered-pixel ratios.
+
+It is still approximate — the DOM counts whitespace and markup the extractor dropped — so
+`resolveTapUnit` takes the nearest timed unit and refuses anything beyond `TAP_MATCH_TOLERANCE`
+(0.05 of the resource). A tap on front matter, a caption or an unaligned tail resolves to nothing and
+is logged as such, which is better than a confident seek to the wrong place.
+
+Only **timed** units are candidates. Matching to an untimed one would report success and then do
+nothing, which reads as a bug in the audio rather than a gap in the map.
+
 ### Decoration taps reach JS (E9)
 
 **`onDecorationActivated` fires, and it names the decoration that was tapped.** Verified on the
@@ -257,11 +348,11 @@ There is no EPUB dev harness any more — the surface picker in Read-Along is th
 book, open Read-Along from the main player, and switch to **Book**.
 
 **The Readium anchor spike is deliberately still there**, at Settings → Developer → *Readium Anchor
-Spike*. Its stated deletion trigger ("once the Alignment Map format is frozen") has passed, and it
-is kept for two jobs this reader cannot do: verifying that **decoration taps reach JS** — the
-unproven half of tap-to-seek, below — and **re-measuring decoration cost on other hardware**, since
-`DEFAULT_ACTIVE_LEAD_MS` is an iPhone 16 number. Delete it, `src/spikes/readium-anchor`, and the
-whole Developer group once tap-to-seek is verified.
+Spike*. Its stated deletion trigger ("once the Alignment Map format is frozen") has passed. One of
+the two jobs it was kept for — verifying that **decoration taps reach JS** — is now done (E9,
+below). The other stands: **re-measuring decoration cost on other hardware**, since
+`DEFAULT_ACTIVE_LEAD_MS` is an iPhone 16 number. Keep it until tap-to-seek has actually shipped, then
+delete it, `src/spikes/readium-anchor`, and the whole Developer group.
 
 Note it is **untracked in git**, so deleting it is permanent.
 
@@ -297,9 +388,7 @@ Note it is **untracked in git**, so deleting it is permanent.
   returns the exact unit index and sidesteps the `(g, progression)` category error that caused the
   original deferral. Cost is `0.4 + 0.018N` per apply, so it must be a window, not a whole chapter
   (400 units would be 7.6 s). A faint tint doubles as an honest signal of which text is aligned.
-  **Unverified: whether decoration taps actually fire.** That is the first thing to check, and the
-  Readium anchor spike screen is the cheapest place to check it — which is why it has not been
-  deleted.
+  **Decoration taps are now verified** — see "Decoration taps reach JS" below. Not yet built.
 - The empty state's secondary action ("Read the book instead") — `EmptyStateBody` supports exactly
   one action today.
 - The download sheet's Transcript card is hard-gated on `isDownloaded`, so it is invisible on a

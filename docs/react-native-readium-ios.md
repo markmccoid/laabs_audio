@@ -47,6 +47,41 @@ Trap: do not detect "already wired" by searching for the substring `readium_pods
 
 ---
 
+## The `onTap` patch
+
+`patches/react-native-readium+5.1.1.patch` adds a tap event the upstream binding does not have. EPUB
+Read-Along's tap-to-seek depends on it — see "Tap-to-seek" in
+[epub-read-along.md](./epub-read-along.md) for why decorations could not do the job.
+
+**What it adds.** A `TapEvent { href, charOffset, totalChars, text }` and an `onTap` prop. Readium
+already routes taps to `VisualNavigatorDelegate`, but the binding's `EPUBViewController` conformed to
+`EPUBNavigatorDelegate` with an *empty* extension, so every tap was silently taking the protocol's
+default no-op. The patch implements `navigator(_:didTapAt:)`, and resolves the point to a character
+offset by running `caretRangeFromPoint` inside the document.
+
+**It uses only public Readium API** — `EPUBNavigatorViewController.evaluateJavaScript(_:)` and the
+delegate. It does *not* reach into the pod's internals, and in particular it does not try to intercept
+`WKScriptMessageHandler`: Readium's `registerJSMessage` is internal to the pod and unreachable from
+the binding, so the JS channel here is pull-based (evaluate on tap) rather than push-based.
+
+**The generated files are a graft, not a regeneration.** Nitrogen must run to add a prop to the spec,
+but the published `nitrogen/generated` was built with an older nitrogen than the 0.35.10 matching our
+`react-native-nitro-modules`, and regenerating wholesale rewrites **1206 lines** of bridge code that
+currently builds. So the patch was made by generating twice — once without the change, once with —
+diffing those two, and applying only that delta onto the published files. The patch touches 24
+generated files and no version churn. **If you ever need to redo this, do it the same way**; a plain
+`npx nitrogen` will produce a patch an order of magnitude larger and largely unrelated to the change.
+
+**`lib/` matters here, unlike at runtime.** Metro loads this package from `src/` (`"react-native":
+"src/index"`), but `tsc` reads `lib/src/index.d.ts` (`"types"`). So the patch edits *both*: `src/` for
+what runs, `lib/**/*.d.ts` for what typechecks. Editing only one produces a build that works and does
+not compile, or the reverse.
+
+**New generated files mean `pod install`.** The patch adds eight files to `nitrogen/generated`, which
+CocoaPods has to add to the Pods project. `patch-package` alone is not enough after a fresh install.
+
+---
+
 ## Verify
 
 ```bash
@@ -55,3 +90,13 @@ npx expo run:ios
 ```
 
 `pod install` should resolve ReadiumStreamer / Shared / Navigator **3.11.0** and `react-native-readium` **5.1.1**. Duplicate-spec warnings for old Readium betas on trunk vs the spec repo are harmless.
+
+To check the patch compiles without building the whole app:
+
+```bash
+LANG=en_US.UTF-8 xcodebuild -project ios/Pods/Pods.xcodeproj -target react-native-readium -sdk iphonesimulator -configuration Debug build
+```
+
+`LANG` is not optional from a non-interactive shell — CocoaPods and xcodebuild otherwise read podspecs
+as US-ASCII and die on the first non-ASCII byte in a dependency's `package.json`, with an error that
+blames the dependency rather than the encoding.

@@ -710,7 +710,9 @@ _Avoid_: Five minute window, scrubber window
 - A **Text Unit** belongs to exactly one Alignment Map and is addressed only by its **Quote Anchor**.
 - A **Text Unit** belongs to exactly one **Resource**; a **Transcript Segment** belongs to exactly one **Section**; neither division contains the other.
 - **EPUB Read-Along** highlights at most one Text Unit as current, and highlights none while the Listening Position falls in a stretch the Alignment Map records as unaligned.
-- **EPUB Read-Along** moves the reader to a new **Resource** when the Listening Position crosses into one, and does not otherwise scroll itself.
+- **EPUB Read-Along** moves the reader to a new **Resource** when the Listening Position crosses into one, and scrolls within a Resource to keep the current **Text Unit** in view while **Follow Mode** holds.
+- **EPUB Read-Along** seeks the Listening Position to a **Text Unit**'s start when the user taps that unit's text, and resumes **Follow Mode** when it does.
+- **EPUB Read-Along** does nothing when the user taps text no **Text Unit** covers, rather than seeking to the nearest one.
 - **EPUB Read-Along** and **Transcript Read-Along** keep separate reading-appearance settings; neither surface's text size, highlight style or theme follows the other's.
 - A **Clip Selection** covers one or more consecutive Transcript Segments and may span sections of the Book Transcript.
 - A **Clip Selection** suspends **Follow Mode** for as long as it exists.
