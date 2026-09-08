@@ -71,6 +71,8 @@ Routing guide for the `docs/` folder. Domain vocabulary lives in
 | --- | --- |
 | [book-transcript-implementation-plan.md](./book-transcript-implementation-plan.md) | the approved v1 plan for whole-book transcription + EPUB export (see ADR-0034 and CONTEXT.md terms) |
 | [read-along-implementation-plan.md](./read-along-implementation-plan.md) | the approved plan for the synchronized Read-Along reading view built on Book Transcripts |
+| [epub-read-along-implementation-plan.md](./epub-read-along-implementation-plan.md) | the phased plan for EPUB Read-Along, and which phases are done |
+| [epub-read-along.md](./epub-read-along.md) | **how EPUB Read-Along actually works** — module map, the Readium binding facts earned on device, what every log line means, and what is still open |
 
 ## Decisions (ADRs)
 
@@ -103,6 +105,9 @@ propose superseding it.
 | [0032](./adr/0032-local-episode-bookmarks-and-clips.md) | Episode bookmarks and clips remain local until ABS supports Episode identity |
 | [0035](./adr/0035-read-along-clip-selections-produce-ordinary-clip-bookmarks.md) | Read-Along Clip Selections produce ordinary Clip Bookmarks |
 | [0036](./adr/0036-clip-text-prefers-the-book-transcript.md) | Clip text prefers the Book Transcript over re-recognition |
+| [0037](./adr/0037-ingested-book-transcripts-are-library-assets.md) | Ingested Book Transcripts are library assets, not download assets |
+| [0038](./adr/0038-alignment-maps-are-paired-by-enumeration-not-by-name.md) | Alignment Maps are paired by enumeration, not by constructing a filename |
+| [0039](./adr/0039-epub-read-along-is-a-second-surface-over-ingested-alignment-maps.md) | EPUB Read-Along is a second Read-Along surface over an ingested Alignment Map |
 
 Note: ADRs are point-in-time records. ADR-0017's phased-cutover details are completed and
 superseded in part by ADR-0019; read 0017 for the why, 0019 plus
@@ -113,6 +118,7 @@ superseded in part by ADR-0019; read 0017 for the why, 0019 plus
 | Doc | Read it when you need… |
 | --- | --- |
 | [react-native-audio-pro-changes.md](./react-native-audio-pro-changes.md) | the catalog of local changes to the vendored `react-native-audio-pro` module |
+| [react-native-readium-ios.md](./react-native-readium-ios.md) | how `react-native-readium` is wired for iOS (spec repo, Minizip, Nitro 0.35) |
 | [react-native-screens-patches.md](./react-native-screens-patches.md) | what's in the `react-native-screens` patch (iOS 26 mini-player fixes) |
 | [eas-patch-package-cng-builds.md](./eas-patch-package-cng-builds.md) | how `patch-package` native edits survive EAS/CNG builds |
 

@@ -423,17 +423,49 @@ _Avoid_: Clip Export File, transcription export
 The durable machine-generated text of one audiobook, organized by chapter and aligned in time with the audio.
 _Avoid_: Clip Transcription, book text, subtitles
 
+**Ingested Book Transcript**:
+A Book Transcript that arrived as a file in the audiobook's Audiobookshelf item folder rather than being produced on this device.
+_Avoid_: imported transcript, shipped transcript, aligned transcript
+
 **Transcript Segment**:
 One timed span of words within a Book Transcript.
 _Avoid_: caption, subtitle line
 
 **Read-Along**:
-The reading experience that displays a Book Transcript synchronized with the Listening Position.
+The reading experience that displays text synchronized with the Listening Position. It has two surfaces: Transcript Read-Along and EPUB Read-Along.
 _Avoid_: karaoke mode, follow-along
+
+**Transcript Read-Along**:
+The Read-Along surface that displays a Book Transcript — the words the narrator said.
+_Avoid_: Read-Along (when the surface matters), transcript mode, ASR view
+
+**EPUB Read-Along**:
+The Read-Along surface that displays the audiobook's EPUB — the words the book says — highlighting each Text Unit as an Alignment Map times it.
+_Avoid_: Read-Along (when the surface matters), reader mode, ebook mode, book view
 
 **Follow Mode**:
 The Read-Along state in which the view scrolls itself to keep the Listening Position's text in view. Follow Mode pauses when the user scrolls manually and resumes only by explicit request.
 _Avoid_: auto-scroll, sticky scroll
+
+**Alignment Map**:
+The correspondence between an EPUB's Text Units and time ranges in the audiobook, arriving as a file in the audiobook's Audiobookshelf item folder. Derived from a Book Transcript plus an EPUB; never produced on this device.
+_Avoid_: sync map, timing map, alignment file, aligned transcript
+
+**Text Unit**:
+One sentence of an EPUB — the unit an Alignment Map times and EPUB Read-Along highlights. Not a Transcript Segment: a Transcript Segment is what the narrator said, a Text Unit is what the book says.
+_Avoid_: segment, sentence, chunk, Transcript Segment
+
+**Quote Anchor**:
+The `(before, highlight, after)` triple that locates a Text Unit in the rendered EPUB by matching its literal text. The only address a Text Unit carries.
+_Avoid_: locator, CFI, offset, position, selector
+
+**Resource**:
+One spine document of an EPUB, as Readium reports it. A division of the book's text, orthogonal to a Section, which divides the book's audio.
+_Avoid_: chapter, spine item, resource href, section
+
+**Decoration Window**:
+The set of Text Units EPUB Read-Along has painted into the reader at any moment.
+_Avoid_: highlight set, active range, visible units
 
 **Clip Selection**:
 The contiguous run of Transcript Segments a reader is choosing in Read-Along before it becomes a Clip Bookmark.
@@ -668,10 +700,17 @@ _Avoid_: Five minute window, scrubber window
 - A **Book Transcript** is not a **Clip Transcription**.
 - A **Transcript Segment** belongs to exactly one Book Transcript.
 - A **Transcript EPUB Export** belongs to exactly one Book Transcript.
-- A **Book Transcript** exists only while its audiobook has Downloaded Audio Assets; deleting the download deletes the Book Transcript, after the user is offered a Transcript EPUB Export.
+- A locally produced **Book Transcript** exists only while its audiobook has Downloaded Audio Assets; deleting the download deletes that Book Transcript, after the user is offered a Transcript EPUB Export.
+- An **Ingested Book Transcript** belongs to the audiobook independently of Downloaded Audio Assets; deleting the download does not delete it.
 - A **Transcript EPUB Export** is available only for a complete Book Transcript.
-- **Read-Along** may display the completed sections of an incomplete Book Transcript; sections still being transcribed are shown as pending, not hidden.
-- **Read-Along** seeks the Listening Position to a Transcript Segment's start when the user taps that segment's text.
+- **Transcript Read-Along** may display the completed sections of an incomplete Book Transcript; sections still being transcribed are shown as pending, not hidden.
+- **Transcript Read-Along** seeks the Listening Position to a Transcript Segment's start when the user taps that segment's text.
+- An **Alignment Map** belongs to exactly one audiobook and exactly one of its EPUBs.
+- An **Alignment Map** belongs to the audiobook independently of Downloaded Audio Assets and of any **Book Transcript**; **EPUB Read-Along** opens without either.
+- A **Text Unit** belongs to exactly one Alignment Map and is addressed only by its **Quote Anchor**.
+- A **Text Unit** belongs to exactly one **Resource**; a **Transcript Segment** belongs to exactly one **Section**; neither division contains the other.
+- **EPUB Read-Along** highlights at most one Text Unit as current, and highlights none while the Listening Position falls in a stretch the Alignment Map records as unaligned.
+- **EPUB Read-Along** moves the reader to a new **Resource** when the Listening Position crosses into one, and does not otherwise scroll itself.
 - A **Clip Selection** covers one or more consecutive Transcript Segments and may span sections of the Book Transcript.
 - A **Clip Selection** suspends **Follow Mode** for as long as it exists.
 - A **Clip Selection** becomes a **Clip Bookmark** only through the **Add Bookmark Sheet**, and produces no other kind of record.

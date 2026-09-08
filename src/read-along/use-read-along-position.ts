@@ -55,6 +55,19 @@ export type UseReadAlongPositionArgs = {
    * are book-absolute, so briefly stale words simply resolve to no active word.
    */
   activeSegmentWords?: readonly TranscriptSegmentWordTiming[] | null;
+  /**
+   * Look this many wall-clock milliseconds into the future when resolving the
+   * active index. Zero for Transcript Read-Along, which paints instantly.
+   *
+   * EPUB Read-Along needs it: a Readium decoration takes a measured ~0.4 s to
+   * appear (D47), and that cost is deterministic latency rather than jank — so
+   * issuing the apply this far early makes the delay invisible instead of merely
+   * short. `interpolatePosition` multiplies elapsed wall time by `rate`, so the
+   * look-ahead is automatically `leadMs × rate` in book time and stays correct
+   * at 2×. While paused it is ignored, because a paused reader should mark where
+   * the listener actually is.
+   */
+  leadMs?: number;
 };
 
 export type UseReadAlongPositionResult = {
@@ -93,6 +106,7 @@ export const useReadAlongPosition = ({
   boundLibraryItemId,
   segments,
   activeSegmentWords = null,
+  leadMs = 0,
 }: UseReadAlongPositionArgs): UseReadAlongPositionResult => {
   const positionMs = usePlaybackStore((state) => state.positionMs);
   const positionUpdatedAtMs = usePlaybackStore((state) => state.positionUpdatedAtMs);
@@ -123,9 +137,13 @@ export const useReadAlongPosition = ({
   const segmentsRef = useRef(segments);
   const wordsRef = useRef(activeSegmentWords);
   const mismatchRef = useRef(isBookMismatch);
+  const leadMsRef = useRef(leadMs);
 
   const [indexes, setIndexes] = useState<ActiveIndexes>(NO_ACTIVE_INDEXES);
 
+  // Deliberately without `leadMs`: this reports where the listener *is*, and its
+  // callers (tap-to-seek context, one-shot lookups) would all be wrong by a lead
+  // if it reported where the highlight is about to be.
   const getPositionMs = useCallback(() => interpolatePosition(anchorRef.current, Date.now()), []);
 
   /** Recompute both indexes and commit only when one of them changed. */
@@ -133,7 +151,7 @@ export const useReadAlongPosition = ({
     const next = mismatchRef.current
       ? NO_ACTIVE_INDEXES
       : (() => {
-          const currentMs = interpolatePosition(anchorRef.current, Date.now());
+          const currentMs = interpolatePosition(anchorRef.current, Date.now() + leadMsRef.current);
           const words = wordsRef.current;
           return {
             activeSegmentIndex: findActiveSegmentIndex(segmentsRef.current, currentMs),
@@ -141,12 +159,27 @@ export const useReadAlongPosition = ({
           };
         })();
 
-    setIndexes((previous) =>
-      previous.activeSegmentIndex === next.activeSegmentIndex &&
-      previous.activeWordIndex === next.activeWordIndex
-        ? previous
-        : next,
-    );
+    setIndexes((previous) => {
+      if (
+        previous.activeSegmentIndex === next.activeSegmentIndex &&
+        previous.activeWordIndex === next.activeWordIndex
+      ) {
+        return previous;
+      }
+      // A frozen highlight with the ticker running is either this index not
+      // moving or the list not re-rendering when it does. Logging the segment
+      // index and the position it was derived from separates the two: a moving
+      // `pos` with a stuck `segment` is a lookup problem, and both moving means
+      // the problem is downstream in rendering.
+      if (previous.activeSegmentIndex !== next.activeSegmentIndex) {
+        console.log(
+          `[ReadAlong] segment lead=${leadMsRef.current} index=${next.activeSegmentIndex} pos=${Math.round(
+            interpolatePosition(anchorRef.current, Date.now() + leadMsRef.current),
+          )} of=${segmentsRef.current.length}`,
+        );
+      }
+      return next;
+    });
   }, []);
 
   const [isFocused, setIsFocused] = useState(true);
@@ -160,21 +193,55 @@ export const useReadAlongPosition = ({
   // Re-anchor immediately: every store tick, seek, rate change, state change,
   // book change, and every time the caller hands over new segments/words.
   useEffect(() => {
+    // `interpolatePosition` can never rewind within one anchor (it is clamped to
+    // `>= anchor.positionMs`), so a highlight that cycles backwards can only be
+    // re-anchoring onto a position that is not advancing. Logging the *delta*
+    // between consecutive anchors is what separates "the store is pinned" from
+    // "the lookup is wrong": `dPos` near zero with `dt` near a second means the
+    // player is re-writing the same position at tick rate and Read-Along is
+    // faithfully rendering a stuck clock.
+    const previous = anchorRef.current;
+    if (
+      previous.positionMs !== anchor.positionMs ||
+      previous.anchoredAtMs !== anchor.anchoredAtMs ||
+      previous.isPlaying !== anchor.isPlaying ||
+      previous.rate !== anchor.rate
+    ) {
+      console.log(
+        `[ReadAlong] anchor lead=${leadMs} pos=${Math.round(anchor.positionMs)} dPos=${Math.round(
+          anchor.positionMs - previous.positionMs,
+        )} dt=${anchor.anchoredAtMs - previous.anchoredAtMs} rate=${anchor.rate} playing=${
+          anchor.isPlaying
+        } state=${playbackState}`,
+      );
+    }
+
     anchorRef.current = anchor;
     segmentsRef.current = segments;
     wordsRef.current = activeSegmentWords;
     mismatchRef.current = isBookMismatch;
+    leadMsRef.current = leadMs;
     syncIndexes();
-  }, [anchor, segments, activeSegmentWords, isBookMismatch, syncIndexes]);
+  }, [anchor, segments, activeSegmentWords, isBookMismatch, leadMs, playbackState, syncIndexes]);
 
   useEffect(() => {
-    if (!isPlaying || !isFocused || isBookMismatch) return;
+    if (!isPlaying || !isFocused || isBookMismatch) {
+      // A frozen highlight while audio advances means this interval is not
+      // running, and there are three ways that happens. Naming which one costs
+      // one line and is the difference between a diagnosis and a guess — the
+      // symptom is identical for all three from the outside.
+      console.log(
+        `[ReadAlong] ticker idle lead=${leadMs} isPlaying=${isPlaying} isFocused=${isFocused} mismatch=${isBookMismatch}`,
+      );
+      return;
+    }
 
+    console.log(`[ReadAlong] ticker running lead=${leadMs}`);
     const intervalId = setInterval(syncIndexes, READ_ALONG_TICK_MS);
     return () => {
       clearInterval(intervalId);
     };
-  }, [isPlaying, isFocused, isBookMismatch, syncIndexes]);
+  }, [isPlaying, isFocused, isBookMismatch, leadMs, syncIndexes]);
 
   return {
     activeSegmentIndex: indexes.activeSegmentIndex,

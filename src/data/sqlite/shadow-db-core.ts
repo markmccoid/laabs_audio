@@ -552,6 +552,66 @@ CREATE TABLE IF NOT EXISTS book_transcript_segments (
 CREATE INDEX IF NOT EXISTS idx_transcript_segments_book_section
   ON book_transcript_segments(library_item_id, section_index, start_ms);
 
+-- Alignment Map (ADR-0039). A library asset like an Ingested Book Transcript:
+-- it does not belong to the download and does not die with it. Keyed by book
+-- alone, holding the map for the EPUB edition Audiobookshelf calls primary; a
+-- book with two alignable editions replaces rather than accumulating, and the
+-- key would extend to (library_item_id, epub_sha256) if that ever mattered.
+CREATE TABLE IF NOT EXISTS alignment_maps (
+  library_item_id TEXT PRIMARY KEY NOT NULL,
+  alignment_id TEXT NOT NULL,
+  epub_ino TEXT,
+  epub_sha256 TEXT NOT NULL,          -- half of the per-unit cache key
+  extractor_version INTEGER NOT NULL, -- the other half; unit indices are scoped to it
+  epub_filename TEXT NOT NULL,        -- the ABS filename this map was paired with
+  transcript_id TEXT,                 -- informational only: timings do not depend on it
+  tracks_fingerprint TEXT NOT NULL,
+  generator TEXT,
+  generated_at TEXT,
+  quality_json TEXT NOT NULL,
+  unaligned_json TEXT NOT NULL,       -- honest gaps; small enough not to need rows
+  did_recompute_book_time INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS alignment_resources (   -- one EPUB spine document
+  library_item_id TEXT NOT NULL,
+  resource_index INTEGER NOT NULL,    -- spine order, as the artifact lists them
+  href TEXT NOT NULL,                 -- OPF-relative, no leading slash, not always .xhtml
+  type TEXT NOT NULL,                 -- the manifest's media-type, copied not guessed
+  track_index INTEGER,                -- absent on a resource with no timed units
+  start_ms INTEGER,
+  end_ms INTEGER,
+  unit_count INTEGER NOT NULL,
+  PRIMARY KEY (library_item_id, resource_index)
+);
+
+CREATE TABLE IF NOT EXISTS alignment_units (       -- one EPUB sentence
+  library_item_id TEXT NOT NULL,
+  unit_index INTEGER NOT NULL,        -- the artifact's i; contiguous from 0 in reading order
+  resource_index INTEGER NOT NULL,
+  quote_before TEXT NOT NULL,         -- the Quote Anchor: the unit's only address
+  quote_highlight TEXT NOT NULL,
+  quote_after TEXT NOT NULL,
+  progression REAL NOT NULL,          -- g, 0..1. Navigation only, never timing
+  provenance TEXT NOT NULL,           -- m | i | x. Does NOT identify an untimed unit
+  confidence REAL,
+  -- All five null together: text the aligner never matched to narration. Roughly
+  -- 30% of one real book. provenance cannot distinguish these from genuinely
+  -- interpolated units, so start_ms IS NULL is the only honest test.
+  start_ms INTEGER,
+  end_ms INTEGER,
+  track_index INTEGER,
+  track_start_ms INTEGER,
+  track_end_ms INTEGER,
+  ambiguous INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (library_item_id, unit_index)
+);
+CREATE INDEX IF NOT EXISTS idx_alignment_units_time
+  ON alignment_units(library_item_id, start_ms);
+CREATE INDEX IF NOT EXISTS idx_alignment_units_resource
+  ON alignment_units(library_item_id, resource_index, unit_index);
 `;
 
 export const initializeShadowDatabaseInternal = async () => {

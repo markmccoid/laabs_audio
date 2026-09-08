@@ -44,15 +44,23 @@ import {
   resumeIfNeeded,
   startBookTranscription,
 } from "@/transcription/book-transcription";
+import { useShippedTranscriptIngest } from "@/transcription/use-shipped-transcript-ingest";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useKeepAwake } from "expo-keep-awake";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
 import { ReadAlongControls } from "./read-along-controls";
+import { useAlignmentIngest } from "@/alignment/use-alignment-ingest";
+import { EpubReadAlongSurface } from "./epub-read-along-surface";
 import { ReadAlongEmptyState } from "./read-along-empty-state";
+import {
+  initialReadAlongSurface,
+  ReadAlongSurfacePicker,
+  type ReadAlongSurface,
+} from "./read-along-surface-picker";
 import { ReadAlongHeader } from "./read-along-header";
 import { ReadAlongPendingBlock } from "./read-along-pending-block";
 import { ReadAlongSegmentItem } from "./read-along-segment-item";
@@ -120,9 +128,11 @@ type TranscriptSnapshot = {
 
 type ReadAlongScreenProps = {
   libraryItemId?: string;
+  /** Route param: which surface to open on. See `initialReadAlongSurface`. */
+  initialSurface?: string;
 };
 
-const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
+const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps) => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlashListRef<ReadAlongListItem>>(null);
@@ -138,6 +148,7 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
   // No book id means there is nothing to load, so the reader is never "loading".
   const [isLoading, setIsLoading] = useState(Boolean(libraryItemId));
 
+  const ingest = useShippedTranscriptIngest(boundLibraryItemId);
   const fontSize = useSettingsStore((state) => state.readAlongFontSize);
   const wordHighlightStyle = useSettingsStore((state) => state.readAlongWordHighlightStyle);
   const playingLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
@@ -214,7 +225,15 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
   useEffect(() => {
     if (!boundLibraryItemId) return;
     void loadSnapshot(boundLibraryItemId);
-  }, [boundLibraryItemId, completedTracks, runtimeStatus, activePhase, loadSnapshot]);
+  }, [
+    boundLibraryItemId,
+    completedTracks,
+    runtimeStatus,
+    activePhase,
+    loadSnapshot,
+    ingest.phase,
+    ingest.outcome,
+  ]);
 
   const model = useMemo(
     () =>
@@ -645,14 +664,78 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
     ],
   );
 
+  /**
+   * `enabled: false` — this instance never fetches anything. It is here purely
+   * for `hasMapOnServer`, which is a free read of item details the app already
+   * holds, and which decides whether the surface picker appears at all. The real
+   * ingest belongs to `EpubReadAlongSurface`, and only runs once that mounts.
+   */
+  const alignment = useAlignmentIngest(boundLibraryItemId, { enabled: false });
+  // iOS only: `plugins/with-readium.js` wires the iOS Podfile alone, and the
+  // decoration cost model is a WKWebView number (ADR-0039).
+  const canReadBook = Platform.OS === "ios" && alignment.hasMapOnServer;
+  const [surface, setSurface] = useState<ReadAlongSurface>(() =>
+    initialReadAlongSurface(initialSurface, canReadBook),
+  );
+  // The map's presence arrives with item details, a render or two after mount.
+  // Without this, a book that should open on its EPUB opens on the transcript
+  // and stays there.
+  const settledInitialSurfaceRef = useRef(false);
+  useEffect(() => {
+    if (settledInitialSurfaceRef.current || !alignment.hasMapOnServer) return;
+    settledInitialSurfaceRef.current = true;
+    setSurface(initialReadAlongSurface(initialSurface, canReadBook));
+  }, [alignment.hasMapOnServer, canReadBook, initialSurface]);
+
+  const isBookSurface = surface === "book" && canReadBook;
+
+  /**
+   * Bumped every time the reader returns from the Book surface, to remount the
+   * transcript list and re-anchor it.
+   *
+   * Coming back needs both halves. The list is remounted because recycled rows
+   * can carry a stale tint (see the FlashList `key` below), and Follow Mode is
+   * forced back on because the transcript's own follow state is untouched by
+   * what happened on the other surface — the reader was following narration in
+   * the EPUB, so landing on a transcript parked wherever it was left reads as
+   * the reader having lost their place.
+   *
+   * This deliberately overrides a manual scroll the reader made before
+   * switching away. Switching surfaces is an explicit request to see the
+   * narrated text in the other form, which is exactly what Follow Mode is for.
+   */
+  const [transcriptGeneration, setTranscriptGeneration] = useState(0);
+  const wasBookSurfaceRef = useRef(isBookSurface);
+  useEffect(() => {
+    const wasBook = wasBookSurfaceRef.current;
+    wasBookSurfaceRef.current = isBookSurface;
+    if (isBookSurface || !wasBook) return;
+    setTranscriptGeneration((generation) => generation + 1);
+  }, [isBookSurface]);
+
+  useEffect(() => {
+    if (transcriptGeneration === 0) return;
+    // Same two-stage wait as the post-swap re-anchor above: the list has just
+    // been remounted and cannot be scrolled to an index it has not laid out yet.
+    const frame = requestAnimationFrame(() => {
+      setTimeout(() => resumeFollowing(), 100);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [transcriptGeneration, resumeFollowing]);
+
   const bookTitle = snapshot?.bookTitle ?? "Read Along";
   const hasReaderContent = model.items.length > 0;
+  const waitingForIngest = ingest.phase === "pending" || ingest.phase === "ingesting";
+  const showTranscriptLoading = isLoading || (waitingForIngest && !hasReaderContent);
   // The footer needs this too: its rate menu lifts to clear the pill rather
   // than covering it. The selection bar takes the pill's slot outright — both
   // float at the same offset, and resuming Follow Mode mid-selection would
   // scroll the page out from under the sentence being picked.
   const isSelecting = selection !== null;
-  const isResumePillVisible = !followEnabled && activeListIndex >= 0 && !isSelecting;
+  // The transcript's own Follow Mode pill. EPUB Read-Along carries its own, so
+  // showing this one over the reader would put two of them on screen.
+  const isResumePillVisible =
+    !isBookSurface && !followEnabled && activeListIndex >= 0 && !isSelecting;
   const floatingBottomOffset = Math.max(insets.bottom, 10) + 80;
 
   return (
@@ -730,7 +813,23 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
         </View>
       ) : null}
 
-      {isLoading ? (
+      {canReadBook ? (
+        <ReadAlongSurfacePicker
+          surface={surface}
+          onChange={setSurface}
+          themeColors={themeColors}
+        />
+      ) : null}
+
+      {isBookSurface ? (
+        <EpubReadAlongSurface
+          boundLibraryItemId={boundLibraryItemId}
+          // Clears `ReadAlongControls`, which floats over both surfaces. This
+          // route sits outside the tab navigator, so there is no tab bar or
+          // mini-player to account for — only the reader's own footer.
+          bottomInset={floatingBottomOffset}
+        />
+      ) : showTranscriptLoading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 8 }}>
           <ActivityIndicator color={themeColors.accent} />
         </View>
@@ -739,12 +838,21 @@ const ReadAlongScreen = ({ libraryItemId }: ReadAlongScreenProps) => {
           libraryItemId={boundLibraryItemId}
           status={snapshot?.status ?? "idle"}
           errorCode={snapshot?.errorCode ?? null}
+          ingestOutcome={ingest.outcome}
+          ingestErrorMessage={ingest.errorMessage}
           themeColors={themeColors}
           onResume={handleResumeTranscription}
           onRetry={handleRetryTranscription}
         />
       ) : (
         <FlashList
+          // Remounted when the reader comes back from the Book surface. A
+          // segment's tint is a Reanimated shared value initialised once per
+          // component *instance*, and FlashList recycles instances — so a row
+          // that was active when the list was torn down could come back wearing
+          // a tint that no longer belongs to it, leaving two sentences lit.
+          // Fresh instances cannot carry stale animation state.
+          key={`transcript-${transcriptGeneration}`}
           ref={listRef}
           data={model.items}
           keyExtractor={(item) => item.key}
