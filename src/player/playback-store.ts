@@ -265,11 +265,31 @@ export const playbackStore = createStore<PlaybackStoreState>()(
             error,
           }),
         applyStatusUpdate: (payload) =>
-          set(
-            payload.positionMs !== undefined
-              ? { ...payload, positionUpdatedAtMs: Date.now() }
-              : payload,
-          ),
+          set((state) => {
+            const hasPosition = payload.positionMs !== undefined;
+            const positionChanged =
+              hasPosition &&
+              (payload.positionMs !== state.positionMs || state.positionUpdatedAtMs === 0);
+
+            if (positionChanged) {
+              return { ...payload, positionUpdatedAtMs: Date.now() };
+            }
+
+            if (!hasPosition) {
+              return payload;
+            }
+
+            // Same position as the store already holds, and we already have a
+            // real interpolation clock. Drop the position fields so we do not
+            // re-stamp `positionUpdatedAtMs`. Read-Along interpolates from that
+            // stamp: restamping a frozen engine tick is what loops a sentence
+            // — the interpolator advances for ~1 s, then the new anchor snaps
+            // back to the same word.
+            const rest = { ...payload };
+            delete rest.positionMs;
+            delete rest.trackPositionMs;
+            return Object.keys(rest).length > 0 ? rest : state;
+          }),
       },
     }),
     {

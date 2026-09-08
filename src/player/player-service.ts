@@ -3979,21 +3979,37 @@ class PlayerService {
     const state = playbackStore.getState();
     if (!state.queue.length) return;
     const handledAsTemporaryPlayback = await this.handleTemporaryPlaybackStatus(status, state);
-    if (handledAsTemporaryPlayback) return;
+    if (handledAsTemporaryPlayback) {
+      // Every early return here looks identical from the outside: audio keeps
+      // playing while `playbackStore.positionMs` stands still. Naming which
+      // guard swallowed the tick is the difference between a diagnosis and a
+      // guess (Read-Along's frozen-highlight bug).
+      console.log(`[Status] swallowed by temporary playback engine=${status.positionMs}`);
+      return;
+    }
 
     const currentTrack = state.queue[state.currentTrackIndex];
     if (!currentTrack) return;
 
     const trackPositionMs = Math.max(0, status.positionMs);
     const positionMs = currentTrack.startOffsetMs + trackPositionMs;
+    console.log(
+      `[Status] engine=${Math.round(status.positionMs)} track=${state.currentTrackIndex} offset=${
+        currentTrack.startOffsetMs
+      } book=${Math.round(positionMs)} storeWas=${Math.round(
+        state.positionMs,
+      )} enginePlaying=${status.isPlaying} storeState=${state.playbackState}`,
+    );
     const displayedPositionRecord = state.libraryItemId
       ? displayedListeningPositionStore.getState().byLibraryItemId[state.libraryItemId]
       : undefined;
     const resumeFloorMs = displayedPositionRecord?.chosenResumePositionMs;
     if (resumeFloorMs !== null && resumeFloorMs !== undefined && positionMs < resumeFloorMs) {
+      console.log(`[Status] swallowed by resume floor floor=${resumeFloorMs} book=${positionMs}`);
       return;
     }
     if (await this.shouldIgnorePostPreviewStatus(status, positionMs)) {
+      console.log(`[Status] swallowed by post-preview guard book=${positionMs}`);
       return;
     }
     const updates: Parameters<PlaybackStoreState["actions"]["applyStatusUpdate"]>[0] = {
