@@ -267,3 +267,102 @@ describe("book_transcript_tracks.transcribed_through_ms", () => {
     expect(readWatermark()?.watermark).toBe(0);
   });
 });
+
+describe("replaceWithIngestedTranscript", () => {
+  beforeEach(() => {
+    mockSeedLegacySchema = null;
+    mockOpenedDatabases.length = 0;
+    jest.resetModules();
+    delete (globalThis as Record<string, unknown>).__laabsShadowSqliteRuntimeState;
+  });
+
+  it("writes a complete ingested Book Transcript that Read-Along can load", async () => {
+    const transcripts = loadTranscriptsModule();
+    await transcripts.replaceWithIngestedTranscript({
+      libraryItemId: LIBRARY_ITEM_ID,
+      transcriptId: "sha256:mini",
+      tracksFingerprint: "sha256:fp",
+      localeIdentifier: "en-US",
+      sourceStructure: "chapters",
+      sections: [{ index: 0, title: "Opening Credits", startMs: 0, endMs: 11966 }],
+      bookTitle: "Any Way You Can",
+      bookAuthor: "Dr. Annette Bosworth",
+      asrJson: JSON.stringify({ engine: "speechanalyzer", model: null, chunking: null }),
+      tracks: [
+        {
+          trackIno: TRACK_INO,
+          filename: "book.m4b",
+          trackIndex: 0,
+          startOffsetMs: 0,
+          durationMs: TRACK_DURATION_MS,
+        },
+      ],
+      segments: [
+        {
+          segmentIndex: 0,
+          sectionIndex: 0,
+          startMs: 0,
+          endMs: 1920,
+          trackIndex: 0,
+          trackStartMs: 0,
+          trackEndMs: 1920,
+          text: "This is Audible.",
+          words: [
+            [0, 840, "This"],
+            [840, 1140, "is"],
+            [1140, 1920, "Audible."],
+          ],
+          suspectReason: null,
+        },
+        {
+          segmentIndex: 1,
+          sectionIndex: 0,
+          startMs: 5000,
+          endMs: 7000,
+          trackIndex: 0,
+          trackStartMs: 5000,
+          trackEndMs: 7000,
+          text: "Thank you for listening.",
+          words: null,
+          suspectReason: "repetition",
+        },
+      ],
+    });
+
+    const row = await transcripts.getBookTranscriptStatus(LIBRARY_ITEM_ID);
+    expect(row?.status).toBe("complete");
+    expect(row?.origin).toBe("ingested");
+    expect(row?.transcriptId).toBe("sha256:mini");
+    expect(row?.localeIdentifier).toBe("en-US");
+
+    const texts = await transcripts.getSegmentTextRows(LIBRARY_ITEM_ID);
+    expect(texts.map((segment) => segment.text)).toEqual([
+      "This is Audible.",
+      "Thank you for listening.",
+    ]);
+    expect(await transcripts.getTranscriptFrontierMs(LIBRARY_ITEM_ID)).toBe(TRACK_DURATION_MS);
+
+    const db = mockOpenedDatabases[0];
+    const stored = db
+      .prepare(
+        `SELECT origin, transcript_id FROM book_transcripts WHERE library_item_id = ?`,
+      )
+      .get(LIBRARY_ITEM_ID) as { origin: string; transcript_id: string };
+    expect(stored.origin).toBe("ingested");
+
+    await transcripts.deleteLocalBookTranscript(LIBRARY_ITEM_ID);
+    expect(await transcripts.getBookTranscriptStatus(LIBRARY_ITEM_ID)).not.toBeNull();
+
+    await transcripts.deleteBookTranscript(LIBRARY_ITEM_ID);
+    expect(await transcripts.getBookTranscriptStatus(LIBRARY_ITEM_ID)).toBeNull();
+  });
+
+  it("leaves local createBookTranscript working without the new columns filled", async () => {
+    const transcripts = loadTranscriptsModule();
+    await createTrack(transcripts);
+    const row = await transcripts.getBookTranscriptStatus(LIBRARY_ITEM_ID);
+    expect(row?.origin).toBe("local");
+    expect(row?.transcriptId).toBeNull();
+    expect(row?.status).toBe("in_progress");
+  });
+});

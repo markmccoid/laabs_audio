@@ -10,12 +10,12 @@ import { now, type BindValues } from "./shadow-shared";
 // Book Transcript persistence (CONTEXT.md glossary: Book Transcript, Transcript
 // Segment). Keyed by libraryItemId only — the Book Transcript is device-scoped,
 // not user/library scoped (see docs/book-transcript-implementation-plan.md
-// Phase 1). One row set per audiobook; dies with its download (Phase 4 wires
-// deleteBookTranscript into the download-delete flow).
+// Phase 1). Locally produced rows die with the download; ingested rows do not.
 
 export type BookTranscriptStatus = "in_progress" | "complete" | "failed";
 export type BookTranscriptTrackStatus = "pending" | "complete";
 export type BookTranscriptSourceStructure = "chapters" | "files";
+export type BookTranscriptOrigin = "local" | "ingested";
 
 /** One frozen Book Transcript section, captured at start time. */
 export type BookTranscriptSection = {
@@ -39,6 +39,9 @@ export type BookTranscriptRow = {
   errorCode: string | null;
   createdAt: number;
   updatedAt: number;
+  transcriptId: string | null;
+  tracksFingerprint: string | null;
+  origin: BookTranscriptOrigin;
 };
 
 export type BookTranscriptTrackRow = {
@@ -102,6 +105,9 @@ type BookTranscriptSqlRow = {
   error_code: string | null;
   created_at: number;
   updated_at: number;
+  transcript_id: string | null;
+  tracks_fingerprint: string | null;
+  origin: BookTranscriptOrigin | null;
 };
 
 type BookTranscriptTrackSqlRow = {
@@ -154,6 +160,9 @@ const toBookTranscriptRow = (row: BookTranscriptSqlRow): BookTranscriptRow => ({
   errorCode: row.error_code,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+  transcriptId: row.transcript_id,
+  tracksFingerprint: row.tracks_fingerprint,
+  origin: row.origin === "ingested" ? "ingested" : "local",
 });
 
 const toBookTranscriptTrackRow = (
@@ -299,6 +308,126 @@ export const createBookTranscript = (payload: {
     });
   });
 
+export type IngestedTranscriptWrite = {
+  libraryItemId: string;
+  transcriptId: string;
+  tracksFingerprint: string;
+  localeIdentifier: string;
+  sourceStructure: BookTranscriptSourceStructure;
+  sections: BookTranscriptSection[];
+  bookTitle: string;
+  bookAuthor: string | null;
+  asrJson: string;
+  tracks: {
+    trackIno: string;
+    filename: string;
+    trackIndex: number;
+    startOffsetMs: number;
+    durationMs: number;
+  }[];
+  segments: {
+    segmentIndex: number;
+    sectionIndex: number;
+    startMs: number;
+    endMs: number;
+    trackIndex: number;
+    trackStartMs: number;
+    trackEndMs: number;
+    text: string;
+    words: TranscriptSegmentWordTiming[] | null;
+    suspectReason: string | null;
+  }[];
+};
+
+/**
+ * Replace any existing Book Transcript for this item with a complete ingested
+ * one. Callers decide whether replacement is allowed (collision policy).
+ */
+export const replaceWithIngestedTranscript = (payload: IngestedTranscriptWrite) =>
+  withWriteGuard(async (): Promise<void> => {
+    await initializeShadowDatabaseInternal();
+    const db = await getDb();
+    const timestamp = now();
+
+    await runInTransaction(db, async () => {
+      await db.runAsync(`DELETE FROM book_transcript_segments WHERE library_item_id = ?`, [
+        payload.libraryItemId,
+      ]);
+      await db.runAsync(`DELETE FROM book_transcript_tracks WHERE library_item_id = ?`, [
+        payload.libraryItemId,
+      ]);
+      await db.runAsync(`DELETE FROM book_transcripts WHERE library_item_id = ?`, [
+        payload.libraryItemId,
+      ]);
+
+      await db.runAsync(
+        `INSERT INTO book_transcripts (
+          library_item_id, status, locale_identifier, source_structure,
+          sections_json, book_title, book_author, error_code, created_at, updated_at,
+          transcript_id, tracks_fingerprint, asr_json, origin
+        ) VALUES (?, 'complete', ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 'ingested')`,
+        [
+          payload.libraryItemId,
+          payload.localeIdentifier,
+          payload.sourceStructure,
+          JSON.stringify(payload.sections),
+          payload.bookTitle,
+          payload.bookAuthor,
+          timestamp,
+          timestamp,
+          payload.transcriptId,
+          payload.tracksFingerprint,
+          payload.asrJson,
+        ],
+      );
+
+      await insertChunkedRows(
+        db,
+        {
+          prefix: `INSERT INTO book_transcript_tracks (
+            library_item_id, track_ino, track_index, start_offset_ms, duration_ms,
+            status, completed_at, transcribed_through_ms, filename
+          )`,
+          rowPlaceholder: "(?, ?, ?, ?, ?, 'complete', ?, ?, ?)",
+        },
+        payload.tracks.map((track) => [
+          payload.libraryItemId,
+          track.trackIno,
+          track.trackIndex,
+          track.startOffsetMs,
+          track.durationMs,
+          timestamp,
+          track.durationMs,
+          track.filename,
+        ]),
+      );
+
+      await insertChunkedRows(
+        db,
+        {
+          prefix: `INSERT INTO book_transcript_segments (
+            library_item_id, section_index, start_ms, end_ms, text, words_json,
+            segment_index, suspect_reason, track_index, track_start_ms, track_end_ms
+          )`,
+          rowPlaceholder: "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        },
+        payload.segments.map((segment) => [
+          payload.libraryItemId,
+          segment.sectionIndex,
+          segment.startMs,
+          segment.endMs,
+          segment.text,
+          segment.words ? JSON.stringify(segment.words) : null,
+          segment.segmentIndex,
+          segment.suspectReason,
+          segment.trackIndex,
+          segment.trackStartMs,
+          segment.trackEndMs,
+        ]),
+      );
+    });
+  });
+
 /** The Book Transcript row for one audiobook, or null if none exists. */
 export const getBookTranscriptStatus = async (
   libraryItemId: string,
@@ -307,7 +436,8 @@ export const getBookTranscriptStatus = async (
   const db = await getDb();
   const row = await db.getFirstAsync<BookTranscriptSqlRow>(
     `SELECT library_item_id, status, locale_identifier, source_structure,
-            sections_json, book_title, book_author, error_code, created_at, updated_at
+            sections_json, book_title, book_author, error_code, created_at, updated_at,
+            transcript_id, tracks_fingerprint, origin
      FROM book_transcripts
      WHERE library_item_id = ?`,
     [libraryItemId],
@@ -584,7 +714,7 @@ export const getTranscriptFrontierMs = async (
   return computeTranscriptFrontierMs(rows.map(toBookTranscriptTrackRow));
 };
 
-/** Delete a Book Transcript and all its tracks/segments (dies with the download). */
+/** Delete a Book Transcript and all its tracks/segments. */
 export const deleteBookTranscript = (libraryItemId: string) =>
   withWriteGuard(async (): Promise<void> => {
     await initializeShadowDatabaseInternal();
@@ -606,6 +736,16 @@ export const deleteBookTranscript = (libraryItemId: string) =>
   });
 
 /**
+ * Download-delete path: drop a locally produced Book Transcript, leave an
+ * ingested one in place (it lives in the item folder, not the download).
+ */
+export const deleteLocalBookTranscript = async (libraryItemId: string) => {
+  const row = await getBookTranscriptStatus(libraryItemId);
+  if (row?.origin === "ingested") return;
+  await deleteBookTranscript(libraryItemId);
+};
+
+/**
  * The single in-progress Book Transcript, if any (at most one may be active —
  * CONTEXT.md invariant). Used on cold start to seed a "resumable" status.
  */
@@ -614,7 +754,8 @@ export const findResumableTranscript = async (): Promise<BookTranscriptRow | nul
   const db = await getDb();
   const row = await db.getFirstAsync<BookTranscriptSqlRow>(
     `SELECT library_item_id, status, locale_identifier, source_structure,
-            sections_json, book_title, book_author, error_code, created_at, updated_at
+            sections_json, book_title, book_author, error_code, created_at, updated_at,
+            transcript_id, tracks_fingerprint, origin
      FROM book_transcripts
      WHERE status = 'in_progress'
      ORDER BY updated_at DESC

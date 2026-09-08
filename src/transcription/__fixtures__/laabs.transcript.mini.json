@@ -1,0 +1,66 @@
+{
+  "formatVersion": 2,
+  "kind": "transcript",
+  "transcriptId": "sha256:mini000000000000000000000000000000000000000000000000000000000000",
+  "generator": "laabs-align/0.1.0",
+  "generatedAt": "2026-09-03T20:19:19Z",
+  "item": {
+    "bookTitle": "Any Way You Can",
+    "bookAuthor": "Dr. Annette Bosworth"
+  },
+  "localeIdentifier": "en_US",
+  "sourceStructure": "chapters",
+  "asr": {
+    "engine": "speechanalyzer"
+  },
+  "quality": {
+    "coverage": 0.92,
+    "degraded": false,
+    "suspectCount": 1
+  },
+  "sections": [
+    {
+      "index": 0,
+      "title": "Opening Credits",
+      "startMs": 0,
+      "endMs": 11966
+    }
+  ],
+  "tracks": [
+    {
+      "filename": "book.m4b",
+      "index": 0,
+      "startOffsetMs": 0,
+      "durationMs": 28941800
+    }
+  ],
+  "tracksFingerprint": "sha256:e281657eb8f30acf90917b2e61c6fe5e59b5c3b9b0dee9a6009789144b81125c",
+  "segments": [
+    {
+      "i": 0,
+      "sectionIndex": 0,
+      "startMs": 0,
+      "endMs": 1920,
+      "trackIndex": 0,
+      "trackStartMs": 0,
+      "trackEndMs": 1920,
+      "text": "This is Audible.",
+      "words": [
+        [0, 840, "This"],
+        [840, 1140, "is"],
+        [1140, 1920, "Audible."]
+      ]
+    },
+    {
+      "i": 1,
+      "sectionIndex": 0,
+      "startMs": 5000,
+      "endMs": 7000,
+      "trackIndex": 0,
+      "trackStartMs": 5000,
+      "trackEndMs": 7000,
+      "text": "Thank you for listening.",
+      "s": "repetition"
+    }
+  ]
+}

@@ -14,7 +14,7 @@ import {
 } from "../api/me-api";
 import { playlistsApi, type PlaylistSummary } from "../api/playlists-api";
 import { authStore } from "../auth/auth-store";
-import { deleteBookTranscript } from "../data/sqlite/shadow-db-transcripts";
+import { deleteLocalBookTranscript } from "../data/sqlite/shadow-db-transcripts";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import {
@@ -3298,9 +3298,10 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
         },
 
         deleteDownloadedBookData: async (libraryItemId) => {
-          // A Book Transcript dies with its download (CONTEXT.md lifetime rule).
-          // Doing it here rather than only in the delete UI makes EVERY path —
-          // including `cancelDownload`'s cleanup — drop the transcript.
+          // A locally produced Book Transcript dies with its download. An
+          // ingested one lives in the item folder and is left in place.
+          // Doing this here rather than only in the delete UI makes EVERY path —
+          // including `cancelDownload`'s cleanup — drop a local transcript.
           //
           // Lazily required: `@/transcription/book-transcription` imports this
           // store (and subscribes to it at module scope), so a static import
@@ -3321,7 +3322,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           } catch {
             // Transcription is iOS-only and optional — never block a deletion on it.
           }
-          await deleteBookTranscript(libraryItemId).catch(() => undefined);
+          await deleteLocalBookTranscript(libraryItemId).catch(() => undefined);
 
           const downloadInfo = get().downloadedBookData[libraryItemId];
 

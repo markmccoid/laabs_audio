@@ -1,7 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 const DATABASE_NAME = "laabs-shadow-library.db";
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -515,7 +515,11 @@ CREATE TABLE IF NOT EXISTS book_transcripts (
   book_author TEXT,
   error_code TEXT,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  transcript_id TEXT,
+  tracks_fingerprint TEXT,
+  asr_json TEXT,
+  origin TEXT NOT NULL DEFAULT 'local'
 );
 
 CREATE TABLE IF NOT EXISTS book_transcript_tracks (   -- resume unit = one audio file
@@ -527,6 +531,7 @@ CREATE TABLE IF NOT EXISTS book_transcript_tracks (   -- resume unit = one audio
   status TEXT NOT NULL,               -- 'pending' | 'complete'
   completed_at INTEGER,
   transcribed_through_ms INTEGER NOT NULL DEFAULT 0, -- TRACK-relative resume watermark (0 = file start)
+  filename TEXT,
   PRIMARY KEY (library_item_id, track_ino)
 );
 
@@ -537,10 +542,16 @@ CREATE TABLE IF NOT EXISTS book_transcript_segments (
   start_ms INTEGER NOT NULL,          -- book-absolute
   end_ms INTEGER NOT NULL,            -- book-absolute
   text TEXT NOT NULL,
-  words_json TEXT                     -- [[startMs,endMs,"word"], ...] book-absolute; null if unavailable
+  words_json TEXT,                    -- [[startMs,endMs,"word"], ...] book-absolute; null if unavailable
+  segment_index INTEGER,
+  suspect_reason TEXT,
+  track_index INTEGER,
+  track_start_ms INTEGER,
+  track_end_ms INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_transcript_segments_book_section
   ON book_transcript_segments(library_item_id, section_index, start_ms);
+
 `;
 
 export const initializeShadowDatabaseInternal = async () => {
@@ -619,6 +630,40 @@ export const initializeShadowDatabaseInternal = async () => {
     ALTER TABLE book_transcript_tracks ADD COLUMN transcribed_through_ms INTEGER NOT NULL DEFAULT 0;
   `,
       )
+      .catch(() => undefined);
+    // Schema v8: shipped Book Transcript ingest. New columns are nullable (or
+    // defaulted) so the local SpeechAnalyzer writer can keep omitting them.
+    await db
+      .execAsync(`ALTER TABLE book_transcripts ADD COLUMN transcript_id TEXT;`)
+      .catch(() => undefined);
+    await db
+      .execAsync(`ALTER TABLE book_transcripts ADD COLUMN tracks_fingerprint TEXT;`)
+      .catch(() => undefined);
+    await db
+      .execAsync(`ALTER TABLE book_transcripts ADD COLUMN asr_json TEXT;`)
+      .catch(() => undefined);
+    await db
+      .execAsync(
+        `ALTER TABLE book_transcripts ADD COLUMN origin TEXT NOT NULL DEFAULT 'local';`,
+      )
+      .catch(() => undefined);
+    await db
+      .execAsync(`ALTER TABLE book_transcript_tracks ADD COLUMN filename TEXT;`)
+      .catch(() => undefined);
+    await db
+      .execAsync(`ALTER TABLE book_transcript_segments ADD COLUMN segment_index INTEGER;`)
+      .catch(() => undefined);
+    await db
+      .execAsync(`ALTER TABLE book_transcript_segments ADD COLUMN suspect_reason TEXT;`)
+      .catch(() => undefined);
+    await db
+      .execAsync(`ALTER TABLE book_transcript_segments ADD COLUMN track_index INTEGER;`)
+      .catch(() => undefined);
+    await db
+      .execAsync(`ALTER TABLE book_transcript_segments ADD COLUMN track_start_ms INTEGER;`)
+      .catch(() => undefined);
+    await db
+      .execAsync(`ALTER TABLE book_transcript_segments ADD COLUMN track_end_ms INTEGER;`)
       .catch(() => undefined);
     if (!shadowSqliteRuntimeState.didEnsureEffectiveProgressView) {
       await db
