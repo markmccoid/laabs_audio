@@ -17,8 +17,8 @@
  *
  * 1. **Verifying that decoration taps reach JS.** `onDecorationActivated` *is*
  *    implemented on iOS (unlike `onSelectionChange`), and it is the route to
- *    tap-to-seek in EPUB Read-Along — but nothing has ever exercised it. E8's
- *    two-group case is the cheapest place to find out.
+ *    tap-to-seek in EPUB Read-Along. **E9** exercises it: the handler is wired
+ *    for every group, so taps on E5's and E8's decorations are recorded too.
  * 2. **Re-measuring the decoration cost on other hardware.**
  *    `DEFAULT_ACTIVE_LEAD_MS` is an iPhone 16 number, and a lead tuned on fast
  *    hardware fires late on slow. Stopwatch only — the frame counter here is
@@ -57,6 +57,18 @@ import {
   E8_WINDOW_SIZE,
   hasEnoughQuotesForWindow,
 } from "@/spikes/readium-anchor/window-groups";
+import {
+  buildClearedTapTargetGroup,
+  buildTapTargetGroup,
+  describeTap,
+  distinctTapTargets,
+  E9_INVISIBLE_TINT,
+  E9_TAP_COUNT,
+  E9_TAP_TINT,
+  hasEnoughQuotesForTapTargets,
+  parseTapTargetIndex,
+  type TapSample,
+} from "@/spikes/readium-anchor/tap-targets";
 import {
   deleteSpikeBook,
   importSpikeBook,
@@ -106,6 +118,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   ReadiumView,
+  type DecorationActivatedEvent,
   type DecorationGroup,
   type Locator,
   type PublicationReadyEvent,
@@ -180,6 +193,14 @@ export const SettingsReadiumSpikeScreen = () => {
   const [bulkQuotes, setBulkQuotes] = useState<SpikeQuote[]>([]);
   const [bulkHref, setBulkHref] = useState<string | null>(null);
   const [bulkReason, setBulkReason] = useState<"visible" | "largest" | null>(null);
+  /**
+   * Every decoration activation this session, newest first — E9. Not persisted:
+   * a tap count is only meaningful against the decorations currently painted,
+   * and a count restored from MMKV would read as a pass on a run that never
+   * happened.
+   */
+  const [tapSamples, setTapSamples] = useState<TapSample[]>([]);
+
   const [isSamplingLocations, setIsSamplingLocations] = useState(false);
   const [locationSamples, setLocationSamples] = useState<LocationSample[]>([]);
   /** Set just before a `goTo`, so the next location change can be attributed to it. */
@@ -494,6 +515,36 @@ export const SettingsReadiumSpikeScreen = () => {
     [pushLog],
   );
 
+  /**
+   * E9. Wired unconditionally rather than only while E9's own group is painted,
+   * because a tap that fires for one group and not another is the most useful
+   * failure available here — and it is invisible if the handler only listens to
+   * the group under test.
+   */
+  const handleDecorationActivated = useCallback(
+    (event: DecorationActivatedEvent) => {
+      const sample: TapSample = {
+        at: Date.now(),
+        id: event.decoration.id,
+        group: event.group,
+        index: parseTapTargetIndex(event.decoration.id),
+        point: event.point ? { x: event.point.x, y: event.point.y } : null,
+      };
+      setTapSamples((samples) => [sample, ...samples].slice(0, 50));
+      pushLog(
+        "tap",
+        `decoration activated — ${describeTap(sample)}`,
+        [
+          `id ${sample.id}`,
+          `href ${event.decoration.locator.href}`,
+          `quote "${truncate(event.decoration.locator.text?.highlight ?? "", 60)}"`,
+          sample.point ? `point ${sample.point.x.toFixed(0)},${sample.point.y.toFixed(0)}` : "no point",
+        ].join("\n"),
+      );
+    },
+    [pushLog],
+  );
+
   /** iOS: the edit-menu item is the only selection signal the binding delivers. */
   const handleSelectionAction = useCallback(
     (event: SelectionActionEvent) => {
@@ -657,6 +708,19 @@ export const SettingsReadiumSpikeScreen = () => {
 
   // ── E5 ────────────────────────────────────────────────────────────────────
 
+  /**
+   * Search is book-wide and capped at `BULK_SEARCH_CAP`, and the cap fills in
+   * **document order** — so a common query exhausts it long before reaching the
+   * chapter on screen, and `pickBulkResource` then silently falls back to
+   * "largest resource".
+   *
+   * Seen on a real book: the default query `the` reported 3,278 quotes in
+   * chapter002 while the reader was sitting in chapter007, and every experiment
+   * downstream would have decorated a chapter nobody could see. The log line
+   * names the resource and says which rule chose it — **read it**, and if it says
+   * "largest resource" when you wanted the visible one, narrow the query until it
+   * says "chapter on screen" instead.
+   */
   const collectBulkQuotes = useCallback(async () => {
     const reader = readerRef.current;
     if (!reader) return;
@@ -828,6 +892,46 @@ export const SettingsReadiumSpikeScreen = () => {
     pushLog("decorate", "E8 cleared — both groups sent empty");
   }, [pushLog]);
 
+  // ── E9 — do decoration taps reach JS? ─────────────────────────────────────
+
+  const canRunTapCase = Boolean(bulkHref) && hasEnoughQuotesForTapTargets(bulkQuotes);
+
+  const paintTapTargets = useCallback(
+    (tint: string = E9_TAP_TINT) => {
+      if (!bulkHref || !hasEnoughQuotesForTapTargets(bulkQuotes)) {
+        pushLog(
+          "decorate",
+          `E9 skipped — needs ${E9_TAP_COUNT} quotes in one chapter, have ${bulkQuotes.length}`,
+        );
+        return;
+      }
+      const isInvisible = tint === E9_INVISIBLE_TINT;
+      // Clearing the tap log with the paint is deliberate: counting taps against
+      // decorations that are no longer the ones on screen is how this experiment
+      // would lie about itself.
+      setTapSamples([]);
+      setDecorationGroups([buildTapTargetGroup(bulkHref, bulkQuotes, tint)]);
+      setActiveCase(`E9 tap targets (${E9_TAP_COUNT})${isInvisible ? " — invisible" : ""}`);
+      pushLog(
+        "decorate",
+        `E9 — ${E9_TAP_COUNT} ${isInvisible ? "invisible" : "tappable"} decoration(s) painted`,
+        isInvisible
+          ? // The targets are the same quotes in the same order, so the visible
+            // run is the map: paint visible first, note where the highlights sit,
+            // then paint invisible and tap the same places.
+            "Paint the visible targets first to learn where they are, then tap those same places."
+          : "Now tap two different teal highlights, then tap plain text between them.",
+      );
+    },
+    [bulkHref, bulkQuotes, pushLog],
+  );
+
+  const clearTapTargets = useCallback(() => {
+    setDecorationGroups([buildClearedTapTargetGroup()]);
+    setActiveCase("none");
+    pushLog("decorate", "E9 cleared — group sent empty");
+  }, [pushLog]);
+
   // ── E6 / E7 ───────────────────────────────────────────────────────────────
 
   const runGoToProgression = useCallback(
@@ -991,6 +1095,7 @@ export const SettingsReadiumSpikeScreen = () => {
             selectionActions={SELECTION_ACTIONS}
             onPublicationReady={handlePublicationReady}
             onLocationChange={handleLocationChange}
+            onDecorationActivated={handleDecorationActivated}
             onSelectionChange={handleSelectionChange}
             onSelectionAction={handleSelectionAction}
           />
@@ -1513,6 +1618,96 @@ export const SettingsReadiumSpikeScreen = () => {
               verdict={state.verdicts["8b"]}
               onRun={moveActiveUnit}
               onVerdict={(verdict) => setVerdict("8b", verdict)}
+            />
+          </Section>
+
+          <Section
+            title="E9 — do decoration taps reach JS?"
+            subtitle={`The one unproven link in tap-to-seek. ${E9_TAP_COUNT} teal highlights are painted; tapping one should fire onDecorationActivated with that decoration's own id. The handler listens to every group, so a tap landing on an E5 or E8 highlight is recorded too.`}
+          >
+            <Text style={{ color: themeColors.textMuted, fontSize: 12 }}>
+              {canRunTapCase
+                ? `Ready — ${bulkQuotes.length} quotes in ${bulkHref}. Paint, then tap two different teal highlights and one piece of plain text between them.`
+                : `Needs ${E9_TAP_COUNT} quotes in one chapter. Tap Collect in E5 first.`}
+            </Text>
+            <Text style={{ color: themeColors.textMuted, fontSize: 12 }}>
+              Also worth judging while the targets are up: whether a tint this faint
+              reads as &ldquo;this text is tappable&rdquo; or just as damage to the page.
+              Tap-to-seek would paint one over every aligned sentence.
+            </Text>
+
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              <ActionButton
+                title={`Paint tap targets (${E9_TAP_COUNT})`}
+                disabled={isBusy || !canRunTapCase}
+                onPress={() => paintTapTargets()}
+              />
+              <ActionButton
+                title="Paint invisible"
+                disabled={isBusy || !canRunTapCase}
+                onPress={() => paintTapTargets(E9_INVISIBLE_TINT)}
+              />
+              <ActionButton title="Clear" icon="xmark" onPress={clearTapTargets} />
+              <ActionButton
+                title="Reset tap log"
+                icon="arrow.counterclockwise"
+                onPress={() => setTapSamples([])}
+              />
+            </View>
+
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+              <Stat label="Activations" value={tapSamples.length} />
+              <Stat label="Distinct targets" value={distinctTapTargets(tapSamples)} />
+              <Stat
+                label="Last tap"
+                value={tapSamples[0] ? describeTap(tapSamples[0]) : null}
+              />
+            </View>
+
+            <CaseRow
+              title="9a — a tap on a highlight reaches JS"
+              detail="Pass if Activations moves at all when you tap a teal highlight. Fail means tap-to-seek is impossible through this binding and the fallback is prev/next-sentence buttons."
+              runLabel="Paint"
+              disabled={isBusy || !canRunTapCase}
+              verdict={state.verdicts["9a"]}
+              onRun={() => paintTapTargets()}
+              onVerdict={(verdict) => setVerdict("9a", verdict)}
+            />
+            <CaseRow
+              title="9b — the event names the decoration that was tapped"
+              detail="Tap two different highlights. Pass only if Distinct targets reaches 2 and each Last tap named the one under your finger — a callback that always reports the same target would pass 9a and still be useless."
+              runLabel="Paint"
+              disabled={isBusy || !canRunTapCase}
+              verdict={state.verdicts["9b"]}
+              onRun={() => paintTapTargets()}
+              onVerdict={(verdict) => setVerdict("9b", verdict)}
+            />
+            <CaseRow
+              title="9c — plain text does not fire"
+              detail="The control. Tap undecorated text between two targets; Activations must not move. If it fires anyway, 9a proved nothing about decorations."
+              runLabel="Paint"
+              disabled={isBusy || !canRunTapCase}
+              verdict={state.verdicts["9c"]}
+              onRun={() => paintTapTargets()}
+              onVerdict={(verdict) => setVerdict("9c", verdict)}
+            />
+            <CaseRow
+              title="9e — a fully transparent decoration is still tappable"
+              detail="The one that decides whether tap-to-seek has to tint the page at all. Paint the visible targets, note where two of them are, then Paint invisible and tap those same places. Pass if Activations still moves."
+              runLabel="Invisible"
+              disabled={isBusy || !canRunTapCase}
+              verdict={state.verdicts["9e"]}
+              onRun={() => paintTapTargets(E9_INVISIBLE_TINT)}
+              onVerdict={(verdict) => setVerdict("9e", verdict)}
+            />
+            <CaseRow
+              title="9d — activation survives a resource turn"
+              detail="Turn to another chapter and back, then tap a target again. The pod re-arms activation in spreadViewDidLoad, so this should hold — but it is the difference between tap-to-seek working for one chapter and working for a book."
+              runLabel="Paint"
+              disabled={isBusy || !canRunTapCase}
+              verdict={state.verdicts["9d"]}
+              onRun={() => paintTapTargets()}
+              onVerdict={(verdict) => setVerdict("9d", verdict)}
             />
           </Section>
 

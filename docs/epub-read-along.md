@@ -94,6 +94,45 @@ The `preferences` prop is **memoized**. It is a native `didSet`, so an inline ob
 re-submits the entire preference set on every render — several times a sentence, for a value that
 changes only when the popover is open.
 
+### Decoration taps reach JS (E9)
+
+**`onDecorationActivated` fires, and it names the decoration that was tapped.** Verified on the
+iPhone 17 Pro simulator (iOS 26.5) against a real book, through the E9 section of the Readium anchor
+spike. Four cases, all pass:
+
+- **9a** — a tap on a painted highlight fires the callback.
+- **9b** — two different targets fired in turn, each naming its own id. A callback hard-wired to one
+  decoration would pass a one-tap test and be useless for tap-to-seek; this rules that out.
+- **9c** (control) — three taps on undecorated text fired **nothing**. So 9a is a fact about
+  decorations rather than about taps.
+- **9d** — activation survives a resource turn. Left the chapter, came back, tapped again, still
+  fired. `spreadViewDidLoad` re-arms `setActivable()` for every group holding a callback, as the pod
+  source claims.
+
+Two independent confirmations the payload is real rather than synthetic: the ids alternated correctly
+across four taps, and the reported `point` matched the tap coordinates exactly in x, with y offset by
+a constant equal to the WebView's origin in the split layout.
+
+**This unblocks tap-to-seek.** It also means a tapped clip mark can open its clip.
+
+Two things this did *not* settle:
+
+- **The tint.** E9 painted `#80CBC4` at a measured contrast of **1.20:1** against the page — against
+  WCAG's 3:1 floor for a non-text affordance. It reads as a printing artifact, not as a control. But
+  E9's targets were **word-width**, because E5's quotes come from single-word search hits, whereas
+  tap-to-seek would paint a continuous band under *every* sentence. Those look nothing alike at
+  density. Do not settle the tint from E9; mock it with sentence-length spans first.
+- **Physical hardware.** Simulator only.
+
+### Readium decorations are invisible to accessibility
+
+Relevant to anyone trying to automate against this reader. `describe` returns the book's paragraphs
+as `AXStaticText`, but with frames in the **WebView's own content space** rather than screen space,
+so the coordinates are unusable directly; `native-describe-screen` omits the WebView text entirely;
+and the decorations themselves surface as no accessibility element at all. E9's taps had to be aimed
+by detecting the tint's pixels in a full-resolution screenshot. There is no supported path to tapping
+a decoration from the accessibility tree.
+
 ### `goTo` resolves the quote
 
 A `Locator` carrying `text.highlight` scrolls to **that exact sentence**, not near it — verified
