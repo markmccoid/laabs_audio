@@ -321,3 +321,42 @@ describe("collapseArm", () => {
     expect(collapseArm(null, NOW)).toBeNull();
   });
 });
+
+describe("decoration style", () => {
+  const unit = {
+    unitIndex: 7,
+    resourceIndex: 1,
+    quote: { b: "before ", h: "the sentence", a: " after" },
+    progression: 0.4,
+    provenance: "m" as const,
+    confidence: null,
+    startMs: 0,
+    endMs: 1000,
+    ambiguous: false,
+  };
+  const target = {
+    unitIndex: 7,
+    resourceIndex: 1,
+    href: "chapter1.xhtml",
+    type: "application/xhtml+xml",
+    progression: 0.4,
+  };
+
+  it("highlights by default, so every existing caller is unchanged", () => {
+    expect(toActiveDecoration(unit, target, "#fff").style.type).toBe("highlight");
+  });
+
+  it("underlines when asked", () => {
+    expect(toActiveDecoration(unit, target, "#fff", "underline").style.type).toBe("underline");
+    expect(buildActiveDecorationGroups(unit, target, "#fff", "underline")[0].decorations[0].style
+      .type).toBe("underline");
+  });
+
+  it("still names the group when there is nothing to paint", () => {
+    // "None" comes through as a null unit, and the group must survive it —
+    // dropping the group leaves the previous sentence lit for good (D21).
+    const [group] = buildActiveDecorationGroups(null, target, "#fff", "underline");
+    expect(group.name).toBe(ACTIVE_DECORATION_GROUP);
+    expect(group.decorations).toEqual([]);
+  });
+});

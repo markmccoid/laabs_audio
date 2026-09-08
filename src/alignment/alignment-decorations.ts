@@ -219,10 +219,18 @@ export const armFollow = (href: string, nowMs: number, kind: GoToKind = "follow"
   expiresAt: nowMs + (kind === "turn" ? TURN_ACK_WINDOW_MS : FOLLOW_ACK_WINDOW_MS),
 });
 
+/**
+ * The two decoration styles Readium will render. `DecorationData.swift` returns
+ * `nil` for every other `type`, and a `nil` style is a decoration that silently
+ * never appears — so this is a closed set, not a string.
+ */
+export type ActiveDecorationStyle = "highlight" | "underline";
+
 export const toActiveDecoration = (
   unit: AlignmentUnitRow,
   target: ReaderTarget,
   tint: string,
+  style: ActiveDecorationStyle = "highlight",
 ): Decoration => ({
   // Keyed on the unit so a re-apply of the *same* unit is idempotent, and a move
   // is unambiguously a different decoration.
@@ -232,7 +240,7 @@ export const toActiveDecoration = (
     type: target.type,
     text: { before: unit.quote.b, highlight: unit.quote.h, after: unit.quote.a },
   },
-  style: { type: "highlight", tint },
+  style: { type: style, tint },
 });
 
 /**
@@ -246,9 +254,10 @@ export const buildActiveDecorationGroups = (
   unit: AlignmentUnitRow | null,
   target: ReaderTarget | null,
   tint: string,
+  style: ActiveDecorationStyle = "highlight",
 ): DecorationGroup[] => [
   {
     name: ACTIVE_DECORATION_GROUP,
-    decorations: unit && target ? [toActiveDecoration(unit, target, tint)] : [],
+    decorations: unit && target ? [toActiveDecoration(unit, target, tint, style)] : [],
   },
 ];

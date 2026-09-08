@@ -744,6 +744,7 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
         title={bookTitle}
         fontSize={fontSize}
         wordHighlightStyle={wordHighlightStyle}
+        isBookSurface={isBookSurface}
         themeColors={themeColors}
         topInset={insets.top}
         onClose={() => router.back()}

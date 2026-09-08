@@ -16,6 +16,18 @@ import {
   normalizeReadAlongWordHighlightStyle,
   type ReadAlongWordHighlightStyle,
 } from "../read-along/read-along-rendering";
+import {
+  clampEpubFontScale,
+  clampEpubLineHeight,
+  clampEpubPageMargins,
+  DEFAULT_EPUB_READING_PREFERENCES,
+  normalizeEpubReaderFont,
+  normalizeEpubReaderTheme,
+  normalizeEpubSentenceHighlightStyle,
+  type EpubReaderFont,
+  type EpubReaderTheme,
+  type EpubSentenceHighlightStyle,
+} from "../read-along/epub-reading-preferences";
 
 export const DEFAULT_HOME_SHELF_ITEM_COUNT = 15;
 export const MIN_HOME_SHELF_ITEM_COUNT = 5;
@@ -194,6 +206,21 @@ export type SettingsState = {
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
   readAlongFontSize: number;
   readAlongWordHighlightStyle: ReadAlongWordHighlightStyle;
+  /**
+   * EPUB Read-Along's appearance, kept apart from the transcript's above.
+   *
+   * Deliberately not shared. The transcript's size is a point value the app
+   * draws with; the EPUB's is a ratio applied to the publisher's own CSS, so one
+   * slider driving both would leave whichever surface the reader was not looking
+   * at set to a size they never chose.
+   */
+  readAlongEpubFontScale: number;
+  readAlongEpubTheme: EpubReaderTheme;
+  readAlongEpubFont: EpubReaderFont;
+  readAlongEpubPageMargins: number;
+  readAlongEpubLineHeight: number;
+  readAlongEpubPublisherStyles: boolean;
+  readAlongEpubSentenceHighlightStyle: EpubSentenceHighlightStyle;
   actions: {
     setPlaybackRate: (rate: number) => void;
     setPlaybackRateRangeMin: (rate: number) => void;
@@ -235,6 +262,13 @@ export type SettingsState = {
     ) => void;
     setReadAlongFontSize: (fontSize: number) => void;
     setReadAlongWordHighlightStyle: (style: ReadAlongWordHighlightStyle) => void;
+    setReadAlongEpubFontScale: (scale: number) => void;
+    setReadAlongEpubTheme: (theme: EpubReaderTheme) => void;
+    setReadAlongEpubFont: (font: EpubReaderFont) => void;
+    setReadAlongEpubPageMargins: (margins: number) => void;
+    setReadAlongEpubLineHeight: (lineHeight: number) => void;
+    setReadAlongEpubPublisherStyles: (enabled: boolean) => void;
+    setReadAlongEpubSentenceHighlightStyle: (style: EpubSentenceHighlightStyle) => void;
   };
 };
 
@@ -274,6 +308,13 @@ export const settingsStore = createStore<SettingsState>()(
       discoverShelfByScope: {},
       readAlongFontSize: DEFAULT_READ_ALONG_FONT_SIZE,
       readAlongWordHighlightStyle: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE,
+      readAlongEpubFontScale: DEFAULT_EPUB_READING_PREFERENCES.fontScale,
+      readAlongEpubTheme: DEFAULT_EPUB_READING_PREFERENCES.theme,
+      readAlongEpubFont: DEFAULT_EPUB_READING_PREFERENCES.font,
+      readAlongEpubPageMargins: DEFAULT_EPUB_READING_PREFERENCES.pageMargins,
+      readAlongEpubLineHeight: DEFAULT_EPUB_READING_PREFERENCES.lineHeight,
+      readAlongEpubPublisherStyles: DEFAULT_EPUB_READING_PREFERENCES.publisherStyles,
+      readAlongEpubSentenceHighlightStyle: normalizeEpubSentenceHighlightStyle(undefined),
       actions: {
         setPlaybackRate: (playbackRate) => set({ playbackRate }),
         setPlaybackRateRangeMin: (playbackRateRangeMin) =>
@@ -586,6 +627,21 @@ export const settingsStore = createStore<SettingsState>()(
           set({ readAlongFontSize: clampReadAlongFontSize(fontSize) }),
         setReadAlongWordHighlightStyle: (style) =>
           set({ readAlongWordHighlightStyle: normalizeReadAlongWordHighlightStyle(style) }),
+        setReadAlongEpubFontScale: (scale) =>
+          set({ readAlongEpubFontScale: clampEpubFontScale(scale) }),
+        setReadAlongEpubTheme: (theme) =>
+          set({ readAlongEpubTheme: normalizeEpubReaderTheme(theme) }),
+        setReadAlongEpubFont: (font) => set({ readAlongEpubFont: normalizeEpubReaderFont(font) }),
+        setReadAlongEpubPageMargins: (margins) =>
+          set({ readAlongEpubPageMargins: clampEpubPageMargins(margins) }),
+        setReadAlongEpubLineHeight: (lineHeight) =>
+          set({ readAlongEpubLineHeight: clampEpubLineHeight(lineHeight) }),
+        setReadAlongEpubPublisherStyles: (readAlongEpubPublisherStyles) =>
+          set({ readAlongEpubPublisherStyles }),
+        setReadAlongEpubSentenceHighlightStyle: (style) =>
+          set({
+            readAlongEpubSentenceHighlightStyle: normalizeEpubSentenceHighlightStyle(style),
+          }),
       },
     }),
     {
@@ -617,6 +673,13 @@ export const settingsStore = createStore<SettingsState>()(
         discoverShelfByScope: state.discoverShelfByScope,
         readAlongFontSize: state.readAlongFontSize,
         readAlongWordHighlightStyle: state.readAlongWordHighlightStyle,
+        readAlongEpubFontScale: state.readAlongEpubFontScale,
+        readAlongEpubTheme: state.readAlongEpubTheme,
+        readAlongEpubFont: state.readAlongEpubFont,
+        readAlongEpubPageMargins: state.readAlongEpubPageMargins,
+        readAlongEpubLineHeight: state.readAlongEpubLineHeight,
+        readAlongEpubPublisherStyles: state.readAlongEpubPublisherStyles,
+        readAlongEpubSentenceHighlightStyle: state.readAlongEpubSentenceHighlightStyle,
       }),
       version: 19,
       migrate: (persistedState, version) => {
@@ -649,6 +712,14 @@ export const settingsStore = createStore<SettingsState>()(
             discoverShelfByScope: {},
             readAlongFontSize: DEFAULT_READ_ALONG_FONT_SIZE,
             readAlongWordHighlightStyle: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE,
+            readAlongEpubFontScale: DEFAULT_EPUB_READING_PREFERENCES.fontScale,
+            readAlongEpubTheme: DEFAULT_EPUB_READING_PREFERENCES.theme,
+            readAlongEpubFont: DEFAULT_EPUB_READING_PREFERENCES.font,
+            readAlongEpubPageMargins: DEFAULT_EPUB_READING_PREFERENCES.pageMargins,
+            readAlongEpubLineHeight: DEFAULT_EPUB_READING_PREFERENCES.lineHeight,
+            readAlongEpubPublisherStyles: DEFAULT_EPUB_READING_PREFERENCES.publisherStyles,
+            readAlongEpubSentenceHighlightStyle:
+              normalizeEpubSentenceHighlightStyle(undefined),
           };
         }
 
@@ -760,6 +831,26 @@ export const settingsStore = createStore<SettingsState>()(
           // and the normalizer turns that absence into the default.
           readAlongWordHighlightStyle: normalizeReadAlongWordHighlightStyle(
             state.readAlongWordHighlightStyle,
+          ),
+          // Same treatment as `readAlongWordHighlightStyle` above: added without a
+          // version bump, because every one of these is absent on an older blob
+          // and its normalizer turns that absence into the default.
+          readAlongEpubFontScale: clampEpubFontScale(
+            state.readAlongEpubFontScale ?? DEFAULT_EPUB_READING_PREFERENCES.fontScale,
+          ),
+          readAlongEpubTheme: normalizeEpubReaderTheme(state.readAlongEpubTheme),
+          readAlongEpubFont: normalizeEpubReaderFont(state.readAlongEpubFont),
+          readAlongEpubPageMargins: clampEpubPageMargins(
+            state.readAlongEpubPageMargins ?? DEFAULT_EPUB_READING_PREFERENCES.pageMargins,
+          ),
+          readAlongEpubLineHeight: clampEpubLineHeight(
+            state.readAlongEpubLineHeight ?? DEFAULT_EPUB_READING_PREFERENCES.lineHeight,
+          ),
+          readAlongEpubPublisherStyles:
+            state.readAlongEpubPublisherStyles ??
+            DEFAULT_EPUB_READING_PREFERENCES.publisherStyles,
+          readAlongEpubSentenceHighlightStyle: normalizeEpubSentenceHighlightStyle(
+            state.readAlongEpubSentenceHighlightStyle,
           ),
         };
       },

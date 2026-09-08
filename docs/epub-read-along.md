@@ -70,6 +70,30 @@ look-ahead is automatically `leadMs × rate` in book time and stays correct at 2
 be calibrated on the device**; one tuned on an iPhone 16 fires late on slower hardware, which is
 worse than not pre-firing.
 
+### Reading appearance is Readium's, not ours
+
+The `Aa` popover is surface-aware: `ReadAlongBookAppearance` replaces the transcript's rows on the
+Book surface, because the app draws none of that text. Three constraints, all read out of the pod
+rather than guessed, and all encoded in `src/read-along/epub-reading-preferences.ts`:
+
+- **`fontSize` is a ratio.** `ReadiumCSS.swift:48` wraps it in `CSSPercentLength`, so `1.0` is the
+  publisher's own size. The transcript's 14-24 pt scale is not reused — mapped to a ratio it spans
+  0.82-1.41, far too narrow for an ebook, and a stepper reading "17" over text that is not 17 pt
+  would misdescribe its own control. EPUB Read-Along has its own 70%-200% setting.
+- **Line spacing is gated behind publisher styles.** `ReadiumCSS` passes
+  `advancedSettings: !publisherStyles`, and Readium CSS ignores `--USER__lineHeight` unless that is
+  on. So line spacing cannot be offered on its own; the popover carries an explicit **Publisher
+  typography** toggle and the line-spacing stepper is disabled until it is off. Text size, theme,
+  font and margins are all outside that gate.
+- **Only `highlight` and `underline` exist.** `DecorationData.swift:96` returns `nil` for every other
+  style, and a `nil` style is a decoration that silently never appears. The transcript's `bold` and
+  `color` word treatments have no counterpart, which is why the Book surface says *Sentence
+  highlight* with three options rather than reusing `ReadAlongWordHighlightStyle`.
+
+The `preferences` prop is **memoized**. It is a native `didSet`, so an inline object literal
+re-submits the entire preference set on every render — several times a sentence, for a value that
+changes only when the popover is open.
+
 ### `goTo` resolves the quote
 
 A `Locator` carrying `text.highlight` scrolls to **that exact sentence**, not near it — verified

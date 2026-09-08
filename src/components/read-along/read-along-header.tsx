@@ -9,6 +9,7 @@ import {
   useSettingsActions,
 } from "@/store/settings-store";
 import type { ThemeColors } from "@/theme/use-app-theme";
+import { ReadAlongBookAppearance } from "./read-along-appearance-book";
 import { ReadAlongPopoverBackdrop } from "./read-along-popover-backdrop";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useState } from "react";
@@ -39,6 +40,12 @@ type ReadAlongHeaderProps = {
   title: string;
   fontSize: number;
   wordHighlightStyle: ReadAlongWordHighlightStyle;
+  /**
+   * Which surface the popover is configuring. The two share nothing but the
+   * button: on the Book surface the app draws none of the text, so the
+   * transcript's rows have nothing to act on (see `ReadAlongBookAppearance`).
+   */
+  isBookSurface: boolean;
   themeColors: ThemeColors;
   topInset: number;
   onClose: () => void;
@@ -178,6 +185,7 @@ export const ReadAlongHeader = ({
   title,
   fontSize,
   wordHighlightStyle,
+  isBookSurface,
   themeColors,
   topInset,
   onClose,
@@ -269,7 +277,7 @@ export const ReadAlongHeader = ({
             top: topInset + 50,
             right: 12,
             zIndex: 3,
-            width: 244,
+            width: isBookSurface ? 268 : 244,
             gap: 8,
             borderRadius: 16,
             borderCurve: "continuous",
@@ -281,46 +289,59 @@ export const ReadAlongHeader = ({
             boxShadow: "0 12px 24px rgba(15, 23, 42, 0.18)",
           }}
         >
-          <SectionLabel text="Text size" color={themeColors.textMuted} />
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <StepperButton
-              label="Decrease text size"
-              symbol="-"
-              disabled={fontSize <= MIN_READ_ALONG_FONT_SIZE}
-              onPress={() => setReadAlongFontSize(fontSize - 1)}
-              themeColors={themeColors}
-            />
-            <Text
-              accessibilityLabel={`Text size ${fontSize}`}
-              style={{ minWidth: 28, textAlign: "center", fontSize: 14, color: themeColors.text }}
-            >
-              {fontSize}
-            </Text>
-            <StepperButton
-              label="Increase text size"
-              symbol="+"
-              disabled={fontSize >= MAX_READ_ALONG_FONT_SIZE}
-              onPress={() => setReadAlongFontSize(fontSize + 1)}
-              themeColors={themeColors}
-            />
-          </View>
+          {isBookSurface ? (
+            <ReadAlongBookAppearance themeColors={themeColors} />
+          ) : (
+            <>
+              <SectionLabel text="Text size" color={themeColors.textMuted} />
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <StepperButton
+                  label="Decrease text size"
+                  symbol="-"
+                  disabled={fontSize <= MIN_READ_ALONG_FONT_SIZE}
+                  onPress={() => setReadAlongFontSize(fontSize - 1)}
+                  themeColors={themeColors}
+                />
+                <Text
+                  accessibilityLabel={`Text size ${fontSize}`}
+                  style={{
+                    minWidth: 28,
+                    textAlign: "center",
+                    fontSize: 14,
+                    color: themeColors.text,
+                  }}
+                >
+                  {fontSize}
+                </Text>
+                <StepperButton
+                  label="Increase text size"
+                  symbol="+"
+                  disabled={fontSize >= MAX_READ_ALONG_FONT_SIZE}
+                  onPress={() => setReadAlongFontSize(fontSize + 1)}
+                  themeColors={themeColors}
+                />
+              </View>
 
-          <View style={{ height: 1, backgroundColor: themeColors.border, marginVertical: 2 }} />
-
-          {/* "Word highlight", not "Highlight": the segment block stays on in
-              every style, including None, and the heading has to say so. */}
-          <SectionLabel text="Word highlight" color={themeColors.textMuted} />
-          <View accessibilityRole="radiogroup" accessibilityLabel="Word highlight">
-            {READ_ALONG_WORD_HIGHLIGHT_STYLES.map((style) => (
-              <WordHighlightRow
-                key={style}
-                style={style}
-                isSelected={style === wordHighlightStyle}
-                onSelect={setReadAlongWordHighlightStyle}
-                themeColors={themeColors}
+              <View
+                style={{ height: 1, backgroundColor: themeColors.border, marginVertical: 2 }}
               />
-            ))}
-          </View>
+
+              {/* "Word highlight", not "Highlight": the segment block stays on in
+                  every style, including None, and the heading has to say so. */}
+              <SectionLabel text="Word highlight" color={themeColors.textMuted} />
+              <View accessibilityRole="radiogroup" accessibilityLabel="Word highlight">
+                {READ_ALONG_WORD_HIGHLIGHT_STYLES.map((style) => (
+                  <WordHighlightRow
+                    key={style}
+                    style={style}
+                    isSelected={style === wordHighlightStyle}
+                    onSelect={setReadAlongWordHighlightStyle}
+                    themeColors={themeColors}
+                  />
+                ))}
+              </View>
+            </>
+          )}
         </View>
       ) : null}
     </View>

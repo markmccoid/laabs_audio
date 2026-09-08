@@ -39,8 +39,13 @@ import {
   type AlignmentTimedUnitRow,
   type AlignmentUnitRow,
 } from "@/data/sqlite/shadow-db-alignment";
+import {
+  buildReaderPreferences,
+  toDecorationStyleType,
+} from "@/read-along/epub-reading-preferences";
 import { useReadAlongPosition } from "@/read-along/use-read-along-position";
-import { useThemeColors } from "@/theme/use-app-theme";
+import { useSettingsStore } from "@/store/settings-store";
+import { useIsDarkTheme, useThemeColors } from "@/theme/use-app-theme";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -79,8 +84,41 @@ export const EpubReadAlongView = ({
   bottomInset = 0,
 }: EpubReadAlongViewProps) => {
   const themeColors = useThemeColors();
+  const isDarkTheme = useIsDarkTheme();
   const insets = useSafeAreaInsets();
   const readerRef = useRef<ReadiumViewRef>(null);
+
+  const fontScale = useSettingsStore((state) => state.readAlongEpubFontScale);
+  const readerTheme = useSettingsStore((state) => state.readAlongEpubTheme);
+  const readerFont = useSettingsStore((state) => state.readAlongEpubFont);
+  const pageMargins = useSettingsStore((state) => state.readAlongEpubPageMargins);
+  const lineHeight = useSettingsStore((state) => state.readAlongEpubLineHeight);
+  const publisherStyles = useSettingsStore((state) => state.readAlongEpubPublisherStyles);
+  const sentenceHighlightStyle = useSettingsStore(
+    (state) => state.readAlongEpubSentenceHighlightStyle,
+  );
+
+  /**
+   * Memoized because the native `preferences` setter is a `didSet`: an inline
+   * object literal is a new value on every render, so Readium would re-submit
+   * the whole preference set on every highlight move — several times a sentence,
+   * for a value that changes only when the reader opens the `Aa` popover.
+   */
+  const readerPreferences = useMemo(
+    () =>
+      buildReaderPreferences(
+        {
+          fontScale,
+          theme: readerTheme,
+          font: readerFont,
+          pageMargins,
+          lineHeight,
+          publisherStyles,
+        },
+        isDarkTheme,
+      ),
+    [fontScale, readerTheme, readerFont, pageMargins, lineHeight, publisherStyles, isDarkTheme],
+  );
 
   const [timedUnits, setTimedUnits] = useState<AlignmentTimedUnitRow[]>([]);
   const [resources, setResources] = useState<AlignmentResourceRow[]>([]);
@@ -206,8 +244,16 @@ export const EpubReadAlongView = ({
   // anchor the previous sentence into the current chapter.
   const groups = useMemo(() => {
     const matched = activeUnit && target && activeUnit.unitIndex === target.unitIndex;
-    return buildActiveDecorationGroups(matched ? activeUnit : null, target, themeColors.accent);
-  }, [activeUnit, target, themeColors.accent]);
+    const styleType = toDecorationStyleType(sentenceHighlightStyle);
+    // "None" still sends the group, empty. Dropping the group instead would
+    // leave the last sentence lit for the rest of the book (D21).
+    return buildActiveDecorationGroups(
+      styleType && matched ? activeUnit : null,
+      target,
+      themeColors.accent,
+      styleType ?? "highlight",
+    );
+  }, [activeUnit, target, themeColors.accent, sentenceHighlightStyle]);
 
   useEffect(() => {
     setDecorationGroups(groups);
@@ -317,7 +363,7 @@ export const EpubReadAlongView = ({
       <ReadiumView
         ref={readerRef}
         file={{ url: epubUri }}
-        preferences={{ scroll: true }}
+        preferences={readerPreferences}
         decorations={decorationGroups}
         onLocationChange={handleLocationChange}
         onPublicationReady={handlePublicationReady}
