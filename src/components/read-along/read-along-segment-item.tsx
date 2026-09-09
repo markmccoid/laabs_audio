@@ -1,10 +1,10 @@
-import { buildWordSpans } from "@/read-along/read-along-rendering";
+import { ReadAlongTranscriptText } from "./read-along-transcript-text";
 import {
   areSegmentPropsEqual,
   type ReadAlongSegmentItemProps,
 } from "@/read-along/read-along-segment-props";
-import { memo, useEffect, useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { memo, useEffect } from "react";
+import { Pressable, StyleSheet, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 
 /**
@@ -16,7 +16,6 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-na
 
 /** Matches the plan's "gentle cross-fade" on the segment tint. */
 const TINT_FADE_DURATION_MS = 220;
-const LINE_HEIGHT_RATIO = 1.5;
 
 /**
  * The Bookmark Gutter's lane. Wide enough for two stacked markers, because
@@ -39,6 +38,7 @@ const ReadAlongSegmentItemBase = ({
   palette,
   words,
   activeWordIndex,
+  wordHighlightCount,
   markers,
   onPress,
   onLongPress,
@@ -51,19 +51,6 @@ const ReadAlongSegmentItemBase = ({
   }, [isActive, tintProgress]);
 
   const tintStyle = useAnimatedStyle(() => ({ opacity: tintProgress.value }));
-
-  // Only the active segment ever has word timings, so this alignment work runs
-  // for one item at a time.
-  const spans = useMemo(
-    () => (isActive ? buildWordSpans(row.text, words) : null),
-    [isActive, row.text, words],
-  );
-
-  const textStyle = {
-    fontSize,
-    lineHeight: Math.round(fontSize * LINE_HEIGHT_RATIO),
-    color: palette.text,
-  };
 
   const visibleMarkers = markers.slice(0, MAX_VISIBLE_MARKERS);
 
@@ -128,21 +115,15 @@ const ReadAlongSegmentItemBase = ({
             )}
           </Pressable>
         ))}
-        <Text style={textStyle}>
-          {spans
-            ? spans.map((span, index) =>
-                span.wordIndex === activeWordIndex &&
-                span.wordIndex >= 0 &&
-                palette.wordAppearance ? (
-                  <Text key={index} style={palette.wordAppearance}>
-                    {span.text}
-                  </Text>
-                ) : (
-                  span.text
-                ),
-              )
-            : row.text}
-        </Text>
+        <ReadAlongTranscriptText
+          row={row}
+          isActive={isActive}
+          fontSize={fontSize}
+          palette={palette}
+          words={words}
+          activeWordIndex={activeWordIndex}
+          wordHighlightCount={wordHighlightCount}
+        />
       </View>
     </Pressable>
   );

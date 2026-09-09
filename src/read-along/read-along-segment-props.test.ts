@@ -23,6 +23,7 @@ const baseProps = () => ({
   },
   words: null,
   activeWordIndex: -1,
+  wordHighlightCount: 3 as const,
   markers: [] as const,
   onPress: noop,
   onLongPress: noop,
@@ -70,6 +71,16 @@ describe("areSegmentPropsEqual", () => {
   it("honours word ticks while the segment is active", () => {
     const previous = { ...baseProps(), isActive: true };
     expect(areSegmentPropsEqual(previous, { ...previous, activeWordIndex: 4 })).toBe(false);
+  });
+
+  it("re-renders the active segment when the highlight count changes", () => {
+    const previous = { ...baseProps(), isActive: true };
+    expect(areSegmentPropsEqual(previous, { ...previous, wordHighlightCount: 4 })).toBe(false);
+  });
+
+  it("defers a highlight count change until an inactive segment becomes active", () => {
+    const previous = baseProps();
+    expect(areSegmentPropsEqual(previous, { ...previous, wordHighlightCount: 4 })).toBe(true);
   });
 
   it("re-renders on a font size or palette change", () => {

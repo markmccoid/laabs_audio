@@ -1,12 +1,103 @@
 import type { TranscriptSegmentWordTiming } from "@/data/sqlite/shadow-db-transcripts";
 import {
   buildWordSpans,
+  buildWordRanges,
+  getWordHighlightWindow,
+  normalizeReadAlongWordHighlightCount,
   normalizeReadAlongWordHighlightStyle,
+  READ_ALONG_WORD_HIGHLIGHT_COUNTS,
   READ_ALONG_WORD_HIGHLIGHT_STYLES,
   resolveWordHighlightStyle,
   withAlpha,
   WORD_HIGHLIGHT_ALPHA,
 } from "./read-along-rendering";
+
+describe("three-word transcript highlight window", () => {
+  const words = (...tokens: string[]): TranscriptSegmentWordTiming[] =>
+    tokens.map((token, index) => [index, index + 1, token]);
+
+  it("holds the same three-word group until all three words are spoken", () => {
+    const spans = buildWordSpans(
+      "One two three four five six seven.",
+      words("One", "two", "three", "four", "five", "six", "seven"),
+    );
+    expect(getWordHighlightWindow(spans, 0)).toEqual({ startIndex: 0, wordCount: 3 });
+    expect(getWordHighlightWindow(spans, 1)).toEqual({ startIndex: 0, wordCount: 3 });
+    expect(getWordHighlightWindow(spans, 2)).toEqual({ startIndex: 0, wordCount: 3 });
+    expect(getWordHighlightWindow(spans, 3)).toEqual({ startIndex: 3, wordCount: 3 });
+    expect(getWordHighlightWindow(spans, 5)).toEqual({ startIndex: 3, wordCount: 3 });
+    expect(getWordHighlightWindow(spans, 6)).toEqual({ startIndex: 6, wordCount: 1 });
+  });
+
+  it("shrinks at the end of a sentence or segment", () => {
+    const spans = buildWordSpans("One two. Next sentence.", words("One", "two", "Next", "sentence"));
+    expect(getWordHighlightWindow(spans, 0)).toEqual({ startIndex: 0, wordCount: 2 });
+    expect(getWordHighlightWindow(spans, 1)).toEqual({ startIndex: 0, wordCount: 2 });
+    expect(getWordHighlightWindow(spans, 2)).toEqual({ startIndex: 2, wordCount: 2 });
+    expect(getWordHighlightWindow(spans, 3)).toEqual({ startIndex: 2, wordCount: 2 });
+  });
+
+  it("recognizes sentence punctuation detached from timing tokens", () => {
+    const spans = buildWordSpans("One two! Three four", words("One", "two", "Three", "four"));
+    expect(getWordHighlightWindow(spans, 0)).toEqual({ startIndex: 0, wordCount: 2 });
+  });
+
+  it("returns no window when there is no active aligned word", () => {
+    const spans = buildWordSpans("One two", words("One", "two"));
+    expect(getWordHighlightWindow(spans, -1)).toEqual({ startIndex: -1, wordCount: 0 });
+    expect(getWordHighlightWindow(null, 0)).toEqual({ startIndex: -1, wordCount: 0 });
+  });
+
+  it.each(READ_ALONG_WORD_HIGHLIGHT_COUNTS)(
+    "holds fixed groups of %i within a sentence",
+    (count) => {
+      const spans = buildWordSpans(
+        "One two three four five.",
+        words("One", "two", "three", "four", "five"),
+      );
+      expect(getWordHighlightWindow(spans, count - 1, count)).toEqual({
+        startIndex: 0,
+        wordCount: count,
+      });
+      expect(getWordHighlightWindow(spans, count, count)).toEqual({
+        startIndex: count,
+        wordCount: 5 - count > count ? count : 5 - count,
+      });
+    },
+  );
+});
+
+describe("normalizeReadAlongWordHighlightCount", () => {
+  it("passes through every supported count", () => {
+    for (const count of READ_ALONG_WORD_HIGHLIGHT_COUNTS) {
+      expect(normalizeReadAlongWordHighlightCount(count)).toBe(count);
+    }
+  });
+
+  it("falls back to three for unsupported persisted values", () => {
+    expect(normalizeReadAlongWordHighlightCount(undefined)).toBe(3);
+    expect(normalizeReadAlongWordHighlightCount(0)).toBe(3);
+    expect(normalizeReadAlongWordHighlightCount(5)).toBe(3);
+    expect(normalizeReadAlongWordHighlightCount("3")).toBe(3);
+  });
+});
+
+describe("TextKit word ranges", () => {
+  it("preserves UTF-16 offsets through emoji, punctuation, repeated words and newlines", () => {
+    const text = "📖 ‘Hello,’\nHello café 👩🏽‍💻!";
+    const tokens = ["Hello", "Hello", "café", "👩🏽‍💻"];
+    const words: TranscriptSegmentWordTiming[] = tokens.map((token, index) => [index, index + 1, token]);
+    const ranges = buildWordRanges(buildWordSpans(text, words));
+    expect(ranges[0]).toEqual([4, 5]); // NSString counts the opening emoji as two UTF-16 units.
+    expect(ranges[1]).toEqual([12, 5]);
+    expect(ranges.map(([start, length]) => text.slice(start, start + length))).toEqual(tokens);
+  });
+
+  it("does not invent ranges when alignment fails or timing data is unavailable", () => {
+    expect(buildWordRanges(buildWordSpans("Real text", [[0, 1, "missing"]]))).toEqual([]);
+    expect(buildWordRanges(null)).toEqual([]);
+  });
+});
 
 describe("withAlpha", () => {
   it("converts six-digit hex", () => {

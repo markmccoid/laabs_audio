@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-08` `pending` - Smooth Transcript Read-Along highlighting with rounded, fading highlight transitions and fixed, sentence-bounded word groups. The Aa appearance menu now lets readers highlight 1, 2, 3, or 4 words at a time, with 3 as the default.
+  Tester focus: play several transcript passages at different speeds and confirm the highlight moves between stable groups without sliding one word at a time. Try all four group sizes, including sentences whose final group is shorter than the chosen size, and confirm the choice updates immediately and survives restarting the app. Check wrapped lines, punctuation, light and dark themes, and Reduce Motion.
+
 - `2026-09-03` `pending` - Ingest a Book Transcript from `laabs.transcript.json` in the Audiobookshelf item folder and open it in Read-Along, with no EPUB and without waiting for on-device transcription.
   Tester focus: put `laabs.transcript.json` in a book's item folder on the server, open the book in LAABS, then open Read-Along — highlighting should track playback, including word highlight. Confirm this works without downloading the book and on a device that cannot transcribe (pre-iOS 26). Delete the download of a book that was transcribed on-device and confirm that transcript disappears; delete the download of a book whose transcript was ingested and confirm Read-Along still has the text. Open Read-Along on a book that is currently being transcribed on-device while a shipped file also exists — the in-progress run must keep going, not be replaced.
 

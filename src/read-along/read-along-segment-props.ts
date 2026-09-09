@@ -3,7 +3,10 @@ import type {
   TranscriptSegmentWordTiming,
 } from "@/data/sqlite/shadow-db-transcripts";
 import type { ReadAlongBookmarkMarker } from "@/read-along/read-along-bookmark-markers";
-import type { ReadAlongWordAppearance } from "@/read-along/read-along-rendering";
+import type {
+  ReadAlongWordAppearance,
+  ReadAlongWordHighlightCount,
+} from "@/read-along/read-along-rendering";
 
 /**
  * The props and memoization contract for one Transcript Segment in the
@@ -21,7 +24,7 @@ import type { ReadAlongWordAppearance } from "@/read-along/read-along-rendering"
  *
  * That is what {@link areSegmentPropsEqual} enforces: an item re-renders only
  * when `row.id`, `isActive`, `fontSize` or `palette` change, and word-level
- * props (`words`, `activeWordIndex`) are compared **only while the item is
+ * props (`words`, `activeWordIndex`, `wordHighlightCount`) are compared **only while the item is
  * active**. Inactive items therefore ignore word ticks entirely, even though
  * the screen passes the same props down to every row.
  *
@@ -81,6 +84,8 @@ export type ReadAlongSegmentItemProps = {
   /** Word timings for THIS segment, or null (segment-tint-only mode). */
   words: readonly TranscriptSegmentWordTiming[] | null;
   activeWordIndex: number;
+  /** Stable group size for transcript word highlighting. */
+  wordHighlightCount: ReadAlongWordHighlightCount;
   /** Saved Bookmarks covering this segment. Must be a stable array identity. */
   markers: readonly ReadAlongBookmarkMarker[];
   onPress: (row: TranscriptSegmentTextRow) => void;
@@ -104,5 +109,9 @@ export const areSegmentPropsEqual = (
   }
   // Word props only matter to the segment that is actually showing them.
   if (!next.isActive) return true;
-  return previous.words === next.words && previous.activeWordIndex === next.activeWordIndex;
+  return (
+    previous.words === next.words &&
+    previous.activeWordIndex === next.activeWordIndex &&
+    previous.wordHighlightCount === next.wordHighlightCount
+  );
 };

@@ -1,6 +1,8 @@
 import {
+  READ_ALONG_WORD_HIGHLIGHT_COUNTS,
   READ_ALONG_WORD_HIGHLIGHT_STYLES,
   resolveWordHighlightStyle,
+  type ReadAlongWordHighlightCount,
   type ReadAlongWordHighlightStyle,
 } from "@/read-along/read-along-rendering";
 import {
@@ -39,6 +41,7 @@ const WORD_HIGHLIGHT_SAMPLE = "word";
 type ReadAlongHeaderProps = {
   title: string;
   fontSize: number;
+  wordHighlightCount: ReadAlongWordHighlightCount;
   wordHighlightStyle: ReadAlongWordHighlightStyle;
   /**
    * Which surface the popover is configuring. The two share nothing but the
@@ -133,6 +136,46 @@ const SectionLabel = ({ text, color }: { text: string; color: string }) => (
   </Text>
 );
 
+const WordCountOption = ({
+  count,
+  isSelected,
+  onSelect,
+  themeColors,
+}: {
+  count: ReadAlongWordHighlightCount;
+  isSelected: boolean;
+  onSelect: (count: ReadAlongWordHighlightCount) => void;
+  themeColors: ThemeColors;
+}) => (
+  <Pressable
+    accessibilityRole="radio"
+    accessibilityLabel={`${count} ${count === 1 ? "word" : "words"}`}
+    accessibilityState={{ selected: isSelected, checked: isSelected }}
+    onPress={() => onSelect(count)}
+    style={({ pressed }) => ({
+      flex: 1,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 10,
+      borderCurve: "continuous",
+      backgroundColor: isSelected ? themeColors.accent : themeColors.bg,
+      opacity: pressed ? 0.7 : 1,
+    })}
+  >
+    <Text
+      style={{
+        fontSize: 14,
+        fontWeight: "700",
+        color: isSelected ? themeColors.accentForeground : themeColors.text,
+        fontVariant: ["tabular-nums"],
+      }}
+    >
+      {count}
+    </Text>
+  </Pressable>
+);
+
 const WordHighlightRow = ({
   style,
   isSelected,
@@ -184,6 +227,7 @@ const WordHighlightRow = ({
 export const ReadAlongHeader = ({
   title,
   fontSize,
+  wordHighlightCount,
   wordHighlightStyle,
   isBookSurface,
   themeColors,
@@ -192,7 +236,11 @@ export const ReadAlongHeader = ({
   onOpenChapters,
 }: ReadAlongHeaderProps) => {
   const [isAppearanceOpen, setIsAppearanceOpen] = useState(false);
-  const { setReadAlongFontSize, setReadAlongWordHighlightStyle } = useSettingsActions();
+  const {
+    setReadAlongFontSize,
+    setReadAlongWordHighlightCount,
+    setReadAlongWordHighlightStyle,
+  } = useSettingsActions();
 
   return (
     <View
@@ -320,6 +368,27 @@ export const ReadAlongHeader = ({
                   onPress={() => setReadAlongFontSize(fontSize + 1)}
                   themeColors={themeColors}
                 />
+              </View>
+
+              <View
+                style={{ height: 1, backgroundColor: themeColors.border, marginVertical: 2 }}
+              />
+
+              <SectionLabel text="Words highlighted" color={themeColors.textMuted} />
+              <View
+                accessibilityRole="radiogroup"
+                accessibilityLabel="Words highlighted"
+                style={{ flexDirection: "row", gap: 6 }}
+              >
+                {READ_ALONG_WORD_HIGHLIGHT_COUNTS.map((count) => (
+                  <WordCountOption
+                    key={count}
+                    count={count}
+                    isSelected={count === wordHighlightCount}
+                    onSelect={setReadAlongWordHighlightCount}
+                    themeColors={themeColors}
+                  />
+                ))}
               </View>
 
               <View

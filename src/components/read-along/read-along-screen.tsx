@@ -150,6 +150,7 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
 
   const ingest = useShippedTranscriptIngest(boundLibraryItemId);
   const fontSize = useSettingsStore((state) => state.readAlongFontSize);
+  const wordHighlightCount = useSettingsStore((state) => state.readAlongWordHighlightCount);
   const wordHighlightStyle = useSettingsStore((state) => state.readAlongWordHighlightStyle);
   const playingLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
 
@@ -636,6 +637,7 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
           palette={segmentPalette}
           words={isActive ? activeSegmentWords : null}
           activeWordIndex={activeWordIndex}
+          wordHighlightCount={wordHighlightCount}
           markers={getMarkersForSegment(markerMap, item.row.id)}
           onPress={handlePressSegment}
           onLongPress={handleLongPressSegment}
@@ -657,6 +659,7 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
       segmentPalette,
       activeSegmentWords,
       activeWordIndex,
+      wordHighlightCount,
       markerMap,
       handlePressSegment,
       handleLongPressSegment,
@@ -743,6 +746,7 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
       <ReadAlongHeader
         title={bookTitle}
         fontSize={fontSize}
+        wordHighlightCount={wordHighlightCount}
         wordHighlightStyle={wordHighlightStyle}
         isBookSurface={isBookSurface}
         themeColors={themeColors}

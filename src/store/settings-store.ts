@@ -12,8 +12,11 @@ import {
 import type { PitchCorrectionQuality } from "../player/types";
 import { DEFAULT_DARK_ACCENT_COLOR, DEFAULT_LIGHT_ACCENT_COLOR, normalizeAccentHex } from "../theme/accent-color";
 import {
+  DEFAULT_READ_ALONG_WORD_HIGHLIGHT_COUNT,
   DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE,
+  normalizeReadAlongWordHighlightCount,
   normalizeReadAlongWordHighlightStyle,
+  type ReadAlongWordHighlightCount,
   type ReadAlongWordHighlightStyle,
 } from "../read-along/read-along-rendering";
 import {
@@ -205,6 +208,7 @@ export type SettingsState = {
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>;
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
   readAlongFontSize: number;
+  readAlongWordHighlightCount: ReadAlongWordHighlightCount;
   readAlongWordHighlightStyle: ReadAlongWordHighlightStyle;
   /**
    * EPUB Read-Along's appearance, kept apart from the transcript's above.
@@ -261,6 +265,7 @@ export type SettingsState = {
       payload: { dateKey: string; seed: number; bookIds: string[]; updatedAt?: number },
     ) => void;
     setReadAlongFontSize: (fontSize: number) => void;
+    setReadAlongWordHighlightCount: (count: ReadAlongWordHighlightCount) => void;
     setReadAlongWordHighlightStyle: (style: ReadAlongWordHighlightStyle) => void;
     setReadAlongEpubFontScale: (scale: number) => void;
     setReadAlongEpubTheme: (theme: EpubReaderTheme) => void;
@@ -307,6 +312,7 @@ export const settingsStore = createStore<SettingsState>()(
       homeShelvesByScope: {},
       discoverShelfByScope: {},
       readAlongFontSize: DEFAULT_READ_ALONG_FONT_SIZE,
+      readAlongWordHighlightCount: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_COUNT,
       readAlongWordHighlightStyle: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE,
       readAlongEpubFontScale: DEFAULT_EPUB_READING_PREFERENCES.fontScale,
       readAlongEpubTheme: DEFAULT_EPUB_READING_PREFERENCES.theme,
@@ -625,6 +631,8 @@ export const settingsStore = createStore<SettingsState>()(
         },
         setReadAlongFontSize: (fontSize) =>
           set({ readAlongFontSize: clampReadAlongFontSize(fontSize) }),
+        setReadAlongWordHighlightCount: (count) =>
+          set({ readAlongWordHighlightCount: normalizeReadAlongWordHighlightCount(count) }),
         setReadAlongWordHighlightStyle: (style) =>
           set({ readAlongWordHighlightStyle: normalizeReadAlongWordHighlightStyle(style) }),
         setReadAlongEpubFontScale: (scale) =>
@@ -672,6 +680,7 @@ export const settingsStore = createStore<SettingsState>()(
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
         readAlongFontSize: state.readAlongFontSize,
+        readAlongWordHighlightCount: state.readAlongWordHighlightCount,
         readAlongWordHighlightStyle: state.readAlongWordHighlightStyle,
         readAlongEpubFontScale: state.readAlongEpubFontScale,
         readAlongEpubTheme: state.readAlongEpubTheme,
@@ -711,6 +720,7 @@ export const settingsStore = createStore<SettingsState>()(
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
             readAlongFontSize: DEFAULT_READ_ALONG_FONT_SIZE,
+            readAlongWordHighlightCount: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_COUNT,
             readAlongWordHighlightStyle: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE,
             readAlongEpubFontScale: DEFAULT_EPUB_READING_PREFERENCES.fontScale,
             readAlongEpubTheme: DEFAULT_EPUB_READING_PREFERENCES.theme,
@@ -827,6 +837,9 @@ export const settingsStore = createStore<SettingsState>()(
                   state.readAlongFontSize ?? DEFAULT_READ_ALONG_FONT_SIZE,
                 )
               : DEFAULT_READ_ALONG_FONT_SIZE,
+          readAlongWordHighlightCount: normalizeReadAlongWordHighlightCount(
+            state.readAlongWordHighlightCount,
+          ),
           // Added after version 19 without a bump: absent on every older blob,
           // and the normalizer turns that absence into the default.
           readAlongWordHighlightStyle: normalizeReadAlongWordHighlightStyle(

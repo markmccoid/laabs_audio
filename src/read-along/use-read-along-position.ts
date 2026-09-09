@@ -8,16 +8,16 @@
  * - The anchor `(positionMs, positionUpdatedAtMs, rate, playbackState)` comes
  *   straight from the playback store, so every store tick re-anchors and drift
  *   self-corrects once a second (seek / rate / state changes re-anchor too).
- * - A single 150 ms `setInterval` recomputes the interpolated position and both
+ * - A single `setInterval` (150 ms by default; 40 ms for transcript words)
+ *   recomputes the interpolated position and both
  *   indexes, and calls `setState` **only when an index actually changes** — so
  *   React re-renders at word-boundary frequency (~2-4/s), not tick frequency.
  * - The interval runs only while playback is `playing`, the screen is focused,
  *   and the playing book is the bound book. Anything else leaves the last
  *   indexes frozen in place (paused) or cleared (mismatch).
  *
- * Deliberately a plain JS clock: a Reanimated frame-callback loop buys nothing
- * perceptible for prose word highlighting and costs worklet complexity. Do not
- * "upgrade" it (settled decision in the plan).
+ * The plain JS clock resolves word boundaries; visual fades run independently
+ * on the UI thread. More frequent sampling does not render unchanged indexes.
  */
 
 import { usePlaybackStore } from "@/player/playback-store";
@@ -33,8 +33,10 @@ import {
   type ReadAlongTimedRange,
 } from "./read-along-sync";
 
-/** Interpolation tick. 150 ms is perceptually smooth for word highlighting. */
+/** Default cadence for segment / EPUB tracking. */
 export const READ_ALONG_TICK_MS = 150;
+/** Finer transcript word sampling reduces late transitions at faster playback. */
+export const READ_ALONG_WORD_TICK_MS = 40;
 
 export type UseReadAlongPositionArgs = {
   /**
@@ -55,6 +57,8 @@ export type UseReadAlongPositionArgs = {
    * are book-absolute, so briefly stale words simply resolve to no active word.
    */
   activeSegmentWords?: readonly TranscriptSegmentWordTiming[] | null;
+  /** Transcript words opt into finer sampling; EPUB keeps the default cadence. */
+  tickIntervalMs?: number;
   /**
    * Look this many wall-clock milliseconds into the future when resolving the
    * active index. Zero for Transcript Read-Along, which paints instantly.
@@ -106,6 +110,7 @@ export const useReadAlongPosition = ({
   boundLibraryItemId,
   segments,
   activeSegmentWords = null,
+  tickIntervalMs = READ_ALONG_TICK_MS,
   leadMs = 0,
 }: UseReadAlongPositionArgs): UseReadAlongPositionResult => {
   const positionMs = usePlaybackStore((state) => state.positionMs);
@@ -237,11 +242,11 @@ export const useReadAlongPosition = ({
     }
 
     console.log(`[ReadAlong] ticker running lead=${leadMs}`);
-    const intervalId = setInterval(syncIndexes, READ_ALONG_TICK_MS);
+    const intervalId = setInterval(syncIndexes, tickIntervalMs);
     return () => {
       clearInterval(intervalId);
     };
-  }, [isPlaying, isFocused, isBookMismatch, leadMs, syncIndexes]);
+  }, [isPlaying, isFocused, isBookMismatch, leadMs, syncIndexes, tickIntervalMs]);
 
   return {
     activeSegmentIndex: indexes.activeSegmentIndex,
