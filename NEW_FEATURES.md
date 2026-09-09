@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-09` `pending` - Add configurable Read-Along Follow Mode positioning with Top, Middle, and Bottom alignment in the transcript appearance menu. The readable viewport ends above the playback controls so each position remains usable and switching positions re-anchors the active sentence immediately.
+  Tester focus: open a transcript's Aa menu, try Top, Middle, and Bottom while narration is following, and confirm the active sentence moves immediately to the selected position without sitting behind the header or playback controls. Close and reopen the reader and confirm the selected position persists.
+
 - `2026-09-08` `pending` - Smooth Transcript Read-Along highlighting with rounded, fading highlight transitions and fixed, sentence-bounded word groups. The Aa appearance menu now lets readers highlight 1, 2, 3, or 4 words at a time, with 3 as the default.
   Tester focus: play several transcript passages at different speeds and confirm the highlight moves between stable groups without sliding one word at a time. Try all four group sizes, including sentences whose final group is shorter than the chosen size, and confirm the choice updates immediately and survives restarting the app. Check wrapped lines, punctuation, light and dark themes, and Reduce Motion.
 

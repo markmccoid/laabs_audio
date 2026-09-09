@@ -1,9 +1,10 @@
 /**
  * Follow Mode controller (`docs/read-along-implementation-plan.md` Phase 2).
  *
- * Keeps the active list row parked ~40% down the viewport while enabled, backs
- * off the moment the reader scrolls by hand, and re-engages only on an explicit
- * "Resume following" tap (no auto-resume timer — settled decision).
+ * Keeps the active list row parked at the reader's chosen viewport position
+ * while enabled, backs off the moment the reader scrolls by hand, and
+ * re-engages only on an explicit "Resume following" tap (no auto-resume timer —
+ * settled decision).
  *
  * The hook is deliberately dumb about transcript shapes: it takes a
  * **list-space** index (the caller applies its own header / pending-block
@@ -11,6 +12,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import type { ReadAlongFollowAlignment } from "./read-along-follow-alignment";
+import { getFollowViewPosition } from "./read-along-follow-alignment";
 
 /** At most one programmatic scroll per this window. */
 const SCROLL_THROTTLE_MS = 500;
@@ -20,9 +23,6 @@ const SCROLL_THROTTLE_MS = 500;
  * belt-and-braces against a platform that ever fires it for animated scrolls.
  */
 const PROGRAMMATIC_SCROLL_WINDOW_MS = 600;
-/** Active row sits ~40% from the top of the viewport. */
-const FOLLOW_VIEW_POSITION = 0.4;
-
 /** Minimal structural shape — `FlashListRef<T>` and `ScrollView` refs satisfy it. */
 export type FollowModeScrollTarget = {
   scrollToIndex: (params: {
@@ -40,6 +40,8 @@ export type UseFollowModeArgs = {
    * when nothing is active.
    */
   activeListIndex: number;
+  /** Where the active row sits inside the readable transcript viewport. */
+  alignment: ReadAlongFollowAlignment;
 };
 
 export type UseFollowModeResult = {
@@ -59,8 +61,10 @@ export type UseFollowModeResult = {
 export const useFollowMode = ({
   listRef,
   activeListIndex,
+  alignment,
 }: UseFollowModeArgs): UseFollowModeResult => {
   const [followEnabled, setFollowEnabled] = useState(true);
+  const viewPosition = getFollowViewPosition(alignment);
 
   // Latest active index for `resumeFollowing`, written in an effect (never
   // during render) so the callback can stay a stable identity.
@@ -70,7 +74,7 @@ export const useFollowMode = ({
   }, [activeListIndex]);
 
   const lastScrollAtMsRef = useRef(0);
-  const lastScrolledIndexRef = useRef(-1);
+  const lastScrollRef = useRef<{ index: number; viewPosition: number } | null>(null);
   const programmaticScrollUntilMsRef = useRef(0);
 
   const scrollToIndex = useCallback(
@@ -78,15 +82,15 @@ export const useFollowMode = ({
       if (index < 0) return;
       const nowMs = Date.now();
       lastScrollAtMsRef.current = nowMs;
-      lastScrolledIndexRef.current = index;
+      lastScrollRef.current = { index, viewPosition };
       programmaticScrollUntilMsRef.current = nowMs + PROGRAMMATIC_SCROLL_WINDOW_MS;
       listRef.current?.scrollToIndex({
         index,
         animated: true,
-        viewPosition: FOLLOW_VIEW_POSITION,
+        viewPosition,
       });
     },
-    [listRef],
+    [listRef, viewPosition],
   );
 
   // Follow the active row, at most once per throttle window. Because this effect
@@ -95,7 +99,15 @@ export const useFollowMode = ({
   useEffect(() => {
     if (!followEnabled) return;
     if (activeListIndex < 0) return;
-    if (lastScrolledIndexRef.current === activeListIndex) return;
+    const lastScroll = lastScrollRef.current;
+    if (lastScroll?.index === activeListIndex && lastScroll.viewPosition === viewPosition) return;
+
+    // A setting change should preview immediately even when the active sentence
+    // has not changed and the ordinary follow throttle is still running.
+    if (lastScroll && lastScroll.viewPosition !== viewPosition) {
+      scrollToIndex(activeListIndex);
+      return;
+    }
 
     const elapsedMs = Date.now() - lastScrollAtMsRef.current;
     if (elapsedMs >= SCROLL_THROTTLE_MS) {
@@ -110,7 +122,7 @@ export const useFollowMode = ({
     return () => {
       clearTimeout(timeoutId);
     };
-  }, [activeListIndex, followEnabled, scrollToIndex]);
+  }, [activeListIndex, followEnabled, scrollToIndex, viewPosition]);
 
   const handleScrollBeginDrag = useCallback(() => {
     if (Date.now() < programmaticScrollUntilMsRef.current) return;

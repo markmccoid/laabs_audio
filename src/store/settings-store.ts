@@ -20,6 +20,11 @@ import {
   type ReadAlongWordHighlightStyle,
 } from "../read-along/read-along-rendering";
 import {
+  DEFAULT_READ_ALONG_FOLLOW_ALIGNMENT,
+  normalizeReadAlongFollowAlignment,
+  type ReadAlongFollowAlignment,
+} from "../read-along/read-along-follow-alignment";
+import {
   clampEpubFontScale,
   clampEpubLineHeight,
   clampEpubPageMargins,
@@ -208,6 +213,7 @@ export type SettingsState = {
   homeShelvesByScope: Record<string, HomeShelvesScopeSettings>;
   discoverShelfByScope: Record<string, DailyDiscoverShelf>;
   readAlongFontSize: number;
+  readAlongFollowAlignment: ReadAlongFollowAlignment;
   readAlongWordHighlightCount: ReadAlongWordHighlightCount;
   readAlongWordHighlightStyle: ReadAlongWordHighlightStyle;
   /**
@@ -265,6 +271,7 @@ export type SettingsState = {
       payload: { dateKey: string; seed: number; bookIds: string[]; updatedAt?: number },
     ) => void;
     setReadAlongFontSize: (fontSize: number) => void;
+    setReadAlongFollowAlignment: (alignment: ReadAlongFollowAlignment) => void;
     setReadAlongWordHighlightCount: (count: ReadAlongWordHighlightCount) => void;
     setReadAlongWordHighlightStyle: (style: ReadAlongWordHighlightStyle) => void;
     setReadAlongEpubFontScale: (scale: number) => void;
@@ -312,6 +319,7 @@ export const settingsStore = createStore<SettingsState>()(
       homeShelvesByScope: {},
       discoverShelfByScope: {},
       readAlongFontSize: DEFAULT_READ_ALONG_FONT_SIZE,
+      readAlongFollowAlignment: DEFAULT_READ_ALONG_FOLLOW_ALIGNMENT,
       readAlongWordHighlightCount: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_COUNT,
       readAlongWordHighlightStyle: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE,
       readAlongEpubFontScale: DEFAULT_EPUB_READING_PREFERENCES.fontScale,
@@ -631,6 +639,8 @@ export const settingsStore = createStore<SettingsState>()(
         },
         setReadAlongFontSize: (fontSize) =>
           set({ readAlongFontSize: clampReadAlongFontSize(fontSize) }),
+        setReadAlongFollowAlignment: (alignment) =>
+          set({ readAlongFollowAlignment: normalizeReadAlongFollowAlignment(alignment) }),
         setReadAlongWordHighlightCount: (count) =>
           set({ readAlongWordHighlightCount: normalizeReadAlongWordHighlightCount(count) }),
         setReadAlongWordHighlightStyle: (style) =>
@@ -680,6 +690,7 @@ export const settingsStore = createStore<SettingsState>()(
         homeShelvesByScope: state.homeShelvesByScope,
         discoverShelfByScope: state.discoverShelfByScope,
         readAlongFontSize: state.readAlongFontSize,
+        readAlongFollowAlignment: state.readAlongFollowAlignment,
         readAlongWordHighlightCount: state.readAlongWordHighlightCount,
         readAlongWordHighlightStyle: state.readAlongWordHighlightStyle,
         readAlongEpubFontScale: state.readAlongEpubFontScale,
@@ -720,6 +731,7 @@ export const settingsStore = createStore<SettingsState>()(
             homeShelvesByScope: EMPTY_HOME_SHELVES_BY_SCOPE,
             discoverShelfByScope: {},
             readAlongFontSize: DEFAULT_READ_ALONG_FONT_SIZE,
+            readAlongFollowAlignment: DEFAULT_READ_ALONG_FOLLOW_ALIGNMENT,
             readAlongWordHighlightCount: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_COUNT,
             readAlongWordHighlightStyle: DEFAULT_READ_ALONG_WORD_HIGHLIGHT_STYLE,
             readAlongEpubFontScale: DEFAULT_EPUB_READING_PREFERENCES.fontScale,
@@ -837,6 +849,10 @@ export const settingsStore = createStore<SettingsState>()(
                   state.readAlongFontSize ?? DEFAULT_READ_ALONG_FONT_SIZE,
                 )
               : DEFAULT_READ_ALONG_FONT_SIZE,
+          // Added after version 19 without a bump; older blobs normalize to Top.
+          readAlongFollowAlignment: normalizeReadAlongFollowAlignment(
+            state.readAlongFollowAlignment,
+          ),
           readAlongWordHighlightCount: normalizeReadAlongWordHighlightCount(
             state.readAlongWordHighlightCount,
           ),

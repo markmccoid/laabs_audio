@@ -30,6 +30,7 @@ import {
   resolveWordHighlightStyle,
   withAlpha,
 } from "@/read-along/read-along-rendering";
+import { getFollowViewPosition } from "@/read-along/read-along-follow-alignment";
 import { useFollowMode } from "@/read-along/use-follow-mode";
 import { useReadAlongHighlight } from "@/read-along/use-read-along-highlight";
 import { deviceBooksStore, useDeviceBooksStore } from "@/store/device-books-store";
@@ -150,6 +151,7 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
 
   const ingest = useShippedTranscriptIngest(boundLibraryItemId);
   const fontSize = useSettingsStore((state) => state.readAlongFontSize);
+  const followAlignment = useSettingsStore((state) => state.readAlongFollowAlignment);
   const wordHighlightCount = useSettingsStore((state) => state.readAlongWordHighlightCount);
   const wordHighlightStyle = useSettingsStore((state) => state.readAlongWordHighlightStyle);
   const playingLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
@@ -269,9 +271,9 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
       ? (model.listIndexBySegmentIndex[activeSegmentIndex] ?? -1)
       : coarseListIndex;
 
-  const { followEnabled, resumeFollowing, handleScrollBeginDrag, suspendFollowing } = useFollowMode(
-    { listRef, activeListIndex },
-  );
+  const followViewPosition = getFollowViewPosition(followAlignment);
+  const { followEnabled, resumeFollowing, handleScrollBeginDrag, suspendFollowing } =
+    useFollowMode({ listRef, activeListIndex, alignment: followAlignment });
 
   // FlashList v2 can leave its render window behind after a data swap (see
   // src/components/Library/LibraryContainer.tsx:116-124). A frontier advance is
@@ -288,7 +290,7 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
         listRef.current?.scrollToIndex({
           index: activeListIndex,
           animated: false,
-          viewPosition: 0.4,
+          viewPosition: followViewPosition,
         });
       }, 100);
     });
@@ -746,6 +748,7 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
       <ReadAlongHeader
         title={bookTitle}
         fontSize={fontSize}
+        followAlignment={followAlignment}
         wordHighlightCount={wordHighlightCount}
         wordHighlightStyle={wordHighlightStyle}
         isBookSurface={isBookSurface}
@@ -850,26 +853,32 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
           onRetry={handleRetryTranscription}
         />
       ) : (
-        <FlashList
-          // Remounted when the reader comes back from the Book surface. A
-          // segment's tint is a Reanimated shared value initialised once per
-          // component *instance*, and FlashList recycles instances — so a row
-          // that was active when the list was torn down could come back wearing
-          // a tint that no longer belongs to it, leaving two sentences lit.
-          // Fresh instances cannot carry stale animation state.
-          key={`transcript-${transcriptGeneration}`}
-          ref={listRef}
-          data={model.items}
-          keyExtractor={(item) => item.key}
-          getItemType={(item) => item.type}
-          renderItem={renderItem}
-          onScrollBeginDrag={handleScrollBeginDrag}
-          contentContainerStyle={{
-            paddingHorizontal: 14,
-            paddingTop: 8,
-            paddingBottom: insets.bottom + 96,
-          }}
-        />
+        // Give FlashList the actual readable viewport between the fixed header
+        // and floating controls. Follow alignment can then use ordinary 0/0.5/1
+        // positions without screen-size-specific offsets.
+        <View style={{ flex: 1, marginBottom: floatingBottomOffset }}>
+          <FlashList
+            // Remounted when the reader comes back from the Book surface. A
+            // segment's tint is a Reanimated shared value initialised once per
+            // component *instance*, and FlashList recycles instances — so a row
+            // that was active when the list was torn down could come back wearing
+            // a tint that no longer belongs to it, leaving two sentences lit.
+            // Fresh instances cannot carry stale animation state.
+            key={`transcript-${transcriptGeneration}`}
+            ref={listRef}
+            style={{ flex: 1 }}
+            data={model.items}
+            keyExtractor={(item) => item.key}
+            getItemType={(item) => item.type}
+            renderItem={renderItem}
+            onScrollBeginDrag={handleScrollBeginDrag}
+            contentContainerStyle={{
+              paddingHorizontal: 14,
+              paddingTop: 8,
+              paddingBottom: 24,
+            }}
+          />
+        </View>
       )}
 
       {isResumePillVisible ? (
