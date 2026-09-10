@@ -91,6 +91,7 @@ When a book is downloaded, playback is resolved from local files before any remo
 6. The same play/pause/seek API is used by UI; controls do not need a separate offline code path.
 
 Result:
+
 - Offline + downloaded: play stays available and uses local files.
 - Offline + not downloaded: play is disabled in book controls.
 - Online + downloaded: downloaded files are still preferred for playback source.
@@ -312,6 +313,18 @@ const handlePreviousChapter = async () => {
 ```
 
 **Multi-track note:** chapter positions are stored as **absolute book time**. Jumping to a chapter uses `seekTo`, which handles track switching automatically. If the book has no chapter index, `nextChapter`/`previousChapter` do not change position.
+
+### Automatic File Boundaries
+
+Natural file boundaries are internal queue transitions, not playback pauses. The native engine
+reports the outgoing file as `STOPPED` and then emits `TRACK_ENDED`; the adapter represents that
+stopped/loading interval with `isPlaying: null`, so only an actual native `PAUSED` event can change
+the public player state to `paused`.
+
+On `TRACK_ENDED`, `playerService` coalesces duplicate notifications and loads the next queue item
+with native autoplay. The load is not considered complete until a `PLAYING` event identifies the
+replacement track; stale events from the outgoing track are ignored. As a result, the store remains
+`playing` across the boundary and player controls must continue to show Pause throughout the handoff.
 
 When system playback surfaces expose next and previous controls, `REMOTE_NEXT` and `REMOTE_PREV` use the same chapter navigation behavior. These commands never skip raw audio tracks.
 

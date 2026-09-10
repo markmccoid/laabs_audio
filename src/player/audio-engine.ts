@@ -51,8 +51,11 @@ export type AudioEngineEvents = {
 export type AudioEngineStatus = {
   positionMs: number;
   durationMs: number;
-  isPlaying: boolean;
+  // null means loading, stopped at a natural track boundary, idle, or failed.
+  // Only PAUSED is an audible pause that should update the public player state.
+  isPlaying: boolean | null;
   didJustFinish: boolean;
+  trackId: string | null;
 };
 
 export type AudioEngine = {
@@ -62,6 +65,7 @@ export type AudioEngine = {
       initialPositionMs?: number;
       rate?: number;
       pitchCorrectionQuality?: PitchCorrectionQuality;
+      autoPlay?: boolean;
     },
   ) => Promise<void>;
   play: () => Promise<void>;
@@ -176,17 +180,17 @@ const toStatus = (
   duration: number,
   state: AudioProState,
   didJustFinish = false,
+  trackId: string | null = null,
 ): AudioEngineStatus => ({
   positionMs: Math.max(0, Math.round(position)),
   durationMs: Math.max(0, Math.round(duration)),
-  isPlaying: state === AudioProState.PLAYING,
+  isPlaying: state === AudioProState.PLAYING ? true : state === AudioProState.PAUSED ? false : null,
   didJustFinish,
+  trackId,
 });
 
 const isReadyState = (state: AudioProState) =>
-  state === AudioProState.PAUSED ||
-  state === AudioProState.STOPPED ||
-  state === AudioProState.PLAYING;
+  state === AudioProState.PAUSED || state === AudioProState.PLAYING;
 
 export const createAudioEngine = (): AudioEngine => {
   let events: AudioEngineEvents = {};
@@ -336,7 +340,9 @@ export const createAudioEngine = (): AudioEngine => {
         settleStateWaiters(event);
         const position = event.payload?.position ?? AudioPro.getTimings().position;
         const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
-        events.onStatus?.(toStatus(position, duration, currentState));
+        events.onStatus?.(
+          toStatus(position, duration, currentState, false, event.track?.id ?? null),
+        );
         if (state === AudioProState.ERROR && event.payload?.error) {
           rejectStateWaiters(new Error(event.payload.error));
           events.onError?.(new Error(event.payload.error));
@@ -347,20 +353,26 @@ export const createAudioEngine = (): AudioEngine => {
         const position = event.payload?.position ?? AudioPro.getTimings().position;
         const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
         settleStateWaiters(event);
-        events.onStatus?.(toStatus(position, duration, currentState));
+        events.onStatus?.(
+          toStatus(position, duration, currentState, false, event.track?.id ?? null),
+        );
         break;
       }
       case AudioProEventType.SEEK_COMPLETE: {
         const position = event.payload?.position ?? AudioPro.getTimings().position;
         const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
         settleStateWaiters(event);
-        events.onStatus?.(toStatus(position, duration, currentState));
+        events.onStatus?.(
+          toStatus(position, duration, currentState, false, event.track?.id ?? null),
+        );
         break;
       }
       case AudioProEventType.TRACK_ENDED: {
         const position = event.payload?.position ?? AudioPro.getTimings().position;
         const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
-        events.onStatus?.(toStatus(position, duration, currentState, false));
+        events.onStatus?.(
+          toStatus(position, duration, currentState, false, event.track?.id ?? null),
+        );
         events.onEnded?.();
         break;
       }
@@ -454,9 +466,10 @@ export const createAudioEngine = (): AudioEngine => {
         AudioPro.setPlaybackSpeed(options.rate);
       }
 
-      // We explicitly start paused; playerService decides when to play.
+      // Automatic queue advances start the replacement natively so there is
+      // no pause/resume cycle between audiobook files. Other loads stay paused.
       AudioPro.play(audioTrack, {
-        autoPlay: false,
+        autoPlay: options?.autoPlay ?? false,
         startTimeMs: options?.initialPositionMs ?? 0,
         headers,
       });
@@ -477,9 +490,10 @@ export const createAudioEngine = (): AudioEngine => {
           const resolvedTrackId = event?.track?.id ?? AudioPro.getPlayingTrack()?.id;
           const state = AudioPro.getState();
           if (!resolvedTrackId || resolvedTrackId !== targetTrackId) return false;
-          return isReadyState(state);
+          return options?.autoPlay ? state === AudioProState.PLAYING : isReadyState(state);
         },
         options?.initialPositionMs ? DEFAULT_READY_TIMEOUT_MS + 5000 : DEFAULT_READY_TIMEOUT_MS,
+        { allowImmediate: false },
       );
     },
     async play() {
@@ -491,6 +505,9 @@ export const createAudioEngine = (): AudioEngine => {
         return;
       }
       const state = AudioPro.getState();
+      if (state === AudioProState.PLAYING) {
+        return;
+      }
       if (state === AudioProState.PAUSED || state === AudioProState.STOPPED) {
         AudioPro.resume();
         return;

@@ -275,6 +275,7 @@ class PlayerService {
     untilMs: number;
     restoredPositionMs: number;
   } | null = null;
+  private trackEndTransitionInFlight = false;
 
   private createPlaybackControlIntentId(kind: "start" | "play" | "pause") {
     return `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -608,6 +609,7 @@ class PlayerService {
     this.unsubscribeEpisodeDownloads?.();
     this.unsubscribeEpisodeDownloads = null;
     this.pendingPlaybackSourceTransition = null;
+    this.trackEndTransitionInFlight = false;
     this.cancelPendingSkipBurst();
   }
 
@@ -3929,6 +3931,7 @@ class PlayerService {
       initialPositionMs: options?.initialPositionMs ?? 0,
       rate: state.rate,
       pitchCorrectionQuality: settingsStore.getState().pitchCorrectionQuality,
+      autoPlay: options?.autoPlay ?? false,
     });
 
     playbackStore.getState().actions.setCurrentTrack(index, track.durationMs);
@@ -3965,8 +3968,9 @@ class PlayerService {
   private async handleStatus(status: {
     positionMs: number;
     durationMs: number;
-    isPlaying: boolean;
+    isPlaying: boolean | null;
     didJustFinish: boolean;
+    trackId?: string | null;
   }) {
     // Store the latest engine status only when debug logging is enabled.
     const debugStatus = DEBUG_PLAYBACK_EVENTS
@@ -3983,6 +3987,7 @@ class PlayerService {
 
     const currentTrack = state.queue[state.currentTrackIndex];
     if (!currentTrack) return;
+    if (status.trackId && status.trackId !== currentTrack.id) return;
 
     const trackPositionMs = Math.max(0, status.positionMs);
     const positionMs = currentTrack.startOffsetMs + trackPositionMs;
@@ -4005,14 +4010,14 @@ class PlayerService {
     const isNativeSeekPauseGuardActive = Date.now() < this.nativeSeekPauseGuardUntilMs;
 
     // Keep store playbackState aligned with engine state.
-    if (status.isPlaying && state.playbackState !== "playing") {
+    if (status.isPlaying === true && state.playbackState !== "playing") {
       this.nativeSeekPauseGuardUntilMs = 0;
       updates.playbackState = "playing";
       // Playback can resume from system controls/background without going through play().
       // Reconcile and reapply persisted speed on this transition.
       void this.reconcilePlaybackRate("status-transition");
     } else if (
-      !status.isPlaying &&
+      status.isPlaying === false &&
       state.playbackState === "playing" &&
       !isNativeSeekPauseGuardActive
     ) {
@@ -4074,7 +4079,7 @@ class PlayerService {
         sessionKind: this.resolveSessionKind(state.sessionId),
         fromPlaybackState: previousPlaybackState,
         toPlaybackState: updates.playbackState,
-        engineIsPlaying: status.isPlaying,
+        engineIsPlaying: status.isPlaying === true,
         positionSeconds: msToSeconds(positionMs),
         trackPositionSeconds: msToSeconds(trackPositionMs),
         durationSeconds: msToSeconds(state.durationMs),
@@ -4089,7 +4094,7 @@ class PlayerService {
       });
     }
 
-    if (status.isPlaying && previousPlaybackState !== "playing") {
+    if (status.isPlaying === true && previousPlaybackState !== "playing") {
       await this.applyAutoRewindBeforePlay(playbackStore.getState());
     }
 
@@ -4099,14 +4104,14 @@ class PlayerService {
     }
 
     // Sync to Audiobookshelf/local storage on interval.
-    if (status.isPlaying && Date.now() - this.lastSyncAttemptAt >= SYNC_INTERVAL_MS) {
+    if (status.isPlaying === true && Date.now() - this.lastSyncAttemptAt >= SYNC_INTERVAL_MS) {
       await this.syncProgress("interval");
     }
   }
 
   private async shouldIgnorePostPreviewStatus(
     status: {
-      isPlaying: boolean;
+      isPlaying: boolean | null;
     },
     positionMs: number,
   ) {
@@ -4123,7 +4128,7 @@ class PlayerService {
     const isRestoredPosition =
       Math.abs(positionMs - guard.restoredPositionMs) <=
       POST_PREVIEW_RESTORED_POSITION_TOLERANCE_MS;
-    if (status.isPlaying) {
+    if (status.isPlaying === true) {
       try {
         await this.engine.pause();
       } catch {
@@ -4145,7 +4150,7 @@ class PlayerService {
     status: {
       positionMs: number;
       durationMs: number;
-      isPlaying: boolean;
+      isPlaying: boolean | null;
       didJustFinish: boolean;
     },
     state: PlaybackStoreState,
@@ -4180,9 +4185,9 @@ class PlayerService {
       return true;
     }
 
-    if (status.isPlaying) {
+    if (status.isPlaying === true) {
       temporaryPlaybackStore.getState().actions.setPlaying();
-    } else {
+    } else if (status.isPlaying === false) {
       temporaryPlaybackStore.getState().actions.setPaused();
     }
 
@@ -4210,46 +4215,55 @@ class PlayerService {
   }
 
   private async handleTrackEnded() {
-    const temporarySession = this.temporaryPlaybackSession;
-    if (temporarySession) {
-      const state = playbackStore.getState();
-      const nextTrackIndex = temporarySession.currentTrackIndex + 1;
-      const nextTrack = state.queue[nextTrackIndex];
-      if (
-        !canAdvanceTemporaryPlaybackToTrack({
-          nextTrackStartMs: nextTrack?.startOffsetMs ?? null,
-          endMs: temporarySession.endMs,
-        }) ||
-        !nextTrack
-      ) {
-        await this.finishTemporaryPlaybackAtEnd(temporarySession);
+    if (this.trackEndTransitionInFlight) return;
+    this.trackEndTransitionInFlight = true;
+
+    try {
+      const temporarySession = this.temporaryPlaybackSession;
+      if (temporarySession) {
+        const state = playbackStore.getState();
+        const nextTrackIndex = temporarySession.currentTrackIndex + 1;
+        const nextTrack = state.queue[nextTrackIndex];
+        if (
+          !canAdvanceTemporaryPlaybackToTrack({
+            nextTrackStartMs: nextTrack?.startOffsetMs ?? null,
+            endMs: temporarySession.endMs,
+          }) ||
+          !nextTrack
+        ) {
+          await this.finishTemporaryPlaybackAtEnd(temporarySession);
+          return;
+        }
+
+        this.temporaryPlaybackSession = {
+          ...temporarySession,
+          currentTrackIndex: nextTrackIndex,
+        };
+        await this.engine.load(nextTrack, {
+          initialPositionMs: 0,
+          rate: state.rate,
+          pitchCorrectionQuality: settingsStore.getState().pitchCorrectionQuality,
+          autoPlay: true,
+        });
+        temporaryPlaybackStore.getState().actions.setPosition(nextTrack.startOffsetMs);
+        await this.engine.play();
+        temporaryPlaybackStore.getState().actions.setPlaying();
         return;
       }
 
-      this.temporaryPlaybackSession = {
-        ...temporarySession,
-        currentTrackIndex: nextTrackIndex,
-      };
-      await this.engine.load(nextTrack, {
-        initialPositionMs: 0,
-        rate: state.rate,
-        pitchCorrectionQuality: settingsStore.getState().pitchCorrectionQuality,
-      });
-      temporaryPlaybackStore.getState().actions.setPosition(nextTrack.startOffsetMs);
-      await this.engine.play();
-      temporaryPlaybackStore.getState().actions.setPlaying();
-      return;
-    }
-    const state = playbackStore.getState();
-    if (!state.queue.length) return;
+      const state = playbackStore.getState();
+      if (!state.queue.length) return;
 
-    const nextIndex = state.currentTrackIndex + 1;
-    if (nextIndex >= state.queue.length) {
-      playbackStore.getState().actions.setPlaybackState("ended");
-      return;
-    }
+      const nextIndex = state.currentTrackIndex + 1;
+      if (nextIndex >= state.queue.length) {
+        playbackStore.getState().actions.setPlaybackState("ended");
+        return;
+      }
 
-    await this.loadTrack(nextIndex, { initialPositionMs: 0, autoPlay: true });
+      await this.loadTrack(nextIndex, { initialPositionMs: 0, autoPlay: true });
+    } finally {
+      this.trackEndTransitionInFlight = false;
+    }
   }
 
   private resolveProgressForSync(payload: {

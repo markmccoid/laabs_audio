@@ -44,7 +44,7 @@ export type PlaybackStoreState = {
   debugStatus: {
     positionMs: number;
     durationMs: number;
-    isPlaying: boolean;
+    isPlaying: boolean | null;
     didJustFinish: boolean;
     updatedAt: number;
   } | null;
