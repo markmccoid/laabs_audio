@@ -59,18 +59,27 @@ export const useThemeColors = (): ThemeColors => {
   };
 };
 
+/**
+ * Whether the app is currently rendering dark.
+ *
+ * `theme` is the app's own setting and may be "system", in which case the device
+ * decides — so neither source answers this alone. Callers that need to hand a
+ * light/dark decision to something outside the CSS-variable system (the Readium
+ * reader's own theme, for one) need the resolved answer rather than the setting.
+ */
+export const useIsDarkTheme = () => {
+  const { theme } = useUniwind();
+  const colorScheme = useColorScheme();
+
+  return theme === "dark" || (theme !== "light" && colorScheme === "dark");
+};
+
 // Ebook availability reads as green everywhere it appears. There is no green
 // token in ThemeColors, so the two shades live here instead of per component.
 const EBOOK_GREEN_LIGHT = "#15803d";
 const EBOOK_GREEN_DARK = "#4ade80";
 
-export const useEbookAccentColor = () => {
-  const { theme } = useUniwind();
-  const colorScheme = useColorScheme();
-  const isDark = theme === "dark" || (theme !== "light" && colorScheme === "dark");
-
-  return isDark ? EBOOK_GREEN_DARK : EBOOK_GREEN_LIGHT;
-};
+export const useEbookAccentColor = () => (useIsDarkTheme() ? EBOOK_GREEN_DARK : EBOOK_GREEN_LIGHT);
 
 export const useNavigationTheme = (): Theme => {
   const { theme } = useUniwind();

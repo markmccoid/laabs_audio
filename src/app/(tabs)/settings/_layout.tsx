@@ -28,6 +28,10 @@ const SettingLayout = () => {
         options={{ title: "Progress Logs", headerTransparent: true }}
       />
       <Stack.Screen
+        name="readium-spike"
+        options={{ title: "Readium Anchor Spike" }}
+      />
+      <Stack.Screen
         name="shadow-sqlite"
         options={{ title: "Shadow SQLite", headerTransparent: true }}
       />

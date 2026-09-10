@@ -21,6 +21,7 @@ import {
 } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { useShippedTranscriptIngest } from "@/transcription/use-shipped-transcript-ingest";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -75,6 +76,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
   const segments = useSegments();
   const colorScheme = useColorScheme();
   useReconcileBookProgress(libraryItemId);
+  useShippedTranscriptIngest(libraryItemId);
   const { data: bookData, error: itemLoadError, isLoading } = useGetItemDetails(libraryItemId);
   const { data: userServerState } = useGetUserServerState();
   const isOffline = useAuthStore((state) => state.isOnline === false);

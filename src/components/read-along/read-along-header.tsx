@@ -1,14 +1,21 @@
 import {
+  READ_ALONG_WORD_HIGHLIGHT_COUNTS,
   READ_ALONG_WORD_HIGHLIGHT_STYLES,
   resolveWordHighlightStyle,
+  type ReadAlongWordHighlightCount,
   type ReadAlongWordHighlightStyle,
 } from "@/read-along/read-along-rendering";
+import {
+  READ_ALONG_FOLLOW_ALIGNMENTS,
+  type ReadAlongFollowAlignment,
+} from "@/read-along/read-along-follow-alignment";
 import {
   MAX_READ_ALONG_FONT_SIZE,
   MIN_READ_ALONG_FONT_SIZE,
   useSettingsActions,
 } from "@/store/settings-store";
 import type { ThemeColors } from "@/theme/use-app-theme";
+import { ReadAlongBookAppearance } from "./read-along-appearance-book";
 import { ReadAlongPopoverBackdrop } from "./read-along-popover-backdrop";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useState } from "react";
@@ -32,18 +39,71 @@ const WORD_HIGHLIGHT_LABELS: Record<ReadAlongWordHighlightStyle, string> = {
   none: "None",
 };
 
+const FOLLOW_ALIGNMENT_LABELS: Record<ReadAlongFollowAlignment, string> = {
+  top: "Top",
+  middle: "Middle",
+  bottom: "Bottom",
+};
+
 /** The word the style rows render in their own style, so the labels aren't guesses. */
 const WORD_HIGHLIGHT_SAMPLE = "word";
 
 type ReadAlongHeaderProps = {
   title: string;
   fontSize: number;
+  followAlignment: ReadAlongFollowAlignment;
+  wordHighlightCount: ReadAlongWordHighlightCount;
   wordHighlightStyle: ReadAlongWordHighlightStyle;
+  /**
+   * Which surface the popover is configuring. The two share nothing but the
+   * button: on the Book surface the app draws none of the text, so the
+   * transcript's rows have nothing to act on (see `ReadAlongBookAppearance`).
+   */
+  isBookSurface: boolean;
   themeColors: ThemeColors;
   topInset: number;
   onClose: () => void;
   onOpenChapters: () => void;
 };
+
+const FollowAlignmentOption = ({
+  alignment,
+  isSelected,
+  onSelect,
+  themeColors,
+}: {
+  alignment: ReadAlongFollowAlignment;
+  isSelected: boolean;
+  onSelect: (alignment: ReadAlongFollowAlignment) => void;
+  themeColors: ThemeColors;
+}) => (
+  <Pressable
+    accessibilityRole="radio"
+    accessibilityLabel={`${FOLLOW_ALIGNMENT_LABELS[alignment]} follow position`}
+    accessibilityState={{ selected: isSelected, checked: isSelected }}
+    onPress={() => onSelect(alignment)}
+    style={({ pressed }) => ({
+      flex: 1,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 10,
+      borderCurve: "continuous",
+      backgroundColor: isSelected ? themeColors.accent : themeColors.bg,
+      opacity: pressed ? 0.7 : 1,
+    })}
+  >
+    <Text
+      style={{
+        fontSize: 13,
+        fontWeight: "700",
+        color: isSelected ? themeColors.accentForeground : themeColors.text,
+      }}
+    >
+      {FOLLOW_ALIGNMENT_LABELS[alignment]}
+    </Text>
+  </Pressable>
+);
 
 const HeaderButton = ({
   icon,
@@ -126,6 +186,46 @@ const SectionLabel = ({ text, color }: { text: string; color: string }) => (
   </Text>
 );
 
+const WordCountOption = ({
+  count,
+  isSelected,
+  onSelect,
+  themeColors,
+}: {
+  count: ReadAlongWordHighlightCount;
+  isSelected: boolean;
+  onSelect: (count: ReadAlongWordHighlightCount) => void;
+  themeColors: ThemeColors;
+}) => (
+  <Pressable
+    accessibilityRole="radio"
+    accessibilityLabel={`${count} ${count === 1 ? "word" : "words"}`}
+    accessibilityState={{ selected: isSelected, checked: isSelected }}
+    onPress={() => onSelect(count)}
+    style={({ pressed }) => ({
+      flex: 1,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 10,
+      borderCurve: "continuous",
+      backgroundColor: isSelected ? themeColors.accent : themeColors.bg,
+      opacity: pressed ? 0.7 : 1,
+    })}
+  >
+    <Text
+      style={{
+        fontSize: 14,
+        fontWeight: "700",
+        color: isSelected ? themeColors.accentForeground : themeColors.text,
+        fontVariant: ["tabular-nums"],
+      }}
+    >
+      {count}
+    </Text>
+  </Pressable>
+);
+
 const WordHighlightRow = ({
   style,
   isSelected,
@@ -177,14 +277,22 @@ const WordHighlightRow = ({
 export const ReadAlongHeader = ({
   title,
   fontSize,
+  followAlignment,
+  wordHighlightCount,
   wordHighlightStyle,
+  isBookSurface,
   themeColors,
   topInset,
   onClose,
   onOpenChapters,
 }: ReadAlongHeaderProps) => {
   const [isAppearanceOpen, setIsAppearanceOpen] = useState(false);
-  const { setReadAlongFontSize, setReadAlongWordHighlightStyle } = useSettingsActions();
+  const {
+    setReadAlongFontSize,
+    setReadAlongFollowAlignment,
+    setReadAlongWordHighlightCount,
+    setReadAlongWordHighlightStyle,
+  } = useSettingsActions();
 
   return (
     <View
@@ -269,7 +377,7 @@ export const ReadAlongHeader = ({
             top: topInset + 50,
             right: 12,
             zIndex: 3,
-            width: 244,
+            width: isBookSurface ? 268 : 244,
             gap: 8,
             borderRadius: 16,
             borderCurve: "continuous",
@@ -281,46 +389,101 @@ export const ReadAlongHeader = ({
             boxShadow: "0 12px 24px rgba(15, 23, 42, 0.18)",
           }}
         >
-          <SectionLabel text="Text size" color={themeColors.textMuted} />
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <StepperButton
-              label="Decrease text size"
-              symbol="-"
-              disabled={fontSize <= MIN_READ_ALONG_FONT_SIZE}
-              onPress={() => setReadAlongFontSize(fontSize - 1)}
-              themeColors={themeColors}
-            />
-            <Text
-              accessibilityLabel={`Text size ${fontSize}`}
-              style={{ minWidth: 28, textAlign: "center", fontSize: 14, color: themeColors.text }}
-            >
-              {fontSize}
-            </Text>
-            <StepperButton
-              label="Increase text size"
-              symbol="+"
-              disabled={fontSize >= MAX_READ_ALONG_FONT_SIZE}
-              onPress={() => setReadAlongFontSize(fontSize + 1)}
-              themeColors={themeColors}
-            />
-          </View>
+          {isBookSurface ? (
+            <ReadAlongBookAppearance themeColors={themeColors} />
+          ) : (
+            <>
+              <SectionLabel text="Text size" color={themeColors.textMuted} />
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <StepperButton
+                  label="Decrease text size"
+                  symbol="-"
+                  disabled={fontSize <= MIN_READ_ALONG_FONT_SIZE}
+                  onPress={() => setReadAlongFontSize(fontSize - 1)}
+                  themeColors={themeColors}
+                />
+                <Text
+                  accessibilityLabel={`Text size ${fontSize}`}
+                  style={{
+                    minWidth: 28,
+                    textAlign: "center",
+                    fontSize: 14,
+                    color: themeColors.text,
+                  }}
+                >
+                  {fontSize}
+                </Text>
+                <StepperButton
+                  label="Increase text size"
+                  symbol="+"
+                  disabled={fontSize >= MAX_READ_ALONG_FONT_SIZE}
+                  onPress={() => setReadAlongFontSize(fontSize + 1)}
+                  themeColors={themeColors}
+                />
+              </View>
 
-          <View style={{ height: 1, backgroundColor: themeColors.border, marginVertical: 2 }} />
-
-          {/* "Word highlight", not "Highlight": the segment block stays on in
-              every style, including None, and the heading has to say so. */}
-          <SectionLabel text="Word highlight" color={themeColors.textMuted} />
-          <View accessibilityRole="radiogroup" accessibilityLabel="Word highlight">
-            {READ_ALONG_WORD_HIGHLIGHT_STYLES.map((style) => (
-              <WordHighlightRow
-                key={style}
-                style={style}
-                isSelected={style === wordHighlightStyle}
-                onSelect={setReadAlongWordHighlightStyle}
-                themeColors={themeColors}
+              <View
+                style={{ height: 1, backgroundColor: themeColors.border, marginVertical: 2 }}
               />
-            ))}
-          </View>
+
+              <SectionLabel text="Follow position" color={themeColors.textMuted} />
+              <View
+                accessibilityRole="radiogroup"
+                accessibilityLabel="Follow position"
+                style={{ flexDirection: "row", gap: 6 }}
+              >
+                {READ_ALONG_FOLLOW_ALIGNMENTS.map((alignment) => (
+                  <FollowAlignmentOption
+                    key={alignment}
+                    alignment={alignment}
+                    isSelected={alignment === followAlignment}
+                    onSelect={setReadAlongFollowAlignment}
+                    themeColors={themeColors}
+                  />
+                ))}
+              </View>
+
+              <View
+                style={{ height: 1, backgroundColor: themeColors.border, marginVertical: 2 }}
+              />
+
+              <SectionLabel text="Words highlighted" color={themeColors.textMuted} />
+              <View
+                accessibilityRole="radiogroup"
+                accessibilityLabel="Words highlighted"
+                style={{ flexDirection: "row", gap: 6 }}
+              >
+                {READ_ALONG_WORD_HIGHLIGHT_COUNTS.map((count) => (
+                  <WordCountOption
+                    key={count}
+                    count={count}
+                    isSelected={count === wordHighlightCount}
+                    onSelect={setReadAlongWordHighlightCount}
+                    themeColors={themeColors}
+                  />
+                ))}
+              </View>
+
+              <View
+                style={{ height: 1, backgroundColor: themeColors.border, marginVertical: 2 }}
+              />
+
+              {/* "Word highlight", not "Highlight": the segment block stays on in
+                  every style, including None, and the heading has to say so. */}
+              <SectionLabel text="Word highlight" color={themeColors.textMuted} />
+              <View accessibilityRole="radiogroup" accessibilityLabel="Word highlight">
+                {READ_ALONG_WORD_HIGHLIGHT_STYLES.map((style) => (
+                  <WordHighlightRow
+                    key={style}
+                    style={style}
+                    isSelected={style === wordHighlightStyle}
+                    onSelect={setReadAlongWordHighlightStyle}
+                    themeColors={themeColors}
+                  />
+                ))}
+              </View>
+            </>
+          )}
         </View>
       ) : null}
     </View>

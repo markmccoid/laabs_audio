@@ -223,6 +223,23 @@ describe("interpolatePosition", () => {
     expect(interpolatePosition(anchor({ anchoredAtMs: Number.NaN }), 1_000_500)).toBe(10_000);
   });
 
+  it("snaps back when a later tick re-anchors onto the same position", () => {
+    // The Book → Transcript sentence-loop: a playing 1 Hz tick that reports
+    // the same millisecond with a new wall clock. Interpolation had walked
+    // through the sentence; the restamp lands back at its start. The store
+    // must not feed the interpolator this kind of anchor — see
+    // `playback-store.test.ts`.
+    const first = anchor({ positionMs: 17_706_780, anchoredAtMs: 1_000_000, rate: 1.75 });
+    expect(interpolatePosition(first, 1_001_000)).toBe(17_706_780 + 1_000 * 1.75);
+
+    const restamped = anchor({
+      positionMs: 17_706_780,
+      anchoredAtMs: 1_001_000,
+      rate: 1.75,
+    });
+    expect(interpolatePosition(restamped, 1_001_000)).toBe(17_706_780);
+  });
+
   it("feeds segment resolution: a paused highlight freezes, a playing one advances", () => {
     const segments = [range(10_000, 10_500), range(10_600, 11_000)];
     const playing = anchor();

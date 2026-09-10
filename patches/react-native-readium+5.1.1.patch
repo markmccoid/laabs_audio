@@ -1,0 +1,1322 @@
+diff --git a/node_modules/react-native-readium/ios/HybridReadiumView.swift b/node_modules/react-native-readium/ios/HybridReadiumView.swift
+index 33b6589..640755f 100644
+--- a/node_modules/react-native-readium/ios/HybridReadiumView.swift
++++ b/node_modules/react-native-readium/ios/HybridReadiumView.swift
+@@ -46,6 +46,7 @@ class HybridReadiumView: HybridReadiumViewSpec {
+   var onDecorationActivated: ((DecorationActivatedEvent) -> Void)? = nil
+   var onSelectionChange: ((SelectionEvent) -> Void)? = nil
+   var onSelectionAction: ((SelectionActionEvent) -> Void)? = nil
++  var onTap: ((TapEvent) -> Void)? = nil
+ 
+   // MARK: - Private state
+ 
+@@ -115,6 +116,9 @@ class HybridReadiumView: HybridReadiumViewSpec {
+ 
+         if let epubVC = vc as? EPUBViewController {
+           epubVC.selectionActionDelegate = self
++          epubVC.onTapPoint = { [weak self] point in
++            self?.handleTap(at: point)
++          }
+         }
+ 
+         self.addViewControllerAsSubview(vc)
+@@ -178,6 +182,115 @@ class HybridReadiumView: HybridReadiumViewSpec {
+     }
+   }
+ 
++
++  // MARK: - Tap resolution
++
++  /// Installed into each spread's JS context; records where the reader last
++  /// tapped, in the document's own terms.
++  ///
++  /// The native tap gives a point in the navigator's coordinate space, which
++  /// says nothing about what was tapped and would have to be converted through
++  /// the spread view's scroll offset and scale to mean anything. The document
++  /// already knows: `caretRangeFromPoint` answers in the WebView's own
++  /// coordinates, so letting the page resolve its own tap removes the
++  /// conversion — and with it the class of bug where the answer is subtly wrong
++  /// only when the reader has scrolled.
++  ///
++  /// The listener is passive and runs in the capture phase without calling
++  /// `preventDefault`, so Readium's own gesture handling is untouched. Nothing
++  /// is added to the DOM: wrapping words in elements would change the text
++  /// layout that quote anchoring — the highlight, and every decoration — matches
++  /// against.
++  private static let tapProbeScript = """
++  (function () {
++    if (window.__laabsTapProbe) { return 'present'; }
++    window.__laabsTapProbe = { at: 0, offset: -1, total: 0, text: '' };
++    var measure = function (node, nodeOffset) {
++      // One pass yields both the offset and the total, which is what makes this
++      // comparable to an alignment unit's character-ratio progression.
++      var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
++      var total = 0;
++      var offset = -1;
++      var current;
++      while ((current = walker.nextNode())) {
++        if (current === node) { offset = total + nodeOffset; }
++        total += current.nodeValue.length;
++      }
++      return { offset: offset, total: total };
++    };
++    document.addEventListener('click', function (event) {
++      try {
++        var range = document.caretRangeFromPoint
++          ? document.caretRangeFromPoint(event.clientX, event.clientY)
++          : null;
++        if (!range) { return; }
++        var measured = measure(range.startContainer, range.startOffset);
++        if (measured.offset < 0) { return; }
++        var block = range.startContainer.parentElement;
++        window.__laabsTapProbe = {
++          at: Date.now(),
++          offset: measured.offset,
++          total: measured.total,
++          text: block ? (block.textContent || '').slice(0, 400) : ''
++        };
++      } catch (error) { /* a tap that cannot be resolved must not break the page */ }
++    }, true);
++    return 'installed';
++  })();
++  """
++
++  /// Reinstalls the probe. Idempotent — each spread loads a fresh JS context, so
++  /// this runs again on every location change and does nothing when already there.
++  private func installTapProbe() {
++    guard let navigator = readerViewController?.navigator as? EPUBNavigatorViewController else { return }
++    Task { @MainActor in
++      _ = await navigator.evaluateJavaScript(Self.tapProbeScript)
++    }
++  }
++
++  /// Reads what the probe recorded for the tap Readium just reported.
++  ///
++  /// `didTapAt` and the DOM's own `click` are two independent paths out of the
++  /// same finger, and their order is not guaranteed. Rather than assume, this
++  /// retries briefly and ignores anything the probe recorded too long ago to
++  /// belong to this tap — a stale reading would seek the reader somewhere they
++  /// tapped a minute earlier, which is worse than not seeking at all.
++  private func handleTap(at point: CGPoint) {
++    guard let navigator = readerViewController?.navigator as? EPUBNavigatorViewController else { return }
++    let href = navigator.currentLocation?.href.string ?? ""
++
++    Task { @MainActor in
++      for attempt in 0 ..< 4 {
++        if attempt > 0 {
++          try? await Task.sleep(nanoseconds: 40_000_000)
++        }
++        let result = await navigator.evaluateJavaScript(
++          "JSON.stringify(window.__laabsTapProbe || null)"
++        )
++        guard
++          let raw = try? result.get() as? String,
++          let data = raw.data(using: .utf8),
++          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
++          let recordedAt = json["at"] as? Double,
++          let offset = json["offset"] as? Double,
++          let total = json["total"] as? Double,
++          offset >= 0, total > 0
++        else { continue }
++
++        let ageMs = Date().timeIntervalSince1970 * 1000 - recordedAt
++        guard ageMs >= 0, ageMs < 1000 else { continue }
++
++        self.onTap?(TapEvent(
++          href: href,
++          charOffset: offset,
++          totalChars: total,
++          text: (json["text"] as? String) ?? ""
++        ))
++        return
++      }
++    }
++  }
++
+   // MARK: - Selection Actions
+ 
+   private func updateSelectionActions() {
+@@ -192,10 +305,15 @@ class HybridReadiumView: HybridReadiumViewSpec {
+       guard let self = self else { return }
+       let nitroLocator = readiumLocatorToNitro(locator)
+       self.onLocationChange?(nitroLocator)
++      // Each spread loads its own JS context, so the probe has to be reinstalled
++      // after a resource turn. The script guards itself, so re-running it on
++      // every scroll report costs one no-op evaluation.
++      self.installTapProbe()
+     })
+     .store(in: &subscriptions)
+ 
+     readerViewController = vc
++    installTapProbe()
+ 
+     // Apply pending state
+     if preferences != nil { updatePreferences() }
+diff --git a/node_modules/react-native-readium/ios/Reader/EPUB/EPUBViewController.swift b/node_modules/react-native-readium/ios/Reader/EPUB/EPUBViewController.swift
+index dd4b1ad..e726a8d 100644
+--- a/node_modules/react-native-readium/ios/Reader/EPUB/EPUBViewController.swift
++++ b/node_modules/react-native-readium/ios/Reader/EPUB/EPUBViewController.swift
+@@ -15,6 +15,14 @@ class EPUBViewController: ReaderViewController, SelectionActionHandlerDelegate {
+     private var selectionActionHandler: SelectionActionHandler?
+     weak var selectionActionDelegate: SelectionActionDelegate?
+ 
++    /// Called for every tap on the page, with the point in the navigator's own
++    /// coordinate space.
++    ///
++    /// Readium already routes taps to `VisualNavigatorDelegate`, but this class
++    /// conformed to `EPUBNavigatorDelegate` with an empty extension, so every
++    /// tap was silently taking the protocol's default no-op implementation.
++    var onTapPoint: ((CGPoint) -> Void)?
++
+     init(
+       publication: Publication,
+       locator: ReadiumShared.Locator?,
+@@ -130,7 +138,11 @@ class EPUBViewController: ReaderViewController, SelectionActionHandlerDelegate {
+ 
+ }
+ 
+-extension EPUBViewController: EPUBNavigatorDelegate {}
++extension EPUBViewController: EPUBNavigatorDelegate {
++    func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
++        onTapPoint?(point)
++    }
++}
+ 
+ extension EPUBViewController: UIGestureRecognizerDelegate {
+ 
+diff --git a/node_modules/react-native-readium/lib/src/components/ReadiumView.types.d.ts b/node_modules/react-native-readium/lib/src/components/ReadiumView.types.d.ts
+index 0d7d0a6..3286646 100644
+--- a/node_modules/react-native-readium/lib/src/components/ReadiumView.types.d.ts
++++ b/node_modules/react-native-readium/lib/src/components/ReadiumView.types.d.ts
+@@ -1,4 +1,4 @@
+-import type { Preferences, Locator, File, DecorationGroup, SelectionAction, PublicationReadyEvent, DecorationActivatedEvent, SelectionEvent, SelectionActionEvent, SearchOptions, SearchPage, ZoomEvent } from '../interfaces';
++import type { Preferences, Locator, File, DecorationGroup, SelectionAction, PublicationReadyEvent, DecorationActivatedEvent, SelectionEvent, SelectionActionEvent, SearchOptions, SearchPage, TapEvent, ZoomEvent } from '../interfaces';
+ export type ReadiumViewRef = {
+     goTo: (locator: Locator) => void;
+     goForward: () => void;
+@@ -27,5 +27,6 @@ export type ReadiumProps = {
+     onDecorationActivated?: (event: DecorationActivatedEvent) => void;
+     onSelectionChange?: (event: SelectionEvent) => void;
+     onSelectionAction?: (event: SelectionActionEvent) => void;
++    onTap?: (event: TapEvent) => void;
+     onZoomChange?: (event: ZoomEvent) => void;
+ };
+diff --git a/node_modules/react-native-readium/lib/src/interfaces/Tap.d.ts b/node_modules/react-native-readium/lib/src/interfaces/Tap.d.ts
+new file mode 100644
+index 0000000..430333b
+--- /dev/null
++++ b/node_modules/react-native-readium/lib/src/interfaces/Tap.d.ts
+@@ -0,0 +1 @@
++export type { TapEvent } from '../specs/ReadiumView.nitro';
+diff --git a/node_modules/react-native-readium/lib/src/interfaces/Tap.js b/node_modules/react-native-readium/lib/src/interfaces/Tap.js
+new file mode 100644
+index 0000000..cb0ff5c
+--- /dev/null
++++ b/node_modules/react-native-readium/lib/src/interfaces/Tap.js
+@@ -0,0 +1 @@
++export {};
+diff --git a/node_modules/react-native-readium/lib/src/interfaces/index.d.ts b/node_modules/react-native-readium/lib/src/interfaces/index.d.ts
+index 35c2f70..fa5121e 100644
+--- a/node_modules/react-native-readium/lib/src/interfaces/index.d.ts
++++ b/node_modules/react-native-readium/lib/src/interfaces/index.d.ts
+@@ -8,6 +8,7 @@ export * from './PublicationMetadata';
+ export * from './PublicationReady';
+ export * from './Selection';
+ export * from './SelectionAction';
++export * from './Tap';
+ export type { Rect, Point } from '../specs/ReadiumView.nitro';
+ export * from './Search';
+ export * from './Zoom';
+diff --git a/node_modules/react-native-readium/lib/src/interfaces/index.js b/node_modules/react-native-readium/lib/src/interfaces/index.js
+index 76e116f..c53fbc8 100644
+--- a/node_modules/react-native-readium/lib/src/interfaces/index.js
++++ b/node_modules/react-native-readium/lib/src/interfaces/index.js
+@@ -8,5 +8,6 @@ export * from './PublicationMetadata';
+ export * from './PublicationReady';
+ export * from './Selection';
+ export * from './SelectionAction';
++export * from './Tap';
+ export * from './Search';
+ export * from './Zoom';
+diff --git a/node_modules/react-native-readium/lib/src/specs/ReadiumView.nitro.d.ts b/node_modules/react-native-readium/lib/src/specs/ReadiumView.nitro.d.ts
+index 4be62c3..486d89d 100644
+--- a/node_modules/react-native-readium/lib/src/specs/ReadiumView.nitro.d.ts
++++ b/node_modules/react-native-readium/lib/src/specs/ReadiumView.nitro.d.ts
+@@ -197,6 +197,12 @@ export interface SelectionEvent {
+     locator?: Locator;
+     selectedText?: string;
+ }
++export interface TapEvent {
++    href: string;
++    charOffset: number;
++    totalChars: number;
++    text: string;
++}
+ export interface SelectionActionEvent {
+     locator: Locator;
+     selectedText: string;
+@@ -216,6 +222,7 @@ export interface ReadiumViewProps extends HybridViewProps {
+     onDecorationActivated?: (event: DecorationActivatedEvent) => void;
+     onSelectionChange?: (event: SelectionEvent) => void;
+     onSelectionAction?: (event: SelectionActionEvent) => void;
++    onTap?: (event: TapEvent) => void;
+ }
+ export interface ReadiumViewMethods extends HybridViewMethods {
+     goTo(locator: Locator): void;
+diff --git a/node_modules/react-native-readium/nitrogen/generated/android/NitroReadiumOnLoad.cpp b/node_modules/react-native-readium/nitrogen/generated/android/NitroReadiumOnLoad.cpp
+index 5e17bb7..040501b 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/android/NitroReadiumOnLoad.cpp
++++ b/node_modules/react-native-readium/nitrogen/generated/android/NitroReadiumOnLoad.cpp
+@@ -21,6 +21,7 @@
+ #include "JFunc_void_DecorationActivatedEvent.hpp"
+ #include "JFunc_void_SelectionEvent.hpp"
+ #include "JFunc_void_SelectionActionEvent.hpp"
++#include "JFunc_void_TapEvent.hpp"
+ #include "views/JHybridReadiumViewStateUpdater.hpp"
+ #include <NitroModules/DefaultConstructableObject.hpp>
+ 
+@@ -52,6 +53,7 @@ void registerAllNatives() {
+   margelo::nitro::readium::JFunc_void_DecorationActivatedEvent_cxx::registerNatives();
+   margelo::nitro::readium::JFunc_void_SelectionEvent_cxx::registerNatives();
+   margelo::nitro::readium::JFunc_void_SelectionActionEvent_cxx::registerNatives();
++  margelo::nitro::readium::JFunc_void_TapEvent_cxx::registerNatives();
+   margelo::nitro::readium::views::JHybridReadiumViewStateUpdater::registerNatives();
+ 
+   // Register Nitro Hybrid Objects
+diff --git a/node_modules/react-native-readium/nitrogen/generated/android/c++/JFunc_void_TapEvent.hpp b/node_modules/react-native-readium/nitrogen/generated/android/c++/JFunc_void_TapEvent.hpp
+new file mode 100644
+index 0000000..b1bcdb7
+--- /dev/null
++++ b/node_modules/react-native-readium/nitrogen/generated/android/c++/JFunc_void_TapEvent.hpp
+@@ -0,0 +1,78 @@
++///
++/// JFunc_void_TapEvent.hpp
++/// This file was generated by nitrogen. DO NOT MODIFY THIS FILE.
++/// https://github.com/mrousavy/nitro
++/// Copyright © Marc Rousavy @ Margelo
++///
++
++#pragma once
++
++#include <fbjni/fbjni.h>
++#include <functional>
++
++#include "TapEvent.hpp"
++#include <functional>
++#include <NitroModules/JNICallable.hpp>
++#include "JTapEvent.hpp"
++#include <string>
++
++namespace margelo::nitro::readium {
++
++  using namespace facebook;
++
++  /**
++   * Represents the Java/Kotlin callback `(event: TapEvent) -> Unit`.
++   * This can be passed around between C++ and Java/Kotlin.
++   */
++  struct JFunc_void_TapEvent: public jni::JavaClass<JFunc_void_TapEvent> {
++  public:
++    static constexpr auto kJavaDescriptor = "Lcom/margelo/nitro/reactnativereadium/Func_void_TapEvent;";
++
++  public:
++    /**
++     * Invokes the function this `JFunc_void_TapEvent` instance holds through JNI.
++     */
++    void invoke(const TapEvent& event) const {
++      static const auto method = javaClassStatic()->getMethod<void(jni::alias_ref<JTapEvent> /* event */)>("invoke");
++      method(self(), JTapEvent::fromCpp(event));
++    }
++  };
++
++  /**
++   * An implementation of Func_void_TapEvent that is backed by a C++ implementation (using `std::function<...>`)
++   */
++  class JFunc_void_TapEvent_cxx final: public jni::HybridClass<JFunc_void_TapEvent_cxx, JFunc_void_TapEvent> {
++  public:
++    static jni::local_ref<JFunc_void_TapEvent::javaobject> fromCpp(const std::function<void(const TapEvent& /* event */)>& func) {
++      return JFunc_void_TapEvent_cxx::newObjectCxxArgs(func);
++    }
++
++  public:
++    /**
++     * Invokes the C++ `std::function<...>` this `JFunc_void_TapEvent_cxx` instance holds.
++     */
++    void invoke_cxx(jni::alias_ref<JTapEvent> event) {
++      _func(event->toCpp());
++    }
++
++  public:
++    [[nodiscard]]
++    inline const std::function<void(const TapEvent& /* event */)>& getFunction() const {
++      return _func;
++    }
++
++  public:
++    static constexpr auto kJavaDescriptor = "Lcom/margelo/nitro/reactnativereadium/Func_void_TapEvent_cxx;";
++    static void registerNatives() {
++      registerHybrid({makeNativeMethod("invoke_cxx", JFunc_void_TapEvent_cxx::invoke_cxx)});
++    }
++
++  private:
++    explicit JFunc_void_TapEvent_cxx(const std::function<void(const TapEvent& /* event */)>& func): _func(func) { }
++
++  private:
++    friend HybridBase;
++    std::function<void(const TapEvent& /* event */)> _func;
++  };
++
++} // namespace margelo::nitro::readium
+diff --git a/node_modules/react-native-readium/nitrogen/generated/android/c++/JHybridReadiumViewSpec.cpp b/node_modules/react-native-readium/nitrogen/generated/android/c++/JHybridReadiumViewSpec.cpp
+index 34fa29e..bdcc8e2 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/android/c++/JHybridReadiumViewSpec.cpp
++++ b/node_modules/react-native-readium/nitrogen/generated/android/c++/JHybridReadiumViewSpec.cpp
+@@ -53,6 +53,8 @@ namespace margelo::nitro::readium { struct Point; }
+ namespace margelo::nitro::readium { struct SelectionEvent; }
+ // Forward declaration of `SelectionActionEvent` to properly resolve imports.
+ namespace margelo::nitro::readium { struct SelectionActionEvent; }
++// Forward declaration of `TapEvent` to properly resolve imports.
++namespace margelo::nitro::readium { struct TapEvent; }
+ // Forward declaration of `SearchPage` to properly resolve imports.
+ namespace margelo::nitro::readium { struct SearchPage; }
+ // Forward declaration of `SearchResult` to properly resolve imports.
+@@ -117,6 +119,9 @@ namespace margelo::nitro::readium { struct SearchOptions; }
+ #include "SelectionActionEvent.hpp"
+ #include "JFunc_void_SelectionActionEvent.hpp"
+ #include "JSelectionActionEvent.hpp"
++#include "TapEvent.hpp"
++#include "JFunc_void_TapEvent.hpp"
++#include "JTapEvent.hpp"
+ #include "SearchPage.hpp"
+ #include <NitroModules/Promise.hpp>
+ #include <NitroModules/JPromise.hpp>
+@@ -313,6 +318,23 @@ namespace margelo::nitro::readium {
+     static const auto method = _javaPart->javaClassStatic()->getMethod<void(jni::alias_ref<JFunc_void_SelectionActionEvent::javaobject> /* onSelectionAction */)>("setOnSelectionAction_cxx");
+     method(_javaPart, onSelectionAction.has_value() ? JFunc_void_SelectionActionEvent_cxx::fromCpp(onSelectionAction.value()) : nullptr);
+   }
++  std::optional<std::function<void(const TapEvent& /* event */)>> JHybridReadiumViewSpec::getOnTap() {
++    static const auto method = _javaPart->javaClassStatic()->getMethod<jni::local_ref<JFunc_void_TapEvent::javaobject>()>("getOnTap_cxx");
++    auto __result = method(_javaPart);
++    return __result != nullptr ? std::make_optional([&]() -> std::function<void(const TapEvent& /* event */)> {
++      if (__result->isInstanceOf(JFunc_void_TapEvent_cxx::javaClassStatic())) [[likely]] {
++        auto downcast = jni::static_ref_cast<JFunc_void_TapEvent_cxx::javaobject>(__result);
++        return downcast->cthis()->getFunction();
++      } else {
++        auto __resultRef = jni::make_global(__result);
++        return JNICallable<JFunc_void_TapEvent, void(TapEvent)>(std::move(__resultRef));
++      }
++    }()) : std::nullopt;
++  }
++  void JHybridReadiumViewSpec::setOnTap(const std::optional<std::function<void(const TapEvent& /* event */)>>& onTap) {
++    static const auto method = _javaPart->javaClassStatic()->getMethod<void(jni::alias_ref<JFunc_void_TapEvent::javaobject> /* onTap */)>("setOnTap_cxx");
++    method(_javaPart, onTap.has_value() ? JFunc_void_TapEvent_cxx::fromCpp(onTap.value()) : nullptr);
++  }
+ 
+   // Methods
+   void JHybridReadiumViewSpec::goTo(const Locator& locator) {
+diff --git a/node_modules/react-native-readium/nitrogen/generated/android/c++/JHybridReadiumViewSpec.hpp b/node_modules/react-native-readium/nitrogen/generated/android/c++/JHybridReadiumViewSpec.hpp
+index 672e698..ac3fba5 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/android/c++/JHybridReadiumViewSpec.hpp
++++ b/node_modules/react-native-readium/nitrogen/generated/android/c++/JHybridReadiumViewSpec.hpp
+@@ -68,6 +68,8 @@ namespace margelo::nitro::readium {
+     void setOnSelectionChange(const std::optional<std::function<void(const SelectionEvent& /* event */)>>& onSelectionChange) override;
+     std::optional<std::function<void(const SelectionActionEvent& /* event */)>> getOnSelectionAction() override;
+     void setOnSelectionAction(const std::optional<std::function<void(const SelectionActionEvent& /* event */)>>& onSelectionAction) override;
++    std::optional<std::function<void(const TapEvent& /* event */)>> getOnTap() override;
++    void setOnTap(const std::optional<std::function<void(const TapEvent& /* event */)>>& onTap) override;
+ 
+   public:
+     // Methods
+diff --git a/node_modules/react-native-readium/nitrogen/generated/android/c++/JTapEvent.hpp b/node_modules/react-native-readium/nitrogen/generated/android/c++/JTapEvent.hpp
+new file mode 100644
+index 0000000..2df1e5f
+--- /dev/null
++++ b/node_modules/react-native-readium/nitrogen/generated/android/c++/JTapEvent.hpp
+@@ -0,0 +1,69 @@
++///
++/// JTapEvent.hpp
++/// This file was generated by nitrogen. DO NOT MODIFY THIS FILE.
++/// https://github.com/mrousavy/nitro
++/// Copyright © Marc Rousavy @ Margelo
++///
++
++#pragma once
++
++#include <fbjni/fbjni.h>
++#include "TapEvent.hpp"
++
++#include <string>
++
++namespace margelo::nitro::readium {
++
++  using namespace facebook;
++
++  /**
++   * The C++ JNI bridge between the C++ struct "TapEvent" and the Kotlin data class "TapEvent".
++   */
++  struct JTapEvent final: public jni::JavaClass<JTapEvent> {
++  public:
++    static constexpr auto kJavaDescriptor = "Lcom/margelo/nitro/reactnativereadium/TapEvent;";
++
++  public:
++    /**
++     * Convert this Java/Kotlin-based struct to the C++ struct TapEvent by copying all values to C++.
++     */
++    [[maybe_unused]]
++    [[nodiscard]]
++    TapEvent toCpp() const {
++      static const auto clazz = javaClassStatic();
++      static const auto fieldHref = clazz->getField<jni::JString>("href");
++      jni::local_ref<jni::JString> href = this->getFieldValue(fieldHref);
++      static const auto fieldCharOffset = clazz->getField<double>("charOffset");
++      double charOffset = this->getFieldValue(fieldCharOffset);
++      static const auto fieldTotalChars = clazz->getField<double>("totalChars");
++      double totalChars = this->getFieldValue(fieldTotalChars);
++      static const auto fieldText = clazz->getField<jni::JString>("text");
++      jni::local_ref<jni::JString> text = this->getFieldValue(fieldText);
++      return TapEvent(
++        href->toStdString(),
++        charOffset,
++        totalChars,
++        text->toStdString()
++      );
++    }
++
++  public:
++    /**
++     * Create a Java/Kotlin-based struct by copying all values from the given C++ struct to Java.
++     */
++    [[maybe_unused]]
++    static jni::local_ref<JTapEvent::javaobject> fromCpp(const TapEvent& value) {
++      using JSignature = JTapEvent(jni::alias_ref<jni::JString>, double, double, jni::alias_ref<jni::JString>);
++      static const auto clazz = javaClassStatic();
++      static const auto create = clazz->getStaticMethod<JSignature>("fromCpp");
++      return create(
++        clazz,
++        jni::make_jstring(value.href),
++        value.charOffset,
++        value.totalChars,
++        jni::make_jstring(value.text)
++      );
++    }
++  };
++
++} // namespace margelo::nitro::readium
+diff --git a/node_modules/react-native-readium/nitrogen/generated/android/c++/views/JHybridReadiumViewStateUpdater.cpp b/node_modules/react-native-readium/nitrogen/generated/android/c++/views/JHybridReadiumViewStateUpdater.cpp
+index 5be1614..cdd177d 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/android/c++/views/JHybridReadiumViewStateUpdater.cpp
++++ b/node_modules/react-native-readium/nitrogen/generated/android/c++/views/JHybridReadiumViewStateUpdater.cpp
+@@ -73,6 +73,10 @@ void JHybridReadiumViewStateUpdater::updateViewProps(jni::alias_ref<jni::JClass>
+     hybridView->setOnSelectionAction(props->onSelectionAction.value);
+     props->onSelectionAction.isDirty = false;
+   }
++  if (props->onTap.isDirty) {
++    hybridView->setOnTap(props->onTap.value);
++    props->onTap.isDirty = false;
++  }
+ 
+   // Update hybridRef if it changed
+   if (props->hybridRef.isDirty) {
+diff --git a/node_modules/react-native-readium/nitrogen/generated/android/kotlin/com/margelo/nitro/reactnativereadium/Func_void_TapEvent.kt b/node_modules/react-native-readium/nitrogen/generated/android/kotlin/com/margelo/nitro/reactnativereadium/Func_void_TapEvent.kt
+new file mode 100644
+index 0000000..52491e6
+--- /dev/null
++++ b/node_modules/react-native-readium/nitrogen/generated/android/kotlin/com/margelo/nitro/reactnativereadium/Func_void_TapEvent.kt
+@@ -0,0 +1,80 @@
++///
++/// Func_void_TapEvent.kt
++/// This file was generated by nitrogen. DO NOT MODIFY THIS FILE.
++/// https://github.com/mrousavy/nitro
++/// Copyright © Marc Rousavy @ Margelo
++///
++
++package com.margelo.nitro.reactnativereadium
++
++import androidx.annotation.Keep
++import com.facebook.jni.HybridData
++import com.facebook.proguard.annotations.DoNotStrip
++import dalvik.annotation.optimization.FastNative
++
++
++/**
++ * Represents the JavaScript callback `(event: struct) => void`.
++ * This can be either implemented in C++ (in which case it might be a callback coming from JS),
++ * or in Kotlin/Java (in which case it is a native callback).
++ */
++@DoNotStrip
++@Keep
++@Suppress("ClassName", "RedundantUnitReturnType")
++fun interface Func_void_TapEvent: (TapEvent) -> Unit {
++  /**
++   * Call the given JS callback.
++   * @throws Throwable if the JS function itself throws an error, or if the JS function/runtime has already been deleted.
++   */
++  @DoNotStrip
++  @Keep
++  override fun invoke(event: TapEvent): Unit
++}
++
++/**
++ * Represents the JavaScript callback `(event: struct) => void`.
++ * This is implemented in C++, via a `std::function<...>`.
++ * The callback might be coming from JS.
++ */
++@DoNotStrip
++@Keep
++@Suppress(
++  "KotlinJniMissingFunction", "unused",
++  "RedundantSuppression", "RedundantUnitReturnType", "FunctionName",
++  "ConvertSecondaryConstructorToPrimary", "ClassName", "LocalVariableName",
++)
++class Func_void_TapEvent_cxx: Func_void_TapEvent {
++  @DoNotStrip
++  @Keep
++  private val mHybridData: HybridData
++
++  @DoNotStrip
++  @Keep
++  private constructor(hybridData: HybridData) {
++    mHybridData = hybridData
++  }
++
++  @DoNotStrip
++  @Keep
++  override fun invoke(event: TapEvent): Unit
++    = invoke_cxx(event)
++
++  @FastNative
++  private external fun invoke_cxx(event: TapEvent): Unit
++}
++
++/**
++ * Represents the JavaScript callback `(event: struct) => void`.
++ * This is implemented in Java/Kotlin, via a `(TapEvent) -> Unit`.
++ * The callback is always coming from native.
++ */
++@DoNotStrip
++@Keep
++@Suppress("ClassName", "RedundantUnitReturnType", "unused")
++class Func_void_TapEvent_java(private val function: (TapEvent) -> Unit): Func_void_TapEvent {
++  @DoNotStrip
++  @Keep
++  override fun invoke(event: TapEvent): Unit {
++    return this.function(event)
++  }
++}
+diff --git a/node_modules/react-native-readium/nitrogen/generated/android/kotlin/com/margelo/nitro/reactnativereadium/HybridReadiumViewSpec.kt b/node_modules/react-native-readium/nitrogen/generated/android/kotlin/com/margelo/nitro/reactnativereadium/HybridReadiumViewSpec.kt
+index de9697d..cf2b733 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/android/kotlin/com/margelo/nitro/reactnativereadium/HybridReadiumViewSpec.kt
++++ b/node_modules/react-native-readium/nitrogen/generated/android/kotlin/com/margelo/nitro/reactnativereadium/HybridReadiumViewSpec.kt
+@@ -121,6 +121,20 @@ abstract class HybridReadiumViewSpec: HybridView() {
+       onSelectionAction = value?.let { it }
+     }
+   
++  abstract var onTap: ((event: TapEvent) -> Unit)?
++  
++  private var onTap_cxx: Func_void_TapEvent?
++    @Keep
++    @DoNotStrip
++    get() {
++      return onTap?.let { Func_void_TapEvent_java(it) }
++    }
++    @Keep
++    @DoNotStrip
++    set(value) {
++      onTap = value?.let { it }
++    }
++
+   // Methods
+   @DoNotStrip
+   @Keep
+diff --git a/node_modules/react-native-readium/nitrogen/generated/android/kotlin/com/margelo/nitro/reactnativereadium/TapEvent.kt b/node_modules/react-native-readium/nitrogen/generated/android/kotlin/com/margelo/nitro/reactnativereadium/TapEvent.kt
+new file mode 100644
+index 0000000..6109a3a
+--- /dev/null
++++ b/node_modules/react-native-readium/nitrogen/generated/android/kotlin/com/margelo/nitro/reactnativereadium/TapEvent.kt
+@@ -0,0 +1,66 @@
++///
++/// TapEvent.kt
++/// This file was generated by nitrogen. DO NOT MODIFY THIS FILE.
++/// https://github.com/mrousavy/nitro
++/// Copyright © Marc Rousavy @ Margelo
++///
++
++package com.margelo.nitro.reactnativereadium
++
++import androidx.annotation.Keep
++import com.facebook.proguard.annotations.DoNotStrip
++import java.util.Objects
++
++
++/**
++ * Represents the JavaScript object/struct "TapEvent".
++ */
++@DoNotStrip
++@Keep
++data class TapEvent(
++  @DoNotStrip
++  @Keep
++  val href: String,
++  @DoNotStrip
++  @Keep
++  val charOffset: Double,
++  @DoNotStrip
++  @Keep
++  val totalChars: Double,
++  @DoNotStrip
++  @Keep
++  val text: String
++) {
++  /* primary constructor */
++
++  override fun equals(other: Any?): Boolean {
++    if (this === other) return true
++    if (other !is TapEvent) return false
++    return Objects.deepEquals(this.href, other.href)
++      && Objects.deepEquals(this.charOffset, other.charOffset)
++      && Objects.deepEquals(this.totalChars, other.totalChars)
++      && Objects.deepEquals(this.text, other.text)
++  }
++
++  override fun hashCode(): Int {
++    return arrayOf<Any?>(
++      href,
++      charOffset,
++      totalChars,
++      text
++    ).contentDeepHashCode()
++  }
++
++  companion object {
++    /**
++     * Constructor called from C++
++     */
++    @DoNotStrip
++    @Keep
++    @Suppress("unused")
++    @JvmStatic
++    private fun fromCpp(href: String, charOffset: Double, totalChars: Double, text: String): TapEvent {
++      return TapEvent(href, charOffset, totalChars, text)
++    }
++  }
++}
+diff --git a/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Bridge.cpp b/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Bridge.cpp
+index 7b9f54e..6c194af 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Bridge.cpp
++++ b/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Bridge.cpp
+@@ -54,6 +54,14 @@ namespace margelo::nitro::readium::bridge::swift {
+     };
+   }
+   
++  // pragma MARK: std::function<void(const TapEvent& /* event */)>
++  Func_void_TapEvent create_Func_void_TapEvent(void* NON_NULL swiftClosureWrapper) noexcept {
++    auto swiftClosure = NitroReadium::Func_void_TapEvent::fromUnsafe(swiftClosureWrapper);
++    return [swiftClosure = std::move(swiftClosure)](const TapEvent& event) mutable -> void {
++      swiftClosure.call(event);
++    };
++  }
++  
+   // pragma MARK: std::function<void(const SearchPage& /* result */)>
+   Func_void_SearchPage create_Func_void_SearchPage(void* NON_NULL swiftClosureWrapper) noexcept {
+     auto swiftClosure = NitroReadium::Func_void_SearchPage::fromUnsafe(swiftClosureWrapper);
+diff --git a/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Bridge.hpp b/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Bridge.hpp
+index 0ecf3e9..8774362 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Bridge.hpp
++++ b/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Bridge.hpp
+@@ -62,6 +62,8 @@ namespace margelo::nitro::readium { struct SelectionEvent; }
+ namespace margelo::nitro::readium { struct SeriesInfo; }
+ // Forward declaration of `Subject` to properly resolve imports.
+ namespace margelo::nitro::readium { struct Subject; }
++// Forward declaration of `TapEvent` to properly resolve imports.
++namespace margelo::nitro::readium { struct TapEvent; }
+ 
+ // Forward declarations of Swift defined types
+ // Forward declaration of `HybridReadiumViewSpec_cxx` to properly resolve imports.
+@@ -95,6 +97,7 @@ namespace NitroReadium { class HybridReadiumViewSpec_cxx; }
+ #include "SelectionEvent.hpp"
+ #include "SeriesInfo.hpp"
+ #include "Subject.hpp"
++#include "TapEvent.hpp"
+ #include <NitroModules/Promise.hpp>
+ #include <NitroModules/PromiseHolder.hpp>
+ #include <NitroModules/Result.hpp>
+@@ -721,6 +724,43 @@ namespace margelo::nitro::readium::bridge::swift {
+     return optional.value();
+   }
+   
++  // pragma MARK: std::function<void(const TapEvent& /* event */)>
++  /**
++   * Specialized version of `std::function<void(const TapEvent&)>`.
++   */
++  using Func_void_TapEvent = std::function<void(const TapEvent& /* event */)>;
++  /**
++   * Wrapper class for a `std::function<void(const TapEvent& / * event * /)>`, this can be used from Swift.
++   */
++  class Func_void_TapEvent_Wrapper final {
++  public:
++    explicit Func_void_TapEvent_Wrapper(std::function<void(const TapEvent& /* event */)>&& func): _function(std::make_unique<std::function<void(const TapEvent& /* event */)>>(std::move(func))) {}
++    inline void call(TapEvent event) const noexcept {
++      _function->operator()(event);
++    }
++  private:
++    std::unique_ptr<std::function<void(const TapEvent& /* event */)>> _function;
++  } SWIFT_NONCOPYABLE;
++  Func_void_TapEvent create_Func_void_TapEvent(void* NON_NULL swiftClosureWrapper) noexcept;
++  inline Func_void_TapEvent_Wrapper wrap_Func_void_TapEvent(Func_void_TapEvent value) noexcept {
++    return Func_void_TapEvent_Wrapper(std::move(value));
++  }
++  
++  // pragma MARK: std::optional<std::function<void(const TapEvent& /* event */)>>
++  /**
++   * Specialized version of `std::optional<std::function<void(const TapEvent& / * event * /)>>`.
++   */
++  using std__optional_std__function_void_const_TapEvent_____event______ = std::optional<std::function<void(const TapEvent& /* event */)>>;
++  inline std::optional<std::function<void(const TapEvent& /* event */)>> create_std__optional_std__function_void_const_TapEvent_____event______(const std::function<void(const TapEvent& /* event */)>& value) noexcept {
++    return std::optional<std::function<void(const TapEvent& /* event */)>>(value);
++  }
++  inline bool has_value_std__optional_std__function_void_const_TapEvent_____event______(const std::optional<std::function<void(const TapEvent& /* event */)>>& optional) noexcept {
++    return optional.has_value();
++  }
++  inline std::function<void(const TapEvent& /* event */)> get_std__optional_std__function_void_const_TapEvent_____event______(const std::optional<std::function<void(const TapEvent& /* event */)>>& optional) noexcept {
++    return optional.value();
++  }
++  
+   // pragma MARK: std::vector<SearchResult>
+   /**
+    * Specialized version of `std::vector<SearchResult>`.
+diff --git a/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Umbrella.hpp b/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Umbrella.hpp
+index b0b4584..a64470c 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Umbrella.hpp
++++ b/node_modules/react-native-readium/nitrogen/generated/ios/NitroReadium-Swift-Cxx-Umbrella.hpp
+@@ -62,6 +62,8 @@ namespace margelo::nitro::readium { struct SelectionEvent; }
+ namespace margelo::nitro::readium { struct SeriesInfo; }
+ // Forward declaration of `Subject` to properly resolve imports.
+ namespace margelo::nitro::readium { struct Subject; }
++// Forward declaration of `TapEvent` to properly resolve imports.
++namespace margelo::nitro::readium { struct TapEvent; }
+ 
+ // Include C++ defined types
+ #include "Accessibility.hpp"
+@@ -91,6 +93,7 @@ namespace margelo::nitro::readium { struct Subject; }
+ #include "SelectionEvent.hpp"
+ #include "SeriesInfo.hpp"
+ #include "Subject.hpp"
++#include "TapEvent.hpp"
+ #include <NitroModules/Promise.hpp>
+ #include <NitroModules/Result.hpp>
+ #include <exception>
+diff --git a/node_modules/react-native-readium/nitrogen/generated/ios/c++/HybridReadiumViewSpecSwift.hpp b/node_modules/react-native-readium/nitrogen/generated/ios/c++/HybridReadiumViewSpecSwift.hpp
+index 1ffb5ef..45921a3 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/ios/c++/HybridReadiumViewSpecSwift.hpp
++++ b/node_modules/react-native-readium/nitrogen/generated/ios/c++/HybridReadiumViewSpecSwift.hpp
+@@ -58,6 +58,8 @@ namespace margelo::nitro::readium { struct Point; }
+ namespace margelo::nitro::readium { struct SelectionEvent; }
+ // Forward declaration of `SelectionActionEvent` to properly resolve imports.
+ namespace margelo::nitro::readium { struct SelectionActionEvent; }
++// Forward declaration of `TapEvent` to properly resolve imports.
++namespace margelo::nitro::readium { struct TapEvent; }
+ // Forward declaration of `SearchPage` to properly resolve imports.
+ namespace margelo::nitro::readium { struct SearchPage; }
+ // Forward declaration of `SearchResult` to properly resolve imports.
+@@ -93,6 +95,7 @@ namespace margelo::nitro::readium { struct SearchOptions; }
+ #include "Point.hpp"
+ #include "SelectionEvent.hpp"
+ #include "SelectionActionEvent.hpp"
++#include "TapEvent.hpp"
+ #include "SearchPage.hpp"
+ #include <NitroModules/Promise.hpp>
+ #include "SearchResult.hpp"
+@@ -207,6 +210,13 @@ namespace margelo::nitro::readium {
+     inline void setOnSelectionAction(const std::optional<std::function<void(const SelectionActionEvent& /* event */)>>& onSelectionAction) noexcept override {
+       _swiftPart.setOnSelectionAction(onSelectionAction);
+     }
++    inline std::optional<std::function<void(const TapEvent& /* event */)>> getOnTap() noexcept override {
++      auto __result = _swiftPart.getOnTap();
++      return __result;
++    }
++    inline void setOnTap(const std::optional<std::function<void(const TapEvent& /* event */)>>& onTap) noexcept override {
++      _swiftPart.setOnTap(onTap);
++    }
+ 
+   public:
+     // Methods
+diff --git a/node_modules/react-native-readium/nitrogen/generated/ios/c++/views/HybridReadiumViewComponent.mm b/node_modules/react-native-readium/nitrogen/generated/ios/c++/views/HybridReadiumViewComponent.mm
+index 74a0ff0..692bb43 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/ios/c++/views/HybridReadiumViewComponent.mm
++++ b/node_modules/react-native-readium/nitrogen/generated/ios/c++/views/HybridReadiumViewComponent.mm
+@@ -117,6 +117,11 @@ using namespace margelo::nitro::readium::views;
+     swiftPart.setOnSelectionAction(newViewProps.onSelectionAction.value);
+     newViewProps.onSelectionAction.isDirty = false;
+   }
++  // onTap: optional
++  if (newViewProps.onTap.isDirty) {
++    swiftPart.setOnTap(newViewProps.onTap.value);
++    newViewProps.onTap.isDirty = false;
++  }
+ 
+   swiftPart.afterUpdate();
+ 
+diff --git a/node_modules/react-native-readium/nitrogen/generated/ios/swift/Func_void_TapEvent.swift b/node_modules/react-native-readium/nitrogen/generated/ios/swift/Func_void_TapEvent.swift
+new file mode 100644
+index 0000000..d03077e
+--- /dev/null
++++ b/node_modules/react-native-readium/nitrogen/generated/ios/swift/Func_void_TapEvent.swift
+@@ -0,0 +1,46 @@
++///
++/// Func_void_TapEvent.swift
++/// This file was generated by nitrogen. DO NOT MODIFY THIS FILE.
++/// https://github.com/mrousavy/nitro
++/// Copyright © Marc Rousavy @ Margelo
++///
++
++import NitroModules
++
++/**
++ * Wraps a Swift `(_ event: TapEvent) -> Void` as a class.
++ * This class can be used from C++, e.g. to wrap the Swift closure as a `std::function`.
++ */
++public final class Func_void_TapEvent {
++  public typealias bridge = margelo.nitro.readium.bridge.swift
++
++  private let closure: (_ event: TapEvent) -> Void
++
++  public init(_ closure: @escaping (_ event: TapEvent) -> Void) {
++    self.closure = closure
++  }
++
++  @inline(__always)
++  public func call(event: TapEvent) -> Void {
++    self.closure(event)
++  }
++
++  /**
++   * Casts this instance to a retained unsafe raw pointer.
++   * This acquires one additional strong reference on the object!
++   */
++  @inline(__always)
++  public func toUnsafe() -> UnsafeMutableRawPointer {
++    return Unmanaged.passRetained(self).toOpaque()
++  }
++
++  /**
++   * Casts an unsafe pointer to a `Func_void_TapEvent`.
++   * The pointer has to be a retained opaque `Unmanaged<Func_void_TapEvent>`.
++   * This removes one strong reference from the object!
++   */
++  @inline(__always)
++  public static func fromUnsafe(_ pointer: UnsafeMutableRawPointer) -> Func_void_TapEvent {
++    return Unmanaged<Func_void_TapEvent>.fromOpaque(pointer).takeRetainedValue()
++  }
++}
+diff --git a/node_modules/react-native-readium/nitrogen/generated/ios/swift/HybridReadiumViewSpec.swift b/node_modules/react-native-readium/nitrogen/generated/ios/swift/HybridReadiumViewSpec.swift
+index 21f3dd3..26f9694 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/ios/swift/HybridReadiumViewSpec.swift
++++ b/node_modules/react-native-readium/nitrogen/generated/ios/swift/HybridReadiumViewSpec.swift
+@@ -19,6 +19,7 @@ public protocol HybridReadiumViewSpec_protocol: HybridObject, HybridView {
+   var onDecorationActivated: ((_ event: DecorationActivatedEvent) -> Void)? { get set }
+   var onSelectionChange: ((_ event: SelectionEvent) -> Void)? { get set }
+   var onSelectionAction: ((_ event: SelectionActionEvent) -> Void)? { get set }
++  var onTap: ((_ event: TapEvent) -> Void)? { get set }
+ 
+   // Methods
+   func goTo(locator: Locator) throws -> Void
+diff --git a/node_modules/react-native-readium/nitrogen/generated/ios/swift/HybridReadiumViewSpec_cxx.swift b/node_modules/react-native-readium/nitrogen/generated/ios/swift/HybridReadiumViewSpec_cxx.swift
+index bb5c31b..37e6c2e 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/ios/swift/HybridReadiumViewSpec_cxx.swift
++++ b/node_modules/react-native-readium/nitrogen/generated/ios/swift/HybridReadiumViewSpec_cxx.swift
+@@ -375,6 +375,38 @@ open class HybridReadiumViewSpec_cxx {
+     }
+   }
+   
++  public final var onTap: bridge.std__optional_std__function_void_const_TapEvent_____event______ {
++    @inline(__always)
++    get {
++      return { () -> bridge.std__optional_std__function_void_const_TapEvent_____event______ in
++        if let __unwrappedValue = self.__implementation.onTap {
++          return bridge.create_std__optional_std__function_void_const_TapEvent_____event______({ () -> bridge.Func_void_TapEvent in
++            let __closureWrapper = Func_void_TapEvent(__unwrappedValue)
++            return bridge.create_Func_void_TapEvent(__closureWrapper.toUnsafe())
++          }())
++        } else {
++          return .init()
++        }
++      }()
++    }
++    @inline(__always)
++    set {
++      self.__implementation.onTap = { () -> ((_ event: TapEvent) -> Void)? in
++        if bridge.has_value_std__optional_std__function_void_const_TapEvent_____event______(newValue) {
++          let __unwrapped = bridge.get_std__optional_std__function_void_const_TapEvent_____event______(newValue)
++          return { () -> (TapEvent) -> Void in
++            let __wrappedFunction = bridge.wrap_Func_void_TapEvent(__unwrapped)
++            return { (__event: TapEvent) -> Void in
++              __wrappedFunction.call(__event)
++            }
++          }()
++        } else {
++          return nil
++        }
++      }()
++    }
++  }
++
+   // Methods
+   @inline(__always)
+   public final func goTo(locator: Locator) -> bridge.Result_void_ {
+diff --git a/node_modules/react-native-readium/nitrogen/generated/ios/swift/TapEvent.swift b/node_modules/react-native-readium/nitrogen/generated/ios/swift/TapEvent.swift
+new file mode 100644
+index 0000000..eb40dc2
+--- /dev/null
++++ b/node_modules/react-native-readium/nitrogen/generated/ios/swift/TapEvent.swift
+@@ -0,0 +1,44 @@
++///
++/// TapEvent.swift
++/// This file was generated by nitrogen. DO NOT MODIFY THIS FILE.
++/// https://github.com/mrousavy/nitro
++/// Copyright © Marc Rousavy @ Margelo
++///
++
++import NitroModules
++
++/**
++ * Represents an instance of `TapEvent`, backed by a C++ struct.
++ */
++public typealias TapEvent = margelo.nitro.readium.TapEvent
++
++public extension TapEvent {
++  private typealias bridge = margelo.nitro.readium.bridge.swift
++
++  /**
++   * Create a new instance of `TapEvent`.
++   */
++  init(href: String, charOffset: Double, totalChars: Double, text: String) {
++    self.init(std.string(href), charOffset, totalChars, std.string(text))
++  }
++
++  @inline(__always)
++  var href: String {
++    return String(self.__href)
++  }
++  
++  @inline(__always)
++  var charOffset: Double {
++    return self.__charOffset
++  }
++  
++  @inline(__always)
++  var totalChars: Double {
++    return self.__totalChars
++  }
++  
++  @inline(__always)
++  var text: String {
++    return String(self.__text)
++  }
++}
+diff --git a/node_modules/react-native-readium/nitrogen/generated/shared/c++/HybridReadiumViewSpec.cpp b/node_modules/react-native-readium/nitrogen/generated/shared/c++/HybridReadiumViewSpec.cpp
+index c8984c1..4f14b5b 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/shared/c++/HybridReadiumViewSpec.cpp
++++ b/node_modules/react-native-readium/nitrogen/generated/shared/c++/HybridReadiumViewSpec.cpp
+@@ -32,6 +32,8 @@ namespace margelo::nitro::readium {
+       prototype.registerHybridSetter("onSelectionChange", &HybridReadiumViewSpec::setOnSelectionChange);
+       prototype.registerHybridGetter("onSelectionAction", &HybridReadiumViewSpec::getOnSelectionAction);
+       prototype.registerHybridSetter("onSelectionAction", &HybridReadiumViewSpec::setOnSelectionAction);
++      prototype.registerHybridGetter("onTap", &HybridReadiumViewSpec::getOnTap);
++      prototype.registerHybridSetter("onTap", &HybridReadiumViewSpec::setOnTap);
+       prototype.registerHybridMethod("goTo", &HybridReadiumViewSpec::goTo);
+       prototype.registerHybridMethod("goForward", &HybridReadiumViewSpec::goForward);
+       prototype.registerHybridMethod("goBackward", &HybridReadiumViewSpec::goBackward);
+diff --git a/node_modules/react-native-readium/nitrogen/generated/shared/c++/HybridReadiumViewSpec.hpp b/node_modules/react-native-readium/nitrogen/generated/shared/c++/HybridReadiumViewSpec.hpp
+index caeba80..42dff6e 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/shared/c++/HybridReadiumViewSpec.hpp
++++ b/node_modules/react-native-readium/nitrogen/generated/shared/c++/HybridReadiumViewSpec.hpp
+@@ -31,6 +31,8 @@ namespace margelo::nitro::readium { struct DecorationActivatedEvent; }
+ namespace margelo::nitro::readium { struct SelectionEvent; }
+ // Forward declaration of `SelectionActionEvent` to properly resolve imports.
+ namespace margelo::nitro::readium { struct SelectionActionEvent; }
++// Forward declaration of `TapEvent` to properly resolve imports.
++namespace margelo::nitro::readium { struct TapEvent; }
+ // Forward declaration of `SearchPage` to properly resolve imports.
+ namespace margelo::nitro::readium { struct SearchPage; }
+ // Forward declaration of `SearchOptions` to properly resolve imports.
+@@ -48,6 +50,7 @@ namespace margelo::nitro::readium { struct SearchOptions; }
+ #include "DecorationActivatedEvent.hpp"
+ #include "SelectionEvent.hpp"
+ #include "SelectionActionEvent.hpp"
++#include "TapEvent.hpp"
+ #include "SearchPage.hpp"
+ #include <NitroModules/Promise.hpp>
+ #include <string>
+@@ -98,6 +101,8 @@ namespace margelo::nitro::readium {
+       virtual void setOnSelectionChange(const std::optional<std::function<void(const SelectionEvent& /* event */)>>& onSelectionChange) = 0;
+       virtual std::optional<std::function<void(const SelectionActionEvent& /* event */)>> getOnSelectionAction() = 0;
+       virtual void setOnSelectionAction(const std::optional<std::function<void(const SelectionActionEvent& /* event */)>>& onSelectionAction) = 0;
++      virtual std::optional<std::function<void(const TapEvent& /* event */)>> getOnTap() = 0;
++      virtual void setOnTap(const std::optional<std::function<void(const TapEvent& /* event */)>>& onTap) = 0;
+ 
+     public:
+       // Methods
+diff --git a/node_modules/react-native-readium/nitrogen/generated/shared/c++/TapEvent.hpp b/node_modules/react-native-readium/nitrogen/generated/shared/c++/TapEvent.hpp
+new file mode 100644
+index 0000000..b1cee15
+--- /dev/null
++++ b/node_modules/react-native-readium/nitrogen/generated/shared/c++/TapEvent.hpp
+@@ -0,0 +1,95 @@
++///
++/// TapEvent.hpp
++/// This file was generated by nitrogen. DO NOT MODIFY THIS FILE.
++/// https://github.com/mrousavy/nitro
++/// Copyright © Marc Rousavy @ Margelo
++///
++
++#pragma once
++
++#if __has_include(<NitroModules/JSIConverter.hpp>)
++#include <NitroModules/JSIConverter.hpp>
++#else
++#error NitroModules cannot be found! Are you sure you installed NitroModules properly?
++#endif
++#if __has_include(<NitroModules/NitroDefines.hpp>)
++#include <NitroModules/NitroDefines.hpp>
++#else
++#error NitroModules cannot be found! Are you sure you installed NitroModules properly?
++#endif
++#if __has_include(<NitroModules/JSIHelpers.hpp>)
++#include <NitroModules/JSIHelpers.hpp>
++#else
++#error NitroModules cannot be found! Are you sure you installed NitroModules properly?
++#endif
++#if __has_include(<NitroModules/PropNameIDCache.hpp>)
++#include <NitroModules/PropNameIDCache.hpp>
++#else
++#error NitroModules cannot be found! Are you sure you installed NitroModules properly?
++#endif
++
++
++
++#include <string>
++
++namespace margelo::nitro::readium {
++
++  /**
++   * A struct which can be represented as a JavaScript object (TapEvent).
++   */
++  struct TapEvent final {
++  public:
++    std::string href     SWIFT_PRIVATE;
++    double charOffset     SWIFT_PRIVATE;
++    double totalChars     SWIFT_PRIVATE;
++    std::string text     SWIFT_PRIVATE;
++
++  public:
++    TapEvent() = default;
++    explicit TapEvent(std::string href, double charOffset, double totalChars, std::string text): href(href), charOffset(charOffset), totalChars(totalChars), text(text) {}
++
++  public:
++    friend bool operator==(const TapEvent& lhs, const TapEvent& rhs) = default;
++  };
++
++} // namespace margelo::nitro::readium
++
++namespace margelo::nitro {
++
++  // C++ TapEvent <> JS TapEvent (object)
++  template <>
++  struct JSIConverter<margelo::nitro::readium::TapEvent> final {
++    static inline margelo::nitro::readium::TapEvent fromJSI(jsi::Runtime& runtime, const jsi::Value& arg) {
++      jsi::Object obj = arg.asObject(runtime);
++      return margelo::nitro::readium::TapEvent(
++        JSIConverter<std::string>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "href"))),
++        JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "charOffset"))),
++        JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "totalChars"))),
++        JSIConverter<std::string>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "text")))
++      );
++    }
++    static inline jsi::Value toJSI(jsi::Runtime& runtime, const margelo::nitro::readium::TapEvent& arg) {
++      jsi::Object obj(runtime);
++      obj.setProperty(runtime, PropNameIDCache::get(runtime, "href"), JSIConverter<std::string>::toJSI(runtime, arg.href));
++      obj.setProperty(runtime, PropNameIDCache::get(runtime, "charOffset"), JSIConverter<double>::toJSI(runtime, arg.charOffset));
++      obj.setProperty(runtime, PropNameIDCache::get(runtime, "totalChars"), JSIConverter<double>::toJSI(runtime, arg.totalChars));
++      obj.setProperty(runtime, PropNameIDCache::get(runtime, "text"), JSIConverter<std::string>::toJSI(runtime, arg.text));
++      return obj;
++    }
++    static inline bool canConvert(jsi::Runtime& runtime, const jsi::Value& value) {
++      if (!value.isObject()) {
++        return false;
++      }
++      jsi::Object obj = value.getObject(runtime);
++      if (!nitro::isPlainObject(runtime, obj)) {
++        return false;
++      }
++      if (!JSIConverter<std::string>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "href")))) return false;
++      if (!JSIConverter<double>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "charOffset")))) return false;
++      if (!JSIConverter<double>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "totalChars")))) return false;
++      if (!JSIConverter<std::string>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "text")))) return false;
++      return true;
++    }
++  };
++
++} // namespace margelo::nitro
+diff --git a/node_modules/react-native-readium/nitrogen/generated/shared/c++/views/HybridReadiumViewComponent.cpp b/node_modules/react-native-readium/nitrogen/generated/shared/c++/views/HybridReadiumViewComponent.cpp
+index 93253f0..faedb14 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/shared/c++/views/HybridReadiumViewComponent.cpp
++++ b/node_modules/react-native-readium/nitrogen/generated/shared/c++/views/HybridReadiumViewComponent.cpp
+@@ -116,6 +116,16 @@ namespace margelo::nitro::readium::views {
+         throw std::runtime_error(std::string("ReadiumView.onSelectionAction: ") + exc.what());
+       }
+     }()),
++    onTap([&]() -> CachedProp<std::optional<std::function<void(const TapEvent& /* event */)>>> {
++      try {
++        const react::RawValue* rawValue = rawProps.at("onTap", nullptr, nullptr);
++        if (rawValue == nullptr) return sourceProps.onTap;
++        const auto& [runtime, value] = (std::pair<jsi::Runtime*, jsi::Value>)*rawValue;
++        return CachedProp<std::optional<std::function<void(const TapEvent& /* event */)>>>::fromRawValue(*runtime, value.asObject(*runtime).getProperty(*runtime, PropNameIDCache::get(*runtime, "f")), sourceProps.onTap);
++      } catch (const std::exception& exc) {
++        throw std::runtime_error(std::string("ReadiumView.onTap: ") + exc.what());
++      }
++    }()),
+     hybridRef([&]() -> CachedProp<std::optional<std::function<void(const std::shared_ptr<HybridReadiumViewSpec>& /* ref */)>>> {
+       try {
+         const react::RawValue* rawValue = rawProps.at("hybridRef", nullptr, nullptr);
+@@ -138,6 +148,7 @@ namespace margelo::nitro::readium::views {
+       case hashString("onDecorationActivated"): return true;
+       case hashString("onSelectionChange"): return true;
+       case hashString("onSelectionAction"): return true;
++      case hashString("onTap"): return true;
+       case hashString("hybridRef"): return true;
+       default: return false;
+     }
+diff --git a/node_modules/react-native-readium/nitrogen/generated/shared/c++/views/HybridReadiumViewComponent.hpp b/node_modules/react-native-readium/nitrogen/generated/shared/c++/views/HybridReadiumViewComponent.hpp
+index d107860..e8ba0dd 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/shared/c++/views/HybridReadiumViewComponent.hpp
++++ b/node_modules/react-native-readium/nitrogen/generated/shared/c++/views/HybridReadiumViewComponent.hpp
+@@ -28,6 +28,7 @@
+ #include "DecorationActivatedEvent.hpp"
+ #include "SelectionEvent.hpp"
+ #include "SelectionActionEvent.hpp"
++#include "TapEvent.hpp"
+ #include <memory>
+ #include "HybridReadiumViewSpec.hpp"
+ 
+@@ -60,6 +61,7 @@ namespace margelo::nitro::readium::views {
+     CachedProp<std::optional<std::function<void(const DecorationActivatedEvent& /* event */)>>> onDecorationActivated;
+     CachedProp<std::optional<std::function<void(const SelectionEvent& /* event */)>>> onSelectionChange;
+     CachedProp<std::optional<std::function<void(const SelectionActionEvent& /* event */)>>> onSelectionAction;
++    CachedProp<std::optional<std::function<void(const TapEvent& /* event */)>>> onTap;
+     CachedProp<std::optional<std::function<void(const std::shared_ptr<HybridReadiumViewSpec>& /* ref */)>>> hybridRef;
+ 
+   private:
+diff --git a/node_modules/react-native-readium/nitrogen/generated/shared/json/ReadiumViewConfig.json b/node_modules/react-native-readium/nitrogen/generated/shared/json/ReadiumViewConfig.json
+index cccfb87..3a8a125 100644
+--- a/node_modules/react-native-readium/nitrogen/generated/shared/json/ReadiumViewConfig.json
++++ b/node_modules/react-native-readium/nitrogen/generated/shared/json/ReadiumViewConfig.json
+@@ -13,6 +13,7 @@
+     "onDecorationActivated": true,
+     "onSelectionChange": true,
+     "onSelectionAction": true,
++    "onTap": true,
+     "hybridRef": true
+   }
+ }
+diff --git a/node_modules/react-native-readium/src/components/ReadiumView.tsx b/node_modules/react-native-readium/src/components/ReadiumView.tsx
+index bddf7c5..b67747a 100644
+--- a/node_modules/react-native-readium/src/components/ReadiumView.tsx
++++ b/node_modules/react-native-readium/src/components/ReadiumView.tsx
+@@ -24,6 +24,7 @@ export const ReadiumView = forwardRef<ReadiumViewRef, ReadiumProps>(
+       onDecorationActivated,
+       onSelectionChange,
+       onSelectionAction,
++      onTap,
+       preferences,
+       decorations,
+       selectionActions,
+@@ -119,6 +120,7 @@ export const ReadiumView = forwardRef<ReadiumViewRef, ReadiumProps>(
+             onDecorationActivated={callback(onDecorationActivated ?? noop)}
+             onSelectionChange={callback(onSelectionChange ?? noop)}
+             onSelectionAction={callback(onSelectionAction ?? noop)}
++            onTap={callback(onTap ?? noop)}
+             hybridRef={callback((ref: any) => {
+               hybridRef.current = ref;
+             })}
+diff --git a/node_modules/react-native-readium/src/components/ReadiumView.types.ts b/node_modules/react-native-readium/src/components/ReadiumView.types.ts
+index e43c385..4bbd5d2 100644
+--- a/node_modules/react-native-readium/src/components/ReadiumView.types.ts
++++ b/node_modules/react-native-readium/src/components/ReadiumView.types.ts
+@@ -10,6 +10,7 @@ import type {
+   SelectionActionEvent,
+   SearchOptions,
+   SearchPage,
++  TapEvent,
+   ZoomEvent,
+ } from '../interfaces';
+ 
+@@ -42,5 +43,6 @@ export type ReadiumProps = {
+   onDecorationActivated?: (event: DecorationActivatedEvent) => void;
+   onSelectionChange?: (event: SelectionEvent) => void;
+   onSelectionAction?: (event: SelectionActionEvent) => void;
++  onTap?: (event: TapEvent) => void;
+   onZoomChange?: (event: ZoomEvent) => void;
+ };
+diff --git a/node_modules/react-native-readium/src/interfaces/Tap.ts b/node_modules/react-native-readium/src/interfaces/Tap.ts
+new file mode 100644
+index 0000000..430333b
+--- /dev/null
++++ b/node_modules/react-native-readium/src/interfaces/Tap.ts
+@@ -0,0 +1 @@
++export type { TapEvent } from '../specs/ReadiumView.nitro';
+diff --git a/node_modules/react-native-readium/src/interfaces/index.ts b/node_modules/react-native-readium/src/interfaces/index.ts
+index 35c2f70..fa5121e 100644
+--- a/node_modules/react-native-readium/src/interfaces/index.ts
++++ b/node_modules/react-native-readium/src/interfaces/index.ts
+@@ -8,6 +8,7 @@ export * from './PublicationMetadata';
+ export * from './PublicationReady';
+ export * from './Selection';
+ export * from './SelectionAction';
++export * from './Tap';
+ export type { Rect, Point } from '../specs/ReadiumView.nitro';
+ export * from './Search';
+ export * from './Zoom';
+diff --git a/node_modules/react-native-readium/src/specs/ReadiumView.nitro.ts b/node_modules/react-native-readium/src/specs/ReadiumView.nitro.ts
+index 6529185..2bdfac6 100644
+--- a/node_modules/react-native-readium/src/specs/ReadiumView.nitro.ts
++++ b/node_modules/react-native-readium/src/specs/ReadiumView.nitro.ts
+@@ -250,6 +250,31 @@ export interface SelectionActionEvent {
+   actionId: string;
+ }
+ 
++/**
++ * A tap on the rendered page, resolved to a position in the resource's text.
++ *
++ * Readium reports taps natively but only as a point, and a point in the
++ * navigator's coordinate space says nothing about what was tapped. The offset
++ * here is resolved inside the WebView by `caretRangeFromPoint`, so it is the
++ * document's own answer rather than anything reconstructed from geometry.
++ */
++export interface TapEvent {
++  /** The spine resource that was tapped. */
++  href: string;
++  /**
++   * Character offset of the tapped position within the resource's text content,
++   * and the resource's total character count.
++   *
++   * Their ratio is directly comparable to an alignment unit's character-ratio
++   * progression — unlike Readium's own `progression`, which is a rendered-pixel
++   * ratio and is not the same quantity.
++   */
++  charOffset: number;
++  totalChars: number;
++  /** The text of the block that was tapped, for matching and for diagnostics. */
++  text: string;
++}
++
+ // ── File ─────────────────────────────────────────────────────────────────────
+ 
+ export interface ReadiumFile {
+@@ -269,6 +294,7 @@ export interface ReadiumViewProps extends HybridViewProps {
+   onDecorationActivated?: (event: DecorationActivatedEvent) => void;
+   onSelectionChange?: (event: SelectionEvent) => void;
+   onSelectionAction?: (event: SelectionActionEvent) => void;
++  onTap?: (event: TapEvent) => void;
+ }
+ 
+ export interface ReadiumViewMethods extends HybridViewMethods {

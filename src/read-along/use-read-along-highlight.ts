@@ -25,7 +25,7 @@ import {
 } from "@/data/sqlite/shadow-db-transcripts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NO_ACTIVE_INDEX } from "./read-along-sync";
-import { useReadAlongPosition } from "./use-read-along-position";
+import { READ_ALONG_WORD_TICK_MS, useReadAlongPosition } from "./use-read-along-position";
 
 /** How many segments' parsed word timings stay in memory. */
 export const READ_ALONG_WORDS_CACHE_SIZE = 5;
@@ -44,9 +44,8 @@ export type UseReadAlongHighlightArgs = {
    * never fetched and no word index is resolved, so a long book ticks at
    * segment rate — roughly one render per sentence instead of 2-4 a second.
    *
-   * Switching back to a word style resumes highlighting at the next segment,
-   * not mid-sentence: the fetch is keyed on the active segment, and re-running
-   * it immediately would buy a fraction of a sentence for an extra effect.
+   * Switching back to a word style fetches the current segment's timings and
+   * resumes at the current listening position.
    */
   isWordHighlightEnabled: boolean;
 };
@@ -76,6 +75,7 @@ export const useReadAlongHighlight = ({
     useReadAlongPosition({
       boundLibraryItemId,
       segments,
+      tickIntervalMs: isWordHighlightEnabled ? READ_ALONG_WORD_TICK_MS : undefined,
       // Withholding the timings is what makes `none` cheap: the position hook
       // then resolves no word index at all, so it stops re-rendering at word
       // rate instead of resolving an index nothing displays.

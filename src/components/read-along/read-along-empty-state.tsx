@@ -5,6 +5,7 @@ import {
   type BookTranscriptionRuntimeStatus,
 } from "@/store/transcription-store";
 import type { ThemeColors } from "@/theme/use-app-theme";
+import type { TranscriptIngestOutcome } from "@/transcription/transcript-ingest";
 import {
   describeTranscriptionUnavailable,
   useTranscriptionAvailability,
@@ -41,6 +42,8 @@ type ReadAlongEmptyStateProps = {
   status: BookTranscriptionRuntimeStatus;
   errorCode?: string | null;
   themeColors: ThemeColors;
+  ingestOutcome?: TranscriptIngestOutcome | null;
+  ingestErrorMessage?: string | null;
   onResume: () => void;
   onRetry: () => void;
 };
@@ -109,6 +112,8 @@ export const ReadAlongEmptyState = ({
   libraryItemId,
   status,
   errorCode,
+  ingestOutcome,
+  ingestErrorMessage,
   themeColors,
   onResume,
   onRetry,
@@ -184,6 +189,15 @@ export const ReadAlongEmptyState = ({
       // A complete transcript with no readable rows should not happen; say so
       // plainly rather than pitching a transcript the book already has.
       return { headline: "Nothing to read yet", detail: "This transcript has no text in it." };
+    }
+
+    if (ingestOutcome === "failed") {
+      return {
+        headline: "Couldn't load the library transcript",
+        detail: ingestErrorMessage
+          ? ingestErrorMessage
+          : "LAABS found a transcript file for this book but couldn't read it.",
+      };
     }
 
     // `idle` — no transcript for this book. Pitch it, and offer the only action

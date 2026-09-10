@@ -99,6 +99,92 @@ export const buildWordSpans = (
   return spans;
 };
 
+/** UTF-16 ranges, matching NSString/TextKit, without normalizing the prose. */
+export const buildWordRanges = (
+  spans: readonly ReadAlongTextSpan[] | null,
+): [number, number][] => {
+  const ranges: [number, number][] = [];
+  let offset = 0;
+  for (const span of spans ?? []) {
+    if (span.wordIndex >= 0) ranges[span.wordIndex] = [offset, span.text.length];
+    offset += span.text.length;
+  }
+  return ranges;
+};
+
+export const READ_ALONG_WORD_HIGHLIGHT_COUNTS = [1, 2, 3, 4] as const;
+export type ReadAlongWordHighlightCount =
+  (typeof READ_ALONG_WORD_HIGHLIGHT_COUNTS)[number];
+export const DEFAULT_READ_ALONG_WORD_HIGHLIGHT_COUNT: ReadAlongWordHighlightCount = 3;
+
+export const normalizeReadAlongWordHighlightCount = (
+  value: unknown,
+): ReadAlongWordHighlightCount =>
+  READ_ALONG_WORD_HIGHLIGHT_COUNTS.includes(value as ReadAlongWordHighlightCount)
+    ? (value as ReadAlongWordHighlightCount)
+    : DEFAULT_READ_ALONG_WORD_HIGHLIGHT_COUNT;
+
+export type ReadAlongWordHighlightWindow = {
+  startIndex: number;
+  wordCount: number;
+};
+
+const NO_WORD_HIGHLIGHT_WINDOW: ReadAlongWordHighlightWindow = {
+  startIndex: -1,
+  wordCount: 0,
+};
+
+const endsSentence = (value: string) => /[.!?…]["'”’\)\]]*\s*$/.test(value);
+
+/**
+ * Resolve the stable group containing the active word. Every sentence starts a
+ * fresh group; the final group contracts when fewer than the selected number
+ * of words remain.
+ */
+export const getWordHighlightWindow = (
+  spans: readonly ReadAlongTextSpan[] | null,
+  activeWordIndex: number,
+  maximumWords: number = DEFAULT_READ_ALONG_WORD_HIGHLIGHT_COUNT,
+): ReadAlongWordHighlightWindow => {
+  if (!spans || activeWordIndex < 0 || maximumWords <= 0) return NO_WORD_HIGHLIGHT_WINDOW;
+
+  let sentenceStartIndex = -1;
+  let boundaryText = "";
+  let sawWord = false;
+  for (const span of spans) {
+    if (span.wordIndex >= 0) {
+      if (!sawWord || endsSentence(boundaryText)) sentenceStartIndex = span.wordIndex;
+      if (span.wordIndex === activeWordIndex) break;
+      sawWord = true;
+      boundaryText = span.text;
+    } else if (sawWord) {
+      boundaryText += span.text;
+    }
+  }
+  if (sentenceStartIndex < 0) return NO_WORD_HIGHLIGHT_WINDOW;
+
+  const startIndex =
+    sentenceStartIndex +
+    Math.floor((activeWordIndex - sentenceStartIndex) / maximumWords) * maximumWords;
+  const start = spans.findIndex((span) => span.wordIndex === startIndex);
+  if (start < 0) return NO_WORD_HIGHLIGHT_WINDOW;
+
+  let count = 0;
+  boundaryText = "";
+  for (let index = start; index < spans.length; index += 1) {
+    const span = spans[index];
+    if (span.wordIndex >= 0) {
+      if (count > 0 && endsSentence(boundaryText)) break;
+      count += 1;
+      boundaryText = span.text;
+      if (count >= maximumWords) break;
+    } else if (count > 0) {
+      boundaryText += span.text;
+    }
+  }
+  return { startIndex, wordCount: count };
+};
+
 /**
  * How the currently spoken word is marked inside the active Transcript Segment
  * (`docs/read-along-implementation-plan.md`, "v1.1 — Highlight styles").
