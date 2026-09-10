@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-10` `pending` - Keep native Readium page taps from revealing the app's Expo Router header inside EPUB Read-Along.
+  Tester focus: tap several locations in an EPUB Read-Along page, including after turning a page. The custom reader header should remain in control and no native/Expo Router navigation bar should appear.
+
 - `2026-09-10` `pending` - Keep multi-file audiobooks playing continuously when the audio engine advances between files, without flashing the Play icon or accepting stale end-of-file state from the outgoing track.
   Tester focus: play both streamed and downloaded multi-file books through several file boundaries, including a boundary in the middle of a chapter. The Pause icon should remain visible throughout each transition, narration should continue into the next file without replaying the previous file's ending, and chapter/progress displays should continue forward.
 

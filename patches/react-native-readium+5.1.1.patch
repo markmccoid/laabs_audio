@@ -152,6 +152,34 @@ index 33b6589..640755f 100644
  
      // Apply pending state
      if preferences != nil { updatePreferences() }
+diff --git a/node_modules/react-native-readium/ios/Reader/Common/ReaderViewController.swift b/node_modules/react-native-readium/ios/Reader/Common/ReaderViewController.swift
+index 57d6dd6..0351e02 100644
+--- a/node_modules/react-native-readium/ios/Reader/Common/ReaderViewController.swift
++++ b/node_modules/react-native-readium/ios/Reader/Common/ReaderViewController.swift
+@@ -198,18 +198,11 @@ class ReaderViewController: UIViewController, Loggable {
+       animatedTransition: true
+     ).bind(to: visualNavigator)
+ 
+-    let toggleToken = visualNavigator.addObserver(.tap { [weak self] event in
+-      guard
+-        let self,
+-        event.phase != .cancel
+-      else {
+-        return false
+-      }
+-
+-      self.toggleNavigationBar()
+-      return true
+-    })
+-    toggleToken.store(in: &navigatorInputObserverTokens)
++    // This reader is embedded inside the React Native app's view controller.
++    // Toggling `navigationController` here controls the host native stack, not
++    // reader-owned chrome, and reveals Expo Router's route header over the app's
++    // custom Read-Along header. Page taps are delivered separately through the
++    // navigator delegate, so no tap observer is needed here.
+   }
+ 
+   private func removeNavigatorInputObservers() {
 diff --git a/node_modules/react-native-readium/ios/Reader/EPUB/EPUBViewController.swift b/node_modules/react-native-readium/ios/Reader/EPUB/EPUBViewController.swift
 index dd4b1ad..e726a8d 100644
 --- a/node_modules/react-native-readium/ios/Reader/EPUB/EPUBViewController.swift
