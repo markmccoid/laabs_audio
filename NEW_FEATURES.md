@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-17` `pending` - Publish the chosen user, access mode, streaming eligibility, and exact shadow-database path to the native Assistant runtime at startup and whenever authentication state changes.
+  Tester focus: switch remembered sessions, enter downloaded-session mode, and explicitly log out; Assistant Actions should always use the chosen identity and should become unavailable after explicit logout rather than leaking another session's catalog.
+
 - `2026-09-17` `pending` - Add the first Assistant Actions vertical slice: a background-capable iOS App Shortcut can cold-launch the React Native runtime and resume the most recent audiobook through a timeout-safe native bridge. The app and its Shortcuts entry are now named LAABS Audio.
   Tester focus: launch LAABS Audio and play or pause a book once, force-quit the app, then run Shortcuts > Apps > LAABS Audio > Playback Spike. Playback should resume without foregrounding the app, concurrent requests should be refused, and explicit logout should require choosing a session again.
 

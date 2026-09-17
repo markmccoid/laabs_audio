@@ -6,6 +6,13 @@ import type {
 } from "./AssistantBridge.types";
 
 class AssistantBridgeModule extends NativeModule<AssistantBridgeEvents> {
+  publishRuntimeContext(_context: {
+    dbPath: string;
+    userId: string | null;
+    accessMode: string;
+    canAttemptStreaming: boolean;
+  }): void {}
+
   async activateRuntimeAndTakePending(): Promise<AssistantActionRequest | null> {
     return null;
   }

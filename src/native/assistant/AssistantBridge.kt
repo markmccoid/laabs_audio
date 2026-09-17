@@ -9,6 +9,10 @@ class AssistantBridge : Module() {
 
     Events("onAssistantAction")
 
+    Function("publishRuntimeContext") { _: Map<String, Any?> ->
+      Unit
+    }
+
     AsyncFunction("activateRuntimeAndTakePending") {
       null
     }
