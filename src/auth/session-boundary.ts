@@ -1,3 +1,6 @@
+import { clearAssistantSurfaceContent } from "../assistant/assistant-surface-lifecycle";
+import { getAssistantDownloadedBooks } from "../assistant/assistant-downloaded-books";
+import { rebuildAssistantCatalog } from "../data/sqlite/assistant-catalog-writes";
 import { playerService } from "../player/player-service";
 import { playbackStore } from "../player/playback-store";
 import { queryClient } from "../query/query-client";
@@ -7,8 +10,29 @@ import { libraryActivationStore } from "./library-activation-store";
 import { resolveListeningOwnerKey } from "./listening-owner";
 
 const LOCAL_SESSION_ID = "local";
+const RETAINED_DOWNLOAD_LIBRARY_FALLBACK = "assistant-retained-downloads";
+
+export const replaceAssistantSurfaceContent = async (
+  userId: string,
+  fallbackLibraryId?: string | null,
+) => {
+  try {
+    await rebuildAssistantCatalog({
+      userId,
+      downloadedBooks: getAssistantDownloadedBooks(
+        userId,
+        fallbackLibraryId?.trim() || RETAINED_DOWNLOAD_LIBRARY_FALLBACK,
+      ),
+    });
+  } catch (error) {
+    if (__DEV__) console.warn("[session-boundary] assistant-surface-rebuild-failed", { error });
+  }
+};
 
 export const prepareForUserSessionBoundary = async () => {
+  await clearAssistantSurfaceContent().catch((error) => {
+    if (__DEV__) console.warn("[session-boundary] assistant-surface-clear-failed", { error });
+  });
   await playerService.endActivePlaybackForLogout().catch((error) => {
     if (__DEV__) {
       console.warn("[session-boundary] player-teardown-failed", { error });
@@ -37,6 +61,10 @@ export const prepareForSignInChange = async (target: {
     await prepareForUserSessionBoundary();
     return;
   }
+
+  await clearAssistantSurfaceContent().catch((error) => {
+    if (__DEV__) console.warn("[session-boundary] assistant-surface-clear-failed", { error });
+  });
 
   const playbackState = playbackStore.getState();
   const isStreamingPlayback =

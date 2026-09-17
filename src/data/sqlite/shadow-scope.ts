@@ -12,6 +12,7 @@ export type SqliteLibraryScope = {
 
 export type ActiveLibraryContext = SqliteLibraryScope & {
   libraryName: string;
+  mediaType: string | null;
 };
 
 export const requireActiveLibraryContext = (
@@ -21,6 +22,7 @@ export const requireActiveLibraryContext = (
   const userId = state.activeLibraryUserKey?.trim();
   const libraryId = state.activeLibraryId?.trim();
   const libraryName = state.activeLibraryName?.trim() || "Active Library";
+  const mediaType = state.activeLibraryMediaType?.trim().toLowerCase() || null;
 
   if (state.status !== "authenticated" || !userId || !libraryId) {
     throw new Error("Shadow SQLite requires an authenticated User Session with an Active Library.");
@@ -32,7 +34,7 @@ export const requireActiveLibraryContext = (
     );
   }
 
-  return { userId, libraryId, libraryName };
+  return { userId, libraryId, libraryName, mediaType };
 };
 
 /**
@@ -67,5 +69,6 @@ export const requireAuthenticatedLibraryScope = (scope: {
     userId: scope.userId.trim(),
     libraryId,
     libraryName: scope.libraryName.trim() || "Podcast Library",
+    mediaType: "podcast",
   };
 };

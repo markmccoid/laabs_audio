@@ -38,7 +38,15 @@ export const upsertLibrary = async (db: Db, context: ActiveLibraryContext, times
     ) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_id, library_id) DO UPDATE SET
       name = excluded.name,
+      media_type = excluded.media_type,
       updated_at = excluded.updated_at`,
-    [context.userId, context.libraryId, context.libraryName, null, timestamp, timestamp],
+    [
+      context.userId,
+      context.libraryId,
+      context.libraryName,
+      context.mediaType,
+      timestamp,
+      timestamp,
+    ],
   );
 };

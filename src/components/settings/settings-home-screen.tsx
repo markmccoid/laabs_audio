@@ -5,7 +5,7 @@ import Constants from "expo-constants";
 import { Link } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import React, { type ComponentProps } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 
 type SettingsRowProps = {
   href:
@@ -15,6 +15,7 @@ type SettingsRowProps = {
     | "/(tabs)/settings/bookshelves"
     | "/(tabs)/settings/progress-logs"
     | "/(tabs)/settings/readium-spike"
+    | "/(tabs)/settings/siri-shortcuts"
     | "/(tabs)/settings/shadow-sqlite"
     | "/(tabs)/settings/playback"
     | "/(tabs)/settings/support"
@@ -180,6 +181,14 @@ export const SettingsHomeScreen = () => {
               subtitle="App-level behavior for images and cover handling"
               icon="gearshape.2"
             />
+            {Platform.OS === "ios" ? (
+              <SettingsRow
+                href="/(tabs)/settings/siri-shortcuts"
+                title="Siri & Shortcuts"
+                subtitle="Voice phrases and LAABS Audio actions"
+                icon="mic.badge.plus"
+              />
+            ) : null}
             {/* <SettingsRow
               href="/(tabs)/settings/progress-logs"
               title="Progress Logs"

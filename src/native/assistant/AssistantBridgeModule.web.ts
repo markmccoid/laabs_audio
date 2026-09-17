@@ -18,6 +18,12 @@ class AssistantBridgeModule extends NativeModule<AssistantBridgeEvents> {
   }
 
   completeAction(_id: string, _result: AssistantActionResult): void {}
+
+  async refreshSuggestedBooks(): Promise<void> {}
+
+  async reindexSpotlight(_userId: string | null): Promise<void> {}
+
+  async clearSpotlightIndex(): Promise<void> {}
 }
 
 export default registerWebModule(AssistantBridgeModule, "AssistantBridge");

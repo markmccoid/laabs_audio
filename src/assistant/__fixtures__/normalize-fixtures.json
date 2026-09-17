@@ -1,0 +1,8 @@
+[
+  { "input": "The Shining", "expected": "the shining" },
+  { "input": "Dune: Messiah", "expected": "dune messiah" },
+  { "input": "Stephen King", "expected": "stephen king" },
+  { "input": "Björk", "expected": "bjork" },
+  { "input": "  L'Étranger — Albert Camus  ", "expected": "l etranger albert camus" },
+  { "input": "Volume 2.5 / Part #3", "expected": "volume 2 5 part 3" }
+]

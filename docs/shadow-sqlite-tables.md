@@ -1,6 +1,6 @@
 # Shadow SQLite Tables
 
-This document describes the local SQLite schema introduced as a shadow database in Phase 1 and now used by Phase 2 Search and Phase 3 Home Shelf Display read paths.
+This document describes the local SQLite schema introduced as a shadow database in Phase 1 and now used by Search, Home Shelf Display, and the Assistant Catalog read paths.
 
 ## `app_metadata`
 
@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS libraries (
   media_type TEXT,
   last_catalog_refresh_at INTEGER,
   last_overlay_refresh_at INTEGER,
+  last_collections_refresh_at INTEGER,
+  last_series_refresh_at INTEGER,
+  last_podcast_series_index_refresh_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, library_id)
@@ -41,10 +44,12 @@ Fields:
 - `user_id`: Audiobookshelf User Identity.
 - `library_id`: Audiobookshelf Library id.
 - `name`: User-facing Library name.
-- `media_type`: Library media type when available.
+- `media_type`: Library media type (`book` or `podcast`) persisted from the Active Library context. Assistant Catalog rebuilds use this field to exclude podcast Libraries.
 - `last_catalog_refresh_at`: Last completed catalog refresh timestamp.
 - `last_overlay_refresh_at`: Last completed overlay refresh timestamp.
 - `last_collections_refresh_at`: Last completed Collection snapshot refresh timestamp.
+- `last_series_refresh_at`: Last completed Series snapshot refresh timestamp.
+- `last_podcast_series_index_refresh_at`: Last completed Podcast Series Index refresh timestamp.
 - `created_at`: Local row creation timestamp.
 - `updated_at`: Local row update timestamp.
 
@@ -504,6 +509,80 @@ Fields:
 - `library_item_id`: Audiobook Identity.
 - `source`: Current source, usually `server`; optimistic local read-model updates use `local`.
 - `server_observed_at`: Overlay refresh timestamp.
+
+## `assistant_catalog`
+
+Purpose: The physically replaced, audiobook-only Assistant Catalog projection read by Siri, Shortcuts, and Spotlight code in the iOS app process. Swift reads this table directly through system `libsqlite3`; it does not join the app's source tables.
+
+```sql
+CREATE TABLE IF NOT EXISTS assistant_catalog (
+  user_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  subtitle TEXT,
+  author TEXT,
+  narrator TEXT,
+  series_name TEXT,
+  series_sequence TEXT,
+  duration_seconds REAL NOT NULL DEFAULT 0,
+  cover_path TEXT,
+  cover_url TEXT,
+  search_text TEXT NOT NULL,
+  title_normalized TEXT NOT NULL,
+  author_normalized TEXT NOT NULL DEFAULT '',
+  series_normalized TEXT NOT NULL DEFAULT '',
+  narrator_normalized TEXT NOT NULL DEFAULT '',
+  progress_percent REAL NOT NULL DEFAULT 0,
+  current_time_seconds REAL NOT NULL DEFAULT 0,
+  is_finished INTEGER NOT NULL DEFAULT 0,
+  last_played_at INTEGER,
+  is_downloaded INTEGER NOT NULL DEFAULT 0,
+  is_favorite INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_item_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_assistant_catalog_user_search
+  ON assistant_catalog(user_id, search_text);
+CREATE INDEX IF NOT EXISTS idx_assistant_catalog_user_recent
+  ON assistant_catalog(user_id, last_played_at DESC);
+```
+
+Fields:
+- `user_id`: Audiobookshelf User Identity that owns the Assistant Book. Together with `library_item_id`, it formats as the stable Assistant Book id `${user_id}|${library_item_id}`.
+- `library_item_id`, `library_id`: Audiobook and source Library identities.
+- `title`, `subtitle`, `author`, `narrator`, `series_name`, `series_sequence`: Presentation and disambiguation metadata retained for native Assistant surfaces.
+- `duration_seconds`: Audiobook duration in seconds.
+- `cover_path`: Absolute cached artwork path when the shared widget artwork cache or retained download supplies one.
+- `cover_url`: Server artwork URL used only as an online fallback.
+- `search_text`: All searchable presentation fields normalized into one value.
+- `title_normalized`, `author_normalized`, `series_normalized`, `narrator_normalized`: Individually normalized ranking fields. Normalization lowercases, strips combining marks, maps punctuation to spaces, and collapses whitespace.
+- `progress_percent`, `current_time_seconds`, `is_finished`, `last_played_at`: User-specific progress snapshot used for Resume, recency, and snippets.
+- `is_downloaded`: Whether the chosen User owns a retained Downloaded Audio Asset for this audiobook.
+- `is_favorite`: User-specific Favorite snapshot.
+- `updated_at`: Local projection write timestamp.
+
+The projection contains only the currently chosen Audiobookshelf User Identity: a rebuild deletes all existing catalog and metadata rows before inserting that user's cached audiobook Libraries plus retained downloaded audiobooks whose server rows are absent or marked missing. Podcast Libraries and Episodes are deliberately excluded. There is no FTS companion because the native reader must work with the system SQLite build; Swift ranks the normalized columns in memory.
+
+## `assistant_catalog_meta`
+
+Purpose: Publishes the completed Assistant Catalog generation and its native-reader contract.
+
+```sql
+CREATE TABLE IF NOT EXISTS assistant_catalog_meta (
+  user_id TEXT PRIMARY KEY NOT NULL,
+  built_at INTEGER NOT NULL,
+  row_count INTEGER NOT NULL,
+  contract_version INTEGER NOT NULL
+);
+```
+
+Fields:
+- `user_id`: The one Audiobookshelf User Identity represented by the current projection.
+- `built_at`: Local timestamp for the atomic rebuild.
+- `row_count`: Expected number of Assistant Books in the completed projection.
+- `contract_version`: Native reader contract version. Version `1` corresponds to the schema above; Swift must refuse unsupported versions.
 
 ## `effective_progress`
 

@@ -38,7 +38,10 @@ jest.mock("../library-resolution", () => ({
   resolveLibrarySelection: jest.fn(),
 }));
 
-jest.mock("../session-boundary", () => ({ prepareForSignInChange: jest.fn() }));
+jest.mock("../session-boundary", () => ({
+  prepareForSignInChange: jest.fn(),
+  replaceAssistantSurfaceContent: jest.fn(),
+}));
 
 import { authService } from "../auth-service";
 import { authStore } from "../auth-store";

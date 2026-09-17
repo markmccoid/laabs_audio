@@ -1,7 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 const DATABASE_NAME = "laabs-shadow-library.db";
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -284,6 +284,46 @@ CREATE TABLE IF NOT EXISTS user_favorites (
   source TEXT NOT NULL,
   server_observed_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, library_item_id)
+);
+
+CREATE TABLE IF NOT EXISTS assistant_catalog (
+  user_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  library_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  subtitle TEXT,
+  author TEXT,
+  narrator TEXT,
+  series_name TEXT,
+  series_sequence TEXT,
+  duration_seconds REAL NOT NULL DEFAULT 0,
+  cover_path TEXT,
+  cover_url TEXT,
+  search_text TEXT NOT NULL,
+  title_normalized TEXT NOT NULL,
+  author_normalized TEXT NOT NULL DEFAULT '',
+  series_normalized TEXT NOT NULL DEFAULT '',
+  narrator_normalized TEXT NOT NULL DEFAULT '',
+  progress_percent REAL NOT NULL DEFAULT 0,
+  current_time_seconds REAL NOT NULL DEFAULT 0,
+  is_finished INTEGER NOT NULL DEFAULT 0,
+  last_played_at INTEGER,
+  is_downloaded INTEGER NOT NULL DEFAULT 0,
+  is_favorite INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, library_item_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_assistant_catalog_user_search
+  ON assistant_catalog(user_id, search_text);
+CREATE INDEX IF NOT EXISTS idx_assistant_catalog_user_recent
+  ON assistant_catalog(user_id, last_played_at DESC);
+
+CREATE TABLE IF NOT EXISTS assistant_catalog_meta (
+  user_id TEXT PRIMARY KEY NOT NULL,
+  built_at INTEGER NOT NULL,
+  row_count INTEGER NOT NULL,
+  contract_version INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS item_detail_snapshots (
@@ -725,6 +765,20 @@ export const initializeShadowDatabaseInternal = async () => {
     await db
       .execAsync(`ALTER TABLE book_transcript_segments ADD COLUMN track_end_ms INTEGER;`)
       .catch(() => undefined);
+    // Schema v9: older cached audiobook Libraries predate media_type. The
+    // library_catalog_items table is audiobook-only, so its owning Libraries
+    // can be backfilled without misclassifying Podcast Libraries.
+    await db.execAsync(`
+      UPDATE libraries
+      SET media_type = 'book', updated_at = ${timestamp}
+      WHERE TRIM(COALESCE(media_type, '')) = ''
+        AND EXISTS (
+          SELECT 1
+          FROM library_catalog_items item
+          WHERE item.user_id = libraries.user_id
+            AND item.library_id = libraries.library_id
+        );
+    `);
     if (!shadowSqliteRuntimeState.didEnsureEffectiveProgressView) {
       await db
         .execAsync(

@@ -59,6 +59,7 @@ import { startActiveAudiobookWidgetCoordinator } from "../widgets/active-audiobo
 import { handleAssistantAction } from "../assistant/assistant-action-handlers";
 import { startAssistantActionRuntime } from "../assistant/assistant-bridge";
 import { startAssistantRuntimeContextSubscription } from "../assistant/assistant-runtime-context";
+import { startAssistantCatalogNativeSync } from "../assistant/assistant-surface-lifecycle";
 
 const logStartupDebug = (event: string, payload?: Record<string, unknown>) => {
   void event;
@@ -476,6 +477,7 @@ export default function RootLayout() {
   useEffect(() => {
     playerService.init();
     const stopAssistantRuntimeContext = startAssistantRuntimeContextSubscription();
+    const stopAssistantCatalogSync = startAssistantCatalogNativeSync();
     // The "also transcribe after download" watcher installs itself on import;
     // calling it here is the explicit, idempotent wiring so the subscription
     // exists even before any transcription UI mounts.
@@ -483,6 +485,7 @@ export default function RootLayout() {
     const stopWidgetCoordinator = startActiveAudiobookWidgetCoordinator();
     return () => {
       stopAssistantRuntimeContext();
+      stopAssistantCatalogSync();
       stopWidgetCoordinator();
     };
   }, []);
@@ -496,7 +499,8 @@ export default function RootLayout() {
     void startAssistantActionRuntime({
       handler: handleAssistantAction,
       onPendingAction: (pendingAction) => {
-        startupAssistantOwnsPlaybackRef.current = pendingAction?.kind === "resume";
+        startupAssistantOwnsPlaybackRef.current =
+          pendingAction?.kind === "play" || pendingAction?.kind === "resume";
       },
     })
       .then((stop) => {

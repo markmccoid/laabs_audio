@@ -4532,7 +4532,7 @@ class PlayerService {
       },
     );
 
-    upsertShadowServerProgressProjection(activeLibraryUserKey, nextProgress)
+    upsertShadowServerProgressProjection(activeLibraryUserKey, nextProgress, { markPlayed: true })
       .then(() => {
         invalidateSqliteOverlayProjections(queryClient);
       })

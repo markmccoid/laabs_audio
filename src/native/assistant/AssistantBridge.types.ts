@@ -1,18 +1,49 @@
-export type AssistantActionRequest = {
+type AssistantActionRequestContext = {
   id: string;
-  kind: "resume";
+  expectedUserId: string;
+  expiresAtMilliseconds: number;
 };
 
-export type AssistantActionSuccess = {
-  ok: true;
-  kind: "resume";
-  title: string;
-  isPlaying: boolean;
-};
+export type AssistantActionRequest = AssistantActionRequestContext &
+  (
+  | { kind: "play"; libraryItemId: string }
+  | { kind: "resume" }
+  | { kind: "pause" }
+  | { kind: "bookmarkHere"; title: string | null }
+  | {
+      kind: "sleepTimer";
+      mode: "minutes" | "end_of_chapter" | "end_of_next_chapter" | "cancel";
+      minutes: number | null;
+    }
+  );
+
+export type AssistantPlayableRef =
+  | { kind: "audiobook"; libraryItemId: string }
+  | { kind: "episode"; libraryItemId: string; episodeId: string };
+
+export type AssistantActionSuccess =
+  | {
+      ok: true;
+      kind: "play" | "resume";
+      playable: AssistantPlayableRef;
+      title: string;
+      isPlaying: boolean;
+    }
+  | { ok: true; kind: "pause" }
+  | {
+      ok: true;
+      kind: "bookmarkHere";
+      title: string;
+      positionSeconds: number;
+      playableTitle: string;
+    }
+  | { ok: true; kind: "sleepTimer"; description: string };
 
 export type AssistantActionFailureCode =
   | "nothingPlaying"
   | "signInRequired"
+  | "cannotStream"
+  | "notFound"
   | "playbackFailed"
   | "timeout"
   | "busy"

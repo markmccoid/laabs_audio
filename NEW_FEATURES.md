@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-17` `pending` - Add production Assistant Actions for Siri, Shortcuts, and Spotlight under the LAABS Audio app name, backed by a session-isolated Assistant Catalog with iOS 18 Books-schema and iOS 27 Audio-schema support. Actions can play or resume audiobooks, pause, search the cached library, list books by author, add audiobook or Episode bookmarks, and manage sleep timers; explicit logout clears all Assistant surfaces until a session is chosen again.
+  Tester focus: install on a physical iPhone, open LAABS Audio once, and confirm Shortcuts > Apps lists LAABS Audio with the production actions (not Playback Spike). Exercise named-book play, force-quit Resume, active-Episode Resume, Pause, library/author search, Bookmark Here, all sleep-timer modes, Spotlight detail opening without playback, offline downloaded playback, session switching, and explicit logout. More than three title matches should choose the best match and say so; requests that expire or cross a session change must not start playback later or use the wrong identity.
+
 - `2026-09-17` `pending` - Publish the chosen user, access mode, streaming eligibility, and exact shadow-database path to the native Assistant runtime at startup and whenever authentication state changes.
   Tester focus: switch remembered sessions, enter downloaded-session mode, and explicitly log out; Assistant Actions should always use the chosen identity and should become unavailable after explicit logout rather than leaking another session's catalog.
 

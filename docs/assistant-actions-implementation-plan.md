@@ -81,7 +81,7 @@ shipping intents.
    `playerService`, and completes the Swift continuation.
 3. `npx expo prebuild --clean -p ios && npx expo run:ios --device` (App Intents are only reliable on a device).
 4. Verify the build log contains `appintentsmetadataprocessor` with no "metadata extraction skipped"
-   warning; `LAABS Audiobookshelf.app/Metadata.appintents/` exists; and the Shortcuts app shows "Spike"
+   warning; `LAABSAudiobookshelf.app/Metadata.appintents/` exists; and the Shortcuts app shows "Spike"
    under the LAABS app.
 5. Force-quit the app and invoke the spike. Verify the app process launches without foreground UI,
    React Native drains the request, audio reaches Audible Playback State, and Siri receives the
@@ -405,7 +405,7 @@ struct AssistantShortcuts: AppShortcutsProvider {
 }
 ```
 
-Note the application name Siri expects is the `CFBundleDisplayName` ("LAABS Audiobookshelf"). If the user wants "LAABS Audio" to work, add `INAlternativeAppNames` (`["LAABS Audio", "LAABS"]`) to Info.plist via a new plugin `plugins/with-assistant.js` (`withInfoPlist`). This is the only Info.plist change v1 needs.
+The public application name for Siri and Shortcuts is the `CFBundleDisplayName`, which is **LAABS Audio**. Keep that name aligned across Expo configuration, native metadata, App Shortcut phrases, and user-facing dialogs. An optional shorter alias such as "LAABS" can be added with `INAlternativeAppNames` only if physical-device testing shows it improves recognition.
 
 `Suggested Assistant Books` refresh: `AssistantShortcuts.updateAppShortcutParameters()` is called from `AssistantBridge.refreshSuggestedBooks()`; TS calls it on `assistantCatalogChanged` (debounced 2 s) and at startup.
 

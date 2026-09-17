@@ -11,6 +11,10 @@ import {
   runInTransaction,
   withWriteGuard,
 } from "./shadow-db-core";
+import {
+  patchAssistantCatalogFavorite,
+  patchAssistantCatalogProgress,
+} from "./assistant-catalog-writes";
 import { type SqliteLibraryScope, requireActiveLibraryContext } from "./shadow-scope";
 import {
   type BindValues,
@@ -400,11 +404,19 @@ const insertPendingProgress = async (db: Db, userId: string, pending: PendingPro
 export const upsertShadowPendingProgressIntent = async (
   userId: string,
   pending: PendingProgressSync,
+  options?: { markPlayed?: boolean },
 ) => {
   if (!userId || !pending.libraryItemId) return;
   const db = await getDb();
   await initializeShadowDatabaseInternal();
   await insertPendingProgress(db, userId, pending);
+  await patchAssistantCatalogProgress(userId, pending.libraryItemId, {
+    progressPercent:
+      pending.duration && pending.duration > 0 ? pending.currentTime / pending.duration : 0,
+    currentTimeSeconds: pending.currentTime,
+    isFinished: pending.isFinished,
+    lastPlayedAt: options?.markPlayed ? pending.updatedAt : undefined,
+  });
 };
 
 export const deleteShadowPendingProgressIntent = async (
@@ -437,18 +449,19 @@ export const setShadowFavoriteProjection = async (
       ) VALUES (?, ?, ?, ?)`,
       [userId, libraryItemId, "local", timestamp],
     );
-    return;
+  } else {
+    await db.runAsync(
+      `DELETE FROM user_favorites WHERE user_id = ? AND library_item_id = ?`,
+      [userId, libraryItemId],
+    );
   }
-
-  await db.runAsync(
-    `DELETE FROM user_favorites WHERE user_id = ? AND library_item_id = ?`,
-    [userId, libraryItemId],
-  );
+  await patchAssistantCatalogFavorite(userId, libraryItemId, isFavorite);
 };
 
 export const upsertShadowServerProgressProjection = async (
   userId: string,
   progress: UserBookProgress,
+  options?: { markPlayed?: boolean },
 ) => {
   if (!userId || !progress.libraryItemId) return;
   const db = await getDb();
@@ -479,6 +492,12 @@ export const upsertShadowServerProgressProjection = async (
       JSON.stringify(progress),
     ],
   );
+  await patchAssistantCatalogProgress(userId, progress.libraryItemId, {
+    progressPercent: progress.progressPercent,
+    currentTimeSeconds: progress.currentTime,
+    isFinished: progress.isFinished,
+    lastPlayedAt: options?.markPlayed ? progress.lastUpdate : undefined,
+  });
 };
 
 const localBookmarkBindValues = (userId: string, bookmark: LocalBookmarkRecord): BindValues => [

@@ -15,6 +15,7 @@ import {
 import { playlistsApi, type PlaylistSummary } from "../api/playlists-api";
 import { authStore } from "../auth/auth-store";
 import { deleteLocalBookTranscript } from "../data/sqlite/shadow-db-transcripts";
+import { patchAssistantCatalogDownloaded } from "../data/sqlite/assistant-catalog-writes";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import {
@@ -3279,9 +3280,13 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 }
               : state.downloadedOwnerUserIdsById,
           }));
+          if (ownerUserId) {
+            void patchAssistantCatalogDownloaded(ownerUserId, libraryItemId, true);
+          }
         },
 
         clearDownloadedData: (libraryItemId) => {
+          const ownerUserIds = get().downloadedOwnerUserIdsById[libraryItemId] ?? [];
           set((state) => {
             const { [libraryItemId]: _detailRemoved, ...remainingDetails } =
               state.downloadedDetailsById;
@@ -3295,6 +3300,9 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               downloadedOwnerUserIdsById: remainingOwners,
             };
           });
+          for (const ownerUserId of ownerUserIds) {
+            void patchAssistantCatalogDownloaded(ownerUserId, libraryItemId, false);
+          }
         },
 
         deleteDownloadedBookData: async (libraryItemId) => {

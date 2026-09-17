@@ -1,5 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
+import { getAssistantDownloadedBooks } from "@/assistant/assistant-downloaded-books";
 import { invalidateAllSqliteProjections } from "@/query/sqlite-invalidation";
+import { rebuildAssistantCatalog } from "./assistant-catalog-writes";
 import { refreshShadowLibraryCatalog, type ShadowCatalogRefreshResult } from "./catalog-refresh";
 import { refreshShadowUserOverlays, type ShadowOverlayRefreshResult } from "./overlay-writes";
 import { getShadowLibraryReadiness, type ShadowLibraryReadiness } from "./shadow-status";
@@ -23,6 +25,7 @@ type RefreshResult = {
   readiness: ShadowLibraryReadiness;
   catalog?: ShadowCatalogRefreshResult;
   overlay?: ShadowOverlayRefreshResult;
+  assistantCatalog?: { rowCount: number };
 };
 
 type SqliteRefreshCoordinatorRuntimeState = {
@@ -98,6 +101,37 @@ export const sqliteRefreshCoordinator = {
           favoriteRows: result.overlay.favoriteRows,
           error: result.overlay.error,
         });
+      }
+
+      if (shouldRefreshCatalog || shouldRefreshOverlay) {
+        const assistantCatalogStart = Date.now();
+        try {
+          result.assistantCatalog = await rebuildAssistantCatalog({
+            userId,
+            downloadedBooks: getAssistantDownloadedBooks(userId, libraryId),
+          });
+          void recordTimingLog(
+            "library_switch",
+            "sqlite_refresh_assistant_catalog",
+            assistantCatalogStart,
+            {
+              userId,
+              libraryId,
+              rowCount: result.assistantCatalog.rowCount,
+            },
+          );
+        } catch (error) {
+          void recordTimingLog(
+            "library_switch",
+            "sqlite_refresh_assistant_catalog",
+            assistantCatalogStart,
+            {
+              userId,
+              libraryId,
+              error: error instanceof Error ? error.message : "Assistant Catalog rebuild failed",
+            },
+          );
+        }
       }
 
       invalidateSqliteQueries(options.queryClient);

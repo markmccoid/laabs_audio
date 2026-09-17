@@ -10,7 +10,7 @@ import {
   type SessionSecrets,
 } from "./auth-storage";
 import { fetchLibrariesForResolution, resolveLibrarySelection } from "./library-resolution";
-import { prepareForSignInChange } from "./session-boundary";
+import { prepareForSignInChange, replaceAssistantSurfaceContent } from "./session-boundary";
 
 /**
  * User Session Entry (ADR-0020). Establishes the signed-in User Session from either
@@ -270,6 +270,7 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
       hasPassword: identity.hasPassword,
     });
     authStore.getState().actions.setServerConnectionStatus("reachable");
+    await replaceAssistantSurfaceContent(identity.confirmedUserId, identity.libraryHint);
   } catch (error) {
     const message = toMessage(error, "Sign in failed");
     void recordTimingLog("login", timingLabel, startedAt, {

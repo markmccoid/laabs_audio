@@ -103,7 +103,7 @@ export const recordProgressSyncIntent = (payload: {
 
   const intent = getPendingProgressSyncIntent(payload.libraryItemId, userKey);
   if (intent) {
-    void upsertShadowPendingProgressIntent(userKey, intent)
+    void upsertShadowPendingProgressIntent(userKey, intent, { markPlayed: true })
       .then(() => {
         invalidateSqliteOverlayProjections(queryClient);
       })

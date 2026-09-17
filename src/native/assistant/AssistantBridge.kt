@@ -20,5 +20,11 @@ class AssistantBridge : Module() {
     Function("completeAction") { _: String, _: Map<String, Any?> ->
       Unit
     }
+
+    AsyncFunction("refreshSuggestedBooks") { Unit }
+
+    AsyncFunction("reindexSpotlight") { _: String? -> Unit }
+
+    AsyncFunction("clearSpotlightIndex") { Unit }
   }
 }

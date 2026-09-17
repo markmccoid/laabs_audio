@@ -2,22 +2,75 @@ import Foundation
 
 struct AssistantActionRequest: Codable, Sendable {
   enum Kind: String, Codable, Sendable {
+    case play
     case resume
+    case pause
+    case bookmarkHere
+    case sleepTimer
   }
 
   let id: String
   let kind: Kind
+  let libraryItemId: String?
+  let title: String?
+  let mode: String?
+  let minutes: Int?
+  let expectedUserId: String?
+  let expiresAtMilliseconds: Int64?
+
+  init(
+    id: String = UUID().uuidString,
+    kind: Kind,
+    libraryItemId: String? = nil,
+    title: String? = nil,
+    mode: String? = nil,
+    minutes: Int? = nil,
+    expectedUserId: String? = nil,
+    expiresAtMilliseconds: Int64? = nil
+  ) {
+    self.id = id
+    self.kind = kind
+    self.libraryItemId = libraryItemId
+    self.title = title
+    self.mode = mode
+    self.minutes = minutes
+    self.expectedUserId = expectedUserId
+    self.expiresAtMilliseconds = expiresAtMilliseconds
+  }
+
+  func bound(to userId: String, expiresAtMilliseconds: Int64) -> AssistantActionRequest {
+    AssistantActionRequest(
+      id: id,
+      kind: kind,
+      libraryItemId: libraryItemId,
+      title: title,
+      mode: mode,
+      minutes: minutes,
+      expectedUserId: userId,
+      expiresAtMilliseconds: expiresAtMilliseconds
+    )
+  }
 
   var dictionary: [String: Any] {
-    [
+    var value: [String: Any] = [
       "id": id,
       "kind": kind.rawValue,
     ]
+    if let libraryItemId { value["libraryItemId"] = libraryItemId }
+    if let title { value["title"] = title }
+    if let mode { value["mode"] = mode }
+    if let minutes { value["minutes"] = minutes }
+    if let expectedUserId { value["expectedUserId"] = expectedUserId }
+    if let expiresAtMilliseconds { value["expiresAtMilliseconds"] = expiresAtMilliseconds }
+    return value
   }
 }
 
 enum AssistantActionOutcome: Sendable {
-  case success(title: String, isPlaying: Bool)
+  case playback(title: String, isPlaying: Bool)
+  case paused
+  case bookmark(title: String, positionSeconds: Double, playableTitle: String)
+  case sleepTimer(description: String)
   case failure(code: String, message: String)
 }
 
@@ -48,8 +101,26 @@ actor AssistantActionDispatcher {
     eventEmitter = nil
   }
 
+  func runtimeIsReady() -> Bool {
+    isRuntimeReady
+  }
+
   func perform(_ request: AssistantActionRequest) async -> AssistantActionOutcome {
     purgeExpiredPendingAction()
+
+    guard let userId = AssistantRuntimeContextStore.shared.current().userId else {
+      return .failure(
+        code: "signInRequired",
+        message: "Choose a LAABS Audio session before using Assistant Actions."
+      )
+    }
+
+    if !isRuntimeReady && request.kind != .play && request.kind != .resume {
+      return .failure(
+        code: "nothingPlaying",
+        message: "Nothing is currently playing in LAABS Audio."
+      )
+    }
 
     if !continuations.isEmpty || (!isRuntimeReady && pendingAction != nil) {
       return .failure(
@@ -58,22 +129,27 @@ actor AssistantActionDispatcher {
       )
     }
 
+    let now = Int64(Date().timeIntervalSince1970 * 1000)
+    let boundRequest = request.bound(
+      to: userId,
+      expiresAtMilliseconds: now + Self.timeoutMilliseconds
+    )
+
     return await withCheckedContinuation { continuation in
-      continuations[request.id] = continuation
+      continuations[boundRequest.id] = continuation
 
       Task {
         try? await Task.sleep(nanoseconds: Self.timeoutNanoseconds)
-        self.timeout(id: request.id)
+        self.timeout(id: boundRequest.id)
       }
 
       if isRuntimeReady, let eventEmitter {
-        eventEmitter(request)
+        eventEmitter(boundRequest)
         return
       }
 
-      let now = Int64(Date().timeIntervalSince1970 * 1000)
       let pending = PendingAssistantAction(
-        request: request,
+        request: boundRequest,
         acceptedAtMilliseconds: now,
         expiresAtMilliseconds: now + Self.timeoutMilliseconds
       )
@@ -114,12 +190,39 @@ actor AssistantActionDispatcher {
     }
 
     if result["ok"] as? Bool == true {
-      continuation.resume(
-        returning: .success(
-          title: result["title"] as? String ?? "Audiobook",
-          isPlaying: result["isPlaying"] as? Bool ?? false
+      let kind = result["kind"] as? String
+      switch kind {
+      case "play", "resume":
+        continuation.resume(
+          returning: .playback(
+            title: result["title"] as? String ?? "Audiobook",
+            isPlaying: result["isPlaying"] as? Bool ?? false
+          )
         )
-      )
+      case "pause":
+        continuation.resume(returning: .paused)
+      case "bookmarkHere":
+        continuation.resume(
+          returning: .bookmark(
+            title: result["title"] as? String ?? "Bookmark",
+            positionSeconds: result["positionSeconds"] as? Double ?? 0,
+            playableTitle: result["playableTitle"] as? String ?? "Audiobook"
+          )
+        )
+      case "sleepTimer":
+        continuation.resume(
+          returning: .sleepTimer(
+            description: result["description"] as? String ?? "Sleep timer updated."
+          )
+        )
+      default:
+        continuation.resume(
+          returning: .failure(
+            code: "unsupported",
+            message: "LAABS Audio returned an unsupported result."
+          )
+        )
+      }
       return
     }
 

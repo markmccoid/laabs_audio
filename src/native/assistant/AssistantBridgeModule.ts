@@ -14,6 +14,9 @@ declare class AssistantBridgeModule extends NativeModule<AssistantBridgeEvents> 
   }): void;
   activateRuntimeAndTakePending(): Promise<AssistantActionRequest | null>;
   completeAction(id: string, result: AssistantActionResult): void;
+  refreshSuggestedBooks(): Promise<void>;
+  reindexSpotlight(userId: string | null): Promise<void>;
+  clearSpotlightIndex(): Promise<void>;
 }
 
 export default requireNativeModule<AssistantBridgeModule>("AssistantBridge");
