@@ -56,6 +56,8 @@ import {
   subscribeStartupPresentation,
 } from "../utils/startup-presentation";
 import { startActiveAudiobookWidgetCoordinator } from "../widgets/active-audiobook-widget-coordinator";
+import { handleAssistantAction } from "../assistant/assistant-action-handlers";
+import { startAssistantActionRuntime } from "../assistant/assistant-bridge";
 
 const logStartupDebug = (event: string, payload?: Record<string, unknown>) => {
   void event;
@@ -153,6 +155,8 @@ export default function RootLayout() {
   const globalParams = useGlobalSearchParams<{ libraryItemId?: string | string[] }>();
   const previousStatus = useRef<typeof status | null>(null);
   const didDecideStartupRestoreRef = useRef(false);
+  const startupAssistantOwnsPlaybackRef = useRef(false);
+  const [assistantRuntimeSettled, setAssistantRuntimeSettled] = useState(false);
   const [queryRestoreStartedAtMs] = useState(() => markStartup("query-restore-start"));
   const initialUrlStartedAtMsRef = useRef<number | null>(null);
   const splashHiddenRef = useRef(false);
@@ -477,6 +481,38 @@ export default function RootLayout() {
     return startActiveAudiobookWidgetCoordinator();
   }, []);
 
+  useEffect(() => {
+    if (!warmupEligible) return;
+
+    let disposed = false;
+    let stopRuntime: (() => void) | undefined;
+
+    void startAssistantActionRuntime({
+      handler: handleAssistantAction,
+      onPendingAction: (pendingAction) => {
+        startupAssistantOwnsPlaybackRef.current = pendingAction?.kind === "resume";
+      },
+    })
+      .then((stop) => {
+        if (disposed) {
+          stop();
+          return;
+        }
+        stopRuntime = stop;
+        setAssistantRuntimeSettled(true);
+      })
+      .catch(() => {
+        if (!disposed) {
+          setAssistantRuntimeSettled(true);
+        }
+      });
+
+    return () => {
+      disposed = true;
+      stopRuntime?.();
+    };
+  }, [warmupEligible]);
+
   // Startup Active Playback Restore: once startup has settled (auth resolved, query cache
   // restored, first content presented), bring the most recent book back as a loaded, paused
   // Active Playback. Decide exactly once per launch and never auto-play. Best-effort: a
@@ -485,12 +521,15 @@ export default function RootLayout() {
   useEffect(() => {
     if (didDecideStartupRestoreRef.current) return;
     if (!warmupEligible) return;
+    if (!assistantRuntimeSettled) return;
     didDecideStartupRestoreRef.current = true;
 
     // No usable session to load a book into yet.
     if (accessMode === "firstRunSignInRequired") return;
     // A deep link / return-to-book flow owns startup playback; don't compete with it.
     if (startupBookLinkId) return;
+    // A cold Assistant Action is an explicit user playback request and owns startup.
+    if (startupAssistantOwnsPlaybackRef.current) return;
     if (!settingsStore.getState().restoreLastBookOnStartup) return;
 
     const state = playbackStore.getState();
@@ -522,7 +561,7 @@ export default function RootLayout() {
     });
 
     return () => interactionTask.cancel?.();
-  }, [accessMode, startupBookLinkId, warmupEligible]);
+  }, [accessMode, assistantRuntimeSettled, startupBookLinkId, warmupEligible]);
 
   useEffect(() => {
     if (status !== "authenticated") return;

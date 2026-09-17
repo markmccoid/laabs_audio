@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-17` `pending` - Add the first Assistant Actions vertical slice: a background-capable iOS App Shortcut can cold-launch the React Native runtime and resume the most recent audiobook through a timeout-safe native bridge. The app and its Shortcuts entry are now named LAABS Audio.
+  Tester focus: launch LAABS Audio and play or pause a book once, force-quit the app, then run Shortcuts > Apps > LAABS Audio > Playback Spike. Playback should resume without foregrounding the app, concurrent requests should be refused, and explicit logout should require choosing a session again.
+
 - `2026-09-16` `pending` - Upgrade LAABS Audio to Expo SDK 57 and React Native 0.86.3, preserve the iOS 16.4 deployment floor and native widget/CarPlay fixes, and document the approved Assistant Actions architecture plus continued-task transcription research.
   Tester focus: build and launch the iOS app on the supported device range, exercise dropdown menus, widget play/pause, CarPlay appearance/dev-menu behavior, and existing Book Transcript flows. This commit documents Assistant Actions but does not yet add Siri, Shortcuts, Spotlight, or Control Center behavior.
 

@@ -1,4 +1,4 @@
-# Assistant Actions (Siri / Shortcuts / Spotlight / Control Center) — Implementation Plan
+# Assistant Actions (Siri / Shortcuts / Spotlight) — Implementation Plan
 
 Status: approved design, ready to build.
 Design authority: `CONTEXT.md` ("Assistant surfaces" cluster and its relationships) and
@@ -12,24 +12,24 @@ parked until the JS runtime is up.
 
 | Decision | Choice |
 |---|---|
-| Swift placement | Main app target, `src/native/assistant/`, compiled by the existing inline-module path (`Podfile.properties.json` → `expo.inlineModules.watchedDirectories: ["src/native"]`). **No `expo-apple-targets`, no extension target.** |
+| Swift placement | Main app target, `src/native/assistant/`, compiled by the existing inline-module path (`Podfile.properties.json` → `expo.inlineModules.watchedDirectories: ["src/native"]`). **No `expo-apple-targets`, no Assistant Action extension target.** |
 | Widget | Untouched. Stays on `expo-widgets`. |
-| iOS floor | Stays `16.4`. App Shortcuts everywhere; `.audio` schema + `AudioSearch` behind `@available(iOS 26, *)`; `IndexedEntity` and `ControlWidget` behind `@available(iOS 18, *)`. |
+| iOS floor | Stays `16.4`. App Shortcuts everywhere; `.books.audiobook` / `.books.playAudiobook` behind `@available(iOS 18, *)`; `.audio` schema + `AudioSearch` behind `@available(iOS 27, *)`; `IndexedEntity` behind `@available(iOS 18, *)`. |
 | Catalog access | Swift reads only `assistant_catalog` (a TS-owned projection table in `laabs-shadow-library.db`). Never `library_catalog_*`, `user_server_progress`, or `user_favorites`. |
-| Scope | Current Audiobookshelf User Identity, **all** its audiobook Libraries that have been cached. No podcasts/episodes in the catalog. |
+| Scope | Exactly the chosen Audiobookshelf User Identity, **all** its cached audiobook Libraries, plus its retained downloaded audiobooks when a server catalog row is missing. Session Entry physically replaces the projection; explicit logout clears it and disables assistant surfaces until another session is chosen. No podcasts/episodes in the catalog. |
 | v1 actions | Play ⟨book⟩, Resume, Pause, Is ⟨book⟩ in my library, Books by ⟨author⟩, Bookmark here, Sleep timer (minutes / end of chapter / end of next chapter / cancel). |
 | Play semantics | Ordinary Playback Start Attempt (`playerService.loadBook(id, { autoPlay: true })`). ≤3 matches → Siri disambiguation; more → best title match, stated in reply. No spoken title → Resume. |
 | Cold launch | Pending Assistant Action in Swift memory + `UserDefaults`; JS drains at the `warmupEligible` gate; Swift waits ≤10 s then fails with "Open LAABS Audio". A pending play overrides Startup Active Playback Restore's never-auto-play rule. |
 | Bookmark title | Spoken title if given, else `"<Chapter title> · h:mm:ss"` (or `"Bookmark · h:mm:ss"` with no chapters). Never empty. Allowed for Episodes. |
 | Reply style | Spoken dialog + SwiftUI snippet card (cover, title, author, progress). Lists: speak ≤5, show all returned (cap 10). |
-| Spotlight | `IndexedEntity` mirror of the catalog; tap → `laabsaudio:///<libraryItemId>` (detail only, no playback). Downloaded-Only Mode indexes downloaded books only. Explicit logout clears the index. |
-| Control Center / Action button | One `ControlWidget` toggle: Play/Pause of Active Playback, shows Player Display title; nothing to resume → opens app. |
+| Spotlight | `IndexedEntity` mirror of the catalog; tap runs an `OpenIntent` that routes to `laabsaudio:///<libraryItemId>` (detail only, no playback). Explicit logout clears the index. |
+| Control Center / Action button | Deferred beyond this release. A widget-extension intent cannot reliably drive the JS-owned player when the app process is dead, and a Darwin notification cannot launch it. |
 | Language | English only. |
 
 ## Architecture at a glance
 
 ```
- Siri / Shortcuts / Spotlight / Control Center
+ Siri / Shortcuts / Spotlight
                 │  (App Intents framework, in-process)
                 ▼
  src/native/assistant/*.swift  ── AssistantCatalogReader ──► laabs-shadow-library.db : assistant_catalog (read-only, libsqlite3)
@@ -43,14 +43,18 @@ parked until the JS runtime is up.
 
 Two process states matter:
 
-- **JS alive** (app foreground or background-audio): Swift `perform()` calls `AssistantBridge` → emits `onAssistantAction` → TS handler runs → TS calls `AssistantBridge.completeAction(id, result)` → Swift continuation resumes → reply.
-- **JS not alive** (cold launch in background by the system to run the intent): Swift parks a Pending Assistant Action, RN boots in parallel, `_layout.tsx` drains it at `warmupEligible`, same completion path. Read-only actions never touch JS at all.
+- **JS alive** (app foreground or background-audio): after an atomic listener/readiness handshake, Swift `perform()` calls `AssistantBridge` → emits `onAssistantAction` → TS handler runs → TS calls `AssistantBridge.completeAction(id, result)` → Swift continuation resumes → reply.
+- **JS not alive** (cold launch in background by the system to run the intent): Swift parks one expiring Pending Assistant Action, RN boots in parallel, `_layout.tsx` atomically attaches the listener and drains it at `warmupEligible`, then uses the same completion path. A competing action receives an immediate busy failure instead of overwriting the accepted action. Read-only actions never touch JS at all.
 
 ---
 
-## Phase 0 — Spike: App Intents metadata under the inline-module build (gate for everything else)
+## Phase 0 — Spike: metadata plus cold React Native completion (gate for everything else)
 
-Apple's `appintentsmetadataprocessor` must see the intents in the **app target**. Inline modules compile `src/native/**/*.swift` into `LAABSAudiobookshelf`, which is what we need — but prove it before writing real code.
+Apple's `appintentsmetadataprocessor` must see the intents in the **app target**, and an
+`openAppWhenRun = false` playback action must be able to launch the app process, wait for React Native,
+and receive a completion before Siri's deadline. Inline modules compile `src/native/**/*.swift` into
+`LAABSAudiobookshelf`, which is what we need — but prove both assumptions before writing the catalog or
+shipping intents.
 
 1. Create `src/native/assistant/AssistantSpikeIntent.swift`:
    ```swift
@@ -71,12 +75,24 @@ Apple's `appintentsmetadataprocessor` must see the intents in the **app target**
      }
    }
    ```
-2. `npx expo prebuild --clean -p ios && npx expo run:ios --device` (App Intents are only reliable on a device).
-3. Verify: build log contains `appintentsmetadataprocessor` with no "metadata extraction skipped" warning; `LAABS Audiobookshelf.app/Metadata.appintents/` exists; the Shortcuts app shows "Spike" under the LAABS app; saying "Run the spike in LAABS Audiobookshelf" answers.
-4. If extraction fails: check the target's `Other Swift Flags` / that the files are in the main target's compile sources (not a pod). Fallback (only if needed): a small config plugin `plugins/with-assistant-sources.js` using `withXcodeProject` to add `src/native/assistant` as a synchronized group — but the inline-module path should already do this.
-5. Delete the spike files once Phase 4 lands.
+2. Add the smallest viable `AssistantBridge` pending-action path from Phase 2: the spike parks an
+   expiring request when JS is unavailable; `_layout.tsx` atomically attaches its listener, marks the
+   runtime ready, drains the request, starts the currently persisted audiobook through
+   `playerService`, and completes the Swift continuation.
+3. `npx expo prebuild --clean -p ios && npx expo run:ios --device` (App Intents are only reliable on a device).
+4. Verify the build log contains `appintentsmetadataprocessor` with no "metadata extraction skipped"
+   warning; `LAABS Audiobookshelf.app/Metadata.appintents/` exists; and the Shortcuts app shows "Spike"
+   under the LAABS app.
+5. Force-quit the app and invoke the spike. Verify the app process launches without foreground UI,
+   React Native drains the request, audio reaches Audible Playback State, and Siri receives the
+   completion inside 10 seconds. Repeat with the app alive and with two nearly concurrent requests;
+   the second request must receive a busy result rather than overwrite the first.
+6. If extraction fails: check the target's `Other Swift Flags` / that the files are in the main target's compile sources (not a pod). Fallback (only if needed): a small config plugin `plugins/with-assistant-sources.js` using `withXcodeProject` to add `src/native/assistant` as a synchronized group — but the inline-module path should already do this.
+7. Evolve the spike bridge into the production bridge in Phase 2 and delete only the spike intent once
+   Phase 4 lands.
 
-**Exit criterion:** phrase works on device from a cold app (force-quit first).
+**Exit criterion:** metadata extraction succeeds and a force-quit invocation completes real playback
+through the React Native bridge within 10 seconds. If either fails, stop and revisit ADR-0040.
 
 ---
 
@@ -91,7 +107,6 @@ CREATE TABLE IF NOT EXISTS assistant_catalog (
   user_id            TEXT    NOT NULL,   -- Audiobookshelf User Identity (same value as library_catalog_items.user_id)
   library_item_id    TEXT    NOT NULL,
   library_id         TEXT    NOT NULL,
-  server_id          TEXT    NOT NULL,   -- stable server identity used in the entity id (see 1.4)
   title              TEXT    NOT NULL,
   subtitle           TEXT,
   author             TEXT,
@@ -135,7 +150,10 @@ Deliberately **no FTS** table: Swift reads with the system `libsqlite3` and must
 ### 1.3 Writer — `src/data/sqlite/assistant-catalog-writes.ts`
 
 ```ts
-export const rebuildAssistantCatalog = (scope: { userId: string }): Promise<{ rowCount: number }>;
+export const rebuildAssistantCatalog = (input: {
+  userId: string;
+  downloadedBooks: readonly AssistantDownloadedBookInput[];
+}): Promise<{ rowCount: number }>;
 export const patchAssistantCatalogProgress = (userId: string, libraryItemId: string, patch: {
   progressPercent: number; currentTimeSeconds: number; isFinished: boolean; lastPlayedAt?: number;
 }): Promise<void>;
@@ -146,26 +164,26 @@ export const clearAssistantCatalog = (userId?: string): Promise<void>; // undefi
 
 `rebuildAssistantCatalog`:
 - Runs under `withWriteGuard` + `runInTransaction`.
-- Source rows: `library_catalog_items` joined to `libraries` where `libraries.media_type = 'book'` (audiobook libraries only) and `is_missing = 0`, for `user_id = scope.userId`. Left-join `user_server_progress`, `user_favorites`. Downloaded flag from `deviceBooksStore` (pass a `Set<string>` of downloaded library item ids in; do not import the store into the SQLite layer — accept it as a parameter and let the caller supply it).
+- First make `ActiveLibraryContext` carry `mediaType` and make `upsertLibrary` persist/update it; the existing writer currently stores `NULL`. Source rows are `library_catalog_items` joined to `libraries` where `libraries.media_type = 'book'` (audiobook libraries only) and `is_missing = 0`, for `user_id = input.userId`. Left-join `user_server_progress` and `user_favorites`.
+- Union retained audiobook downloads owned by `input.userId` when their catalog row is absent or marked missing. `AssistantDownloadedBookInput` is built outside the SQLite layer from `deviceBooksStore.downloadedDetailsById`, `downloadedBookData`, and `downloadedOwnerUserIdsById`, and supplies the retained presentation metadata, duration, cover path, and library id. Do not import the store into the SQLite layer.
 - `series_sequence` and `subtitle` come from `summary_json` if present.
 - `cover_path`: resolve through `resolveCachedWidgetArtworkUri` when a cached file exists; otherwise NULL. (Do not trigger downloads here; the snippet falls back to `cover_url` or a placeholder.)
-- `server_id`: derive once via `getAssistantServerId()` in `src/assistant/assistant-identity.ts` — the hostname of the current Server Connection Endpoint, lowercased, port included. Keep it a function so it can be swapped for a server UUID later without touching the writer.
-- `DELETE FROM assistant_catalog WHERE user_id = ?` then bulk insert in chunks of 500; then upsert `assistant_catalog_meta`.
+- Physically replace the projection: delete every row in `assistant_catalog` and `assistant_catalog_meta`, then bulk insert only `input.userId` in chunks of 500 and insert its metadata row.
 - Emits `assistantCatalogChanged` on a tiny event emitter (`src/assistant/assistant-catalog-events.ts`) so Phase 5/7 can react (Suggested Assistant Books refresh, Spotlight reindex).
 
 ### 1.4 Assistant Book identity
 
-Entity id string: `${server_id}|${library_item_id}`. Helpers in `src/assistant/assistant-identity.ts` (TS) and `AssistantBookID` (Swift): `parse`, `format`. Both sides reject ids without exactly one `|`.
+Entity id string: `${user_id}|${library_item_id}`. The Audiobookshelf User Identity is globally unique in this domain and remains stable when the Server Connection Endpoint changes. Helpers in `src/assistant/assistant-identity.ts` (TS) and `AssistantBookID` (Swift): `parse`, `format`. Both sides reject ids without exactly one `|` and validate the parsed user id against the published runtime context.
 
 ### 1.5 Hook points
 
 | Where | Call |
 |---|---|
-| `refresh-coordinator.ts` → `refreshActiveLibrary`, immediately before `invalidateSqliteQueries(...)` | `await rebuildAssistantCatalog({ userId: scope.userId })` when catalog **or** overlay refreshed. Wrap in try/catch + `recordTimingLog("assistant", "catalog_rebuild", …)`; a failure must never fail the library refresh. |
+| `refresh-coordinator.ts` → `refreshActiveLibrary`, immediately before `invalidateSqliteQueries(...)` | `await rebuildAssistantCatalog({ userId: scope.userId, downloadedBooks })` when catalog **or** overlay refreshed. Wrap in try/catch + `recordTimingLog("assistant", "catalog_rebuild", …)`; a failure must never fail the library refresh. |
 | `overlay-writes.ts` → `upsertShadowServerProgressProjection` | after the write: `patchAssistantCatalogProgress(...)`, passing `lastPlayedAt: Date.now()` only when called from `player-service.ts` (add an optional flag to the existing function rather than a second call site). |
 | `overlay-writes.ts` → `setShadowFavoriteProjection` | `patchAssistantCatalogFavorite(...)`. |
 | `device-books-store.ts` download completed / removed | `patchAssistantCatalogDownloaded(...)`. Locate the transitions to `status: "completed"` (≈ L3721) and the remove-download action. |
-| Session Entry Switch (`src/auth/user-session-entry*.ts`) | after the new session commits: `rebuildAssistantCatalog({ userId: newUserId })` if that user has cached libraries; the old user's rows stay (they are scoped by `user_id`) — Swift only ever reads the *current* user. |
+| Session Entry Switch (`src/auth/user-session-entry*.ts`) | after the new session commits: physically replace the projection with `rebuildAssistantCatalog({ userId: newUserId, downloadedBooks })`; no previous-user rows remain. |
 | Explicit logout | `clearAssistantCatalog(userId)` **and** `AssistantBridge.clearSpotlightIndex()` (Phase 7). |
 
 ### 1.6 Telling Swift where the DB is and who the user is
@@ -175,14 +193,13 @@ Swift must not guess the expo-sqlite directory. At startup (`_layout.tsx`, next 
 ```ts
 AssistantBridge.publishRuntimeContext({
   dbPath: `${SQLite.defaultDatabaseDirectory}/laabs-shadow-library.db`,
-  userId: activeLibraryUserKey ?? null,
-  accessMode: "signedIn" | "sessionNeedsSignIn" | "offlineSession" | "downloadedOnly" | "signedOutRequired",
-  canStream: boolean,          // signed in or offline-remembered session
-  serverId: getAssistantServerId() ?? null,
+  userId: resolveAssistantUserId(authState), // active identity, or stored identity in downloadedSessionOnly; null after explicit logout/downloadedOnly
+  accessMode: "hydrating" | "firstRunSignInRequired" | "downloadedOnly" | "downloadedSessionOnly" | "serverSetup" | "serverBrowsing",
+  canAttemptStreaming: boolean, // authenticated session with usable credentials; network failure is still handled by playback
 });
 ```
 
-The bridge persists this in `UserDefaults.standard` under `laabs.assistant.runtimeContext` so a cold-launched intent has it before JS is up. Create `src/assistant/assistant-runtime-context.ts` to compute it from `authStore` / access-mode selectors, and subscribe so republishing is automatic.
+The bridge persists this in `UserDefaults.standard` under `laabs.assistant.runtimeContext` so a cold-launched intent has it before JS is up. Create `src/assistant/assistant-runtime-context.ts` to compute it from `authStore` / access-mode selectors, and subscribe so republishing is automatic. `userId == null` disables every assistant surface; explicit logout publishes that disabled context after clearing the catalog and Spotlight index. `downloadedSessionOnly` retains its remembered identity, while anonymous `downloadedOnly` does not enable assistant surfaces.
 
 ### 1.7 Tests
 
@@ -214,15 +231,18 @@ export type AssistantActionRequest =
   | { id: string; kind: "resume" }
   | { id: string; kind: "pause" }
   | { id: string; kind: "bookmarkHere"; title: string | null }
-  | { id: string; kind: "sleepTimer"; mode: "minutes" | "end_of_chapter" | "end_of_next_chapter" | "cancel"; minutes: number | null }
-  | { id: string; kind: "togglePlayPause" };            // Control Center
+  | { id: string; kind: "sleepTimer"; mode: "minutes" | "end_of_chapter" | "end_of_next_chapter" | "cancel"; minutes: number | null };
+
+export type AssistantPlayableRef =
+  | { kind: "audiobook"; libraryItemId: string }
+  | { kind: "episode"; libraryItemId: string; episodeId: string };
 
 export type AssistantActionResult =
-  | { ok: true; kind: "play" | "resume" | "togglePlayPause"; libraryItemId: string; title: string; isPlaying: boolean }
+  | { ok: true; kind: "play" | "resume"; playable: AssistantPlayableRef; title: string; isPlaying: boolean }
   | { ok: true; kind: "pause" }
-  | { ok: true; kind: "bookmarkHere"; title: string; positionSeconds: number; bookTitle: string }
+  | { ok: true; kind: "bookmarkHere"; title: string; positionSeconds: number; playableTitle: string }
   | { ok: true; kind: "sleepTimer"; description: string }
-  | { ok: false; code: "nothingPlaying" | "signInRequired" | "cannotStream" | "notFound" | "playbackFailed" | "timeout" | "unsupported"; message: string };
+  | { ok: false; code: "nothingPlaying" | "signInRequired" | "cannotStream" | "notFound" | "playbackFailed" | "timeout" | "busy" | "unsupported"; message: string };
 ```
 
 Exhaustive `switch` with a `never` default on `kind` in every TS handler.
@@ -230,11 +250,11 @@ Exhaustive `switch` with a `never` default on `kind` in every TS handler.
 ### 2.3 Swift API (`AssistantActionDispatcher`)
 
 ```swift
-final class AssistantActionDispatcher {
+actor AssistantActionDispatcher {
   static let shared = AssistantActionDispatcher()
-  var isRuntimeReady: Bool               // set true by JS `markRuntimeReady()` at warmupEligible; false on module teardown
+  private(set) var isRuntimeReady: Bool
   func perform(_ request: AssistantActionRequest, timeout: Duration = .seconds(10)) async -> AssistantActionResult
-  func takePendingAction() -> AssistantActionRequest?      // JS drain
+  func activateRuntimeAndTakePending() -> AssistantActionRequest? // atomic ready + drain after listener attach
   func complete(id: String, result: AssistantActionResult) // JS → Swift
 }
 ```
@@ -242,10 +262,16 @@ final class AssistantActionDispatcher {
 `perform`:
 1. Store `CheckedContinuation` under `request.id`.
 2. If `isRuntimeReady` → `sendEvent("onAssistantAction", request)`.
-   Else → write request to `pendingSlot` (memory) **and** `UserDefaults` key `laabs.assistant.pendingAction` (survives the unlikely case that the module instance is recreated during RN boot).
-3. Race the continuation against the timeout; on timeout remove continuation, clear the slot, return `.failure(code: "timeout")`.
+   Else, if the pending slot is empty → write `{ request, acceptedAt, expiresAt }` to memory **and**
+   `UserDefaults` key `laabs.assistant.pendingAction`. If another unexpired action is already pending,
+   return `.failure(code: "busy")` immediately rather than overwrite it.
+3. Race the continuation against the timeout; on timeout remove only the matching continuation/slot
+   and return `.failure(code: "timeout")`. Startup discards persisted requests whose `expiresAt` has
+   passed, so a timed-out action can never auto-play on a later launch.
 
-Only `play`, `resume`, `togglePlayPause` may be parked as Pending Assistant Actions. `pause`, `bookmarkHere`, `sleepTimer` with `isRuntimeReady == false` return `nothingPlaying` immediately (there is no audible playback if the process was not alive).
+Only `play` and `resume` may be parked as Pending Assistant Actions. `pause`, `bookmarkHere`, and
+`sleepTimer` with `isRuntimeReady == false` return `nothingPlaying` immediately (there is no audible
+playback if the process was not alive).
 
 ### 2.4 Expo module surface (`AssistantBridge.swift`)
 
@@ -253,19 +279,21 @@ Only `play`, `resume`, `togglePlayPause` may be parked as Pending Assistant Acti
 Name("AssistantBridge")
 Events("onAssistantAction")
 Function("publishRuntimeContext") { (ctx: [String: Any]) }          // 1.6
-Function("markRuntimeReady")                                          // JS at warmupEligible
-Function("takePendingAction") -> [String: Any]?                        // JS drain
+AsyncFunction("activateRuntimeAndTakePending") -> [String: Any]?       // atomic ready + drain
 Function("completeAction") { (id: String, result: [String: Any]) }
 AsyncFunction("refreshSuggestedBooks")                                 // Phase 5: AppShortcutsProvider.updateAppShortcutParameters()
 AsyncFunction("reindexSpotlight") { (userId: String?) }                // Phase 7
 AsyncFunction("clearSpotlightIndex")                                  // Phase 7
-Function("reloadControls")                                             // Phase 8: ControlCenter.shared.reloadAllControls()
-OnDestroy { AssistantActionDispatcher.shared.isRuntimeReady = false }
+OnDestroy { await AssistantActionDispatcher.shared.deactivateRuntime() }
 ```
 
 ### 2.5 TS side (`src/assistant/assistant-bridge.ts`)
 
-- `startAssistantActionListener(handler: (req) => Promise<AssistantActionResult>)`: subscribes to `onAssistantAction`, and drains `takePendingAction()` once — call from `_layout.tsx` inside the `warmupEligible` effect **before** the Startup Active Playback Restore effect body runs, and if a pending `play`/`resume` exists set a ref `startupAssistantOwnsPlaybackRef = true` that the restore effect checks and bails on (this is the "pending play overrides never-auto-play" rule).
+- `startAssistantActionListener(handler: (req) => Promise<AssistantActionResult>)`: first subscribes to
+  `onAssistantAction`, then calls `activateRuntimeAndTakePending()` to atomically mark Swift ready and
+  claim the pending request. Call from `_layout.tsx` inside the `warmupEligible` effect **before** the
+  Startup Active Playback Restore effect body runs. If a pending `play`/`resume` exists, set
+  `startupAssistantOwnsPlaybackRef = true` before handling it so restore cannot compete.
 - Every handler must `completeAction(id, result)` in a `finally`.
 
 ---
@@ -276,7 +304,7 @@ OnDestroy { AssistantActionDispatcher.shared.isRuntimeReady = false }
 
 - `import SQLite3`; open `runtimeContext.dbPath` with `SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX`; WAL readers need no extra setup. Check `assistant_catalog_meta.contract_version == 1` for the user; otherwise treat as empty and log.
 - Queries (all filtered by `user_id = runtimeContext.userId`):
-  - `book(byLibraryItemId:)`
+  - `book(byID:)` — parse `${userId}|${libraryItemId}`, reject a user id that differs from runtime context, then query by both values.
   - `search(text:, limit:) -> [AssistantBookRow]` — normalize input (Swift twin of 1.2), then rank in memory over rows where `search_text LIKE '%' || ? || '%'`:
     1. `title_normalized == q` → 100
     2. `title_normalized` hasPrefix q → 80
@@ -288,7 +316,7 @@ OnDestroy { AssistantActionDispatcher.shared.isRuntimeReady = false }
   - `booksByAuthor(text:, limit:)` — `author_normalized LIKE`.
   - `suggested(limit: 25)` — `ORDER BY (progress_percent > 0 AND is_finished = 0) DESC, is_downloaded DESC, is_favorite DESC, last_played_at DESC`.
   - `mostRecent()` — `ORDER BY last_played_at DESC LIMIT 1` where `last_played_at IS NOT NULL`.
-  - `downloadedOnly` variants when `accessMode == "downloadedOnly"` (append `AND is_downloaded = 1`).
+  - downloaded-only variants when `accessMode == "downloadedSessionOnly"` (append `AND is_downloaded = 1`). Anonymous `downloadedOnly` has no Assistant user and is disabled.
 - All reads on a serial `DispatchQueue`; the connection is opened lazily and reopened if `dbPath` changes.
 
 ### 3.2 `AssistantBookEntity.swift`
@@ -297,7 +325,7 @@ OnDestroy { AssistantActionDispatcher.shared.isRuntimeReady = false }
 struct AssistantBookEntity: AppEntity, Identifiable {
   static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Audiobook")
   static var defaultQuery = AssistantBookQuery()
-  var id: String                      // "server|libraryItemId"
+  var id: String                      // "userId|libraryItemId"
   @Property(title: "Title")  var title: String
   @Property(title: "Author") var author: String?
   @Property(title: "Narrator") var narrator: String?
@@ -317,7 +345,10 @@ struct AssistantBookQuery: EntityQuery, EntityStringQuery {
 }
 ```
 
-On iOS 26 (Phase 6) the entity additionally conforms to `@AssistantEntity(schema: .audio.audiobook)`; keep the base struct schema-free so 16.4 builds compile.
+For exact play resolution, `entities(matching:)` returns every ranked match when there are 1–3, so
+Siri can disambiguate, but returns only the best title match when there are more than 3. Keep the base
+entity schema-free so 16.4 builds compile; Phase 6 adds availability-gated `.books` and `.audio`
+schema wrappers that share this reader.
 
 ---
 
@@ -327,19 +358,20 @@ On iOS 26 (Phase 6) the entity additionally conforms to `@AssistantEntity(schema
 
 ```swift
 enum AssistantAccessPolicy {
-  static func canAnswerReadOnly(_ ctx: AssistantRuntimeContext) -> Bool   // userId != nil && accessMode != .signedOutRequired
+  static func canAnswerReadOnly(_ ctx: AssistantRuntimeContext) -> Bool   // userId != nil
   static func canPlay(_ book: AssistantBookRow, _ ctx: AssistantRuntimeContext) -> PlayGate  // .allowed | .signInRequired | .cannotStream
 }
 ```
-`canPlay`: `signedOutRequired` → `.signInRequired`; downloaded → `.allowed`; else `ctx.canStream ? .allowed : .cannotStream`.
+`canPlay`: no chosen `userId` → `.signInRequired`; downloaded → `.allowed`; else
+`ctx.canAttemptStreaming ? .allowed : .cannotStream`.
 
 ### 4.2 Intents (one file each under `src/native/assistant/intents/`)
 
 | Intent | Parameters | Behaviour | Reply |
 |---|---|---|---|
-| `PlayAudiobookIntent` (`AudioPlaybackIntent`) | `book: AssistantBookEntity` (optional). `openAppWhenRun = false`. | No book → same as Resume. Else guard via policy; `dispatcher.perform(.play(libraryItemId))`. | "Playing *Title* by *Author*." + card. Failures map codes → dialogs: `cannotStream` "That book isn't downloaded and you're offline."; `signInRequired` "Sign in to LAABS Audio first." with `OpensIntent`/`openAppWhenRun` fallback; `timeout` "LAABS Audio couldn't start playback. Open the app to continue." |
-| `ResumeListeningIntent` (`AudioPlaybackIntent`) | none | `dispatcher.perform(.resume)`; JS resumes Active Playback, else most recent (`reader.mostRecent()` id supplied by Swift as a hint in the request — extend `resume` with `fallbackLibraryItemId?`). Nothing → `.result(opensIntent: OpenLAABSIntent())`. | "Resuming *Title*." |
-| `PauseListeningIntent` (`AudioPlaybackIntent`) | none | requires runtime ready. | "Paused." / "Nothing is playing." |
+| `PlayAudiobookIntent` (`AudioStartingIntent`, available on the 16.4 floor) | `book: AssistantBookEntity` (optional). `openAppWhenRun = false`. | No book → same as Resume. Else guard via policy; `dispatcher.perform(.play(libraryItemId))`. | "Playing *Title* by *Author*." + card. Failures map codes → dialogs: `cannotStream` "That book isn't downloaded and you're offline."; `signInRequired` "Sign in to LAABS Audio first." with `OpensIntent`/`openAppWhenRun` fallback; `timeout` "LAABS Audio couldn't start playback. Open the app to continue." |
+| `ResumeListeningIntent` (`AudioStartingIntent`) | none | `dispatcher.perform(.resume)`; JS resumes Active Playback or the persisted most recent Active Playback, including an Episode. Nothing → `.result(opensIntent: OpenLAABSIntent())`. | "Resuming *Title*." |
+| `PauseListeningIntent` (`AppIntent`; the 16.4 floor predates `AudioPlaybackIntent`) | none | requires runtime ready. | "Paused." / "Nothing is playing." |
 | `IsBookInLibraryIntent` | `query: String` (`\(\.$query)` in phrase) | `reader.search(limit: 5)`. Read-only; no JS. | Yes → "Yes — *Title* by *Author*, 43% listened, downloaded." + card. Several → speak first, show list. None → "I couldn't find *query* in your LAABS library." |
 | `BooksByAuthorIntent` | `author: String` | `reader.booksByAuthor(limit: 10)` | "You have 7 books by Stephen King, including *A*, *B*, *C*…" (speak ≤5) + list snippet. |
 | `BookmarkHereIntent` | `title: String?` | `dispatcher.perform(.bookmarkHere(title))` | "Bookmarked *Title* at 1:23:45." |
@@ -391,18 +423,17 @@ Note the application name Siri expects is the `CFBundleDisplayName` ("LAABS Audi
 export const handleAssistantAction = async (req: AssistantActionRequest): Promise<AssistantActionResult>
 ```
 - `play`: `await playerService.loadBook(req.libraryItemId, { autoPlay: true })`; wait until `playbackStore.playbackState` reaches `"playing"` or an error within 8 s (subscribe, don't poll); return title from `playbackStore.bookTitle`.
-- `resume`: if `playbackStore.libraryItemId` and loaded → `playerService.play()`; if `libraryItemId` set but idle (persisted last book) → `loadBook(id, { autoPlay: true })` (or `loadEpisode` when `episodeId`); else use `req.fallbackLibraryItemId`; else `nothingPlaying`.
+- `resume`: if `playbackStore.libraryItemId` and loaded → `playerService.play()`; if a persisted playable is idle → `loadBook(id, { autoPlay: true })` or `loadEpisode(libraryItemId, episodeId, { autoPlay: true })`; else `nothingPlaying`. Return a discriminated `AssistantPlayableRef`.
 - `pause`: `playerService.pause()` if playing else `nothingPlaying`.
-- `togglePlayPause`: playing → pause; loaded-paused → play; idle with last book → resume path; nothing → `nothingPlaying` (Swift opens app).
-- `bookmarkHere`: requires `playbackStore.libraryItemId`; `positionSeconds = Math.floor(positionMs/1000)`; title = `req.title?.trim() || defaultAssistantBookmarkTitle(chapterTitle, positionSeconds)`; create via `deviceBooksStore.getState().actions.addBookmark(libraryItemId, { kind: "point", startTimeSeconds, title, ... }, options)` — mirror exactly what `BookAddBookmarkDraftProvider` passes on save (read it first; reuse its helper if one exists rather than duplicating server-link fields). Works for Episodes (ADR-0032 local episode bookmarks).
-- `sleepTimer`: `sleepTimerStore.getState().actions.startMinutesTimer(minutes ?? undefined)` / `startChapterTimer(mode)` (refuse chapter modes with `canSetChapterTimer === false` → `unsupported`, "This book has no chapters.") / `stopTimer()`. Requires active playback for non-cancel modes.
+- `bookmarkHere`: requires Active Playback; `positionSeconds = Math.floor(positionMs/1000)` and title = `req.title?.trim() || defaultAssistantBookmarkTitle(chapterTitle, positionSeconds)`. For an audiobook, call `deviceBooksStore.actions.addBookmark` with the actual ABS `Bookmark` shape (`libraryItemId`, `time`, `title`, `createdAt`) and the chosen user. For an Episode, call `episodeBookmarksStore.actions.save` with its full `EpisodeIdentity`. Reuse the existing UI save helpers where possible so server-link and ownership fields cannot drift.
+- `sleepTimer`: `sleepTimerStore.getState().actions.startMinutesTimer(minutes ?? undefined)` / `startChapterTimer(mode)` / `stopTimer()`. Derive chapter-mode availability from the current playback/chapter state; there is no `canSetChapterTimer` store property. Requires Active Playback for non-cancel modes.
 
 `src/assistant/assistant-bookmark-title.ts`: `defaultAssistantBookmarkTitle(chapterTitle: string | null, positionSeconds: number)` → `"Chapter 12 · 1:23:45"` or `"Bookmark · 1:23:45"`. Unit-test it.
 
 ### 5.2 `_layout.tsx`
 
 - In the mount effect next to `playerService.init()`: `publishAssistantRuntimeContext()` and `startAssistantRuntimeContextSubscription()`.
-- In the `warmupEligible` effect (create a dedicated effect that runs *before* the restore one in source order): `AssistantBridge.markRuntimeReady()`, `startAssistantActionListener(handleAssistantAction)`, and drain. If the drained action is `play`/`resume`/`togglePlayPause`, set `startupAssistantOwnsPlaybackRef.current = true`.
+- In the `warmupEligible` effect (create a dedicated effect that runs *before* the restore one in source order): install the listener, call `activateRuntimeAndTakePending()`, set `startupAssistantOwnsPlaybackRef.current = true` for a drained `play`/`resume`, then handle it.
 - Startup Active Playback Restore effect: add `if (startupAssistantOwnsPlaybackRef.current) return;` after the deep-link check, with a comment citing ADR-0040.
 
 ### 5.3 Tests
@@ -411,60 +442,48 @@ export const handleAssistantAction = async (req: AssistantActionRequest): Promis
 
 ---
 
-## Phase 6 — iOS 26 `.audio` schema (free-text Siri / Apple Intelligence)
+## Phase 6 — availability-gated audiobook schemas
 
-Files under `src/native/assistant/audio-schema/`, everything `@available(iOS 26, *)`.
+### 6.1 iOS 18–26 `.books` compatibility schema
 
-1. `AssistantAudiobookSchemaEntity.swift`: `@AssistantEntity(schema: .audio.audiobook) struct AudiobookSchemaEntity` wrapping `AssistantBookEntity` fields (title, author→`artist`-equivalent per schema, duration, artwork). Follow the macro's generated property requirements exactly; fix-its tell you what is missing.
-2. `AssistantAudioSearchQuery.swift`: extend `AssistantBookQuery` with `IntentValueQuery` for `AudioSearch`:
+Files under `src/native/assistant/books-schema/`, everything `@available(iOS 18, *)`.
+
+1. `AssistantBooksAudiobookEntity.swift`: `@AppEntity(schema: .books.audiobook)` wrapper around the base Assistant Book fields and reader.
+2. `PlayBooksAudiobookIntent.swift`: `@AppIntent(schema: .books.playAudiobook)` delegates to the same access policy and dispatcher. This preserves schema-backed audiobook playback on iOS 18–26. Apple deprecates this schema in the iOS 27 SDK, but it remains the supported compatibility path.
+
+### 6.2 iOS 27 `.audio` schema (free-text Siri / Apple Intelligence)
+
+Files under `src/native/assistant/audio-schema/`, everything `@available(iOS 27, *)`.
+
+1. `AssistantAudiobookSchemaEntity.swift`: `@AppEntity(schema: .audio.audiobook) struct AudiobookSchemaEntity` wrapping `AssistantBookEntity` fields. Follow the macro's generated property requirements exactly; fix-its tell you what is missing.
+2. `AssistantAudioSearchQuery.swift`: implement `IntentValueQuery` for `AudioSearch`:
    - `.searchQuery(text)` → `reader.search(text, limit: 10)`
    - `.unspecified` → `[reader.mostRecent()]` (this is the "Play LAABS Audio" → Resume rule)
-   - `.url(url)` → parse `laabsaudio:///<id>` → `reader.book(byLibraryItemId:)`
-3. `PlayAudioSchemaIntent.swift`: `@AppIntent(schema: .audio.playAudio) struct PlayAudioSchemaIntent: AudioStartingIntent` — delegates to the same `dispatcher.perform(.play)` / resume path; ignore `playbackAttributes`/`queueLocation` in v1 (log them).
+   - `.url(urls)` → inspect the URL array, parse the first supported `laabsaudio:///<id>`, then call `reader.book(byID:)`
+3. `PlayAudioSchemaIntent.swift`: `@AppIntent(schema: .audio.playAudio) struct PlayAudioSchemaIntent: AudioPlaybackIntent` — delegates to the same `dispatcher.perform(.play)` / resume path; ignore `playbackAttributes`/`queueLocation` in v1 (log them).
 4. `WarmupAudioQueueIntent` (schema `warmupAudioQueue`): optional; implement as a no-op that returns a result so Siri's pre-warm doesn't fail. Include only if the `playAudio` macro requires it.
-5. Gate: wrap registrations in `if #available(iOS 26, *)`. Confirm the 16.4 build still compiles (the macros are only expanded inside available-gated types).
+5. Gate Books registrations at iOS 18 and Audio registrations at iOS 27. Confirm the 16.4 build still compiles (the macros are only expanded inside availability-gated types).
 
-Acceptance: on an iOS 26 device, "Play The Shining in LAABS" with a book **not** in Suggested Assistant Books plays it; "Search for Stephen King books in LAABS" returns results; "Play LAABS" resumes.
+Acceptance: on iOS 18–26, `.books.playAudiobook` resolves a named audiobook. On an iOS 27 device, "Play The Shining in LAABS" with a book **not** in Suggested Assistant Books plays it through `AudioSearch`; "Search for Stephen King books in LAABS" returns results; "Play LAABS" resumes.
 
 ---
 
 ## Phase 7 — Spotlight (`IndexedEntity`, iOS 18+)
 
 1. `AssistantBookEntity: IndexedEntity` (in an `@available(iOS 18, *)` extension) with `attributeSet` providing `title`, `contentDescription` ("by Author · Narrated by N"), `thumbnailURL` (`coverPath`), `keywords` (author, series, narrator).
-2. `AssistantSpotlightIndexer.swift`: `reindex(userId:)` → reads `reader.all(limit: 5000)` (downloaded-only when `accessMode == .downloadedOnly`), `CSSearchableIndex.default().indexAppEntities(...)` (replace-all: delete domain `laabs.assistant.<userId>` then index). `clear()` deletes all domains.
-3. Tap handling: with `IndexedEntity` the system opens the app and delivers the entity id via `application(_:continue:)` / `NSUserActivity` of type `CSSearchableItemActionType`. Add `onContinueUserActivity` handling in the AppDelegate via `plugins/with-assistant.js` (`withAppDelegate`, same anchored-insertion style as `with-transcription-background.js`) that translates the entity id into `laabsaudio:///<libraryItemId>` and opens it through `RCTLinkingManager` — reusing the existing deep-link path so book detail opens with no new routing code.
+2. `AssistantSpotlightIndexer.swift`: use a named `CSSearchableIndex` and `indexAppEntities(...)`. Replace the current projection with App Intents entity deletion APIs (`deleteAppEntities(ofType:)` or identifier deletion as appropriate), not a Core Spotlight domain delete that was never assigned to the indexed entities. `clear()` removes every Assistant Book entity.
+3. `OpenAssistantBookIntent: OpenIntent` has an `AssistantBookEntity` target and routes it to `laabsaudio:///<libraryItemId>` through the existing app-side deep-link path. Use the bridge to deliver or persist the route until React Native is ready; do not inject a `CSSearchableItemActionType` AppDelegate hook. Tapping an indexed book opens detail and never starts playback.
 4. Triggers: `assistantCatalogChanged` (debounced 5 s) → `AssistantBridge.reindexSpotlight(userId)`; explicit logout → `clearSpotlightIndex()`; Session Entry Switch → reindex new user.
 
 ---
 
-## Phase 8 — Control Center / Lock Screen control (iOS 18+)
+## Phase 8 — Deferred: Control Center / Action button
 
-`AssistantPlaybackControl.swift`:
-
-```swift
-@available(iOS 18, *)
-struct AssistantPlaybackControl: ControlWidget {
-  static let kind = "com.markmccoid.laabs-audio.assistant.playback"
-  var body: some ControlWidgetConfiguration {
-    StaticControlConfiguration(kind: Self.kind, provider: AssistantPlaybackStateProvider()) { state in
-      ControlWidgetToggle(state.title, isOn: state.isPlaying, action: TogglePlaybackIntent()) { isOn in
-        Label(isOn ? "Pause" : "Play", systemImage: isOn ? "pause.fill" : "play.fill")
-      }
-    }
-    .displayName("LAABS Audio")
-    .description("Play or pause your current audiobook")
-  }
-}
-```
-
-- **Controls live in a widget extension**, not the app. Since the widget extension is generated by `expo-widgets`, put the control in the *app* only if Apple allows (it does not — `ControlWidget` must be in a WidgetKit extension). Therefore Phase 8 has two options; pick at implementation time after checking the `expo-widgets` config plugin:
-  - (a) `expo-widgets` exposes a hook to add extra Swift files to `ExpoWidgetsTarget` → add the control there, sharing state through App Group `UserDefaults` (`group.com.markmccoid.laabs-audio`, key `laabs.assistant.playbackState` = `{title, isPlaying, libraryItemId}` written by `active-audiobook-widget-publisher.ts`, which already tracks this).
-  - (b) No hook → small `withXcodeProject` plugin that adds `src/native/assistant/controls/*.swift` to `ExpoWidgetsTarget`'s sources.
-- `TogglePlaybackIntent` in the extension cannot reach the player; it must be an `AppIntent` with `openAppWhenRun = false` whose `perform()` posts a Darwin notification and **also** sets a pending `togglePlayPause` in the shared App Group defaults; the app-side `AssistantActionDispatcher` observes the Darwin notification when alive. If the app is not alive, the control falls back to `openAppWhenRun = true` behaviour (set dynamically by checking the shared `isAppAlive` heartbeat the app writes every 30 s while playing).
-- Action button binds to the same intent via Settings automatically once the control exists.
-- `AssistantBridge.reloadControls()` → `ControlCenter.shared.reloadControls(ofKind:)` on every playback state change (throttle 1 s) from `active-audiobook-widget-publisher.ts`.
-
-This phase is the only one that touches the widget extension and is intentionally last; ADR-0040 is unaffected (the control is a WidgetKit surface, not an Assistant Action host).
+Do not implement a `ControlWidget` in this release. The extension cannot reach the JS-owned player, a
+Darwin notification cannot launch a terminated app, `openAppWhenRun` is static rather than a heartbeat-
+driven runtime choice, and `expo-widgets` regenerates both the extension sources and widget-bundle
+registration. Revisit this only when playback can be driven by shared native machinery or the product
+accepts an always-foreground fallback. No Phase 8 files or widget changes are part of this branch.
 
 ---
 
@@ -483,8 +502,9 @@ This phase is the only one that touches the widget extension and is intentionall
 | App force-quit; "Does LAABS have The Shining" | answer with no visible app launch |
 | App in foreground; "Pause LAABS" | pauses, "Paused." |
 | Nothing ever played; "Resume LAABS" | app opens |
-| Downloaded-Only Mode, airplane mode; "Play ⟨downloaded book⟩" | plays; "Play ⟨streamed book⟩" → "not downloaded and you're offline" |
+| Session Needs Sign-In / remembered offline session; "Play ⟨downloaded book⟩" | plays; "Play ⟨streamed book⟩" → "not downloaded and you're offline" |
 | Signed-Out Required Sign-In; any action | "Sign in to LAABS Audio first" + app opens on tap |
+| Explicit logout with downloads retained | Assistant Catalog and Spotlight are empty; every Assistant Action asks the user to choose/sign in to a session |
 | Two "Shining" editions; "Play The Shining" | Siri disambiguation list |
 | 4+ matches | plays top title match, says so |
 | "Bookmark this as great quote" while playing | Point Bookmark titled "great quote" visible in Bookmark List |
@@ -493,7 +513,8 @@ This phase is the only one that touches the widget extension and is intentionall
 | "Set a sleep timer" (no duration) | uses `draftMinutes` |
 | Session Entry Switch to user B | Spotlight shows only B's books; Suggested Assistant Books refresh |
 | Explicit logout | Spotlight empty; Siri read-only actions say sign-in required |
-| iOS 26 device: "Play ⟨book not in suggestions⟩ in LAABS" | plays via audio schema |
+| iOS 18–26 device: "Play ⟨book⟩ in LAABS" | resolves through the Books audiobook schema |
+| iOS 27 device: "Play ⟨book not in suggestions⟩ in LAABS" | plays through `AudioSearch` and the Audio schema |
 | iOS 17 device: same phrase | fails gracefully (Siri asks which book / offers suggestions) — expected limitation |
 | Startup with pending play + `restoreLastBookOnStartup` on | pending play wins; no double load |
 
@@ -505,10 +526,9 @@ This phase is the only one that touches the widget extension and is intentionall
 2. Phase 1 (catalog) and Phase 2 (bridge) in parallel — 1.5 days.
 3. Phase 3 + 4 — 2 days. Ship-able milestone: Siri on 16.4+ with Suggested Assistant Books.
 4. Phase 5 — 1 day (includes the `_layout.tsx` ordering change; test startup restore regression).
-5. Phase 6 — 1 day on an iOS 26 device.
+5. Phase 6 — 1–1.5 days across iOS 18/26 and iOS 27 devices.
 6. Phase 7 — half a day.
-7. Phase 8 — 1–1.5 days (the extension question in 8 decides which).
-8. Phase 9 + 10 — 1 day.
+7. Phase 9 + 10 — 1 day.
 
 ## Files touched outside `src/native/assistant` and `src/assistant`
 
@@ -516,8 +536,7 @@ This phase is the only one that touches the widget extension and is intentionall
 - `src/store/device-books-store.ts` (download transitions)
 - `src/auth/*` session entry / logout (rebuild, clear)
 - `src/app/_layout.tsx` (context publish, runtime-ready, drain, restore guard)
-- `src/widgets/active-audiobook-widget-publisher.ts` (Phase 8 shared state + `reloadControls`)
-- `plugins/with-assistant.js` (+ `app.json` plugins entry): `INAlternativeAppNames`, Spotlight continue-activity hook, optionally Phase 8 sources
+- `plugins/with-assistant.js` (+ `app.json` plugins entry): validated `INAlternativeAppNames` structure only if the Phase 0 device spike proves alternate-name recognition without an Intents extension
 - `src/app/(tabs)/settings/…` (Phase 9)
 - `docs/shadow-sqlite-tables.md`: document `assistant_catalog` / `assistant_catalog_meta`
 - `CONTEXT.md` / ADR-0040: already updated; amend the ADR only if Phase 0 or Phase 8 changes a decision.

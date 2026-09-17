@@ -1,14 +1,16 @@
 # Assistant Actions live in the app target and read an Assistant Catalog
 
-Siri, Shortcuts, Spotlight and Control Center reach LAABS Audio through Apple's App Intents framework,
+Siri, Shortcuts, and Spotlight reach LAABS Audio through Apple's App Intents framework,
 which the glossary names **Assistant Actions** (the word "intent" was already taken by Playback Control
 Intent and Progress Sync Intent). The Swift for them is compiled into the **main app target** through the
 existing `src/native` inline-module path — not into an extension created by `expo-apple-targets`. The
 actions search an **Assistant Catalog**: a TypeScript-owned projection table with a frozen contract,
 living in the same shadow SQLite database, rather than the `library_catalog_*` tables whose schema is
-versioned for the app's own reads. The `.audio` App Intents domain (`playAudio`, `AudioSearch`) is
-adopted behind `@available(iOS 26)` while the deployment target stays at 16.4; iOS 16.4–25 get the same
-actions through App Shortcuts with a bounded parameter list.
+versioned for the app's own reads. The deployment target stays at 16.4: every supported release gets
+App Shortcuts with a bounded parameter list, iOS 18–26 also get the `.books` audiobook schema, and the
+`.audio` App Intents domain (`playAudio`, `AudioSearch`) is adopted behind `@available(iOS 27, *)`.
+Control Center and Action-button controls are deferred until playback can be driven reliably when the
+app process is not alive.
 
 ## Considered Options
 
@@ -27,10 +29,10 @@ actions through App Shortcuts with a bounded parameter list.
   costs one table and buys independence.
 - **A JSON/plist snapshot in the App Group, as the widget does.** Rejected: fine for one Player Display,
   wrong for a multi-thousand-book library that needs ranked text search.
-- **Raising the deployment target to 26 for the `.audio` schema, or skipping the schema and shipping
-  only App Shortcuts.** Rejected both ways: the floor stays where the rest of the app needs it, and the
-  schema is the only route to free-text "play *any* book" and to Apple Intelligence Siri. App Shortcuts
-  can only recognise the ≤25 books LAABS suggests, so both are needed.
+- **Raising the deployment target for schema adoption, or shipping only App Shortcuts.** Rejected both
+  ways: the floor stays where the rest of the app needs it, while availability gates add the iOS 18
+  `.books` schema and the iOS 27 `.audio` schema without excluding older devices. App Shortcuts can only
+  recognise the ≤25 books LAABS suggests, so schema adoption remains necessary for free-text playback.
 
 ## Consequences
 
@@ -40,12 +42,14 @@ actions through App Shortcuts with a bounded parameter list.
   timeout before answering Siri. A pending play *overrides* the never-auto-play rule of Startup Active
   Playback Restore because it is a user command, and becomes an ordinary Playback Start Attempt.
 - The Assistant Catalog carries listening state (progress, finished, last played, downloaded,
-  favourite) so ranking, Spotlight and Downloaded-Only Mode policy can be decided in Swift without a
-  round trip to JavaScript. It is rebuilt when `refreshActiveLibrary` completes and patched
-  incrementally as progress, favourites and downloads change; podcast Libraries are not projected.
+  favourite) so ranking and Spotlight policy can be decided in Swift without a round trip to
+  JavaScript. It physically contains only the chosen Audiobookshelf User Identity's projection, is
+  rebuilt when `refreshActiveLibrary` completes, includes retained downloaded audiobooks whose server
+  catalog rows are missing, and is patched incrementally as progress, favourites and downloads change;
+  podcast Libraries are not projected.
 - Because the actions run in the app process, they inherit the app's Access Mode rules rather than
-  needing their own: read-only actions answer whenever a Listening State Owner is known, play actions
-  follow Download Availability and session rules, and Signed-Out Required Sign-In sends the user to
-  the app.
+  needing their own: read-only actions answer for the chosen User Session, play actions follow Download
+  Availability and session rules, and explicit logout clears the projection and disables assistant
+  surfaces until User Session Entry chooses an identity again.
 - `expo-apple-targets` is not a dependency of this feature. Anyone adding it later for a different
   target should not move Assistant Actions into it without re-reading the first considered option.
