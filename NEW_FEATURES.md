@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-16` `pending` - Upgrade LAABS Audio to Expo SDK 57 and React Native 0.86.3, preserve the iOS 16.4 deployment floor and native widget/CarPlay fixes, and document the approved Assistant Actions architecture plus continued-task transcription research.
+  Tester focus: build and launch the iOS app on the supported device range, exercise dropdown menus, widget play/pause, CarPlay appearance/dev-menu behavior, and existing Book Transcript flows. This commit documents Assistant Actions but does not yet add Siri, Shortcuts, Spotlight, or Control Center behavior.
+
 - `2026-09-10` `pending` - Keep native Readium page taps from revealing the app's Expo Router header inside EPUB Read-Along.
   Tester focus: tap several locations in an EPUB Read-Along page, including after turning a page. The custom reader header should remain in control and no native/Expo Router navigation bar should appear.
 

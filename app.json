@@ -2,12 +2,13 @@
   "expo": {
     "name": "LAABS Audiobookshelf",
     "slug": "laabs_audio",
-    "version": "1.7.9",
+    "version": "1.8.0",
     "orientation": "portrait",
     "scheme": "laabsaudio",
     "userInterfaceStyle": "automatic",
     "ios": {
       "usesIcloudStorage": true,
+      "deploymentTarget": "16.4",
       "icon": "./assets/laabs-abs.icon",
       "bundleIdentifier": "com.markmccoid.laabs-audio",
       "infoPlist": {
@@ -74,7 +75,8 @@
           ]
         }
       ],
-      "./plugins/with-readium"
+      "./plugins/with-readium",
+      "./plugins/with-ios-deployment-targets"
     ],
     "experiments": {
       "typedRoutes": true,

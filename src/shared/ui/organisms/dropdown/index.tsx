@@ -45,7 +45,7 @@ interface DropdownProps {
   children: ReactNode;
 }
 
-const Dropdown = ({ children }: DropdownProps): JSX.Element => {
+const Dropdown = ({ children }: DropdownProps): React.JSX.Element => {
   const [visible, setVisible] = useState<boolean>(false);
   const [triggerLayout, setTriggerLayout] = useState<TriggerLayout | null>(
     null,
@@ -88,7 +88,7 @@ const Dropdown = ({ children }: DropdownProps): JSX.Element => {
   );
 };
 
-const Trigger = ({ children, style }: TriggerProps): JSX.Element => {
+const Trigger = ({ children, style }: TriggerProps): React.JSX.Element => {
   const { open, setTriggerLayout } = useDropdownContext();
   const triggerRef = useRef<View>(null);
 
@@ -124,7 +124,7 @@ const Content = ({
   children,
   style,
   position = "auto",
-}: ContentProps): JSX.Element | null => {
+}: ContentProps): React.JSX.Element | null => {
   const { visible, close, triggerLayout, flipAnim, activeItemIndex } =
     useDropdownContext();
   const itemCount = Children.count(children);
@@ -320,7 +320,7 @@ const Item = ({
   onPress,
   style,
   index = 0,
-}: ItemProps): JSX.Element => {
+}: ItemProps): React.JSX.Element => {
   const { close, activeItemIndex } = useDropdownContext();
 
   const handlePress = (): void => {
