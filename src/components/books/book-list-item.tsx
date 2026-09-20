@@ -65,8 +65,8 @@ export const BookListItem = ({
   const isFullyDownloaded = useDeviceBooksStore((state) =>
     selectIsBookFullyDownloaded(state, book.id),
   );
-  const localCoverUri = useDeviceBooksStore(
-    (state) => resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
+  const localCoverUri = useDeviceBooksStore((state) =>
+    resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
   );
   const shelfMembershipOptions = useBookShelfManagementOptions(
     enableLongPressMenu && actionIds.includes("bookshelves") ? book.id : null,
@@ -92,6 +92,7 @@ export const BookListItem = ({
       accessibilityRole={onPress || href ? "button" : undefined}
       accessibilityState={isCurrentAudiobook ? { selected: true } : undefined}
       style={({ pressed }) => ({
+        width: "100%",
         opacity: pressed ? 0.86 : 1,
       })}
     >
@@ -103,7 +104,12 @@ export const BookListItem = ({
           paddingVertical: 8,
           paddingHorizontal: 10,
           marginVertical: 4,
-          backgroundColor: isCurrentAudiobook ? themeColors.bg : themeColors.surface,
+          width: "100%",
+          maxWidth: "100%",
+          overflow: "hidden",
+          backgroundColor: isCurrentAudiobook
+            ? themeColors.bg
+            : themeColors.surface,
           borderTopWidth: showRowBorders ? StyleSheet.hairlineWidth : 0,
           borderBottomWidth: showRowBorders ? StyleSheet.hairlineWidth : 0,
           borderColor: themeColors.accent,
@@ -145,17 +151,44 @@ export const BookListItem = ({
                 justifyContent: "center",
               }}
             >
-              <SymbolView name="wifi.slash" size={12} tintColor={themeColors.textMuted} />
+              <SymbolView
+                name="wifi.slash"
+                size={12}
+                tintColor={themeColors.textMuted}
+              />
             </View>
           ) : null}
         </View>
-        <View style={{ flex: 1, justifyContent: "space-between", alignItems: "flex-start" }}>
-          <View style={{ width: "100%", flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+        <View
+          style={{
+            flex: 1,
+            flexShrink: 1,
+            minWidth: 0,
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+          }}
+        >
+          <View
+            style={{
+              width: "100%",
+              minWidth: 0,
+              flexDirection: "row",
+              alignItems: "flex-start",
+              gap: 8,
+            }}
+          >
             <Text
               selectable
               numberOfLines={2}
               lineBreakMode="tail"
-              style={{ flex: 1, color: themeColors.text, fontSize: 16, fontWeight: "600" }}
+              style={{
+                flex: 1,
+                flexShrink: 1,
+                minWidth: 0,
+                color: themeColors.text,
+                fontSize: 16,
+                fontWeight: "600",
+              }}
             >
               {book.title}
             </Text>
@@ -184,28 +217,62 @@ export const BookListItem = ({
             ) : null}
           </View>
           <View
-            style={{ marginTop: 2, flexDirection: "row", alignItems: "center", gap: 4 }}
+            style={{
+              marginTop: 2,
+              width: "100%",
+              minWidth: 0,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 4,
+            }}
           >
-            <SymbolView name="person.fill" tintColor={themeColors.textMuted} size={14} />
+            <SymbolView
+              name="person.fill"
+              tintColor={themeColors.textMuted}
+              size={14}
+            />
             <Text
               selectable
               numberOfLines={1}
               lineBreakMode="tail"
-              style={{ flex: 1, color: themeColors.textMuted, fontSize: 15 }}
+              style={{
+                flex: 1,
+                flexShrink: 1,
+                minWidth: 0,
+                color: themeColors.textMuted,
+                fontSize: 15,
+              }}
             >
               {book.author || "Unknown author"}
             </Text>
           </View>
           {hasNarrator ? (
             <View
-              style={{ marginTop: 1, flexDirection: "row", alignItems: "center", gap: 4 }}
+              style={{
+                marginTop: 1,
+                width: "100%",
+                minWidth: 0,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+              }}
             >
-              <SymbolView name="person.wave.2.fill" tintColor={themeColors.textMuted} size={14} />
+              <SymbolView
+                name="person.wave.2.fill"
+                tintColor={themeColors.textMuted}
+                size={14}
+              />
               <Text
                 selectable
                 numberOfLines={1}
                 lineBreakMode="tail"
-                style={{ flex: 1, color: themeColors.textMuted, fontSize: 13 }}
+                style={{
+                  flex: 1,
+                  flexShrink: 1,
+                  minWidth: 0,
+                  color: themeColors.textMuted,
+                  fontSize: 13,
+                }}
               >
                 {narratorName}
               </Text>
@@ -216,7 +283,13 @@ export const BookListItem = ({
               selectable
               numberOfLines={1}
               lineBreakMode="tail"
-              style={{ color: themeColors.textMuted, fontSize: 13, marginTop: 1 }}
+              style={{
+                maxWidth: "100%",
+                flexShrink: 1,
+                color: themeColors.textMuted,
+                fontSize: 13,
+                marginTop: 1,
+              }}
             >
               {resolvedSeriesName}
             </Text>
@@ -229,8 +302,14 @@ export const BookListItem = ({
               gap: 16,
             }}
           >
-            <View style={{ flexDirection: "row", gap: 4, alignItems: "center" }}>
-              <SymbolView name="hourglass" tintColor={themeColors.textMuted} size={16} />
+            <View
+              style={{ flexDirection: "row", gap: 4, alignItems: "center" }}
+            >
+              <SymbolView
+                name="hourglass"
+                tintColor={themeColors.textMuted}
+                size={16}
+              />
               <Text
                 selectable
                 numberOfLines={1}
@@ -239,9 +318,18 @@ export const BookListItem = ({
                 {formatSeconds(book.duration)}
               </Text>
             </View>
-            <View style={{ flexDirection: "row", gap: 4, alignItems: "center" }}>
-              <SymbolView name="calendar" tintColor={themeColors.textMuted} size={16} />
-              <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
+            <View
+              style={{ flexDirection: "row", gap: 4, alignItems: "center" }}
+            >
+              <SymbolView
+                name="calendar"
+                tintColor={themeColors.textMuted}
+                size={16}
+              />
+              <Text
+                selectable
+                style={{ color: themeColors.textMuted, fontSize: 13 }}
+              >
                 {book.publishedYear ?? "-"}
               </Text>
             </View>
@@ -251,8 +339,15 @@ export const BookListItem = ({
                 accessibilityLabel="Ebook available"
                 style={{ flexDirection: "row", gap: 4, alignItems: "center" }}
               >
-                <SymbolView name="book.badge.plus.fill" tintColor={ebookGreen} size={16} />
-                <Text selectable style={{ color: ebookGreen, fontSize: 13, fontWeight: "600" }}>
+                <SymbolView
+                  name="book.badge.plus.fill"
+                  tintColor={ebookGreen}
+                  size={16}
+                />
+                <Text
+                  selectable
+                  style={{ color: ebookGreen, fontSize: 13, fontWeight: "600" }}
+                >
                   EBook
                 </Text>
               </View>
@@ -275,7 +370,12 @@ export const BookListItem = ({
   }
 
   return (
-    <BookActionMenu title={book.title} actions={resolvedActions} shouldOpenOnLongPress>
+    <BookActionMenu
+      title={book.title}
+      actions={resolvedActions}
+      shouldOpenOnLongPress
+      style={{ width: "100%" }}
+    >
       {linkedContent}
     </BookActionMenu>
   );
@@ -283,7 +383,11 @@ export const BookListItem = ({
 
 // Skeleton matching BookListItem geometry for rows whose summary has not
 // resolved yet (windowed Search Result Set resolution).
-export const BookListItemPlaceholder = ({ showRowBorders = true }: { showRowBorders?: boolean }) => {
+export const BookListItemPlaceholder = ({
+  showRowBorders = true,
+}: {
+  showRowBorders?: boolean;
+}) => {
   const themeColors = useThemeColors();
   return (
     <View
@@ -310,10 +414,20 @@ export const BookListItemPlaceholder = ({ showRowBorders = true }: { showRowBord
       />
       <View style={{ flex: 1, gap: 8 }}>
         <View
-          style={{ height: 16, width: "70%", borderRadius: 4, backgroundColor: themeColors.bg }}
+          style={{
+            height: 16,
+            width: "70%",
+            borderRadius: 4,
+            backgroundColor: themeColors.bg,
+          }}
         />
         <View
-          style={{ height: 14, width: "45%", borderRadius: 4, backgroundColor: themeColors.bg }}
+          style={{
+            height: 14,
+            width: "45%",
+            borderRadius: 4,
+            backgroundColor: themeColors.bg,
+          }}
         />
       </View>
     </View>

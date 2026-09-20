@@ -1,8 +1,17 @@
 import type { ResolvedBookAction } from "@/components/books/book-action-types";
-import { MenuView, type MenuAction, type NativeActionEvent } from "@expo/ui/community/menu";
+import {
+  MenuView,
+  type MenuAction,
+  type NativeActionEvent,
+} from "@expo/ui/community/menu";
 import type { ReactNode } from "react";
-import { useMemo } from "react";
-import type { StyleProp, ViewStyle } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import {
+  View,
+  type LayoutChangeEvent,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
 
 const SHELF_ACTION_PREFIX = "bookshelf:";
 
@@ -25,12 +34,14 @@ const toMenuAction = (action: ResolvedBookAction): MenuAction => {
       attributes: { disabled: action.disabled },
       subactions:
         shelfOptions.length > 0
-          ? shelfOptions.map((option): MenuAction => ({
-              id: `${SHELF_ACTION_PREFIX}${option.shelfId}`,
-              title: option.title,
-              image: option.isMember ? "checkmark.circle.fill" : "circle",
-              attributes: { disabled: action.disabled || !option.canMutate },
-            }))
+          ? shelfOptions.map(
+              (option): MenuAction => ({
+                id: `${SHELF_ACTION_PREFIX}${option.shelfId}`,
+                title: option.title,
+                image: option.isMember ? "checkmark.circle.fill" : "circle",
+                attributes: { disabled: action.disabled || !option.canMutate },
+              }),
+            )
           : [
               {
                 id: `${SHELF_ACTION_PREFIX}none`,
@@ -56,7 +67,14 @@ export const BookActionMenu = ({
   shouldOpenOnLongPress = true,
   style,
 }: BookActionMenuProps) => {
-  const visibleActions = useMemo(() => actions.filter((action) => action.visible), [actions]);
+  // Expo 57's iOS MenuView measures its SwiftUI host from the trigger's intrinsic
+  // content width. Give the trigger the width resolved by its React Native parent
+  // so list rows do not shrink-wrap around their text.
+  const [triggerWidth, setTriggerWidth] = useState<number>();
+  const visibleActions = useMemo(
+    () => actions.filter((action) => action.visible),
+    [actions],
+  );
   const menuActions = useMemo<MenuAction[]>(
     () => visibleActions.map(toMenuAction),
     [visibleActions],
@@ -67,9 +85,19 @@ export const BookActionMenu = ({
 
     if (eventId.startsWith(SHELF_ACTION_PREFIX)) {
       const shelfId = eventId.slice(SHELF_ACTION_PREFIX.length);
-      const shelfAction = visibleActions.find((action) => action.id === "bookshelves");
-      const shelfOption = shelfAction?.shelfOptions?.find((option) => option.shelfId === shelfId);
-      if (!shelfAction || !shelfOption || shelfAction.disabled || !shelfOption.canMutate) return;
+      const shelfAction = visibleActions.find(
+        (action) => action.id === "bookshelves",
+      );
+      const shelfOption = shelfAction?.shelfOptions?.find(
+        (option) => option.shelfId === shelfId,
+      );
+      if (
+        !shelfAction ||
+        !shelfOption ||
+        shelfAction.disabled ||
+        !shelfOption.canMutate
+      )
+        return;
 
       void shelfAction.onSelectShelfOption?.(shelfOption);
       return;
@@ -81,15 +109,25 @@ export const BookActionMenu = ({
     void action.onPress?.();
   };
 
+  const handleLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextWidth = Math.round(event.nativeEvent.layout.width);
+    setTriggerWidth((currentWidth) =>
+      currentWidth === nextWidth ? currentWidth : nextWidth,
+    );
+  }, []);
+
   return (
-    <MenuView
-      title={title}
-      actions={menuActions}
-      shouldOpenOnLongPress={shouldOpenOnLongPress}
-      onPressAction={handlePressAction}
-      style={style}
-    >
-      {children}
-    </MenuView>
+    <View style={style} onLayout={handleLayout}>
+      <MenuView
+        title={title}
+        actions={menuActions}
+        shouldOpenOnLongPress={shouldOpenOnLongPress}
+        onPressAction={handlePressAction}
+      >
+        <View style={triggerWidth ? { width: triggerWidth } : undefined}>
+          {children}
+        </View>
+      </MenuView>
+    </View>
   );
 };
