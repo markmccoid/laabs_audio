@@ -6,7 +6,6 @@ import Foundation
 struct AssistantBooksAudiobookEntity: Identifiable {
   let id: String
   let libraryItemId: String
-  let matchedFromMany: Bool
 
   @Property(title: "Title")
   var title: String?
@@ -19,10 +18,9 @@ struct AssistantBooksAudiobookEntity: Identifiable {
   var purchaseDate: Date?
   var genre: String?
 
-  init(row: AssistantBookRow, matchedFromMany: Bool = false) {
+  init(row: AssistantBookRow) {
     id = row.id
     libraryItemId = row.libraryItemId
-    self.matchedFromMany = matchedFromMany
     title = row.title
     author = row.author
     url = URL(string: "laabsaudio:///\(row.libraryItemId)")
@@ -52,11 +50,14 @@ struct AssistantBooksAudiobookQuery: EntityQuery, EntityStringQuery {
   }
 
   func entities(matching string: String) async throws -> [AssistantBooksAudiobookEntity] {
-    let matches = AssistantCatalogReader.shared.search(text: string, limit: 10)
-    if matches.count > 3, let best = matches.first {
-      return [AssistantBooksAudiobookEntity(row: best, matchedFromMany: true)]
+    switch AssistantCatalogReader.shared.playbackMatch(text: string) {
+    case .unavailable, .none:
+      return []
+    case .unique(let row):
+      return [AssistantBooksAudiobookEntity(row: row)]
+    case .ambiguous(let books, _):
+      return books.map { AssistantBooksAudiobookEntity(row: $0) }
     }
-    return matches.map { AssistantBooksAudiobookEntity(row: $0) }
   }
 
   func suggestedEntities() async throws -> [AssistantBooksAudiobookEntity] {

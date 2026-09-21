@@ -31,8 +31,7 @@ struct PlayBooksAudiobookIntent: ForegroundContinuableIntent {
   private func response(_ outcome: AssistantActionOutcome) -> some IntentResult & ProvidesDialog {
     switch outcome {
     case .playback(let title, _):
-      let selection = target.matchedFromMany ? "I found several matches. " : ""
-      return .result(dialog: "\(selection)Playing \(title).")
+      return .result(dialog: "Playing \(title).")
     case .failure(let code, _):
       return .result(dialog: AssistantIntentSupport.failureDialog(code: code))
     default:

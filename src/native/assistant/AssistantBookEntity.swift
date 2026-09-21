@@ -32,14 +32,18 @@ struct AssistantBookEntity: AppEntity, Identifiable {
   let libraryItemId: String
   let coverPath: String?
   let coverURL: String?
-  let matchedFromMany: Bool
 
-  init(row: AssistantBookRow, matchedFromMany: Bool = false) {
+  var detailURL: URL? {
+    let encodedID = libraryItemId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+      ?? libraryItemId
+    return URL(string: "laabsaudio:///\(encodedID)")
+  }
+
+  init(row: AssistantBookRow) {
     id = row.id
     libraryItemId = row.libraryItemId
     coverPath = row.coverPath
     coverURL = row.coverURL
-    self.matchedFromMany = matchedFromMany
     title = row.title
     author = row.author
     narrator = row.narrator
@@ -93,11 +97,14 @@ struct AssistantBookQuery: EntityQuery, EntityStringQuery {
   }
 
   func entities(matching string: String) async throws -> [AssistantBookEntity] {
-    let matches = AssistantCatalogReader.shared.search(text: string, limit: 10)
-    if matches.count > 3, let best = matches.first {
-      return [AssistantBookEntity(row: best, matchedFromMany: true)]
+    switch AssistantCatalogReader.shared.playbackMatch(text: string) {
+    case .unavailable, .none:
+      return []
+    case .unique(let row):
+      return [AssistantBookEntity(row: row)]
+    case .ambiguous(let books, _):
+      return books.map { AssistantBookEntity(row: $0) }
     }
-    return matches.map { AssistantBookEntity(row: $0) }
   }
 
   func suggestedEntities() async throws -> [AssistantBookEntity] {

@@ -19,6 +19,14 @@ class AssistantBridgeModule extends NativeModule<AssistantBridgeEvents> {
 
   completeAction(_id: string, _result: AssistantActionResult): void {}
 
+  peekPendingOpen(): string | null {
+    return null;
+  }
+
+  takePendingOpen(): string | null {
+    return null;
+  }
+
   async refreshSuggestedBooks(): Promise<void> {}
 
   async reindexSpotlight(_userId: string | null): Promise<void> {}

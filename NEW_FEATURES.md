@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-20` `pending` - Teach Siri to search the cached LAABS Audio library by title or author, including “Books by [author]” phrases that do not require picking an author entity first. Result-card Play and Open persist the chosen book so the app can open that title instead of Home.
+  Tester focus: install this `codex/assistant-actions` build, open LAABS Audio once so the catalog is current, then ask “What books do I have by Stephen King in LAABS Audio?”, “Search my library in LAABS Audio”, and “Find an audiobook in LAABS Audio”. Siri should list catalog matches, not say it could not find the book. After a match, Play should start that title and Open should land on its detail screen.
+
 - `2026-09-20` `pending` - Keep audiobook search and list rows constrained to the available screen width after the Expo 57 iOS menu-host sizing change, including wrapping long titles and preserving long-press book actions.
   Tester focus: search or browse a list containing long and short titles; every row should span the screen cleanly, long titles should wrap or truncate within the row, and long-press actions should still open.
 

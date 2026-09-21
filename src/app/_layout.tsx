@@ -27,6 +27,7 @@ import { LibrarySelectionGate } from "../components/library-selection-gate";
 import { OfflineConnectionBanner } from "../components/offline-connection-banner";
 import "../global.css";
 import { extractBookDetailIdFromUrl } from "../navigation/book-links";
+import { useAssistantOpenNavigation } from "../navigation/use-assistant-open-navigation";
 import {
   getAuthenticatedRouteState,
   isKnownAuthenticatedRoute,
@@ -60,6 +61,7 @@ import { handleAssistantAction } from "../assistant/assistant-action-handlers";
 import { startAssistantActionRuntime } from "../assistant/assistant-bridge";
 import { startAssistantRuntimeContextSubscription } from "../assistant/assistant-runtime-context";
 import { startAssistantCatalogNativeSync } from "../assistant/assistant-surface-lifecycle";
+import { AssistantBridgeModule } from "../native/assistant";
 
 const logStartupDebug = (event: string, payload?: Record<string, unknown>) => {
   void event;
@@ -174,7 +176,15 @@ export default function RootLayout() {
     () => getReturnToLibraryItemId(segments, globalParams),
     [globalParams, segments],
   );
-  const startupBookLinkId = returnToLibraryItemId ?? initialDeepLinkBookId ?? undefined;
+  useAssistantOpenNavigation({
+    canNavigate:
+      status !== "hydrating" &&
+      accessMode !== "firstRunSignInRequired" &&
+      !routeState.inLogin,
+  });
+  const pendingAssistantOpenId = AssistantBridgeModule.peekPendingOpen()?.trim() || undefined;
+  const startupBookLinkId =
+    returnToLibraryItemId ?? initialDeepLinkBookId ?? pendingAssistantOpenId ?? undefined;
   const hasActivePlayback = Boolean(
     playbackLibraryItemId &&
       isActivePlaybackState(playbackState) &&

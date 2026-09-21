@@ -889,7 +889,7 @@ _Avoid_: Siri response, dialog, snippet
 - Explicit logout clears the **Assistant Catalog** and disables assistant surfaces until **User Session Entry** chooses an identity again.
 - **Suggested Assistant Books** are drawn from the **Assistant Catalog**, ordered in-progress first, then downloaded, then **Favorite**, and never exceed 25.
 - A play **Assistant Action** for an **Assistant Book** is an ordinary **Playback Start Attempt**: **Resume Resolution** chooses the **Listening Position** and **Auto Rewind** may apply.
-- A play **Assistant Action** whose name matches at most three **Assistant Books** asks the user to choose; with more matches it plays the best title match and says so in the **Assistant Reply**.
+- A play **Assistant Action** whose spoken name uniquely matches one **Assistant Book** title plays that book. Multiple editions of the same title, or several plausible matches, stay ambiguous and use system disambiguation; if too many choices remain, the **Assistant Reply** asks for a narrower title or offers results. Discovery never collapses a broad match set to a single best-guess playback.
 - A play **Assistant Action** that arrives before playback machinery is awake becomes a **Pending Assistant Action** and is performed once startup is settled.
 - A **Pending Assistant Action** to play takes precedence over **Startup Active Playback Restore**'s never-auto-play rule, because it is a user command.
 - A **Pending Assistant Action** that cannot be performed within its wait is answered with a failure **Assistant Reply** that offers to open the app; it does not linger.

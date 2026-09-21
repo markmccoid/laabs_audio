@@ -13,6 +13,8 @@ const ASSISTANT_PHRASES = [
   "Pause LAABS Audio",
   "Search my library in LAABS Audio",
   "Find an audiobook in LAABS Audio",
+  "Books by [author] in LAABS Audio",
+  "What books do I have by [author] in LAABS Audio",
   "Find books by an author in LAABS Audio",
   "Bookmark this in LAABS Audio",
   "Add a bookmark in LAABS Audio",

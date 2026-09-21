@@ -9,6 +9,12 @@ struct PlayAudiobookIntent: AudioStartingIntent, ForegroundContinuableIntent {
   @Parameter(title: "Audiobook")
   var book: AssistantBookEntity?
 
+  init() {}
+
+  init(book: AssistantBookEntity) {
+    self.book = book
+  }
+
   static var parameterSummary: some ParameterSummary {
     Summary("Play \(\.$book)")
   }
@@ -45,6 +51,9 @@ struct PlayAudiobookIntent: AudioStartingIntent, ForegroundContinuableIntent {
         book: book
       )
     case .allowed:
+      if await AssistantActionDispatcher.shared.runtimeIsReady() == false {
+        try await requestToContinueInForeground("Open LAABS Audio to play this audiobook.")
+      }
       let outcome = await AssistantActionDispatcher.shared.perform(
         AssistantActionRequest(kind: .play, libraryItemId: book.libraryItemId)
       )
@@ -59,8 +68,7 @@ struct PlayAudiobookIntent: AudioStartingIntent, ForegroundContinuableIntent {
     switch outcome {
     case .playback(let title, _):
       let author = book?.author.map { " by \($0)" } ?? ""
-      let selection = book?.matchedFromMany == true ? "I found several matches. " : ""
-      return .result(dialog: "\(selection)Playing \(title)\(author).") {
+      return .result(dialog: "Playing \(title)\(author).") {
         AssistantResultSnippet(heading: "Now playing", books: book.map { [$0] } ?? [])
       }
     case .failure(let code, _):
@@ -77,3 +85,4 @@ struct PlayAudiobookIntent: AudioStartingIntent, ForegroundContinuableIntent {
     }
   }
 }
+

@@ -21,6 +21,10 @@ class AssistantBridge : Module() {
       Unit
     }
 
+    Function("peekPendingOpen") { null }
+
+    Function("takePendingOpen") { null }
+
     AsyncFunction("refreshSuggestedBooks") { Unit }
 
     AsyncFunction("reindexSpotlight") { _: String? -> Unit }

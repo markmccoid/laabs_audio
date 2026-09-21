@@ -90,71 +90,203 @@ final class AssistantCatalogReader: @unchecked Sendable {
   }
 
   func book(byID rawID: String) -> AssistantBookRow? {
-    guard let id = AssistantBookID(rawValue: rawID) else { return nil }
+    let request = AssistantDiagnostics.begin(.bookByEntityID, inputKind: .entityIdentifier)
+    guard let id = AssistantBookID(rawValue: rawID) else {
+      request.complete(resultCount: 0, outcome: .invalidInput)
+      return nil
+    }
     let context = AssistantRuntimeContextStore.shared.current()
-    guard id.userId == context.userId else { return nil }
-    let rows: [AssistantBookRow] = read(context: context) { db, userId, downloadedOnly in
+    guard id.userId == context.userId else {
+      request.complete(resultCount: 0, outcome: .unavailable)
+      return nil
+    }
+    let result: [AssistantBookRow]? = read(context: context) { db, userId, downloadedOnly in
       var sql = Self.selectColumns + " WHERE user_id = ? AND library_item_id = ?"
       if downloadedOnly { sql += " AND is_downloaded = 1" }
       sql += " LIMIT 1"
       return try Self.query(db: db, sql: sql, values: [userId, id.libraryItemId])
-    } ?? []
+    }
+    let rows = result ?? []
+    request.complete(
+      resultCount: rows.count,
+      outcome: result == nil ? .unavailable : (rows.isEmpty ? .empty : .success)
+    )
     return rows.first
   }
 
   func book(libraryItemID: String) -> AssistantBookRow? {
-    guard !libraryItemID.isEmpty else { return nil }
+    let request = AssistantDiagnostics.begin(
+      .bookByLibraryItemID,
+      inputKind: .libraryItemIdentifier
+    )
+    guard !libraryItemID.isEmpty else {
+      request.complete(resultCount: 0, outcome: .invalidInput)
+      return nil
+    }
     let context = AssistantRuntimeContextStore.shared.current()
-    let rows: [AssistantBookRow] = read(context: context) { db, userId, downloadedOnly in
+    let result: [AssistantBookRow]? = read(context: context) { db, userId, downloadedOnly in
       var sql = Self.selectColumns + " WHERE user_id = ? AND library_item_id = ?"
       if downloadedOnly { sql += " AND is_downloaded = 1" }
       sql += " LIMIT 1"
       return try Self.query(db: db, sql: sql, values: [userId, libraryItemID])
-    } ?? []
+    }
+    let rows = result ?? []
+    request.complete(
+      resultCount: rows.count,
+      outcome: result == nil ? .unavailable : (rows.isEmpty ? .empty : .success)
+    )
     return rows.first
   }
 
   func search(text: String, limit: Int = 10) -> [AssistantBookRow] {
+    let request = AssistantDiagnostics.begin(.search, inputKind: .freeText)
     let normalized = AssistantText.normalize(text)
-    guard !normalized.isEmpty, limit > 0 else { return [] }
-    let context = AssistantRuntimeContextStore.shared.current()
-    let rows: [AssistantBookRow] = read(context: context) { db, userId, downloadedOnly in
-      var sql = Self.selectColumns + " WHERE user_id = ? AND search_text LIKE ? ESCAPE '\\'"
-      if downloadedOnly { sql += " AND is_downloaded = 1" }
-      return try Self.query(db: db, sql: sql, values: [userId, "%\(Self.escapeLike(normalized))%"])
-    } ?? []
-
-    return rows.sorted { lhs, rhs in
-      let leftScore = Self.rank(lhs, for: normalized)
-      let rightScore = Self.rank(rhs, for: normalized)
-      if leftScore != rightScore { return leftScore > rightScore }
-      if lhs.isInProgress != rhs.isInProgress { return lhs.isInProgress }
-      if lhs.lastPlayedAt != rhs.lastPlayedAt { return (lhs.lastPlayedAt ?? 0) > (rhs.lastPlayedAt ?? 0) }
-      return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
-    }.prefix(limit).map { $0 }
+    guard !normalized.isEmpty, limit > 0 else {
+      request.complete(resultCount: 0, outcome: .invalidInput)
+      return []
+    }
+    switch query(AssistantSearchCriteria(text: text, sort: .relevance, limit: limit)) {
+    case .unavailable:
+      request.complete(resultCount: 0, outcome: .unavailable)
+      return []
+    case .success(let page):
+      request.complete(resultCount: page.books.count, outcome: page.books.isEmpty ? .empty : .success)
+      return page.books
+    }
   }
 
   func booksByAuthor(text: String, limit: Int = 10) -> [AssistantBookRow] {
+    let request = AssistantDiagnostics.begin(.booksByAuthor, inputKind: .authorText)
     let normalized = AssistantText.normalize(text)
-    guard !normalized.isEmpty, limit > 0 else { return [] }
-    let context = AssistantRuntimeContextStore.shared.current()
-    return read(context: context) { db, userId, downloadedOnly in
-      var sql = Self.selectColumns + " WHERE user_id = ? AND author_normalized LIKE ? ESCAPE '\\'"
-      if downloadedOnly { sql += " AND is_downloaded = 1" }
-      sql += " ORDER BY title COLLATE NOCASE LIMIT ?"
-      return try Self.query(
-        db: db,
-        sql: sql,
-        values: [userId, "%\(Self.escapeLike(normalized))%"],
-        integer: Int32(min(max(limit, 1), 100))
+    guard !normalized.isEmpty, limit > 0 else {
+      request.complete(resultCount: 0, outcome: .invalidInput)
+      return []
+    }
+    switch query(
+      AssistantSearchCriteria(
+        author: .combinedCreditContains(text),
+        sort: .title,
+        limit: limit
       )
-    } ?? []
+    ) {
+    case .unavailable:
+      request.complete(resultCount: 0, outcome: .unavailable)
+      return []
+    case .success(let page):
+      request.complete(resultCount: page.books.count, outcome: page.books.isEmpty ? .empty : .success)
+      return page.books
+    }
+  }
+
+  func query(_ criteria: AssistantSearchCriteria) -> AssistantCatalogRead {
+    let request = AssistantDiagnostics.begin(.query, inputKind: criteria.diagnosticInputKind)
+    let context = AssistantRuntimeContextStore.shared.current()
+    let result: AssistantSearchResult? = read(context: context) { db, userId, downloadedOnly in
+      try Self.executeQuery(
+        db: db,
+        userId: userId,
+        downloadedOnly: downloadedOnly,
+        criteria: criteria
+      )
+    }
+    guard let result else {
+      request.complete(resultCount: 0, outcome: .unavailable)
+      return .unavailable
+    }
+    request.complete(
+      resultCount: result.books.count,
+      outcome: result.books.isEmpty ? .empty : .success
+    )
+    return .success(result)
+  }
+
+  func playbackMatch(text: String, limit: Int = 10) -> AssistantPlaybackMatch {
+    let normalized = AssistantText.normalize(text)
+    guard !normalized.isEmpty else { return .none }
+    switch query(AssistantSearchCriteria(text: text, sort: .relevance, limit: limit)) {
+    case .unavailable:
+      return .unavailable
+    case .success(let page):
+      let exactTitles = page.books.filter { $0.titleNormalized == normalized }
+      if exactTitles.count == 1, let unique = exactTitles.first {
+        return .unique(unique)
+      }
+      if exactTitles.count > 1 {
+        return .ambiguous(books: exactTitles, totalCount: exactTitles.count)
+      }
+      if page.books.count == 1, let unique = page.books.first {
+        return .unique(unique)
+      }
+      if page.books.isEmpty {
+        return .none
+      }
+      return .ambiguous(books: page.books, totalCount: page.totalCount)
+    }
+  }
+
+  func authors(matching text: String? = nil, limit: Int = 25) -> AssistantCatalogReadAuthors {
+    let request = AssistantDiagnostics.begin(.authors, inputKind: text == nil ? .none : .authorText)
+    let criteriaLimit = min(max(limit, 1), 100)
+    if let text, AssistantText.normalize(text).isEmpty && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      request.complete(resultCount: 0, outcome: .invalidInput)
+      return .success([])
+    }
+    let context = AssistantRuntimeContextStore.shared.current()
+    let result: [AssistantAuthorCredit]? = read(context: context) { db, userId, downloadedOnly in
+      try Self.executeAuthorQuery(
+        db: db,
+        userId: userId,
+        downloadedOnly: downloadedOnly,
+        matching: text,
+        limit: criteriaLimit
+      )
+    }
+    guard let result else {
+      request.complete(resultCount: 0, outcome: .unavailable)
+      return .unavailable
+    }
+    request.complete(resultCount: result.count, outcome: result.isEmpty ? .empty : .success)
+    return .success(result)
+  }
+
+  func author(byID rawID: String) -> AssistantAuthorCredit? {
+    let request = AssistantDiagnostics.begin(.authors, inputKind: .entityIdentifier)
+    guard let parsed = AssistantAuthorCredit(rawID: rawID) else {
+      request.complete(resultCount: 0, outcome: .invalidInput)
+      return nil
+    }
+    let context = AssistantRuntimeContextStore.shared.current()
+    guard parsed.userId == context.userId else {
+      request.complete(resultCount: 0, outcome: .unavailable)
+      return nil
+    }
+    let rows: [AssistantAuthorCredit]? = read(context: context) { db, userId, downloadedOnly in
+      if let credit = try Self.executeAuthorLookup(
+        db: db,
+        userId: userId,
+        downloadedOnly: downloadedOnly,
+        normalized: parsed.normalized
+      ) {
+        return [credit]
+      }
+      return []
+    }
+    guard let rows else {
+      request.complete(resultCount: 0, outcome: .unavailable)
+      return nil
+    }
+    request.complete(resultCount: rows.count, outcome: rows.isEmpty ? .empty : .success)
+    return rows.first
   }
 
   func suggested(limit: Int = 25) -> [AssistantBookRow] {
-    guard limit > 0 else { return [] }
+    let request = AssistantDiagnostics.begin(.suggested, inputKind: .none)
+    guard limit > 0 else {
+      request.complete(resultCount: 0, outcome: .invalidInput)
+      return []
+    }
     let context = AssistantRuntimeContextStore.shared.current()
-    return read(context: context) { db, userId, downloadedOnly in
+    let result: [AssistantBookRow]? = read(context: context) { db, userId, downloadedOnly in
       var sql = Self.selectColumns + " WHERE user_id = ?"
       if downloadedOnly { sql += " AND is_downloaded = 1" }
       sql += " ORDER BY (progress_percent > 0 AND is_finished = 0) DESC, is_downloaded DESC, is_favorite DESC, last_played_at DESC, title COLLATE NOCASE LIMIT ?"
@@ -164,13 +296,23 @@ final class AssistantCatalogReader: @unchecked Sendable {
         values: [userId],
         integer: Int32(min(max(limit, 1), 100))
       )
-    } ?? []
+    }
+    let rows = result ?? []
+    request.complete(
+      resultCount: rows.count,
+      outcome: result == nil ? .unavailable : (rows.isEmpty ? .empty : .success)
+    )
+    return rows
   }
 
   func all(limit: Int = 5_000) -> [AssistantBookRow] {
-    guard limit > 0 else { return [] }
+    let request = AssistantDiagnostics.begin(.all, inputKind: .none)
+    guard limit > 0 else {
+      request.complete(resultCount: 0, outcome: .invalidInput)
+      return []
+    }
     let context = AssistantRuntimeContextStore.shared.current()
-    return read(context: context) { db, userId, downloadedOnly in
+    let result: [AssistantBookRow]? = read(context: context) { db, userId, downloadedOnly in
       var sql = Self.selectColumns + " WHERE user_id = ?"
       if downloadedOnly { sql += " AND is_downloaded = 1" }
       sql += " ORDER BY title COLLATE NOCASE LIMIT ?"
@@ -180,17 +322,29 @@ final class AssistantCatalogReader: @unchecked Sendable {
         values: [userId],
         integer: Int32(min(max(limit, 1), 10_000))
       )
-    } ?? []
+    }
+    let rows = result ?? []
+    request.complete(
+      resultCount: rows.count,
+      outcome: result == nil ? .unavailable : (rows.isEmpty ? .empty : .success)
+    )
+    return rows
   }
 
   func mostRecent() -> AssistantBookRow? {
+    let request = AssistantDiagnostics.begin(.mostRecent, inputKind: .none)
     let context = AssistantRuntimeContextStore.shared.current()
-    let rows: [AssistantBookRow] = read(context: context) { db, userId, downloadedOnly in
+    let result: [AssistantBookRow]? = read(context: context) { db, userId, downloadedOnly in
       var sql = Self.selectColumns + " WHERE user_id = ? AND last_played_at IS NOT NULL"
       if downloadedOnly { sql += " AND is_downloaded = 1" }
       sql += " ORDER BY last_played_at DESC LIMIT 1"
       return try Self.query(db: db, sql: sql, values: [userId])
-    } ?? []
+    }
+    let rows = result ?? []
+    request.complete(
+      resultCount: rows.count,
+      outcome: result == nil ? .unavailable : (rows.isEmpty ? .empty : .success)
+    )
     return rows.first
   }
 
@@ -245,6 +399,249 @@ final class AssistantCatalogReader: @unchecked Sendable {
     return true
   }
 
+  private enum SQLValue {
+    case text(String)
+    case int(Int32)
+  }
+
+  private static func executeQuery(
+    db: OpaquePointer,
+    userId: String,
+    downloadedOnly: Bool,
+    criteria: AssistantSearchCriteria
+  ) throws -> AssistantSearchResult {
+    var whereSQL = "user_id = ?"
+    var values: [SQLValue] = [.text(userId)]
+
+    if downloadedOnly || criteria.downloaded == true {
+      whereSQL += " AND is_downloaded = 1"
+    } else if criteria.downloaded == false {
+      whereSQL += " AND is_downloaded = 0"
+    }
+
+    if let finished = criteria.finished {
+      whereSQL += " AND is_finished = \(finished ? 1 : 0)"
+    }
+
+    if let text = criteria.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      let tokens = criteria.textTokens
+      if tokens.isEmpty {
+        whereSQL += " AND 0"
+      } else {
+        appendWordPrefixClause(
+          column: "search_text",
+          tokens: tokens,
+          whereSQL: &whereSQL,
+          values: &values
+        )
+      }
+    }
+
+    if let author = criteria.author {
+      switch author {
+      case .combinedCreditEquals(let raw):
+        let normalized = AssistantText.normalize(raw)
+        if normalized.isEmpty {
+          whereSQL += " AND 0"
+        } else {
+          whereSQL += " AND author_normalized = ?"
+          values.append(.text(normalized))
+        }
+      case .combinedCreditContains(let raw):
+        let tokens = AssistantText.tokens(from: raw)
+        if tokens.isEmpty {
+          whereSQL += " AND 0"
+        } else {
+          appendWordPrefixClause(
+            column: "author_normalized",
+            tokens: tokens,
+            whereSQL: &whereSQL,
+            values: &values
+          )
+        }
+      }
+    }
+
+    let countSQL = "SELECT COUNT(*) FROM assistant_catalog WHERE \(whereSQL)"
+    let totalCount = try scalarInt(db: db, sql: countSQL, values: values)
+
+    var orderValues: [SQLValue] = []
+    let orderSQL = orderClause(criteria: criteria, orderValues: &orderValues)
+    let pageSQL = """
+      \(selectColumns)
+      WHERE \(whereSQL)
+      \(orderSQL)
+      LIMIT ? OFFSET ?
+      """
+    var pageValues = values + orderValues
+    pageValues.append(.int(Int32(criteria.limit)))
+    pageValues.append(.int(Int32(criteria.offset)))
+    let books = try query(db: db, sql: pageSQL, values: pageValues)
+    return AssistantSearchResult(books: books, totalCount: totalCount)
+  }
+
+  private static func executeAuthorQuery(
+    db: OpaquePointer,
+    userId: String,
+    downloadedOnly: Bool,
+    matching: String?,
+    limit: Int
+  ) throws -> [AssistantAuthorCredit] {
+    var whereSQL = "user_id = ? AND author_normalized != ''"
+    var values: [SQLValue] = [.text(userId)]
+    if downloadedOnly { whereSQL += " AND is_downloaded = 1" }
+    if let matching {
+      let tokens = AssistantText.tokens(from: matching)
+      if tokens.isEmpty {
+        whereSQL += " AND 0"
+      } else {
+        appendWordPrefixClause(
+          column: "author_normalized",
+          tokens: tokens,
+          whereSQL: &whereSQL,
+          values: &values
+        )
+      }
+    }
+    let sql = """
+      SELECT MIN(author), author_normalized, COUNT(*)
+      FROM assistant_catalog
+      WHERE \(whereSQL)
+      GROUP BY author_normalized
+      ORDER BY COUNT(*) DESC, MIN(author) COLLATE NOCASE ASC
+      LIMIT ?
+      """
+    values.append(.int(Int32(limit)))
+    return try queryAuthors(db: db, sql: sql, values: values, userId: userId)
+  }
+
+  private static func executeAuthorLookup(
+    db: OpaquePointer,
+    userId: String,
+    downloadedOnly: Bool,
+    normalized: String
+  ) throws -> AssistantAuthorCredit? {
+    var sql = """
+      SELECT MIN(author), author_normalized, COUNT(*)
+      FROM assistant_catalog
+      WHERE user_id = ? AND author_normalized = ?
+      """
+    if downloadedOnly { sql += " AND is_downloaded = 1" }
+    sql += " GROUP BY author_normalized LIMIT 1"
+    return try queryAuthors(
+      db: db,
+      sql: sql,
+      values: [.text(userId), .text(normalized)],
+      userId: userId
+    ).first
+  }
+
+  private static func queryAuthors(
+    db: OpaquePointer,
+    sql: String,
+    values: [SQLValue],
+    userId: String
+  ) throws -> [AssistantAuthorCredit] {
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+      throw AssistantCatalogError.prepare(message: String(cString: sqlite3_errmsg(db)))
+    }
+    defer { sqlite3_finalize(statement) }
+    try bind(statement, values: values)
+    var credits: [AssistantAuthorCredit] = []
+    while true {
+      let result = sqlite3_step(statement)
+      if result == SQLITE_DONE { return credits }
+      guard result == SQLITE_ROW else {
+        throw AssistantCatalogError.step(message: String(cString: sqlite3_errmsg(db)))
+      }
+      let displayName = text(statement, 0) ?? ""
+      let normalized = text(statement, 1) ?? ""
+      let bookCount = Int(sqlite3_column_int64(statement, 2))
+      if let credit = AssistantAuthorCredit(
+        userId: userId,
+        displayName: displayName,
+        normalized: normalized,
+        bookCount: bookCount
+      ) {
+        credits.append(credit)
+      }
+    }
+  }
+
+  private static func appendWordPrefixClause(
+    column: String,
+    tokens: [String],
+    whereSQL: inout String,
+    values: inout [SQLValue]
+  ) {
+    guard !tokens.isEmpty else { return }
+    let clause = tokens.map { token -> String in
+      values.append(.text(token))
+      values.append(.text("\(escapeLike(token))%"))
+      values.append(.text("% \(escapeLike(token))%"))
+      return "(\(column) = ? OR \(column) LIKE ? ESCAPE '\\' OR \(column) LIKE ? ESCAPE '\\')"
+    }.joined(separator: " AND ")
+    whereSQL += " AND \(clause)"
+  }
+
+  private static func orderClause(
+    criteria: AssistantSearchCriteria,
+    orderValues: inout [SQLValue]
+  ) -> String {
+    let ties = "title COLLATE NOCASE ASC, library_item_id ASC"
+    switch criteria.sort {
+    case .title:
+      return "ORDER BY \(ties)"
+    case .author:
+      return "ORDER BY author COLLATE NOCASE ASC, \(ties)"
+    case .recent:
+      return "ORDER BY COALESCE(last_played_at, 0) DESC, \(ties)"
+    case .relevance:
+      let query = criteria.normalizedText
+      if query.isEmpty {
+        return "ORDER BY \(ties)"
+      }
+      orderValues.append(.text(query))
+      orderValues.append(.text("\(escapeLike(query))%"))
+      orderValues.append(.text("%\(escapeLike(query))%"))
+      orderValues.append(.text("%\(escapeLike(query))%"))
+      orderValues.append(.text("%\(escapeLike(query))%"))
+      orderValues.append(.text("%\(escapeLike(query))%"))
+      return """
+        ORDER BY CASE
+          WHEN title_normalized = ? THEN 0
+          WHEN title_normalized LIKE ? ESCAPE '\\' THEN 1
+          WHEN title_normalized LIKE ? ESCAPE '\\' THEN 2
+          WHEN series_normalized LIKE ? ESCAPE '\\' THEN 3
+          WHEN author_normalized LIKE ? ESCAPE '\\' THEN 4
+          WHEN narrator_normalized LIKE ? ESCAPE '\\' THEN 5
+          ELSE 6
+        END,
+        CASE WHEN progress_percent > 0 AND is_finished = 0 THEN 0 ELSE 1 END,
+        COALESCE(last_played_at, 0) DESC,
+        \(ties)
+        """
+    }
+  }
+
+  private static func scalarInt(
+    db: OpaquePointer,
+    sql: String,
+    values: [SQLValue]
+  ) throws -> Int {
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+      throw AssistantCatalogError.prepare(message: String(cString: sqlite3_errmsg(db)))
+    }
+    defer { sqlite3_finalize(statement) }
+    try bind(statement, values: values)
+    guard sqlite3_step(statement) == SQLITE_ROW else {
+      throw AssistantCatalogError.step(message: String(cString: sqlite3_errmsg(db)))
+    }
+    return Int(sqlite3_column_int64(statement, 0))
+  }
+
   private static let selectColumns = """
     SELECT user_id, library_item_id, library_id, title, subtitle, author, narrator,
       series_name, series_sequence, duration_seconds, cover_path, cover_url,
@@ -260,16 +657,22 @@ final class AssistantCatalogReader: @unchecked Sendable {
     values: [String],
     integer: Int32? = nil
   ) throws -> [AssistantBookRow] {
+    var binds: [SQLValue] = values.map { .text($0) }
+    if let integer { binds.append(.int(integer)) }
+    return try query(db: db, sql: sql, values: binds)
+  }
+
+  private static func query(
+    db: OpaquePointer,
+    sql: String,
+    values: [SQLValue]
+  ) throws -> [AssistantBookRow] {
     var statement: OpaquePointer?
     guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
       throw AssistantCatalogError.prepare(message: String(cString: sqlite3_errmsg(db)))
     }
     defer { sqlite3_finalize(statement) }
-
-    for (offset, value) in values.enumerated() {
-      sqlite3_bind_text(statement, Int32(offset + 1), value, -1, sqliteTransient)
-    }
-    if let integer { sqlite3_bind_int(statement, Int32(values.count + 1), integer) }
+    try bind(statement, values: values)
 
     var rows: [AssistantBookRow] = []
     while true {
@@ -279,6 +682,18 @@ final class AssistantCatalogReader: @unchecked Sendable {
         throw AssistantCatalogError.step(message: String(cString: sqlite3_errmsg(db)))
       }
       rows.append(row(statement))
+    }
+  }
+
+  private static func bind(_ statement: OpaquePointer, values: [SQLValue]) throws {
+    for (offset, value) in values.enumerated() {
+      let index = Int32(offset + 1)
+      switch value {
+      case .text(let text):
+        sqlite3_bind_text(statement, index, text, -1, sqliteTransient)
+      case .int(let integer):
+        sqlite3_bind_int(statement, index, integer)
+      }
     }
   }
 
@@ -314,16 +729,6 @@ final class AssistantCatalogReader: @unchecked Sendable {
       let value = sqlite3_column_text(statement, column)
     else { return nil }
     return String(cString: value)
-  }
-
-  private static func rank(_ row: AssistantBookRow, for query: String) -> Int {
-    if row.titleNormalized == query { return 100 }
-    if row.titleNormalized.hasPrefix(query) { return 80 }
-    if row.titleNormalized.contains(query) { return 60 }
-    if row.seriesNormalized.contains(query) { return 50 }
-    if row.authorNormalized.contains(query) { return 40 }
-    if row.narratorNormalized.contains(query) { return 30 }
-    return 0
   }
 
   private static func escapeLike(_ value: String) -> String {

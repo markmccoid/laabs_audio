@@ -40,10 +40,19 @@ struct AssistantShortcuts: AppShortcutsProvider {
       systemImageName: "magnifyingglass"
     )
     AppShortcut(
-      intent: BooksByAuthorIntent(),
-      phrases: ["Find books by an author in \(.applicationName)"],
+      intent: BooksByAuthorEntityIntent(),
+      phrases: [
+        "Books by \(\.$author) in \(.applicationName)",
+        "What books do I have by \(\.$author) in \(.applicationName)",
+      ],
       shortTitle: "Books by Author",
       systemImageName: "person.crop.rectangle.stack"
+    )
+    AppShortcut(
+      intent: BooksByAuthorIntent(),
+      phrases: ["Find books by an author in \(.applicationName)"],
+      shortTitle: "Find Books by Author",
+      systemImageName: "person.text.rectangle"
     )
     AppShortcut(
       intent: BookmarkHereIntent(),

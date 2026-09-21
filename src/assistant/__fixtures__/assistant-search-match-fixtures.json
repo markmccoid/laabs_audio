@@ -1,0 +1,44 @@
+[
+  {
+    "id": "reordered-tokens",
+    "query": "king stephen",
+    "title": "The Shining",
+    "author": "Stephen King",
+    "shouldMatch": true
+  },
+  {
+    "id": "accents",
+    "query": "bjork",
+    "title": "Homogenic",
+    "author": "Björk",
+    "shouldMatch": true
+  },
+  {
+    "id": "punctuation",
+    "query": "dune messiah",
+    "title": "Dune: Messiah",
+    "author": "Frank Herbert",
+    "shouldMatch": true
+  },
+  {
+    "id": "word-prefix",
+    "query": "shin",
+    "title": "The Shining",
+    "author": "Stephen King",
+    "shouldMatch": true
+  },
+  {
+    "id": "substring-is-not-prefix",
+    "query": "ining",
+    "title": "The Shining",
+    "author": "Stephen King",
+    "shouldMatch": false
+  },
+  {
+    "id": "every-token-required",
+    "query": "shining herbert",
+    "title": "The Shining",
+    "author": "Stephen King",
+    "shouldMatch": false
+  }
+]

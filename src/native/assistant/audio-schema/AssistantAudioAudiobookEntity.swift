@@ -7,7 +7,6 @@ import _MediaIntents_AppIntents
 struct AssistantAudioAudiobookEntity: Identifiable {
   let id: String
   let libraryItemId: String
-  let matchedFromMany: Bool
   let shouldResume: Bool
 
   var title: String?
@@ -21,12 +20,10 @@ struct AssistantAudioAudiobookEntity: Identifiable {
 
   init(
     row: AssistantBookRow,
-    matchedFromMany: Bool = false,
     shouldResume: Bool = false
   ) {
     id = row.id
     libraryItemId = row.libraryItemId
-    self.matchedFromMany = matchedFromMany
     self.shouldResume = shouldResume
     title = row.title
     author = row.author
@@ -59,11 +56,14 @@ struct AssistantAudioAudiobookQuery: EntityQuery, EntityStringQuery {
   }
 
   func entities(matching string: String) async throws -> [AssistantAudioAudiobookEntity] {
-    let matches = AssistantCatalogReader.shared.search(text: string, limit: 10)
-    if matches.count > 3, let best = matches.first {
-      return [AssistantAudioAudiobookEntity(row: best, matchedFromMany: true)]
+    switch AssistantCatalogReader.shared.playbackMatch(text: string) {
+    case .unavailable, .none:
+      return []
+    case .unique(let row):
+      return [AssistantAudioAudiobookEntity(row: row)]
+    case .ambiguous(let books, _):
+      return books.map { AssistantAudioAudiobookEntity(row: $0) }
     }
-    return matches.map { AssistantAudioAudiobookEntity(row: $0) }
   }
 
   func suggestedEntities() async throws -> [AssistantAudioAudiobookEntity] {
@@ -89,11 +89,14 @@ struct AssistantAudioSearchQuery: IntentValueQuery {
     let rows: [AssistantBookRow]
     switch audioSearch.criteria {
     case .searchQuery(let query):
-      let matches = AssistantCatalogReader.shared.search(text: query, limit: 10)
-      if matches.count > 3, let best = matches.first {
-        return [.audiobook(AssistantAudioAudiobookEntity(row: best, matchedFromMany: true))]
+      switch AssistantCatalogReader.shared.playbackMatch(text: query) {
+      case .unavailable, .none:
+        return []
+      case .unique(let row):
+        return [.audiobook(AssistantAudioAudiobookEntity(row: row))]
+      case .ambiguous(let books, _):
+        return books.map { .audiobook(AssistantAudioAudiobookEntity(row: $0)) }
       }
-      rows = matches
     case .unspecified:
       guard let mostRecent = AssistantCatalogReader.shared.mostRecent() else { return [] }
       return [.audiobook(AssistantAudioAudiobookEntity(row: mostRecent, shouldResume: true))]

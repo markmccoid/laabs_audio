@@ -52,6 +52,8 @@ Routing guide for the `docs/` folder. Domain vocabulary lives in
 
 | Doc | Read it when you need… |
 | --- | --- |
+| [assistant-surfaces-handoff.md](./assistant-surfaces-handoff.md) | the current Siri, Shortcuts, and Spotlight implementation status, module map, verification gaps, and next-session handoff |
+| [assistant-search-implementation-plan.md](./assistant-search-implementation-plan.md) | implement robust Siri book/author search in bounded Sol/Terra work packages, with coordinator review gates and an execution evidence record |
 | [download-ux.md](./download-ux.md) | the Downloaded Audio Asset UX |
 | [offline-handling.md](./offline-handling.md) | offline detection, the connection banner, and retry behavior |
 | [DEEP_LINKING.md](./DEEP_LINKING.md) | shared-book deep links and cold-start handling |
@@ -109,6 +111,7 @@ propose superseding it.
 | [0037](./adr/0037-ingested-book-transcripts-are-library-assets.md) | Ingested Book Transcripts are library assets, not download assets |
 | [0038](./adr/0038-alignment-maps-are-paired-by-enumeration-not-by-name.md) | Alignment Maps are paired by enumeration, not by constructing a filename |
 | [0039](./adr/0039-epub-read-along-is-a-second-surface-over-ingested-alignment-maps.md) | EPUB Read-Along is a second Read-Along surface over an ingested Alignment Map |
+| [0040](./adr/0040-assistant-actions-live-in-the-app-target-over-an-assistant-catalog.md) | Assistant Actions live in the app target over a session-isolated Assistant Catalog |
 
 Note: ADRs are point-in-time records. ADR-0017's phased-cutover details are completed and
 superseded in part by ADR-0019; read 0017 for the why, 0019 plus

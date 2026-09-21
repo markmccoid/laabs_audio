@@ -82,5 +82,13 @@ class AssistantBridge: Module {
         }
       }
     }
+
+    Function("peekPendingOpen") { () -> String? in
+      AssistantPendingOpen.peek()
+    }
+
+    Function("takePendingOpen") { () -> String? in
+      AssistantPendingOpen.take()
+    }
   }
 }

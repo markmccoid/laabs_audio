@@ -68,8 +68,21 @@ const ROOT_BOOK_ROUTE_PATTERN = /^([^/?#()]+)$/;
 export const extractBookDetailIdFromUrl = (url?: string | null) => {
   if (!url) return undefined;
 
-  const parsed = Linking.parse(url);
-  const pathCandidates = [parsed.path, url];
+  const pathCandidates: Array<string | null | undefined> = [url];
+
+  try {
+    const parsed = Linking.parse(url);
+    pathCandidates.push(parsed.path, parsed.hostname);
+  } catch {
+    // Expo's parser needs a host URI; native assistant URLs still parse via URL.
+  }
+
+  try {
+    const nativeURL = new URL(url);
+    pathCandidates.push(nativeURL.pathname, nativeURL.hostname);
+  } catch {
+    // Keep any Expo parser results when the URL constructor rejects the string.
+  }
 
   for (const candidate of pathCandidates) {
     if (!candidate) continue;

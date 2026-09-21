@@ -99,19 +99,12 @@ struct PlayAudioSchemaIntent: AudioPlaybackIntent, ForegroundContinuableIntent {
   }
 
   private func response(_ outcome: AssistantActionOutcome) -> some IntentResult & ProvidesDialog {
-    let matchedFromMany: Bool
-    switch audioEntity {
-    case .audiobook(let audiobook):
-      matchedFromMany = audiobook.matchedFromMany
-    }
-
     switch outcome {
     case .playback(let title, _):
       if case .audiobook(let audiobook) = audioEntity, audiobook.shouldResume {
         return .result(dialog: "Resuming \(title).")
       }
-      let selection = matchedFromMany ? "I found several matches. " : ""
-      return .result(dialog: "\(selection)Playing \(title).")
+      return .result(dialog: "Playing \(title).")
     case .failure(let code, _):
       return .result(dialog: AssistantIntentSupport.failureDialog(code: code))
     default:

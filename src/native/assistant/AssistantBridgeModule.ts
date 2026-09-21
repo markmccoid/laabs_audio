@@ -14,6 +14,8 @@ declare class AssistantBridgeModule extends NativeModule<AssistantBridgeEvents> 
   }): void;
   activateRuntimeAndTakePending(): Promise<AssistantActionRequest | null>;
   completeAction(id: string, result: AssistantActionResult): void;
+  peekPendingOpen(): string | null;
+  takePendingOpen(): string | null;
   refreshSuggestedBooks(): Promise<void>;
   reindexSpotlight(userId: string | null): Promise<void>;
   clearSpotlightIndex(): Promise<void>;
