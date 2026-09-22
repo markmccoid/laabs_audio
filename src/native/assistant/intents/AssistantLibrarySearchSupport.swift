@@ -99,4 +99,28 @@ extension ForegroundContinuableIntent {
       }
     }
   }
+
+  @available(iOS 26.0, *)
+  func presentInteractiveLibrarySearch(
+    _ outcome: AssistantLibrarySearchOutcome
+  ) async throws -> some IntentResult & ProvidesDialog & ShowsSnippetIntent {
+    switch outcome {
+    case .signInRequired:
+      try await requestToContinueInForeground("Open LAABS Audio to choose a session.")
+      return .result(
+        dialog: AssistantIntentSupport.failureDialog(code: "signInRequired"),
+        snippetIntent: AssistantLibrarySearchSnippetIntent(heading: "Sign in required", books: [])
+      )
+    case .unavailable:
+      return .result(
+        dialog: IntentDialog("\(AssistantSearchCopy.catalogUnavailable())"),
+        snippetIntent: AssistantLibrarySearchSnippetIntent(heading: "Library unavailable", books: [])
+      )
+    case .results(let dialog, let heading, let books):
+      return .result(
+        dialog: IntentDialog("\(dialog)"),
+        snippetIntent: AssistantLibrarySearchSnippetIntent(heading: heading, books: books)
+      )
+    }
+  }
 }

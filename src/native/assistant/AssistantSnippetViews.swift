@@ -4,13 +4,14 @@ import UIKit
 
 struct AssistantBookCard: View {
   let book: AssistantBookEntity
+  let interactive: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(spacing: 12) {
-        snippetCover(book: book, size: 56)
+        snippetCover(book: book, size: 56, interactive: interactive)
         VStack(alignment: .leading, spacing: 5) {
-          Text(book.title).font(.headline).lineLimit(2)
+          snippetTitle(book, lineLimit: 2, interactive: interactive)
           if let author = book.author {
             Text(author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
           }
@@ -18,7 +19,7 @@ struct AssistantBookCard: View {
           Text(statusText).font(.caption).foregroundStyle(.secondary)
         }
       }
-      snippetActions(book)
+      snippetActions(book, interactive: interactive)
     }
     .padding()
   }
@@ -31,14 +32,15 @@ struct AssistantBookCard: View {
 
 struct AssistantBookList: View {
   let books: [AssistantBookEntity]
+  let interactive: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       ForEach(Array(books.prefix(AssistantSearchCopy.displayedBookLimit))) { book in
         HStack(spacing: 10) {
-          snippetCover(book: book, size: 40)
+          snippetCover(book: book, size: 40, interactive: interactive)
           VStack(alignment: .leading, spacing: 2) {
-            Text(book.title).font(.headline).lineLimit(1)
+            snippetTitle(book, lineLimit: 1, interactive: interactive)
             if let author = book.author {
               Text(author).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -48,33 +50,49 @@ struct AssistantBookList: View {
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
         }
-        snippetActions(book)
+        snippetActions(book, interactive: interactive)
       }
     }
     .padding()
   }
 }
 
+// `interactive` must only be true when this view is returned from a `SnippetIntent`;
+// buttons rendered in a plain `ShowsSnippetView` result are a static snapshot and never run.
 struct AssistantResultSnippet: View {
   let heading: String
   let books: [AssistantBookEntity]
+  var interactive = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       Text(heading).font(.headline)
       if books.count == 1, let book = books.first {
-        AssistantBookCard(book: book)
+        AssistantBookCard(book: book, interactive: interactive)
       } else if !books.isEmpty {
-        AssistantBookList(books: books)
+        AssistantBookList(books: books, interactive: interactive)
       }
     }
   }
 }
 
 @ViewBuilder
-private func snippetCover(book: AssistantBookEntity, size: CGFloat) -> some View {
+private func snippetTitle(_ book: AssistantBookEntity, lineLimit: Int, interactive: Bool) -> some View {
+  let title = Text(book.title).font(.headline).lineLimit(lineLimit)
+  if interactive, #available(iOS 26.0, *) {
+    Button(intent: OpenAssistantBookActionIntent(book: book)) {
+      title
+    }
+    .buttonStyle(.plain)
+  } else {
+    title
+  }
+}
+
+@ViewBuilder
+private func snippetCover(book: AssistantBookEntity, size: CGFloat, interactive: Bool) -> some View {
   let cover = AssistantCover(book: book, size: size)
-  if #available(iOS 26.0, *) {
+  if interactive, #available(iOS 26.0, *) {
     Button(intent: OpenAssistantBookActionIntent(book: book)) {
       cover
     }
@@ -85,8 +103,8 @@ private func snippetCover(book: AssistantBookEntity, size: CGFloat) -> some View
 }
 
 @ViewBuilder
-private func snippetActions(_ book: AssistantBookEntity) -> some View {
-  if #available(iOS 26.0, *) {
+private func snippetActions(_ book: AssistantBookEntity, interactive: Bool) -> some View {
+  if interactive, #available(iOS 26.0, *) {
     HStack(spacing: 8) {
       Button(intent: PlayAudiobookIntent(book: book)) {
         Text("Play")

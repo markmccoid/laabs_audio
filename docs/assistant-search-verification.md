@@ -30,7 +30,7 @@ replace stale pending notes rather than appending repeated progress narratives.
 
 | Topic | Current status |
 | --- | --- |
-| OS minimum | Locked: preserve iOS 16.4 and gate newer APIs; ADR-0040 is unchanged. |
+| OS minimum | Changed 2026-09-20: floor raised to iOS 17.4 (ADR-0040 amendment). Interactive Play/Open in search results require iOS 26 `SnippetIntent` + `#available` in `AppShortcutsProvider`, which needs a 17.4 target. iOS 17–25: search intents stay in the Shortcuts app but have no Siri phrases (the builder has no `else`/`#unavailable` branch). |
 | General search UX | Locked: prefer a spoken/list Assistant Reply and offer app results; system in-app search necessarily opens the app. |
 | Catalog scope | Locked: every cached audiobook Library for the selected Audiobookshelf User Identity, including retained downloads. |
 | Test device | User-run physical device on 2026-09-20. Model/OS/Siri language/Apple Intelligence not yet recorded. Agent Siri checks remain NOT RUN. |
@@ -47,7 +47,7 @@ Record source implementation and device acceptance separately when the latter is
 | P0 Baseline | Sol | VERIFIED | PASS (source); native metadata NOT RUN; Siri user-run recorded | [P0 evidence](#p0-evidence--2026-09-19) |
 | P1 Query contract | Coordinator | VERIFIED | PASS (source); app build/Siri NOT RUN | [P1 evidence](#p1-evidence--2026-09-20) |
 | P2 Property queries | — | PLANNED | NOT RUN | — |
-| P3 Author and replies | Coordinator | SOURCE PASS; Siri NOT RUN | pending independent review | [P3 evidence](#p3-evidence--2026-09-20) |
+| P3 Author and replies | Coordinator | VERIFIED | PASS (source + user-run iOS 26 device, 2026-09-21) | [P3 evidence](#p3-evidence--2026-09-20), [P3 snippet fix](#p3-interactive-snippet-fix--2026-09-21) |
 | P4 App results | — | PLANNED | NOT RUN | — |
 | P5 Schemas and indexing | — | PLANNED | NOT RUN | — |
 | P6 Acceptance | — | PLANNED | NOT RUN | — |
@@ -84,8 +84,38 @@ Copy once for the assigned package, filling only applicable fields.
   - Known limitation: snippet covers still need a local `cover_path`; Play The Shining is entity resolution, not this package.
   - 2026-09-20 device: author/search phrases 1–4 PASS. Snippet Play/Open did nothing; title tap opened the app on the previous/Home screen. Cause: Siri snippet buttons used the ViewBuilder `Button(intent:) { Text }` form and Open called `UIApplication.shared.open` instead of persisting a destination for React Native. Fix in working tree (needs a new device install): `Button("Play"/"Open", intent:)` with parameters assigned after `init()`, `AssistantPendingOpen` + `takePendingOpen` navigation, title is also an Open intent button.
 - Source/build status: PASS (harness + app target + extracted metadata).
-- Siri/device status: NOT RUN. Requires a **new** install of this working tree, not the previous production/5305c7a build.
-- Remaining: independent coordinator re-review; user-run phrase matrix after the new binary is on a phone.
+- Siri/device status: superseded by the 2026-09-21 snippet fix below.
+- Remaining: none for P3. Show-results affordance is owned by P4.
+
+## P3 interactive snippet fix — 2026-09-21
+
+- Symptom (user, iOS 26 device, `ddcd22d` build): Play/Open buttons and title tap in Siri search
+  results did nothing. Earlier `Button(intent:)` variants, `init(book:)` on the action intents, and
+  making the search intents themselves `SnippetIntent` all had no effect.
+- Root cause: Siri renders a `ShowsSnippetView` result (`.result(dialog:) { view }`) as a static
+  snapshot. `Button(intent:)` only fires when the view is produced by a `SnippetIntent` delivered via
+  `.result(dialog:, snippetIntent:)` (`ShowsSnippetIntent`, iOS 26). Every search intent used the
+  static path.
+- Fix (files): `AssistantLibrarySearchSnippetIntent.swift` (`SnippetIntent`, `[AssistantBookEntity]`
+  parameter, renders `AssistantResultSnippet(interactive: true)`);
+  `AssistantInteractiveLibrarySearchIntents.swift` (iOS 26-only `SearchLibraryIntent`,
+  `SearchBooksByAuthorIntent`, `SearchBooksByAuthorNameIntent` returning `ShowsSnippetIntent`);
+  `AssistantLibrarySearchSupport.presentInteractiveLibrarySearch`; `AssistantSnippetViews.swift`
+  `interactive` flag so the legacy static card no longer shows dead buttons;
+  `AssistantShortcuts.swift` routes the three search phrases to the iOS 26 intents inside
+  `if #available(iOS 26.0, *)`.
+- Platform constraint: `AppShortcutsBuilder` accepts `if #available` only with deployment target
+  ≥ 17.4, and has no `else` / `#unavailable` form (verified against the iOS 27 SDK swiftinterface and
+  with `swiftc -typecheck`). Floor raised 16.4 → 17.4 in `app.json`, `ios/Podfile`,
+  `ios/Podfile.properties.json`, pbxproj; ADR-0040 amended. Consequence: on iOS 17–25 the legacy
+  `IsBookInLibraryIntent` / `BooksByAuthorIntent` / `BooksByAuthorEntityIntent` remain in the
+  Shortcuts app but have no Siri phrases.
+- Build: `xcodebuild … -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO`
+  exit 0. `extract.actionsdata`: `AssistantLibrarySearchSnippetIntent` has
+  `com.apple.link.systemProtocol.Snippet`, introduced 26.0; the three search intents introduced 26.0
+  own the phrases in `root.ssu.yaml`.
+- Siri/device status: **PASS** (user-run, iOS 26 physical device, 2026-09-21): Play starts the
+  chosen book; Open, cover tap, and title tap land on that book's detail screen.
 
 ## P1 evidence — 2026-09-20
 
@@ -199,6 +229,7 @@ Suggested and non-suggested entities must be separate test cases.
 | --- | --- | --- |
 | What books do I have by Stephen King in LAABS Audio? | Author supplied in first utterance; correct total and bounded list | FAIL (user, 2026-09-20): system/schema empty-author reply; did not use App Shortcut dialog |
 | Books by Stephen King in LAABS Audio | Same author criteria and result set | PASS (user, 2026-09-20): prompted “Find books by an author…” returned multiple King books; covers missing |
+| Result-card Play / Open / cover / title tap | Play starts that book; Open lands on its detail | PASS (user, iOS 26, 2026-09-21) after `SnippetIntent` fix; iOS 17–25 static card, NOT RUN |
 | Author outside suggestion set | Modern route resolves or limitation explicitly documented | NOT RUN |
 | Author with coauthored books | Membership behavior matches declared metadata semantics | NOT RUN |
 | Author with >10 matching books | True total; at most five spoken and ten shown | NOT RUN |

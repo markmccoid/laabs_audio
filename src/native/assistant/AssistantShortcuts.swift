@@ -30,30 +30,32 @@ struct AssistantShortcuts: AppShortcutsProvider {
       shortTitle: "Pause",
       systemImageName: "pause.fill"
     )
-    AppShortcut(
-      intent: IsBookInLibraryIntent(),
-      phrases: [
-        "Search my library in \(.applicationName)",
-        "Find an audiobook in \(.applicationName)",
-      ],
-      shortTitle: "Find a Book",
-      systemImageName: "magnifyingglass"
-    )
-    AppShortcut(
-      intent: BooksByAuthorEntityIntent(),
-      phrases: [
-        "Books by \(\.$author) in \(.applicationName)",
-        "What books do I have by \(\.$author) in \(.applicationName)",
-      ],
-      shortTitle: "Books by Author",
-      systemImageName: "person.crop.rectangle.stack"
-    )
-    AppShortcut(
-      intent: BooksByAuthorIntent(),
-      phrases: ["Find books by an author in \(.applicationName)"],
-      shortTitle: "Find Books by Author",
-      systemImageName: "person.text.rectangle"
-    )
+    if #available(iOS 26.0, *) {
+      AppShortcut(
+        intent: SearchLibraryIntent(),
+        phrases: [
+          "Search my library in \(.applicationName)",
+          "Find an audiobook in \(.applicationName)",
+        ],
+        shortTitle: "Find a Book",
+        systemImageName: "magnifyingglass"
+      )
+      AppShortcut(
+        intent: SearchBooksByAuthorIntent(),
+        phrases: [
+          "Books by \(\.$author) in \(.applicationName)",
+          "What books do I have by \(\.$author) in \(.applicationName)",
+        ],
+        shortTitle: "Books by Author",
+        systemImageName: "person.crop.rectangle.stack"
+      )
+      AppShortcut(
+        intent: SearchBooksByAuthorNameIntent(),
+        phrases: ["Find books by an author in \(.applicationName)"],
+        shortTitle: "Find Books by Author",
+        systemImageName: "person.text.rectangle"
+      )
+    }
     AppShortcut(
       intent: BookmarkHereIntent(),
       phrases: [

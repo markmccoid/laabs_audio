@@ -54,6 +54,7 @@ Routing guide for the `docs/` folder. Domain vocabulary lives in
 | --- | --- |
 | [assistant-surfaces-handoff.md](./assistant-surfaces-handoff.md) | the current Siri, Shortcuts, and Spotlight implementation status, module map, verification gaps, and next-session handoff |
 | [assistant-search-implementation-plan.md](./assistant-search-implementation-plan.md) | implement robust Siri book/author search in bounded Sol/Terra work packages, with coordinator review gates and an execution evidence record |
+| [assistant-search-next-phase-handoff.md](./assistant-search-next-phase-handoff.md) | start the next Assistant search package (P4 in-app results, then P2/P5/P6) after P3 shipped interactive iOS 26 snippets and raised the iOS floor to 17.4 |
 | [download-ux.md](./download-ux.md) | the Downloaded Audio Asset UX |
 | [offline-handling.md](./offline-handling.md) | offline detection, the connection banner, and retry behavior |
 | [DEEP_LINKING.md](./DEEP_LINKING.md) | shared-book deep links and cold-start handling |

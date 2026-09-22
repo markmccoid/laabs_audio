@@ -6,9 +6,10 @@ Intent and Progress Sync Intent). The Swift for them is compiled into the **main
 existing `src/native` inline-module path — not into an extension created by `expo-apple-targets`. The
 actions search an **Assistant Catalog**: a TypeScript-owned projection table with a frozen contract,
 living in the same shadow SQLite database, rather than the `library_catalog_*` tables whose schema is
-versioned for the app's own reads. The deployment target stays at 16.4: every supported release gets
-App Shortcuts with a bounded parameter list, iOS 18–26 also get the `.books` audiobook schema, and the
-`.audio` App Intents domain (`playAudio`, `AudioSearch`) is adopted behind `@available(iOS 27, *)`.
+versioned for the app's own reads. The deployment target is 17.4 (raised from 16.4 in September 2026 —
+see Amendment below): every supported release gets App Shortcuts with a bounded parameter list,
+iOS 18–26 also get the `.books` audiobook schema, and the `.audio` App Intents domain (`playAudio`,
+`AudioSearch`) is adopted behind `@available(iOS 27, *)`.
 Control Center and Action-button controls are deferred until playback can be driven reliably when the
 app process is not alive.
 
@@ -53,3 +54,14 @@ app process is not alive.
   surfaces until User Session Entry chooses an identity again.
 - `expo-apple-targets` is not a dependency of this feature. Anyone adding it later for a different
   target should not move Assistant Actions into it without re-reading the first considered option.
+
+## Amendment — iOS floor raised to 17.4 (2026-09)
+
+Interactive Siri snippets (Play/Open buttons on library search results) require the result view to be
+delivered through a `SnippetIntent` (`ShowsSnippetIntent`, iOS 26). A view returned via plain
+`ShowsSnippetView` is rendered as a static snapshot and its `Button(intent:)` controls never fire.
+Routing the same spoken phrases to the iOS 26 search intents on iOS 26 and to the legacy intents
+elsewhere needs `if #available` inside `AppShortcutsProvider.appShortcuts`, and the
+`AppShortcutsBuilder` only supports availability branches when the deployment target is **17.4 or
+later**. The floor moves from 16.4 to 17.4 to allow this; devices stuck on iOS 16 (iPhone 8/X, first
+SE) are no longer supported. iOS 17–25 receive the static search card without action buttons.

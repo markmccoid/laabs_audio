@@ -34,7 +34,9 @@ Implemented:
   clears the catalog and Spotlight; downloaded-session mode exposes only owned downloads.
 - Settings > Siri & Shortcuts, with example phrases and a button that opens Apple's Shortcuts app.
 - App display name `LAABS Audio`, app version `1.8.0`, Expo SDK 57 / React Native 0.86.3, and an
-  explicit iOS 16.4 deployment floor needed by this native implementation.
+  explicit iOS 17.4 deployment floor (raised from 16.4 on 2026-09-21 for interactive Siri snippets;
+  see the ADR-0040 amendment and
+  [`assistant-search-next-phase-handoff.md`](./assistant-search-next-phase-handoff.md)).
 
 Not implemented or not complete:
 

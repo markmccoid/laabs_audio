@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-21` `pending` - Make the Play and Open buttons (and cover/title taps) on Siri library-search result cards actually work on iOS 26 by delivering the card through an interactive `SnippetIntent`. The app's minimum iOS is now 17.4 (was 16.4); iPhone 8/X/first-gen SE on iOS 16 are no longer supported. On iOS 17–25 the search card is display-only and the search phrases are not offered to Siri.
+  Tester focus: on an iOS 26 iPhone with a fresh install of this build, say “Search my library in LAABS Audio” and “Books by [author] in LAABS Audio”. On the result card, Play should start that title without opening the app; Open, tapping the cover, or tapping the title should open the app on that book's detail screen (not Home). Confirm “Play [book] in LAABS Audio”, Pause, Resume, Bookmark, and Sleep Timer still work. If an iOS 17–25 device is available, confirm the app installs and the search actions still appear under Shortcuts > Apps > LAABS Audio.
+
 - `2026-09-20` `pending` - Teach Siri to search the cached LAABS Audio library by title or author, including “Books by [author]” phrases that do not require picking an author entity first. Result-card Play and Open persist the chosen book so the app can open that title instead of Home.
   Tester focus: install this `codex/assistant-actions` build, open LAABS Audio once so the catalog is current, then ask “What books do I have by Stephen King in LAABS Audio?”, “Search my library in LAABS Audio”, and “Find an audiobook in LAABS Audio”. Siri should list catalog matches, not say it could not find the book. After a match, Play should start that title and Open should land on its detail screen.
 
