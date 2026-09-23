@@ -62,16 +62,19 @@ struct AssistantSearchResult: Equatable, Sendable {
 
 enum AssistantCatalogRead: Equatable, Sendable {
   case unavailable
+  case libraryRequired
   case success(AssistantSearchResult)
 }
 
 enum AssistantCatalogReadAuthors: Equatable, Sendable {
   case unavailable
+  case libraryRequired
   case success([AssistantAuthorCredit])
 }
 
 enum AssistantPlaybackMatch: Equatable, Sendable {
   case unavailable
+  case libraryRequired
   case none
   case unique(AssistantBookRow)
   case ambiguous(books: [AssistantBookRow], totalCount: Int)
@@ -120,6 +123,14 @@ enum AssistantSearchCopy {
 
   static func catalogUnavailable() -> String {
     "I can't search your LAABS Audio library right now. Open the app to refresh it."
+  }
+
+  static func libraryRequired() -> String {
+    "Open LAABS Audio and choose a library first."
+  }
+
+  static func openAppSearch(query: String) -> String {
+    "Open LAABS Audio to search for \(query)?"
   }
 
   static func searchDialog(query: String, totalCount: Int, titles: [String]) -> String {

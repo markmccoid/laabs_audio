@@ -60,3 +60,17 @@ export type AssistantActionResult = AssistantActionSuccess | AssistantActionFail
 export type AssistantBridgeEvents = {
   onAssistantAction: (request: AssistantActionRequest) => void;
 };
+
+export type AssistantPendingSearch = {
+  query: string;
+  userId: string;
+  libraryId: string;
+};
+
+export type AssistantRuntimeContextPayload = {
+  dbPath: string;
+  userId: string | null;
+  libraryId: string | null;
+  accessMode: string;
+  canAttemptStreaming: boolean;
+};

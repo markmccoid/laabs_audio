@@ -4,20 +4,18 @@ import { SymbolView } from "expo-symbols";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 
 const ASSISTANT_PHRASES = [
-  "Play [book] in LAABS Audio",
-  "Listen to [book] in LAABS Audio",
+  "Search [anything] in LAABS Audio",
+  "Find an audiobook in LAABS Audio",
+  "Look up a book in LAABS Audio",
+  "Find books by an author in LAABS Audio",
+  "What books by an author are in LAABS Audio",
   "Play LAABS Audio",
   "Resume LAABS Audio",
   "Continue listening in LAABS Audio",
   "Resume my book in LAABS Audio",
   "Pause LAABS Audio",
-  "Search my library in LAABS Audio",
-  "Find an audiobook in LAABS Audio",
-  "Books by [author] in LAABS Audio",
-  "What books do I have by [author] in LAABS Audio",
-  "Find books by an author in LAABS Audio",
-  "Bookmark this in LAABS Audio",
-  "Add a bookmark in LAABS Audio",
+  "Save my place in LAABS Audio",
+  "Mark this position in LAABS Audio",
   "Set a sleep timer in LAABS Audio",
   "Sleep timer LAABS Audio",
 ] as const;
@@ -44,8 +42,10 @@ export const SettingsSiriShortcutsScreen = () => {
             Siri & Shortcuts
           </Text>
           <Text style={{ color: themeColors.textMuted, fontSize: 15, lineHeight: 21 }}>
-            Ask Siri with one of these phrases, or combine LAABS Audio actions into your own
-            shortcuts.
+            “Search [anything] in LAABS Audio” is the one-sentence search and opens the Search
+            tab. Author search has to be two steps: say “Find books by an author in LAABS Audio”,
+            then say the name when asked. Putting the name in the first sentence is what Siri was
+            hearing as a bookmark.
           </Text>
         </View>
 

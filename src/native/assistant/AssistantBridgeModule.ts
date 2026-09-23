@@ -3,19 +3,18 @@ import type {
   AssistantActionRequest,
   AssistantActionResult,
   AssistantBridgeEvents,
+  AssistantPendingSearch,
+  AssistantRuntimeContextPayload,
 } from "./AssistantBridge.types";
 
 declare class AssistantBridgeModule extends NativeModule<AssistantBridgeEvents> {
-  publishRuntimeContext(context: {
-    dbPath: string;
-    userId: string | null;
-    accessMode: string;
-    canAttemptStreaming: boolean;
-  }): void;
+  publishRuntimeContext(context: AssistantRuntimeContextPayload): void;
   activateRuntimeAndTakePending(): Promise<AssistantActionRequest | null>;
   completeAction(id: string, result: AssistantActionResult): void;
   peekPendingOpen(): string | null;
   takePendingOpen(): string | null;
+  peekPendingSearch(): AssistantPendingSearch | null;
+  takePendingSearch(): AssistantPendingSearch | null;
   refreshSuggestedBooks(): Promise<void>;
   reindexSpotlight(userId: string | null): Promise<void>;
   clearSpotlightIndex(): Promise<void>;

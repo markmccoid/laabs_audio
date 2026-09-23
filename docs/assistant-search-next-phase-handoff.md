@@ -1,10 +1,10 @@
 # Assistant search — next-phase handoff
 
-Last updated: 2026-09-21
+Last updated: 2026-09-22
 Branch: `codex/assistant-actions`
-State at handoff: P0, P1, P3 complete and device-verified on iOS 26. P2, P4, P5, P6 not started.
+State at handoff: P0, P1, and P3 are complete and device-verified on **iOS 27** (earlier notes said iOS 26; that was the physical device, not the snippet API). P4 source is implemented and was revised on 2026-09-22 to Active-Library scope with results in the Search tab; Siri/device acceptance is NOT RUN. P2, P5, and P6 are not started.
 
-Read in this order, then start P4 (recommended) or P2:
+Read in this order, then run the P4 device checklist or start P2:
 
 1. This file.
 2. [`assistant-search-verification.md`](./assistant-search-verification.md) — decisions table,
@@ -86,48 +86,43 @@ JS side:
 listener) for "show results", not the expiring playback pending-action slot in
 `AssistantActionDispatcher`.
 
-## Recommended next package: P4 — In-app search results with preserved scope
+## P4 — In-app search results (Active-Library scope, revised 2026-09-22)
 
-Plan section: `assistant-search-implementation-plan.md` → **P4**. P0 already made the design call
-(verification record, Decisions table + P0 evidence "App-results audit"):
+P4 source landed 2026-09-21 as a dedicated `assistant-search-results` route over all cached
+Libraries. On 2026-09-22 the user changed the scope: **Siri reads only the Active Library**, and
+app results open the existing Search tab. The route, its controller, and the `queryAssistantCatalog`
+bridge read were removed. Device phrases “Show full search results”, “Cold launch search”, and
+“Search Stephen King in LAABS Audio” are still NOT RUN. Next unstarted package is P2.
 
-- New root route `src/app/assistant-search-results.tsx` + controller
-  `src/components/assistant/assistant-catalog-results-screen.tsx`. Do **not** widen the
-  `(tabs)/search` tab — it assumes the Active Library and authenticated browsing, which violates the
-  locked all-Library + retained-download scope.
-- Bounded native reads exposed through `AssistantBridge.swift` (new `Function`/`AsyncFunction`
-  wrapping `AssistantCatalogReader.shared.query(criteria)` with `offset`/`limit`), typed in
-  `AssistantBridge.types.ts`, wired in `AssistantBridgeModule.ts` / `.web.ts` / `index.ts`.
-  Swift stays read-only; TypeScript stays the only catalog writer.
-- Classify the route in `src/navigation/authenticated-route-state.ts` so startup redirects do not
-  discard it; deliver once on cold launch via `_layout.tsx`, same pattern as `peekPendingOpen`.
-- Reuse `BookListItem` presentation with assistant-scoped open/play handlers that go through existing
-  identity/access rules (books outside the active Library and retained downloads included).
+How it works now:
 
-Suggested build order inside P4:
+- `AssistantRuntimeContext` carries `libraryId` (from `auth-store.activeLibraryId`, published by
+  `createAssistantRuntimeContext`). `AssistantCatalogReader` adds `AND library_id = ?` to search,
+  author, playback-match, suggested, and `all()` reads; `book(byID:)`, `book(libraryItemID:)`, and
+  `mostRecent()` stay user-scoped. With no `libraryId` the reader returns `.libraryRequired` and Siri
+  says “Open LAABS Audio and choose a library first.”
+- `AssistantPendingSearch` stores `{ query, userId, libraryId }` (author searches store the author
+  display name as `query`). Written by the iOS 17.4–26 `ShowAssistantInAppSearchIntent`, the iOS 27
+  `SearchInAppSchemaIntent` (`.system.searchInApp`), and the snippet's **Show all results** button
+  (`OpenAssistantSearchResultsIntent`, single `query` parameter).
+- `src/navigation/use-assistant-search-navigation.ts` peeks on mount / AppState active, resolves via
+  `resolveAssistantSearchDelivery` (`wait` until user + Active Library are known; `discard` on user
+  or Library mismatch or a downloaded-only session; `navigate` otherwise), sets
+  `SearchSessionStore.searchText`, and `router.navigate("/(tabs)/search")`. The Search tab pushes
+  store text into the native bar via `SearchBarCommands.setText`.
+- Suggested Assistant Books and the Spotlight index are refreshed when the published `libraryId`
+  changes so they follow the open Library.
 
-1. Native: `AssistantPendingSearch` (mirror `AssistantPendingOpen`: store/peek/take of
-   `{ query?, authorCredit?, userId }` in `UserDefaults`), bridge read function for paged catalog
-   queries. Add a `ShowInAppSearchResultsIntent` (`isDiscoverable = false`, `openAppWhenRun = true`)
-   and check the current SDK for the system in-app-search schema name/availability before
-   conforming — do not copy deprecated samples.
-2. Add a **Show all results** control to `AssistantResultSnippet` (interactive path only) that
-   targets the new intent. Only show it when `totalCount > displayedBookLimit`; this needs
-   `totalCount` to flow into `AssistantLibrarySearchOutcome.results` (currently only the dialog
-   string sees it).
-3. JS: `resolveAssistantSearchDestination`, startup fold-in, warm-app listener, route, controller
-   with query/scope label, loading/empty/error states, paging on the bridge read. Revalidate the
-   session id before display and on each page; clear on logout/switch.
-4. Tests: controller/unit tests for destination resolution and session revalidation; one route
-   smoke test; extend `scripts/test-assistant-catalog.swift` if the reader gains paging behavior.
-5. Device: cold launch with app killed, warm app, session switch mid-launch, downloaded-session-only.
-   Record device/OS in the verification record's phrase matrix ("Show full search results",
-   "Cold launch search").
+Device checklist (NOT RUN): cold launch with app killed → lands on Search tab with the phrase in the
+field; warm app; “Show all results” from a Siri card; a title that exists only in another Library
+returns “couldn't find”; switch Library in-app then ask again; downloaded-only session (search
+discarded, app opens Home); no Active Library chosen (Siri asks to choose one).
 
-Also in scope for P4 (from the phrase matrix): "Search Stephen King in LAABS Audio" currently hits
-the *system* in-app-search route and Siri replies "the app doesn't support in-app search". P4's
-intent is what makes that phrase work; record the outcome separately from our own
-"Search my library…" phrase.
+Door A phrases (2026-09-22): one-sentence “Books by `<author>`” and “Play `<book>`” were removed —
+those slots only resolved the top 25 suggested names. Door A search now asks a follow-up, then
+queries the whole Active Library. Empty Door A results offer to open the Search tab. One-sentence
+search stays Door B: “Search `<anything>` in LAABS Audio”. Needs a new install for Siri to drop the
+old phrases.
 
 ## Alternative next package: P2 — Property queries
 
@@ -148,7 +143,11 @@ suggested books only) is the main user-visible gap left after search works. P6 f
 
 - Snippet cover art loads only from a local `cover_path`; `AsyncImage` of `cover_url` is unreliable
   inside Siri. Consider populating `cover_path` from the widget artwork cache during catalog writes.
-- `AssistantLibrarySearchOutcome.results` does not carry `totalCount` (see P4 step 2).
+- `AssistantLibrarySearchOutcome.results` carries `totalCount` and `query` (the text to prefill in the
+  Search tab; author searches pass the author display name) so the interactive card can offer Show
+  all results.
+- Audiobook searches while a podcast Library is active return no results by design (the Assistant
+  Catalog has no podcasts). Not a bug; revisit if podcast search via Siri is wanted.
 - `playbackMatch` in `AssistantCatalogReader.swift` computes exact-title duplicates from the current
   page only and has no `AssistantDiagnostics` request logging (P1 minor findings).
 - `.unavailable` vs empty result: legacy intents now route through `AssistantLibrarySearchSupport`
@@ -194,8 +193,7 @@ target and breaks unrelated Swift modules. Change the pbxproj/Podfile instead.
 ## Working rules for this branch
 
 - Do not commit unless the user asks. When you do, add a `NEW_FEATURES.md` entry at the top.
-- Any Siri behavior claim needs a physical iOS 26 device run by the user; simulator and metadata
-  extraction prove source/build only. Record device/OS in the verification record.
+- Any Siri behavior claim needs a physical device run by the user. The 2026-09-21 device runs were iOS 27. Interactive snippet APIs remain iOS 26 (`SnippetIntent`, `#available(iOS 26.0, *)`). Simulator and metadata extraction prove source/build only. Record device/OS in the verification record.
 - Swift reads only the Assistant Catalog; TypeScript owns writes; playback-changing actions go
   through `AssistantActionDispatcher` to existing player services.
 - Testing that drives a simulator/device or repro loops is delegated to an Opus agent (see

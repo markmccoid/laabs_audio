@@ -26,8 +26,16 @@ import { LibraryActivationOverlay } from "../components/library-activation-overl
 import { LibrarySelectionGate } from "../components/library-selection-gate";
 import { OfflineConnectionBanner } from "../components/offline-connection-banner";
 import "../global.css";
+import { resolveAssistantOpenHoldId } from "../navigation/assistant-open-destination";
 import { extractBookDetailIdFromUrl } from "../navigation/book-links";
 import { useAssistantOpenNavigation } from "../navigation/use-assistant-open-navigation";
+import { useAssistantSearchNavigation } from "../navigation/use-assistant-search-navigation";
+import { handleAssistantAction } from "../assistant/assistant-action-handlers";
+import { startAssistantActionRuntime } from "../assistant/assistant-bridge";
+import {
+  resolveAssistantUserId,
+  startAssistantRuntimeContextSubscription,
+} from "../assistant/assistant-runtime-context";
 import {
   getAuthenticatedRouteState,
   isKnownAuthenticatedRoute,
@@ -57,9 +65,6 @@ import {
   subscribeStartupPresentation,
 } from "../utils/startup-presentation";
 import { startActiveAudiobookWidgetCoordinator } from "../widgets/active-audiobook-widget-coordinator";
-import { handleAssistantAction } from "../assistant/assistant-action-handlers";
-import { startAssistantActionRuntime } from "../assistant/assistant-bridge";
-import { startAssistantRuntimeContextSubscription } from "../assistant/assistant-runtime-context";
 import { startAssistantCatalogNativeSync } from "../assistant/assistant-surface-lifecycle";
 import { AssistantBridgeModule } from "../native/assistant";
 
@@ -172,17 +177,27 @@ export default function RootLayout() {
   );
   const [queryRestoreReady, setQueryRestoreReady] = useState(false);
   const routeState = useMemo(() => getAuthenticatedRouteState(segments), [segments]);
+  const assistantUserId = useAuthStore((state) => resolveAssistantUserId(state));
   const returnToLibraryItemId = useMemo(
     () => getReturnToLibraryItemId(segments, globalParams),
     [globalParams, segments],
   );
+  const canLeaveLogin =
+    status !== "hydrating" &&
+    accessMode !== "firstRunSignInRequired" &&
+    !routeState.inLogin;
   useAssistantOpenNavigation({
-    canNavigate:
-      status !== "hydrating" &&
-      accessMode !== "firstRunSignInRequired" &&
-      !routeState.inLogin,
+    canNavigate: canLeaveLogin,
   });
-  const pendingAssistantOpenId = AssistantBridgeModule.peekPendingOpen()?.trim() || undefined;
+  useAssistantSearchNavigation({
+    canNavigate: canLeaveLogin,
+    currentUserId: assistantUserId,
+    activeLibraryId,
+    isAuthenticated: status === "authenticated",
+  });
+  const pendingAssistantOpenId = resolveAssistantOpenHoldId({
+    pending: AssistantBridgeModule.peekPendingOpen(),
+  });
   const startupBookLinkId =
     returnToLibraryItemId ?? initialDeepLinkBookId ?? pendingAssistantOpenId ?? undefined;
   const hasActivePlayback = Boolean(

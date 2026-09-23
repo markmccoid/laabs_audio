@@ -32,10 +32,10 @@ replace stale pending notes rather than appending repeated progress narratives.
 | --- | --- |
 | OS minimum | Changed 2026-09-20: floor raised to iOS 17.4 (ADR-0040 amendment). Interactive Play/Open in search results require iOS 26 `SnippetIntent` + `#available` in `AppShortcutsProvider`, which needs a 17.4 target. iOS 17–25: search intents stay in the Shortcuts app but have no Siri phrases (the builder has no `else`/`#unavailable` branch). |
 | General search UX | Locked: prefer a spoken/list Assistant Reply and offer app results; system in-app search necessarily opens the app. |
-| Catalog scope | Locked: every cached audiobook Library for the selected Audiobookshelf User Identity, including retained downloads. |
+| Catalog scope | Changed 2026-09-22 (user decision): the Assistant Catalog still *stores* every cached audiobook Library for the identity, but Siri search, author search, play-by-name, Suggested Assistant Books, and Spotlight *read* only the Active Library. Reason: results from another Library played a book outside the open Library, which was confusing; most users have one Library. Direct-id open/play and Resume stay identity-scoped. No Active Library → “Open LAABS Audio and choose a library first.” Superseded: “every cached Library … including retained downloads”. |
 | Test device | User-run physical device on 2026-09-20. Model/OS/Siri language/Apple Intelligence not yet recorded. Agent Siri checks remain NOT RUN. |
 | Author metadata | P0 recommends combined-credit-only for the current contract. Individual `authors: {id,name}[]` exist in ABS detail types but are discarded by the summary projection; retained downloads cannot guarantee member identities. |
-| App results route | P0 recommends a dedicated root `assistant-search-results` route backed by bounded Assistant Catalog reads; the active-Library Search tab is narrower and cannot preserve the locked scope. |
+| App results route | Changed 2026-09-22: Siri search opens the existing `(tabs)/search` tab with the spoken text prefilled (`SearchBarCommands.setText` + `SearchSessionStore.setSearchText`). The dedicated `assistant-search-results` route and `queryAssistantCatalog` bridge read from the first P4 pass are removed; with Active-Library scope the Search tab is no longer narrower than Siri. Downloaded-only sessions (Search tab redirects Home) discard the pending search. |
 
 ## Package status
 
@@ -47,8 +47,8 @@ Record source implementation and device acceptance separately when the latter is
 | P0 Baseline | Sol | VERIFIED | PASS (source); native metadata NOT RUN; Siri user-run recorded | [P0 evidence](#p0-evidence--2026-09-19) |
 | P1 Query contract | Coordinator | VERIFIED | PASS (source); app build/Siri NOT RUN | [P1 evidence](#p1-evidence--2026-09-20) |
 | P2 Property queries | — | PLANNED | NOT RUN | — |
-| P3 Author and replies | Coordinator | VERIFIED | PASS (source + user-run iOS 26 device, 2026-09-21) | [P3 evidence](#p3-evidence--2026-09-20), [P3 snippet fix](#p3-interactive-snippet-fix--2026-09-21) |
-| P4 App results | — | PLANNED | NOT RUN | — |
+| P3 Author and replies | Coordinator | VERIFIED | PASS (source + user-run iOS 27 device, 2026-09-21) | [P3 evidence](#p3-evidence--2026-09-20), [P3 snippet fix](#p3-interactive-snippet-fix--2026-09-21) |
+| P4 App results | — | READY FOR REVIEW | Source implemented (Active-Library revision 2026-09-22); Siri/device NOT RUN | [P4 evidence](#p4-evidence--2026-09-21), [P4 Active-Library revision](#p4-active-library-revision--2026-09-22) |
 | P5 Schemas and indexing | — | PLANNED | NOT RUN | — |
 | P6 Acceptance | — | PLANNED | NOT RUN | — |
 
@@ -89,7 +89,7 @@ Copy once for the assigned package, filling only applicable fields.
 
 ## P3 interactive snippet fix — 2026-09-21
 
-- Symptom (user, iOS 26 device, `ddcd22d` build): Play/Open buttons and title tap in Siri search
+- Symptom (user, iOS 27 device, `ddcd22d` build): Play/Open buttons and title tap in Siri search
   results did nothing. Earlier `Button(intent:)` variants, `init(book:)` on the action intents, and
   making the search intents themselves `SnippetIntent` all had no effect.
 - Root cause: Siri renders a `ShowsSnippetView` result (`.result(dialog:) { view }`) as a static
@@ -114,8 +114,90 @@ Copy once for the assigned package, filling only applicable fields.
   exit 0. `extract.actionsdata`: `AssistantLibrarySearchSnippetIntent` has
   `com.apple.link.systemProtocol.Snippet`, introduced 26.0; the three search intents introduced 26.0
   own the phrases in `root.ssu.yaml`.
-- Siri/device status: **PASS** (user-run, iOS 26 physical device, 2026-09-21): Play starts the
+- Siri/device status: **PASS** (user-run, iOS 27 physical device, 2026-09-21): Play starts the
   chosen book; Open, cover tap, and title tap land on that book's detail screen.
+
+## P4 evidence — 2026-09-21
+
+- Package / implementer / date / working-tree: P4 / uncommitted on `codex/assistant-actions`. No commit.
+- SDK check: installed iOS 27 `AppIntents.swiftinterface`. `ShowInAppSearchResultsIntent` and
+  `StringSearchCriteria` are iOS 17.2. `.system.search` (schema name `ShowInAppSearchResultsIntent`)
+  is deprecated in 27.0: “Use .system.searchInApp instead”, which is `SystemSearchInAppIntent`
+  (`@available(anyAppleOS 27.0, *)`). iOS 27 rejects extra parameters on the protocol, so the system
+  intents carry only `criteria`. Show all results is a separate non-discoverable
+  `OpenAssistantSearchResultsIntent` that stores `{ query?, authorCredit?, authorExact, userId }`.
+- Files: `AssistantPendingSearch.swift`, `AssistantCatalogBridge.swift`,
+  `intents/ShowAssistantInAppSearchIntent.swift` (protocol intent plus iOS 27
+  `@AppIntent(schema: .system.searchInApp)`), snippet `totalCount` / Show all results,
+  `AssistantBridge` peek/take/query, `src/app/assistant-search-results.tsx`,
+  `src/components/assistant/assistant-catalog-results-screen.tsx`, startup hold in `_layout.tsx`.
+- Material decisions: dedicated root route, not the Search tab. Native reads stay paged through
+  the existing `AssistantCatalogReader.query` (limit/offset already tested). Session id is
+  rechecked before display and before each page; a different account discards the pending search.
+  Startup playback restore yields when a search destination is waiting. Downloaded-session scope
+  stays inside the reader (`downloadedSessionOnly`), labeled “Downloaded books”.
+- Commands: `npx tsc --noEmit` exit 0. Focused Jest (destination, open-destination, route gate,
+  results screen) exit 0. Native catalog harness not re-run; the reader’s paging SQL did not change.
+- Native build: `xcodebuild` Debug simulator, `CODE_SIGNING_ALLOWED=NO`, exit 0.
+  `extract.actionsdata`: `ShowAssistantInAppSearchIntent` has
+  `com.apple.link.systemProtocol.ShowInAppStringSearchResults`, introduced 17.4, obsoleted 27.0,
+  parameter `criteria` only, `openAppWhenRun` true, not discoverable.
+  `SearchInAppSchemaIntent` has the same search protocol plus `AssistantIntent`, introduced 27.0,
+  parameter `criteria` only. `OpenAssistantSearchResultsIntent` is not a system protocol;
+  parameters `query`, `authorCredit`, `authorExact`.
+- Siri/device status: NOT RUN. “Search Stephen King in LAABS Audio”, “Show full search results”,
+  and “Cold launch search” stay NOT RUN until a physical iOS 27 run.
+- Remaining: physical cold launch, warm app, session switch, and downloaded-session-only.
+
+## P4 Active-Library revision — 2026-09-22
+
+- Trigger (user): a Siri result from a different Library played a book outside the open Library and
+  was confusing; most users have one Library. Decision: Siri reads only the Active Library and app
+  results open the normal Search tab. Catalog *storage* is unchanged.
+- Native (Swift): `AssistantRuntimeContext.libraryId` (optional; legacy persisted JSON still
+  decodes). `AssistantCatalogReader.readInLibrary` binds `AND library_id = ?` for `query`,
+  `authors`, `author(byID:)`, `search`, `booksByAuthor`, `playbackMatch`, `suggested`, `all`;
+  `book(byID:)`, `book(libraryItemID:)`, `mostRecent()` stay user-scoped. New cases
+  `AssistantCatalogRead.libraryRequired`, `AssistantCatalogReadAuthors.libraryRequired`,
+  `AssistantPlaybackMatch.libraryRequired`, `AssistantLibrarySearchOutcome.libraryRequired`; copy
+  `AssistantSearchCopy.libraryRequired()` = “Open LAABS Audio and choose a library first.”
+  `AssistantPendingSearch` payload is `{ query, userId, libraryId }`; `OpenAssistantSearchResultsIntent`
+  has one `query` parameter; `AssistantLibrarySearchResults` is `dialog, heading, books, totalCount,
+  query`. Removed `Function("queryAssistantCatalog")`; deleted `AssistantCatalogBridge.swift`.
+- JS: `createAssistantRuntimeContext` publishes `libraryId` from `activeLibraryId`;
+  `startAssistantRuntimeContextSubscription` calls `refreshSuggestedBooks()` + `reindexSpotlight()`
+  when the published `libraryId` changes. `assistant-search-destination.ts` reduced to parse +
+  `resolveAssistantSearchDelivery` (`none` / `wait` / `discard` / `navigate`; `discard` on user or
+  Library mismatch or non-authenticated session). `use-assistant-search-navigation.ts` sets
+  `SearchSessionStore.searchText` and `router.navigate("/(tabs)/search")`; the Search tab pushes store
+  text into the native bar via `SearchBarCommands.setText` (one `requestAnimationFrame` retry).
+  Deleted `src/app/assistant-search-results.tsx` and `src/components/assistant/`; `_layout.tsx`
+  startup hold/yield logic, `authenticated-route-state.ts`, and `book-links.ts` route entries reverted.
+- Commands: Swift harness (command in P1 evidence) exit 0, “Assistant catalog query tests passed.”
+  — new assertions: lib-2 rows excluded from search/author/suggested/all and author bookCount;
+  `playbackMatch` `.unique` despite a cross-Library duplicate title; direct-id reads still return lib-2
+  rows; `libraryId: nil` → `.libraryRequired`; legacy context JSON decodes. `npx tsc --noEmit` exit 0.
+  `npm test -- --runInBand src/navigation src/assistant` exit 0 (8 suites, 60 tests). Integrated
+  re-run of both after merging halves: exit 0 / exit 0.
+- Native build: `xcodebuild` Debug simulator, `CODE_SIGNING_ALLOWED=NO`, exit 0 on the Swift half
+  and exit 0 (`** BUILD SUCCEEDED **`) on the integrated tree. `extract.actionsdata`: `OpenAssistantSearchResultsIntent`
+  parameters `['query']`; `AssistantLibrarySearchSnippetIntent` `['heading','books','totalCount','query']`.
+- Siri/device status: NOT RUN. Checklist in `assistant-search-next-phase-handoff.md` → P4.
+- Known by design: audiobook search with a podcast Active Library returns nothing; downloaded-only
+  sessions discard the pending search (Search tab redirects Home).
+
+## Door A phrase revision + Open race — 2026-09-22
+
+- Removed App Shortcut phrases that interpolate an App Entity (`Books by ${author}`, `Play ${book}`).
+  Those slots only resolved `suggestedEntities()` (top 25). `SearchBooksByAuthorIntent` and
+  `BooksByAuthorEntityIntent` stay for saved shortcuts but are not discoverable.
+- Door A search phrases now all use a free-text follow-up (`SearchLibraryIntent`,
+  `SearchBooksByAuthorNameIntent`). Empty results store `AssistantPendingSearch` and offer
+  `requestToContinueInForeground` to open the Search tab.
+- Open-from-card flake: `useAssistantOpenNavigation` no longer `take()`s before a retry window.
+  AppState can become active before `OpenAssistantBookActionIntent.perform()` writes UserDefaults;
+  retries at 50/150/400/800ms catch the late store. `rememberAssistantOpenInFlight` keeps the
+  startup route-gate hold after take so Home does not win the race.
 
 ## P1 evidence — 2026-09-20
 
@@ -229,7 +311,7 @@ Suggested and non-suggested entities must be separate test cases.
 | --- | --- | --- |
 | What books do I have by Stephen King in LAABS Audio? | Author supplied in first utterance; correct total and bounded list | FAIL (user, 2026-09-20): system/schema empty-author reply; did not use App Shortcut dialog |
 | Books by Stephen King in LAABS Audio | Same author criteria and result set | PASS (user, 2026-09-20): prompted “Find books by an author…” returned multiple King books; covers missing |
-| Result-card Play / Open / cover / title tap | Play starts that book; Open lands on its detail | PASS (user, iOS 26, 2026-09-21) after `SnippetIntent` fix; iOS 17–25 static card, NOT RUN |
+| Result-card Play / Open / cover / title tap | Play starts that book; Open lands on its detail | PASS (user, iOS 27, 2026-09-21) after `SnippetIntent` fix; iOS 17–25 static card, NOT RUN |
 | Author outside suggestion set | Modern route resolves or limitation explicitly documented | NOT RUN |
 | Author with coauthored books | Membership behavior matches declared metadata semantics | NOT RUN |
 | Author with >10 matching books | True total; at most five spoken and ten shown | NOT RUN |

@@ -90,5 +90,13 @@ class AssistantBridge: Module {
     Function("takePendingOpen") { () -> String? in
       AssistantPendingOpen.take()
     }
+
+    Function("peekPendingSearch") { () -> [String: Any]? in
+      AssistantPendingSearch.peek()?.dictionary
+    }
+
+    Function("takePendingSearch") { () -> [String: Any]? in
+      AssistantPendingSearch.take()?.dictionary
+    }
   }
 }

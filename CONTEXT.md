@@ -880,20 +880,22 @@ _Avoid_: Siri response, dialog, snippet
 - An **Assistant Action** is a user command; it is neither a **Playback Control Intent** nor a **Progress Sync Intent**, though performing one may create either.
 - An **Assistant Book** is a projection of exactly one **Audiobook Identity**; it is never the source of truth for that audiobook.
 - An **Assistant Book** keeps the same identity when its **Server Connection Endpoint** changes.
-- The **Assistant Catalog** belongs to the current **Audiobookshelf User Identity** and covers every audiobook **Library** that identity has cached, not only the **Active Library**.
+- The **Assistant Catalog** belongs to the current **Audiobookshelf User Identity** and stores every audiobook **Library** that identity has cached, not only the **Active Library**.
+- Assistant search, books-by-author, play-by-name, **Suggested Assistant Books**, and system-search indexing answer only from the **Active Library** slice of the **Assistant Catalog**; with no **Active Library** they ask the user to open the app and choose one. Opening or resuming a specific **Assistant Book** by identity, and Resume, are not narrowed to the Active Library.
+- A search **Assistant Action** that offers app results opens the app's Search surface for the **Active Library** with the spoken text prefilled; it never opens a separate results surface, and a request bound to another identity or Library is discarded.
 - The **Assistant Catalog** does not contain **Podcasts** or **Episodes**.
 - The **Assistant Catalog** carries each **Assistant Book**'s listening state: **Listening Position** progress, finished state, last played time, **Downloaded Audio Asset** presence, and **Favorite**.
 - A retained audiobook **Downloaded Audio Asset** remains an **Assistant Book** when its server catalog row becomes missing, using its retained presentation metadata.
 - The **Assistant Catalog** is rebuilt when a **Library** catalog refresh completes and patched when progress, **Favorite**, or **Downloaded Audio Asset** state changes.
 - A **Session Entry Switch** physically replaces the **Assistant Catalog** with the new **Audiobookshelf User Identity**'s books; rows for the previous identity are not retained in the Assistant Catalog.
 - Explicit logout clears the **Assistant Catalog** and disables assistant surfaces until **User Session Entry** chooses an identity again.
-- **Suggested Assistant Books** are drawn from the **Assistant Catalog**, ordered in-progress first, then downloaded, then **Favorite**, and never exceed 25.
+- **Suggested Assistant Books** are drawn from the **Active Library** slice of the **Assistant Catalog**, ordered in-progress first, then downloaded, then **Favorite**, and never exceed 25.
 - A play **Assistant Action** for an **Assistant Book** is an ordinary **Playback Start Attempt**: **Resume Resolution** chooses the **Listening Position** and **Auto Rewind** may apply.
 - A play **Assistant Action** whose spoken name uniquely matches one **Assistant Book** title plays that book. Multiple editions of the same title, or several plausible matches, stay ambiguous and use system disambiguation; if too many choices remain, the **Assistant Reply** asks for a narrower title or offers results. Discovery never collapses a broad match set to a single best-guess playback.
 - A play **Assistant Action** that arrives before playback machinery is awake becomes a **Pending Assistant Action** and is performed once startup is settled.
 - A **Pending Assistant Action** to play takes precedence over **Startup Active Playback Restore**'s never-auto-play rule, because it is a user command.
 - A **Pending Assistant Action** that cannot be performed within its wait is answered with a failure **Assistant Reply** that offers to open the app; it does not linger.
-- Read-only **Assistant Actions** (is-in-library, books-by-author) answer from the **Assistant Catalog** for a chosen **User Session**, including **Session Needs Sign-In** and an **Offline User Session**.
+- Read-only **Assistant Actions** (is-in-library, books-by-author) answer from the **Active Library** slice of the **Assistant Catalog** for a chosen **User Session**, including **Session Needs Sign-In** and an **Offline User Session**.
 - In **Signed-Out Required Sign-In**, every **Assistant Action** replies that sign-in is required and offers to open the app.
 - In **Downloaded-Only Mode** after explicit logout, assistant surfaces remain disabled until **User Session Entry** chooses an identity again.
 - A play **Assistant Action** may start a **Downloaded Audio Asset** for the chosen **User Session**, and may stream only with a signed-in or **Offline User Session**.
@@ -901,7 +903,7 @@ _Avoid_: Siri response, dialog, snippet
 - A Resume **Assistant Action** with no **Active Playback** and no most recent Active Playback opens the app instead of failing silently.
 - A Bookmark-here **Assistant Action** creates a **Point Bookmark** at the current **Listening Position** with the spoken **Bookmark Title** when one was given, otherwise a title derived from the current chapter and position; it never creates a **Bookmark** without a **Bookmark Title**.
 - A Sleep-timer **Assistant Action** may set a minutes timer, an end-of-chapter timer, an end-of-next-chapter timer, or cancel the timer; an unspecified duration uses the user's current in-app minutes choice.
-- **Assistant Books** are indexed for system search from the **Assistant Catalog**; choosing one opens that audiobook as the **Current Audiobook** and does not start playback.
+- **Assistant Books** are indexed for system search from the **Active Library** slice of the **Assistant Catalog**; choosing one opens that audiobook as the **Current Audiobook** and does not start playback.
 - A Control Center or Action-button **Assistant Action** toggles **Active Playback** between playing and paused and shows the **Player Display**; with nothing to resume it opens the app.
 - Control Center and Action-button **Assistant Actions** are deferred beyond the first Assistant Actions release.
 - An **Assistant Reply** speaks at most five **Assistant Books** for a list result and shows the rest.

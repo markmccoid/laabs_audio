@@ -29,9 +29,25 @@ struct OpenAssistantBookActionIntent: AppIntent {
 struct OpenAssistantBookIntent: OpenIntent {
   static var title: LocalizedStringResource = "Open Audiobook"
   static var isDiscoverable = false
+  static var openAppWhenRun = true
 
   @Parameter(title: "Audiobook")
   var target: AssistantBookEntity
+
+  func perform() async throws -> some IntentResult & OpensIntent {
+    AssistantPendingOpen.store(libraryItemId: target.libraryItemId)
+    return .result(opensIntent: OpenLAABSIntent())
+  }
+}
+
+@available(iOS 18.0, *)
+struct OpenBooksSchemaAudiobookIntent: OpenIntent {
+  static var title: LocalizedStringResource = "Open Audiobook"
+  static var isDiscoverable = false
+  static var openAppWhenRun = true
+
+  @Parameter(title: "Audiobook")
+  var target: AssistantBooksAudiobookEntity
 
   func perform() async throws -> some IntentResult & OpensIntent {
     AssistantPendingOpen.store(libraryItemId: target.libraryItemId)

@@ -24,7 +24,7 @@ struct BooksByAuthorEntityIntent: AppIntent, ForegroundContinuableIntent {
   static var title: LocalizedStringResource = "Books by Author"
   static var description = IntentDescription("Lists audiobooks by a selected author in your LAABS Audio library.")
   static var openAppWhenRun = false
-  static var isDiscoverable = true
+  static var isDiscoverable = false
 
   @Parameter(title: "Author")
   var author: AssistantAuthorEntity

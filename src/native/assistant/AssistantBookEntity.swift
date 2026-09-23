@@ -2,6 +2,14 @@ import AppIntents
 import CoreSpotlight
 import Foundation
 
+enum AssistantBookLinks {
+  static func url(libraryItemId: String) -> URL? {
+    let encoded = libraryItemId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+      ?? libraryItemId
+    return URL(string: "laabsaudio://book/\(encoded)")
+  }
+}
+
 struct AssistantBookEntity: AppEntity, Identifiable {
   static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Audiobook")
   static var defaultQuery = AssistantBookQuery()
@@ -34,9 +42,7 @@ struct AssistantBookEntity: AppEntity, Identifiable {
   let coverURL: String?
 
   var detailURL: URL? {
-    let encodedID = libraryItemId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
-      ?? libraryItemId
-    return URL(string: "laabsaudio:///\(encodedID)")
+    AssistantBookLinks.url(libraryItemId: libraryItemId)
   }
 
   init(row: AssistantBookRow) {
@@ -85,7 +91,7 @@ extension AssistantBookEntity: IndexedEntity {
     if let coverPath, FileManager.default.fileExists(atPath: coverPath) {
       attributes.thumbnailURL = URL(fileURLWithPath: coverPath)
     }
-    attributes.contentURL = URL(string: "laabsaudio:///\(libraryItemId)")
+    attributes.contentURL = AssistantBookLinks.url(libraryItemId: libraryItemId)
     return attributes
   }
 }
@@ -98,7 +104,7 @@ struct AssistantBookQuery: EntityQuery, EntityStringQuery {
 
   func entities(matching string: String) async throws -> [AssistantBookEntity] {
     switch AssistantCatalogReader.shared.playbackMatch(text: string) {
-    case .unavailable, .none:
+    case .unavailable, .libraryRequired, .none:
       return []
     case .unique(let row):
       return [AssistantBookEntity(row: row)]

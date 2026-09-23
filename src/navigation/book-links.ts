@@ -59,6 +59,7 @@ const RESERVED_ROOT_SEGMENTS = new Set([
 // Matches the internal Expo Router path form used during navigation state, e.g.
 // `/(tabs)/(home)/12345`, and captures the trailing `libraryItemId`.
 const NESTED_BOOK_ROUTE_PATTERN = /(?:^|\/)\(tabs\)\/\(home\)\/([^/?#]+)/;
+const ASSISTANT_BOOK_LINK_PATTERN = /(?:^|\/)book\/([^/?#]+)/;
 // Matches the public shared-link path form, e.g. `/12345`, after leading/trailing
 // slashes are stripped. The capture excludes `/`, `?`, `#`, and route-group parens.
 const ROOT_BOOK_ROUTE_PATTERN = /^([^/?#()]+)$/;
@@ -90,6 +91,11 @@ export const extractBookDetailIdFromUrl = (url?: string | null) => {
     const nestedMatched = candidate.match(NESTED_BOOK_ROUTE_PATTERN);
     if (nestedMatched?.[1]) {
       return decodeURIComponent(nestedMatched[1]);
+    }
+
+    const assistantBookMatched = candidate.match(ASSISTANT_BOOK_LINK_PATTERN);
+    if (assistantBookMatched?.[1] && assistantBookMatched[1] !== "book") {
+      return decodeURIComponent(assistantBookMatched[1]);
     }
 
     const normalizedCandidate = candidate.replace(/^\/+|\/+$/g, "");

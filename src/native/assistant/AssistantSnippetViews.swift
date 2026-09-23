@@ -63,6 +63,8 @@ struct AssistantResultSnippet: View {
   let heading: String
   let books: [AssistantBookEntity]
   var interactive = false
+  var totalCount = 0
+  var query = ""
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -72,6 +74,21 @@ struct AssistantResultSnippet: View {
       } else if !books.isEmpty {
         AssistantBookList(books: books, interactive: interactive)
       }
+      showAllResults
+    }
+  }
+
+  @ViewBuilder
+  private var showAllResults: some View {
+    if interactive,
+      totalCount > AssistantSearchCopy.displayedBookLimit,
+      !query.isEmpty,
+      #available(iOS 26.0, *)
+    {
+      Button(intent: OpenAssistantSearchResultsIntent(query: query)) {
+        Text("Show all results")
+      }
+      .buttonStyle(.bordered)
     }
   }
 }

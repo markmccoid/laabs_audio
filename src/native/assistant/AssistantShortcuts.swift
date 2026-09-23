@@ -7,11 +7,9 @@ struct AssistantShortcuts: AppShortcutsProvider {
     AppShortcut(
       intent: PlayAudiobookIntent(),
       phrases: [
-        "Play \(\.$book) in \(.applicationName)",
-        "Listen to \(\.$book) in \(.applicationName)",
         "Play \(.applicationName)",
       ],
-      shortTitle: "Play a Book",
+      shortTitle: "Play",
       systemImageName: "play.fill"
     )
     AppShortcut(
@@ -31,38 +29,37 @@ struct AssistantShortcuts: AppShortcutsProvider {
       systemImageName: "pause.fill"
     )
     if #available(iOS 26.0, *) {
+      // Phrases must not start with "Search". That grammar belongs to system in-app
+      // search ("Search <anything> in <app>"). A competing shortcut lets Siri treat
+      // "books by" as "bookmark" and run BookmarkHereIntent instead.
       AppShortcut(
         intent: SearchLibraryIntent(),
         phrases: [
-          "Search my library in \(.applicationName)",
           "Find an audiobook in \(.applicationName)",
+          "Look up a book in \(.applicationName)",
         ],
         shortTitle: "Find a Book",
         systemImageName: "magnifyingglass"
       )
       AppShortcut(
-        intent: SearchBooksByAuthorIntent(),
-        phrases: [
-          "Books by \(\.$author) in \(.applicationName)",
-          "What books do I have by \(\.$author) in \(.applicationName)",
-        ],
-        shortTitle: "Books by Author",
-        systemImageName: "person.crop.rectangle.stack"
-      )
-      AppShortcut(
         intent: SearchBooksByAuthorNameIntent(),
-        phrases: ["Find books by an author in \(.applicationName)"],
+        phrases: [
+          "Find books by an author in \(.applicationName)",
+          "What books by an author are in \(.applicationName)",
+        ],
         shortTitle: "Find Books by Author",
         systemImageName: "person.text.rectangle"
       )
     }
+    // Do not say "book" or "bookmark" here. Siri hears "books by" as "bookmark"
+    // and runs this instead of author search.
     AppShortcut(
       intent: BookmarkHereIntent(),
       phrases: [
-        "Bookmark this in \(.applicationName)",
-        "Add a bookmark in \(.applicationName)",
+        "Save my place in \(.applicationName)",
+        "Mark this position in \(.applicationName)",
       ],
-      shortTitle: "Bookmark Here",
+      shortTitle: "Save My Place",
       systemImageName: "bookmark.fill"
     )
     AppShortcut(

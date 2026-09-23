@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LAABS Audio — How Siri search works (mental model)</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a23; --line: #2a2f3d; --text: #e6e8ef; --muted: #9aa3b5;
+    --teal: #2dd4bf; --amber: #fbbf24; --rose: #fb7185; --violet: #a78bfa; --sky: #38bdf8; --lime: #a3e635;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 40px 24px 96px; }
+  h1 { font-size: 34px; margin: 0 0 8px; }
+  h2 { font-size: 24px; margin: 56px 0 12px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 18px; margin: 28px 0 8px; color: var(--teal); }
+  p, li { color: var(--text); }
+  .lead { color: var(--muted); font-size: 18px; }
+  code, kbd { font-family: var(--mono); font-size: 0.9em; background: #1f2432; padding: 1px 6px; border-radius: 5px; color: #dbe4ff; }
+  pre { background: #12151d; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13.5px; line-height: 1.5; }
+  pre code { background: none; padding: 0; color: inherit; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin: 18px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  .term { border-left: 3px solid var(--violet); padding-left: 12px; }
+  .term b { color: #fff; }
+  .term small { color: var(--muted); display: block; margin-top: 2px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .02em; padding: 2px 8px; border-radius: 999px; margin-right: 6px; }
+  .tag.ts { background: #1e3a5f; color: #7dd3fc; }
+  .tag.swift { background: #5a2a1c; color: #fdba74; }
+  .tag.ios { background: #2b2440; color: #c4b5fd; }
+  .tag.sql { background: #1f3a2a; color: #86efac; }
+  figure { margin: 22px 0; }
+  figure svg { width: 100%; height: auto; display: block; background: #12151d; border: 1px solid var(--line); border-radius: 12px; }
+  figcaption { color: var(--muted); font-size: 14px; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .callout { border-left: 4px solid var(--amber); background: #1d1a12; }
+  .callout.bad { border-left-color: var(--rose); background: #1f1418; }
+  .callout.good { border-left-color: var(--lime); background: #151d12; }
+  .toc a { color: var(--sky); text-decoration: none; }
+  .toc li { margin: 2px 0; }
+  .say { font-style: italic; color: #fff; }
+  svg text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #e6e8ef; }
+  svg .mono { font-family: var(--mono); }
+  svg .muted { fill: #9aa3b5; }
+  svg .box { fill: #1c2130; stroke: #3a4157; stroke-width: 1.2; rx: 10; }
+  svg .box.ts { stroke: #38bdf8; }
+  svg .box.swift { stroke: #fb923c; }
+  svg .box.ios { stroke: #a78bfa; }
+  svg .box.sql { stroke: #4ade80; }
+  svg .arrow { stroke: #9aa3b5; stroke-width: 1.6; fill: none; marker-end: url(#arr); }
+  svg .arrow.hot { stroke: #2dd4bf; }
+  svg .arrow.dash { stroke-dasharray: 5 4; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>How Siri search works in LAABS Audio</h1>
+<p class="lead">A mental model of App Intents, App Shortcuts, snippets, and the handoff into React Native — written for a React Native developer with some Swift. The goal is shared vocabulary so we can talk about this feature precisely.</p>
+
+<div class="card toc">
+  <b>Contents</b>
+  <ol>
+    <li><a href="#big-picture">The big picture in one diagram</a></li>
+    <li><a href="#vocab">The six words that matter</a></li>
+    <li><a href="#two-paths">Why phrasing matters: two different doors into the app</a></li>
+    <li><a href="#data">Where the data lives (and why Swift can answer while the app is asleep)</a></li>
+    <li><a href="#snippet">Interactive result cards: the SnippetIntent rule</a></li>
+    <li><a href="#handoff">Getting from Siri into the React Native Search tab</a></li>
+    <li><a href="#scope">Scope: the Active Library rule</a></li>
+    <li><a href="#files">File map</a></li>
+    <li><a href="#talk">How to describe a bug to me</a></li>
+  </ol>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="big-picture">1. The big picture</h2>
+<p>There is a native Swift layer inside the iOS app target that iOS can wake up <em>without launching the React Native app</em>. It reads a small SQLite table that TypeScript keeps up to date. When the user wants to see full results, Swift leaves a note in <code>UserDefaults</code>, opens the app, and React Native reads the note and fills the Search tab.</p>
+
+<figure>
+<svg viewBox="0 0 960 420" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b5"/></marker></defs>
+  <!-- lanes -->
+  <text x="24" y="34" class="muted" font-size="13">iOS SYSTEM</text>
+  <text x="24" y="170" class="muted" font-size="13">APP TARGET · SWIFT (runs without RN)</text>
+  <text x="24" y="330" class="muted" font-size="13">REACT NATIVE · TYPESCRIPT</text>
+  <line x1="24" y1="140" x2="936" y2="140" stroke="#2a2f3d"/>
+  <line x1="24" y1="300" x2="936" y2="300" stroke="#2a2f3d"/>
+
+  <!-- system row -->
+  <rect x="40" y="50" width="200" height="70" class="box ios"/>
+  <text x="140" y="78" text-anchor="middle" font-size="14">Siri / Shortcuts app</text>
+  <text x="140" y="100" text-anchor="middle" font-size="12" class="muted">matches your phrase</text>
+
+  <rect x="380" y="50" width="200" height="70" class="box ios"/>
+  <text x="480" y="78" text-anchor="middle" font-size="14">Spotlight index</text>
+  <text x="480" y="100" text-anchor="middle" font-size="12" class="muted">books searchable system-wide</text>
+
+  <rect x="720" y="50" width="200" height="70" class="box ios"/>
+  <text x="820" y="78" text-anchor="middle" font-size="14">Result card (snippet)</text>
+  <text x="820" y="100" text-anchor="middle" font-size="12" class="muted">Play · Open · Show all</text>
+
+  <!-- swift row -->
+  <rect x="40" y="185" width="220" height="90" class="box swift"/>
+  <text x="150" y="212" text-anchor="middle" font-size="14">App Intents</text>
+  <text x="150" y="232" text-anchor="middle" font-size="12" class="mono muted">SearchLibraryIntent</text>
+  <text x="150" y="250" text-anchor="middle" font-size="12" class="mono muted">SearchBooksByAuthorIntent …</text>
+
+  <rect x="380" y="185" width="200" height="90" class="box swift"/>
+  <text x="480" y="212" text-anchor="middle" font-size="14">AssistantCatalogReader</text>
+  <text x="480" y="232" text-anchor="middle" font-size="12" class="muted">read-only SQL</text>
+  <text x="480" y="252" text-anchor="middle" font-size="12" class="mono muted">WHERE user_id=? AND library_id=?</text>
+
+  <rect x="720" y="185" width="200" height="90" class="box swift"/>
+  <text x="820" y="212" text-anchor="middle" font-size="14">AssistantPendingSearch</text>
+  <text x="820" y="232" text-anchor="middle" font-size="12" class="muted">UserDefaults note:</text>
+  <text x="820" y="252" text-anchor="middle" font-size="12" class="mono muted">{query, userId, libraryId}</text>
+
+  <!-- ts row -->
+  <rect x="40" y="345" width="220" height="60" class="box ts"/>
+  <text x="150" y="370" text-anchor="middle" font-size="14">Catalog refresh</text>
+  <text x="150" y="390" text-anchor="middle" font-size="12" class="mono muted">assistant-catalog-writes.ts</text>
+
+  <rect x="380" y="345" width="200" height="60" class="box sql"/>
+  <text x="480" y="370" text-anchor="middle" font-size="14">SQLite: assistant_catalog</text>
+  <text x="480" y="390" text-anchor="middle" font-size="12" class="muted">one row per book, all libraries</text>
+
+  <rect x="720" y="345" width="200" height="60" class="box ts"/>
+  <text x="820" y="370" text-anchor="middle" font-size="14">Search tab (tabs)/search</text>
+  <text x="820" y="390" text-anchor="middle" font-size="12" class="mono muted">setSearchText → setText</text>
+
+  <!-- arrows -->
+  <path d="M140 120 L150 185" class="arrow hot"/>
+  <path d="M260 230 L380 230" class="arrow hot"/>
+  <path d="M480 275 L480 345" class="arrow dash"/>
+  <path d="M260 375 L380 375" class="arrow"/>
+  <path d="M580 230 L720 230" class="arrow hot"/>
+  <path d="M580 210 L720 100" class="arrow hot"/>
+  <path d="M820 275 L820 345" class="arrow hot"/>
+  <path d="M580 250 L480 120" class="arrow dash"/>
+
+  <text x="300" y="220" class="muted" font-size="11">perform()</text>
+  <text x="620" y="258" class="muted" font-size="11">store()</text>
+  <text x="640" y="150" class="muted" font-size="11">.result(dialog, snippetIntent)</text>
+  <text x="830" y="315" class="muted" font-size="11">take() on launch / foreground</text>
+  <text x="300" y="365" class="muted" font-size="11">writes</text>
+  <text x="490" y="315" class="muted" font-size="11">reads</text>
+</svg>
+<figcaption>Teal arrows are the "Search Stephen King" request. Dashed arrows are background maintenance. Note that the whole middle lane runs with React Native asleep.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2 id="vocab">2. The six words that matter</h2>
+<div class="grid">
+  <div class="card term"><b>App Intent</b><small><span class="tag swift">Swift</span> A struct conforming to <code>AppIntent</code>: a title, some <code>@Parameter</code>s, and a <code>perform()</code>. It is a <em>verb</em> the system can call. Think: one Redux action type with a handler, registered with iOS at build time.</small></div>
+  <div class="card term"><b>App Entity</b><small><span class="tag swift">Swift</span> A struct conforming to <code>AppEntity</code>: a <em>noun</em> Siri can name, with an <code>id</code> and a query that resolves ids back to values. Ours: <code>AssistantBookEntity</code>, <code>AssistantAuthorEntity</code>.</small></div>
+  <div class="card term"><b>App Shortcut</b><small><span class="tag ios">iOS</span> A <em>phrase</em> bound to an intent, declared in <code>AppShortcutsProvider</code>. This is what lets a user say a sentence with no setup. Phrases must contain <code>\(.applicationName)</code>.</small></div>
+  <div class="card term"><b>Snippet</b><small><span class="tag ios">iOS</span> The SwiftUI card Siri draws under its reply. Static unless produced by a <code>SnippetIntent</code> (iOS 26+). See §5.</small></div>
+  <div class="card term"><b>Assistant Schema</b><small><span class="tag ios">iOS</span> Apple-defined intent shapes (<code>.books.playAudiobook</code>, <code>.system.searchInApp</code>). Adopting one lets Siri route <em>natural</em> language without our phrase list.</small></div>
+  <div class="card term"><b>Metadata extraction</b><small><span class="tag ios">iOS</span> A build step that scans Swift for intents/entities/shortcuts and writes <code>Metadata.appintents/</code> into the .app. Siri reads that, not your running code. If it's not in the metadata, Siri doesn't know it exists.</small></div>
+</div>
+
+<div class="card callout">
+<b>Key mental shift from RN:</b> nothing here is registered at runtime. There is no <code>Siri.register(...)</code>. Types exist in the binary → the compiler extracts them → iOS indexes the app's capabilities at install. That's why a new install (not a JS reload) is required for any change in this layer, and why <code>@available</code> annotations end up in the metadata as "this intent exists on iOS ≥ X".
+</div>
+
+<!-- ============================================================ -->
+<h2 id="two-paths">3. Why phrasing matters: two different doors</h2>
+<p>You noticed search works "if I phrase it just right." That's because there are two unrelated ways a sentence containing "search" can reach us, and they land in different code.</p>
+
+<figure>
+<svg viewBox="0 0 960 400" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b5"/></marker></defs>
+  <!-- Door A -->
+  <rect x="30" y="30" width="430" height="340" rx="14" fill="#141a22" stroke="#2dd4bf" stroke-opacity=".5"/>
+  <text x="50" y="60" font-size="15" fill="#2dd4bf" font-weight="600">DOOR A — our App Shortcut phrase</text>
+  <text x="50" y="92" font-size="13" class="say">“Find an audiobook in LAABS Audio”</text>
+  <text x="50" y="112" font-size="13" class="say">“Find books by an author in LAABS Audio”</text>
+  <text x="50" y="132" font-size="13" class="say">“Look up a book in LAABS Audio”</text>
+
+  <rect x="50" y="155" width="390" height="46" class="box ios"/>
+  <text x="245" y="183" text-anchor="middle" font-size="13">Siri matches phrase → <tspan class="mono">SearchLibraryIntent</tspan></text>
+  <path d="M245 201 L245 220" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <rect x="50" y="222" width="390" height="46" class="box swift"/>
+  <text x="245" y="250" text-anchor="middle" font-size="13">Siri asks for the missing <tspan class="mono">query</tspan> if needed → perform()</text>
+  <path d="M245 268 L245 287" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <rect x="50" y="289" width="390" height="60" class="box ios"/>
+  <text x="245" y="313" text-anchor="middle" font-size="13">Spoken reply + interactive card</text>
+  <text x="245" y="333" text-anchor="middle" font-size="12" class="muted">App does NOT open. Play / Open / Show all buttons.</text>
+
+  <!-- Door B -->
+  <rect x="500" y="30" width="430" height="340" rx="14" fill="#161422" stroke="#a78bfa" stroke-opacity=".5"/>
+  <text x="520" y="60" font-size="15" fill="#a78bfa" font-weight="600">DOOR B — system in-app search</text>
+  <text x="520" y="92" font-size="13" class="say">“Search Stephen King in LAABS Audio”</text>
+  <text x="520" y="112" font-size="13" class="say">“Search for Dune in LAABS Audio”</text>
+  <text x="520" y="132" font-size="13" class="muted">(Siri's own grammar: “Search &lt;term&gt; in &lt;app&gt;”)</text>
+
+  <rect x="520" y="155" width="390" height="46" class="box ios"/>
+  <text x="715" y="176" text-anchor="middle" font-size="12">Siri picks the intent that conforms to</text>
+  <text x="715" y="192" text-anchor="middle" font-size="12" class="mono">ShowInAppSearchResultsIntent / .system.searchInApp</text>
+  <path d="M715 201 L715 220" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <rect x="520" y="222" width="390" height="46" class="box swift"/>
+  <text x="715" y="250" text-anchor="middle" font-size="13">perform() → <tspan class="mono">AssistantPendingSearch.storeSystemTerm</tspan></text>
+  <path d="M715 268 L715 287" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr2)"/>
+  <rect x="520" y="289" width="390" height="60" class="box ts"/>
+  <text x="715" y="313" text-anchor="middle" font-size="13">App opens → Search tab prefilled</text>
+  <text x="715" y="333" text-anchor="middle" font-size="12" class="muted">No card, no spoken list. iOS decides this, not us.</text>
+</svg>
+<figcaption>Door A is a phrase we authored. Door B is Apple's built-in "search in app" grammar; the only thing we control there is what happens after the app opens.</figcaption>
+</figure>
+
+<table>
+<tr><th>Door</th><th>Who owns the grammar</th><th>Our code that runs</th><th>Result</th><th>Min iOS</th></tr>
+<tr><td>A</td><td>Us (<code>AssistantShortcuts.swift</code>)</td><td><code>SearchLibraryIntent</code>, <code>SearchBooksByAuthorNameIntent</code> (free-text follow-up)</td><td>Spoken reply + card; app stays closed unless no results (then offers to open Search)</td><td>26 (interactive card)</td></tr>
+<tr><td>B</td><td>Apple</td><td><code>ShowAssistantInAppSearchIntent</code> (17.4–26), <code>SearchInAppSchemaIntent</code> (27+)</td><td>App opens on Search tab</td><td>17.4</td></tr>
+</table>
+
+<div class="card callout">
+<b>Practical consequence:</b> Door A phrases cannot include the author or title in the same sentence, and they must not start with “Search”. That shape is Door B (“Search Tim Ferriss in LAABS Audio”), and a competing shortcut lets Siri hear “books by” as “bookmark”. Door A uses Find / Look up, then asks a follow-up and searches the whole open library. If Door A finds nothing, Siri offers to open the Search tab with that text.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="data">4. Where the data lives</h2>
+<p>Siri can invoke our intent when the app process isn't running. So the intent can't call into JavaScript, React Query, or Zustand. It needs data that is already on disk in a shape Swift can read without help.</p>
+
+<figure>
+<svg viewBox="0 0 960 300" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b5"/></marker></defs>
+  <rect x="30" y="40" width="250" height="110" class="box ts"/>
+  <text x="155" y="70" text-anchor="middle" font-size="14">TypeScript (writer)</text>
+  <text x="155" y="94" text-anchor="middle" font-size="12" class="mono muted">catalog-refresh.ts</text>
+  <text x="155" y="112" text-anchor="middle" font-size="12" class="mono muted">assistant-catalog-writes.ts</text>
+  <text x="155" y="132" text-anchor="middle" font-size="12" class="muted">rebuild on library refresh; patch on progress/favorite/download</text>
+
+  <rect x="355" y="30" width="250" height="130" class="box sql"/>
+  <text x="480" y="58" text-anchor="middle" font-size="14">assistant_catalog</text>
+  <text x="480" y="82" text-anchor="middle" font-size="12" class="mono muted">user_id · library_id · library_item_id</text>
+  <text x="480" y="100" text-anchor="middle" font-size="12" class="mono muted">title · author · narrator · series</text>
+  <text x="480" y="118" text-anchor="middle" font-size="12" class="mono muted">search_text (normalized, word-prefix)</text>
+  <text x="480" y="136" text-anchor="middle" font-size="12" class="mono muted">progress · is_downloaded · is_favorite</text>
+
+  <rect x="680" y="40" width="250" height="110" class="box swift"/>
+  <text x="805" y="70" text-anchor="middle" font-size="14">Swift (reader only)</text>
+  <text x="805" y="94" text-anchor="middle" font-size="12" class="mono muted">AssistantCatalogReader</text>
+  <text x="805" y="112" text-anchor="middle" font-size="12" class="mono muted">AssistantSearchCriteria</text>
+  <text x="805" y="132" text-anchor="middle" font-size="12" class="muted">never writes; harness-tested</text>
+
+  <path d="M280 95 L355 95" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr3)"/>
+  <path d="M680 95 L605 95" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr3)"/>
+
+  <rect x="355" y="200" width="250" height="70" class="box ts"/>
+  <text x="480" y="226" text-anchor="middle" font-size="14">AssistantRuntimeContext</text>
+  <text x="480" y="248" text-anchor="middle" font-size="12" class="mono muted">{ dbPath, userId, libraryId, accessMode }</text>
+  <path d="M280 130 C 300 220, 320 235, 355 235" stroke="#9aa3b5" stroke-width="1.6" fill="none" marker-end="url(#arr3)"/>
+  <path d="M605 235 C 640 235, 660 220, 700 150" stroke="#9aa3b5" stroke-width="1.6" fill="none" marker-end="url(#arr3)"/>
+  <text x="290" y="200" class="muted" font-size="11">publishRuntimeContext</text>
+  <text x="630" y="200" class="muted" font-size="11">UserDefaults JSON</text>
+</svg>
+<figcaption>One writer, one reader, one small table. The runtime context is a second tiny piece of shared state telling Swift <em>which user and which library</em> to answer for.</figcaption>
+</figure>
+
+<h3>Why the "runtime context" exists</h3>
+<p>Swift has no idea who is logged in. So whenever auth state changes, TypeScript calls <code>AssistantBridgeModule.publishRuntimeContext({ dbPath, userId, libraryId, accessMode, canAttemptStreaming })</code>. Swift persists that to <code>UserDefaults</code> and every intent reads it first. If <code>userId</code> is nil, Siri says sign-in is required; if <code>libraryId</code> is nil, it says choose a library. This is the trust boundary: the intent never guesses identity.</p>
+
+<h3>What "search" means in SQL</h3>
+<p>The query text is normalized (lowercase, diacritics stripped, punctuation removed) and every token must be a <em>word prefix</em> in <code>search_text</code>, which concatenates title, subtitle, author, series, and narrator. So <span class="say">"steph king"</span> matches Stephen King, but <span class="say">"tephen"</span> does not. Author lookups match the <em>combined credit string</em> ("Stephen King, Owen King" is one credit, not two people).</p>
+
+<!-- ============================================================ -->
+<h2 id="snippet">5. Interactive result cards: the SnippetIntent rule</h2>
+<p>This was the hardest lesson on this branch and it is worth a picture.</p>
+
+<figure>
+<svg viewBox="0 0 960 330" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b5"/></marker></defs>
+  <!-- wrong -->
+  <rect x="30" y="30" width="430" height="270" rx="14" fill="#1a1216" stroke="#fb7185" stroke-opacity=".6"/>
+  <text x="50" y="60" font-size="15" fill="#fb7185" font-weight="600">✗ Static snapshot (what we had first)</text>
+  <rect x="50" y="80" width="390" height="52" class="box swift"/>
+  <text x="245" y="102" text-anchor="middle" font-size="12" class="mono">SearchIntent.perform()</text>
+  <text x="245" y="120" text-anchor="middle" font-size="12" class="mono muted">.result(dialog:) { ResultView(...) }</text>
+  <path d="M245 132 L245 152" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr4)"/>
+  <rect x="50" y="154" width="390" height="120" class="box ios"/>
+  <text x="245" y="180" text-anchor="middle" font-size="13">Siri renders the view ONCE as an image</text>
+  <rect x="90" y="200" width="90" height="30" rx="8" fill="#2a2f3d"/><text x="135" y="220" text-anchor="middle" font-size="12" class="muted">Play</text>
+  <rect x="200" y="200" width="90" height="30" rx="8" fill="#2a2f3d"/><text x="245" y="220" text-anchor="middle" font-size="12" class="muted">Open</text>
+  <text x="245" y="258" text-anchor="middle" font-size="12" fill="#fb7185">Buttons draw but tapping does nothing</text>
+
+  <!-- right -->
+  <rect x="500" y="30" width="430" height="270" rx="14" fill="#121a14" stroke="#a3e635" stroke-opacity=".6"/>
+  <text x="520" y="60" font-size="15" fill="#a3e635" font-weight="600">✓ SnippetIntent (iOS 26+, what works now)</text>
+  <rect x="520" y="80" width="390" height="52" class="box swift"/>
+  <text x="715" y="102" text-anchor="middle" font-size="12" class="mono">SearchLibraryIntent.perform()</text>
+  <text x="715" y="120" text-anchor="middle" font-size="12" class="mono muted">.result(dialog:, snippetIntent: AssistantLibrarySearchSnippetIntent(…))</text>
+  <path d="M715 132 L715 152" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr4)"/>
+  <rect x="520" y="154" width="390" height="52" class="box swift"/>
+  <text x="715" y="176" text-anchor="middle" font-size="12" class="mono">AssistantLibrarySearchSnippetIntent: SnippetIntent</text>
+  <text x="715" y="194" text-anchor="middle" font-size="12" class="muted">its own perform() builds the view; Siri re-runs it as needed</text>
+  <path d="M715 206 L715 226" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr4)"/>
+  <rect x="520" y="228" width="390" height="52" class="box ios"/>
+  <text x="715" y="250" text-anchor="middle" font-size="12">Button(intent: PlayAudiobookIntent(book:)) fires a real intent</text>
+  <text x="715" y="268" text-anchor="middle" font-size="12" class="muted">Play · Open · Show all results → each is another AppIntent</text>
+</svg>
+<figcaption>A snippet button is not an onPress; it is a <em>nested intent</em>. Every tappable thing on a Siri card is itself an <code>AppIntent</code> with its own <code>perform()</code>.</figcaption>
+</figure>
+
+<p>Think of the snippet intent as a "render intent." It carries its inputs as <code>@Parameter</code>s (<code>heading</code>, <code>books: [AssistantBookEntity]</code>, <code>totalCount</code>, <code>query</code>) — that's why <code>AssistantBookEntity</code> must be resolvable by id: Siri may rehydrate the card later from those ids. This requirement is also why the iOS floor moved to 17.4: <code>AppShortcutsProvider</code> only allows <code>if #available(iOS 26.0, *)</code> around shortcuts when the deployment target is ≥ 17.4.</p>
+
+<!-- ============================================================ -->
+<h2 id="handoff">6. From Siri into the React Native Search tab</h2>
+<p>Three things can open the app with a search in hand: Door B, the <b>Show all results</b> button, or a cold launch after either. They all use the same one-shot note pattern.</p>
+
+<figure>
+<svg viewBox="0 0 960 360" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arr5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa3b5"/></marker></defs>
+  <rect x="30" y="40" width="200" height="70" class="box swift"/>
+  <text x="130" y="68" text-anchor="middle" font-size="13">Intent perform()</text>
+  <text x="130" y="90" text-anchor="middle" font-size="11" class="mono muted">AssistantPendingSearch.store</text>
+
+  <rect x="280" y="40" width="200" height="70" class="box ios"/>
+  <text x="380" y="68" text-anchor="middle" font-size="13">UserDefaults</text>
+  <text x="380" y="90" text-anchor="middle" font-size="11" class="mono muted">laabs.assistant.pendingSearch</text>
+
+  <rect x="530" y="40" width="200" height="70" class="box ios"/>
+  <text x="630" y="68" text-anchor="middle" font-size="13">openAppWhenRun = true</text>
+  <text x="630" y="90" text-anchor="middle" font-size="11" class="muted">iOS launches / foregrounds app</text>
+
+  <rect x="780" y="40" width="150" height="70" class="box ts"/>
+  <text x="855" y="68" text-anchor="middle" font-size="13">_layout.tsx</text>
+  <text x="855" y="90" text-anchor="middle" font-size="11" class="mono muted">useAssistantSearchNavigation</text>
+
+  <path d="M230 75 L280 75" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr5)"/>
+  <path d="M480 75 L530 75" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr5)"/>
+  <path d="M730 75 L780 75" stroke="#9aa3b5" stroke-width="1.6" marker-end="url(#arr5)"/>
+
+  <!-- decision -->
+  <rect x="30" y="160" width="900" height="170" rx="12" fill="#12151d" stroke="#2a2f3d"/>
+  <text x="50" y="188" font-size="13" class="muted">on mount + on AppState → "active":   peekPendingSearch()  →  resolveAssistantSearchDelivery(pending, currentUserId, activeLibraryId, isAuthenticated)</text>
+
+  <rect x="50" y="210" width="200" height="100" class="box"/>
+  <text x="150" y="235" text-anchor="middle" font-size="13" fill="#9aa3b5">wait</text>
+  <text x="150" y="257" text-anchor="middle" font-size="11" class="muted">user or library not known yet</text>
+  <text x="150" y="275" text-anchor="middle" font-size="11" class="muted">leave the note; try again</text>
+  <text x="150" y="293" text-anchor="middle" font-size="11" class="muted">when auth settles</text>
+
+  <rect x="270" y="210" width="200" height="100" class="box"/>
+  <text x="370" y="235" text-anchor="middle" font-size="13" fill="#fb7185">discard</text>
+  <text x="370" y="257" text-anchor="middle" font-size="11" class="muted">different user, different library,</text>
+  <text x="370" y="275" text-anchor="middle" font-size="11" class="muted">or downloaded-only session</text>
+  <text x="370" y="293" text-anchor="middle" font-size="11" class="muted">take() and do nothing</text>
+
+  <rect x="490" y="210" width="420" height="100" class="box ts"/>
+  <text x="700" y="235" text-anchor="middle" font-size="13" fill="#2dd4bf">navigate</text>
+  <text x="700" y="257" text-anchor="middle" font-size="11" class="mono muted">takePendingSearch()</text>
+  <text x="700" y="275" text-anchor="middle" font-size="11" class="mono muted">useSearchSessionStore.actions.setSearchText(query)</text>
+  <text x="700" y="293" text-anchor="middle" font-size="11" class="mono muted">router.navigate("/(tabs)/search")  →  SearchBar.setText(query)</text>
+</svg>
+<figcaption><code>peek</code> is non-destructive so a pending search survives the auth store hydrating; <code>take</code> is the one-shot consume. The Search tab watches the store and pushes the text into the native <code>UISearchBar</code> via <code>SearchBarCommands.setText</code>.</figcaption>
+</figure>
+
+<div class="card callout good">
+<b>Why the note is bound to <code>userId</code> + <code>libraryId</code>:</b> the intent ran against whatever context was published at that moment. If the app comes up under a different account or library (session switch, remembered session), the results would be wrong, so the note is thrown away rather than shown.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="scope">7. Scope: the Active Library rule (changed 2026-09-22)</h2>
+<div class="grid">
+  <div class="card"><b>Stored</b><br/><span class="muted">Every audiobook library the signed-in identity has cached. Nothing was removed from the table.</span></div>
+  <div class="card"><b>Read by Siri</b><br/><span class="muted">Only rows where <code>library_id = context.libraryId</code>: search, author lists, play-by-name, Suggested books, Spotlight index.</span></div>
+  <div class="card"><b>Not narrowed</b><br/><span class="muted">Opening/playing a specific book by id (a card button, a Spotlight hit) and Resume. These already know exactly which book.</span></div>
+</div>
+<p>Consequences worth remembering: a book that lives only in another library now gets <span class="say">"I couldn't find…"</span>; switching libraries in the app republishes the context and re-indexes Suggested books + Spotlight; a podcast library active means audiobook search returns nothing (the catalog has no podcasts).</p>
+
+<!-- ============================================================ -->
+<h2 id="files">8. File map</h2>
+<table>
+<tr><th>Layer</th><th>File</th><th>Role</th></tr>
+<tr><td><span class="tag swift">Swift</span></td><td><code>AssistantShortcuts.swift</code></td><td>Phrase → intent bindings (Door A). Search shortcuts are inside <code>if #available(iOS 26.0, *)</code>.</td></tr>
+<tr><td><span class="tag swift">Swift</span></td><td><code>intents/AssistantInteractiveLibrarySearchIntents.swift</code></td><td><code>SearchLibraryIntent</code>, <code>SearchBooksByAuthorIntent</code>, <code>SearchBooksByAuthorNameIntent</code> — the three search verbs.</td></tr>
+<tr><td><span class="tag swift">Swift</span></td><td><code>intents/AssistantLibrarySearchSupport.swift</code></td><td>Turns a query into an <code>AssistantLibrarySearchOutcome</code> (results / empty / signInRequired / libraryRequired / unavailable) and into the spoken dialog + snippet.</td></tr>
+<tr><td><span class="tag swift">Swift</span></td><td><code>intents/AssistantLibrarySearchSnippetIntent.swift</code></td><td>The <code>SnippetIntent</code> that renders the interactive card.</td></tr>
+<tr><td><span class="tag swift">Swift</span></td><td><code>AssistantSnippetViews.swift</code></td><td>SwiftUI for the card; Play/Open/Show-all buttons are <code>Button(intent:)</code>.</td></tr>
+<tr><td><span class="tag swift">Swift</span></td><td><code>intents/ShowAssistantInAppSearchIntent.swift</code></td><td>Door B intents (17.4–26 protocol, 27+ schema) and <code>OpenAssistantSearchResultsIntent</code> (Show all).</td></tr>
+<tr><td><span class="tag swift">Swift</span></td><td><code>AssistantPendingSearch.swift</code>, <code>AssistantPendingOpen.swift</code></td><td>One-shot UserDefaults notes for RN: "search this" / "open this book".</td></tr>
+<tr><td><span class="tag swift">Swift</span></td><td><code>AssistantCatalogReader.swift</code>, <code>AssistantSearchCriteria.swift</code></td><td>Parameterized SQL over <code>assistant_catalog</code>; the only place scope is enforced.</td></tr>
+<tr><td><span class="tag swift">Swift</span></td><td><code>AssistantRuntimeContext.swift</code></td><td>Who/which library/which access mode Swift should answer for.</td></tr>
+<tr><td><span class="tag swift">Swift</span></td><td><code>AssistantBookEntity.swift</code>, <code>AssistantAuthorEntity.swift</code></td><td>Nouns Siri can name and resolve.</td></tr>
+<tr><td><span class="tag swift">Swift</span></td><td><code>AssistantBridge.swift</code></td><td>Expo module: <code>publishRuntimeContext</code>, <code>peek/takePendingSearch</code>, <code>peek/takePendingOpen</code>, <code>refreshSuggestedBooks</code>, <code>reindexSpotlight</code>.</td></tr>
+<tr><td><span class="tag ts">TS</span></td><td><code>src/assistant/assistant-runtime-context.ts</code></td><td>Derives the context from the auth store and publishes it; re-indexes on library change.</td></tr>
+<tr><td><span class="tag ts">TS</span></td><td><code>src/data/sqlite/assistant-catalog-writes.ts</code></td><td>The catalog writer.</td></tr>
+<tr><td><span class="tag ts">TS</span></td><td><code>src/navigation/assistant-search-destination.ts</code></td><td>Pure decision logic: none / wait / discard / navigate.</td></tr>
+<tr><td><span class="tag ts">TS</span></td><td><code>src/navigation/use-assistant-search-navigation.ts</code></td><td>Runs that decision on mount and foreground; navigates.</td></tr>
+<tr><td><span class="tag ts">TS</span></td><td><code>src/app/(tabs)/search/index.tsx</code></td><td>Pushes store text into the native search bar.</td></tr>
+<tr><td><span class="tag ios">iOS</span></td><td><code>…/LAABSAudiobookshelf.app/Metadata.appintents/extract.actionsdata</code></td><td>Build output. The ground truth for "what does Siri think this app can do."</td></tr>
+</table>
+
+<h3>Harness and checks</h3>
+<pre><code># Swift reader tests (no app needed)
+xcrun swiftc src/native/assistant/AssistantDiagnostics.swift \
+  src/native/assistant/AssistantRuntimeContext.swift \
+  src/native/assistant/AssistantSearchCriteria.swift \
+  src/native/assistant/AssistantCatalogReader.swift \
+  scripts/test-assistant-catalog.swift -lsqlite3 -o /tmp/test-assistant-catalog \
+  &amp;&amp; /tmp/test-assistant-catalog
+
+# JS decision logic
+npm test -- --runInBand src/navigation src/assistant</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="talk">9. How to describe a bug to me</h2>
+<p>These distinctions let me go straight to the right file:</p>
+<table>
+<tr><th>Say this</th><th>Instead of</th><th>Because</th></tr>
+<tr><td>"<b>The phrase</b> X didn't match" / "Siri said the app doesn't support…"</td><td>"Siri didn't understand"</td><td>Phrase matching is <code>AssistantShortcuts.swift</code> + metadata; a different problem from a wrong answer.</td></tr>
+<tr><td>"It went through <b>Door B</b> (opened the app) when I expected a <b>card</b>"</td><td>"It opened the app"</td><td>Tells me routing chose the system in-app-search intent, which is Apple's grammar, not ours.</td></tr>
+<tr><td>"The <b>dialog</b> said … but the <b>snippet</b> showed …"</td><td>"The results were wrong"</td><td>Spoken text and card come from the same outcome but different code paths (<code>AssistantSearchCopy</code> vs <code>AssistantSnippetViews</code>).</td></tr>
+<tr><td>"The <b>Show all</b> button landed on Home / had no text"</td><td>"Search didn't work in the app"</td><td>That's the pending-search handoff (§6): discard vs navigate, or <code>setText</code> timing.</td></tr>
+<tr><td>"Wrong <b>library</b>" / "wrong <b>user</b>"</td><td>"Wrong results"</td><td>Points at the runtime context or the <code>discard</code> branch rather than SQL matching.</td></tr>
+<tr><td>"<b>Cold launch</b> vs <b>warm</b>"</td><td>—</td><td>Cold means RN wasn't running when the intent fired; the <code>wait</code> branch and startup order matter only there.</td></tr>
+<tr><td>"Which iOS and which build (commit)"</td><td>—</td><td>Intents are baked into the binary at build time; a JS reload does not pick up Swift changes.</td></tr>
+</table>
+
+<div class="card callout bad">
+<b>Things that look like bugs but are platform behavior:</b> a card whose buttons do nothing on iOS 17–25 (no <code>SnippetIntent</code> there); "Search &lt;term&gt; in LAABS Audio" always opening the app (Door B); no cover art on cards when the book has no local <code>cover_path</code>; needing to reinstall (not reload) after Swift changes.
+</div>
+
+</main>
+</body>
+</html>

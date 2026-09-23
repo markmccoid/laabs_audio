@@ -12,12 +12,14 @@ enum AssistantAccessMode: String, Codable, Sendable {
 struct AssistantRuntimeContext: Codable, Equatable, Sendable {
   let dbPath: String?
   let userId: String?
+  let libraryId: String?
   let accessMode: AssistantAccessMode
   let canAttemptStreaming: Bool
 
   static let disabled = AssistantRuntimeContext(
     dbPath: nil,
     userId: nil,
+    libraryId: nil,
     accessMode: .hydrating,
     canAttemptStreaming: false
   )
@@ -25,11 +27,13 @@ struct AssistantRuntimeContext: Codable, Equatable, Sendable {
   init(
     dbPath: String?,
     userId: String?,
+    libraryId: String?,
     accessMode: AssistantAccessMode,
     canAttemptStreaming: Bool
   ) {
     self.dbPath = dbPath?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     self.userId = userId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    self.libraryId = libraryId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
     self.accessMode = accessMode
     self.canAttemptStreaming = canAttemptStreaming
   }
@@ -46,6 +50,7 @@ struct AssistantRuntimeContext: Codable, Equatable, Sendable {
     self.init(
       dbPath: dictionary["dbPath"] as? String,
       userId: dictionary["userId"] as? String,
+      libraryId: dictionary["libraryId"] as? String,
       accessMode: accessMode,
       canAttemptStreaming: canAttemptStreaming
     )

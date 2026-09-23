@@ -146,7 +146,7 @@ final class AssistantCatalogReader: @unchecked Sendable {
       return []
     }
     switch query(AssistantSearchCriteria(text: text, sort: .relevance, limit: limit)) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       request.complete(resultCount: 0, outcome: .unavailable)
       return []
     case .success(let page):
@@ -169,7 +169,7 @@ final class AssistantCatalogReader: @unchecked Sendable {
         limit: limit
       )
     ) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       request.complete(resultCount: 0, outcome: .unavailable)
       return []
     case .success(let page):
@@ -181,23 +181,29 @@ final class AssistantCatalogReader: @unchecked Sendable {
   func query(_ criteria: AssistantSearchCriteria) -> AssistantCatalogRead {
     let request = AssistantDiagnostics.begin(.query, inputKind: criteria.diagnosticInputKind)
     let context = AssistantRuntimeContextStore.shared.current()
-    let result: AssistantSearchResult? = read(context: context) { db, userId, downloadedOnly in
+    let result = readInLibrary(context: context) { db, userId, libraryId, downloadedOnly in
       try Self.executeQuery(
         db: db,
         userId: userId,
+        libraryId: libraryId,
         downloadedOnly: downloadedOnly,
         criteria: criteria
       )
     }
-    guard let result else {
+    switch result {
+    case .libraryRequired:
+      request.complete(resultCount: 0, outcome: .unavailable)
+      return .libraryRequired
+    case .unavailable:
       request.complete(resultCount: 0, outcome: .unavailable)
       return .unavailable
+    case .value(let page):
+      request.complete(
+        resultCount: page.books.count,
+        outcome: page.books.isEmpty ? .empty : .success
+      )
+      return .success(page)
     }
-    request.complete(
-      resultCount: result.books.count,
-      outcome: result.books.isEmpty ? .empty : .success
-    )
-    return .success(result)
   }
 
   func playbackMatch(text: String, limit: Int = 10) -> AssistantPlaybackMatch {
@@ -206,6 +212,8 @@ final class AssistantCatalogReader: @unchecked Sendable {
     switch query(AssistantSearchCriteria(text: text, sort: .relevance, limit: limit)) {
     case .unavailable:
       return .unavailable
+    case .libraryRequired:
+      return .libraryRequired
     case .success(let page):
       let exactTitles = page.books.filter { $0.titleNormalized == normalized }
       if exactTitles.count == 1, let unique = exactTitles.first {
@@ -232,21 +240,27 @@ final class AssistantCatalogReader: @unchecked Sendable {
       return .success([])
     }
     let context = AssistantRuntimeContextStore.shared.current()
-    let result: [AssistantAuthorCredit]? = read(context: context) { db, userId, downloadedOnly in
+    let result = readInLibrary(context: context) { db, userId, libraryId, downloadedOnly in
       try Self.executeAuthorQuery(
         db: db,
         userId: userId,
+        libraryId: libraryId,
         downloadedOnly: downloadedOnly,
         matching: text,
         limit: criteriaLimit
       )
     }
-    guard let result else {
+    switch result {
+    case .libraryRequired:
+      request.complete(resultCount: 0, outcome: .unavailable)
+      return .libraryRequired
+    case .unavailable:
       request.complete(resultCount: 0, outcome: .unavailable)
       return .unavailable
+    case .value(let credits):
+      request.complete(resultCount: credits.count, outcome: credits.isEmpty ? .empty : .success)
+      return .success(credits)
     }
-    request.complete(resultCount: result.count, outcome: result.isEmpty ? .empty : .success)
-    return .success(result)
   }
 
   func author(byID rawID: String) -> AssistantAuthorCredit? {
@@ -260,23 +274,21 @@ final class AssistantCatalogReader: @unchecked Sendable {
       request.complete(resultCount: 0, outcome: .unavailable)
       return nil
     }
-    let rows: [AssistantAuthorCredit]? = read(context: context) { db, userId, downloadedOnly in
-      if let credit = try Self.executeAuthorLookup(
+    let result = readInLibrary(context: context) { db, userId, libraryId, downloadedOnly in
+      try Self.executeAuthorLookup(
         db: db,
         userId: userId,
+        libraryId: libraryId,
         downloadedOnly: downloadedOnly,
         normalized: parsed.normalized
-      ) {
-        return [credit]
-      }
-      return []
+      )
     }
-    guard let rows else {
+    guard case .value(let credit) = result else {
       request.complete(resultCount: 0, outcome: .unavailable)
       return nil
     }
-    request.complete(resultCount: rows.count, outcome: rows.isEmpty ? .empty : .success)
-    return rows.first
+    request.complete(resultCount: credit == nil ? 0 : 1, outcome: credit == nil ? .empty : .success)
+    return credit
   }
 
   func suggested(limit: Int = 25) -> [AssistantBookRow] {
@@ -286,17 +298,17 @@ final class AssistantCatalogReader: @unchecked Sendable {
       return []
     }
     let context = AssistantRuntimeContextStore.shared.current()
-    let result: [AssistantBookRow]? = read(context: context) { db, userId, downloadedOnly in
-      var sql = Self.selectColumns + " WHERE user_id = ?"
+    let result = readInLibrary(context: context) { db, userId, libraryId, downloadedOnly in
+      var sql = Self.selectColumns + " WHERE user_id = ? AND library_id = ?"
       if downloadedOnly { sql += " AND is_downloaded = 1" }
       sql += " ORDER BY (progress_percent > 0 AND is_finished = 0) DESC, is_downloaded DESC, is_favorite DESC, last_played_at DESC, title COLLATE NOCASE LIMIT ?"
       return try Self.query(
         db: db,
         sql: sql,
-        values: [userId],
+        values: [userId, libraryId],
         integer: Int32(min(max(limit, 1), 100))
       )
-    }
+    }.value
     let rows = result ?? []
     request.complete(
       resultCount: rows.count,
@@ -312,17 +324,17 @@ final class AssistantCatalogReader: @unchecked Sendable {
       return []
     }
     let context = AssistantRuntimeContextStore.shared.current()
-    let result: [AssistantBookRow]? = read(context: context) { db, userId, downloadedOnly in
-      var sql = Self.selectColumns + " WHERE user_id = ?"
+    let result = readInLibrary(context: context) { db, userId, libraryId, downloadedOnly in
+      var sql = Self.selectColumns + " WHERE user_id = ? AND library_id = ?"
       if downloadedOnly { sql += " AND is_downloaded = 1" }
       sql += " ORDER BY title COLLATE NOCASE LIMIT ?"
       return try Self.query(
         db: db,
         sql: sql,
-        values: [userId],
+        values: [userId, libraryId],
         integer: Int32(min(max(limit, 1), 10_000))
       )
-    }
+    }.value
     let rows = result ?? []
     request.complete(
       resultCount: rows.count,
@@ -346,6 +358,29 @@ final class AssistantCatalogReader: @unchecked Sendable {
       outcome: result == nil ? .unavailable : (rows.isEmpty ? .empty : .success)
     )
     return rows.first
+  }
+
+  private enum LibraryRead<T> {
+    case libraryRequired
+    case unavailable
+    case value(T)
+
+    var value: T? {
+      if case .value(let value) = self { return value }
+      return nil
+    }
+  }
+
+  private func readInLibrary<T>(
+    context: AssistantRuntimeContext,
+    body: (OpaquePointer, String, String, Bool) throws -> T
+  ) -> LibraryRead<T> {
+    guard let libraryId = context.libraryId else { return .libraryRequired }
+    let result = read(context: context) { db, userId, downloadedOnly in
+      try body(db, userId, libraryId, downloadedOnly)
+    }
+    guard let result else { return .unavailable }
+    return .value(result)
   }
 
   private func read<T>(
@@ -407,11 +442,12 @@ final class AssistantCatalogReader: @unchecked Sendable {
   private static func executeQuery(
     db: OpaquePointer,
     userId: String,
+    libraryId: String,
     downloadedOnly: Bool,
     criteria: AssistantSearchCriteria
   ) throws -> AssistantSearchResult {
-    var whereSQL = "user_id = ?"
-    var values: [SQLValue] = [.text(userId)]
+    var whereSQL = "user_id = ? AND library_id = ?"
+    var values: [SQLValue] = [.text(userId), .text(libraryId)]
 
     if downloadedOnly || criteria.downloaded == true {
       whereSQL += " AND is_downloaded = 1"
@@ -483,12 +519,13 @@ final class AssistantCatalogReader: @unchecked Sendable {
   private static func executeAuthorQuery(
     db: OpaquePointer,
     userId: String,
+    libraryId: String,
     downloadedOnly: Bool,
     matching: String?,
     limit: Int
   ) throws -> [AssistantAuthorCredit] {
-    var whereSQL = "user_id = ? AND author_normalized != ''"
-    var values: [SQLValue] = [.text(userId)]
+    var whereSQL = "user_id = ? AND library_id = ? AND author_normalized != ''"
+    var values: [SQLValue] = [.text(userId), .text(libraryId)]
     if downloadedOnly { whereSQL += " AND is_downloaded = 1" }
     if let matching {
       let tokens = AssistantText.tokens(from: matching)
@@ -518,20 +555,21 @@ final class AssistantCatalogReader: @unchecked Sendable {
   private static func executeAuthorLookup(
     db: OpaquePointer,
     userId: String,
+    libraryId: String,
     downloadedOnly: Bool,
     normalized: String
   ) throws -> AssistantAuthorCredit? {
     var sql = """
       SELECT MIN(author), author_normalized, COUNT(*)
       FROM assistant_catalog
-      WHERE user_id = ? AND author_normalized = ?
+      WHERE user_id = ? AND library_id = ? AND author_normalized = ?
       """
     if downloadedOnly { sql += " AND is_downloaded = 1" }
     sql += " GROUP BY author_normalized LIMIT 1"
     return try queryAuthors(
       db: db,
       sql: sql,
-      values: [.text(userId), .text(normalized)],
+      values: [.text(userId), .text(libraryId), .text(normalized)],
       userId: userId
     ).first
   }

@@ -32,7 +32,7 @@ struct AssistantAuthorQuery: EntityQuery, EntityStringQuery {
 
   func entities(matching string: String) async throws -> [AssistantAuthorEntity] {
     switch AssistantCatalogReader.shared.authors(matching: string, limit: 10) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       return []
     case .success(let credits):
       return credits.map(AssistantAuthorEntity.init)
@@ -41,7 +41,7 @@ struct AssistantAuthorQuery: EntityQuery, EntityStringQuery {
 
   func suggestedEntities() async throws -> [AssistantAuthorEntity] {
     switch AssistantCatalogReader.shared.authors(matching: nil, limit: 25) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       return []
     case .success(let credits):
       return credits.map(AssistantAuthorEntity.init)

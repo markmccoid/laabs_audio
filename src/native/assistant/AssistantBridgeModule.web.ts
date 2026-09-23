@@ -3,15 +3,12 @@ import type {
   AssistantActionRequest,
   AssistantActionResult,
   AssistantBridgeEvents,
+  AssistantPendingSearch,
+  AssistantRuntimeContextPayload,
 } from "./AssistantBridge.types";
 
 class AssistantBridgeModule extends NativeModule<AssistantBridgeEvents> {
-  publishRuntimeContext(_context: {
-    dbPath: string;
-    userId: string | null;
-    accessMode: string;
-    canAttemptStreaming: boolean;
-  }): void {}
+  publishRuntimeContext(_context: AssistantRuntimeContextPayload): void {}
 
   async activateRuntimeAndTakePending(): Promise<AssistantActionRequest | null> {
     return null;
@@ -24,6 +21,14 @@ class AssistantBridgeModule extends NativeModule<AssistantBridgeEvents> {
   }
 
   takePendingOpen(): string | null {
+    return null;
+  }
+
+  peekPendingSearch(): AssistantPendingSearch | null {
+    return null;
+  }
+
+  takePendingSearch(): AssistantPendingSearch | null {
     return null;
   }
 

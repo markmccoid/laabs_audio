@@ -16,14 +16,7 @@ struct AssistantCatalogTests {
     createSchema(db)
     seed(db)
 
-    AssistantRuntimeContextStore.shared.publish(
-      AssistantRuntimeContext(
-        dbPath: dbURL.path,
-        userId: "user-a",
-        accessMode: .serverBrowsing,
-        canAttemptStreaming: true
-      )
-    )
+    publish(dbPath: dbURL.path, userId: "user-a", libraryId: "lib-1")
 
     assertNormalize()
     assertSharedFixtures()
@@ -35,9 +28,133 @@ struct AssistantCatalogTests {
     assertSearchCopy()
     assertWrongUserAndContract(db: db, dbPath: dbURL.path)
     assertDownloadedSession(dbPath: dbURL.path)
+    assertLibraryScope(dbPath: dbURL.path)
+    assertLibraryRequired(dbPath: dbURL.path)
+    assertLegacyContextDecodes()
 
     AssistantRuntimeContextStore.shared.publish(.disabled)
     print("Assistant catalog query tests passed.")
+  }
+
+  static func publish(
+    dbPath: String,
+    userId: String,
+    libraryId: String?,
+    accessMode: AssistantAccessMode = .serverBrowsing,
+    canAttemptStreaming: Bool = true
+  ) {
+    AssistantRuntimeContextStore.shared.publish(
+      AssistantRuntimeContext(
+        dbPath: dbPath,
+        userId: userId,
+        libraryId: libraryId,
+        accessMode: accessMode,
+        canAttemptStreaming: canAttemptStreaming
+      )
+    )
+  }
+
+  static func assertLibraryScope(dbPath: String) {
+    publish(dbPath: dbPath, userId: "user-a", libraryId: "lib-1")
+
+    switch AssistantCatalogReader.shared.query(AssistantSearchCriteria(text: "Dune")) {
+    case .unavailable, .libraryRequired:
+      preconditionFailure("library-scoped text query unavailable")
+    case .success(let page):
+      precondition(page.totalCount == 2, "expected 2 lib-1 Dune books, got \(page.totalCount)")
+      precondition(page.books.allSatisfy { $0.libraryId == "lib-1" })
+      precondition(!page.books.contains(where: { $0.libraryItemId == "lib2-dune" }))
+    }
+
+    switch AssistantCatalogReader.shared.query(
+      AssistantSearchCriteria(author: .combinedCreditContains("Frank Herbert"), sort: .title)
+    ) {
+    case .unavailable, .libraryRequired:
+      preconditionFailure("library-scoped author query unavailable")
+    case .success(let page):
+      precondition(page.totalCount == 2, "expected 2 lib-1 Herbert books, got \(page.totalCount)")
+      precondition(page.books.allSatisfy { $0.libraryId == "lib-1" })
+    }
+
+    switch AssistantCatalogReader.shared.authors(matching: "Herbert", limit: 10) {
+    case .unavailable, .libraryRequired:
+      preconditionFailure("library-scoped authors unavailable")
+    case .success(let credits):
+      let herbert = credits.first { $0.normalized == "frank herbert" }
+      precondition(herbert?.bookCount == 2, "author bookCount must exclude lib-2 rows")
+      precondition(!credits.contains(where: { $0.normalized == "lib two only author" }))
+    }
+    precondition(AssistantCatalogReader.shared.author(byID: "user-a|frank herbert")?.bookCount == 2)
+    precondition(AssistantCatalogReader.shared.author(byID: "user-a|lib two only author") == nil)
+
+    switch AssistantCatalogReader.shared.playbackMatch(text: "Homogenic") {
+    case .unique(let row):
+      precondition(row.libraryItemId == "homogenic", "lib-2 duplicate must not make Homogenic ambiguous")
+    default:
+      preconditionFailure("Homogenic should resolve uniquely within lib-1")
+    }
+
+    let suggested = AssistantCatalogReader.shared.suggested(limit: 100)
+    precondition(!suggested.isEmpty)
+    precondition(suggested.allSatisfy { $0.libraryId == "lib-1" }, "suggested must exclude lib-2")
+    let all = AssistantCatalogReader.shared.all(limit: 100)
+    precondition(all.count == 18, "all() should return the 18 lib-1 rows, got \(all.count)")
+    precondition(all.allSatisfy { $0.libraryId == "lib-1" }, "all() must exclude lib-2")
+
+    let crossLibrary = AssistantCatalogReader.shared.book(libraryItemID: "lib2-dune")
+    precondition(crossLibrary?.libraryId == "lib-2", "direct id lookups stay user-scoped")
+    precondition(AssistantCatalogReader.shared.book(byID: "user-a|lib2-homogenic")?.libraryId == "lib-2")
+  }
+
+  static func assertLibraryRequired(dbPath: String) {
+    publish(dbPath: dbPath, userId: "user-a", libraryId: nil)
+    precondition(AssistantRuntimeContextStore.shared.current().libraryId == nil)
+    switch AssistantCatalogReader.shared.query(AssistantSearchCriteria(text: "Dune")) {
+    case .libraryRequired:
+      break
+    case .unavailable, .success:
+      preconditionFailure("query without a library must be .libraryRequired")
+    }
+    switch AssistantCatalogReader.shared.authors(matching: nil, limit: 5) {
+    case .libraryRequired:
+      break
+    case .unavailable, .success:
+      preconditionFailure("authors without a library must be .libraryRequired")
+    }
+    precondition(AssistantCatalogReader.shared.playbackMatch(text: "Dune") == .libraryRequired)
+    precondition(AssistantCatalogReader.shared.suggested().isEmpty)
+    precondition(AssistantCatalogReader.shared.book(libraryItemID: "dune")?.title == "Dune")
+    precondition(AssistantCatalogReader.shared.book(libraryItemID: "lib2-dune")?.libraryId == "lib-2")
+    precondition(AssistantCatalogReader.shared.mostRecent() == nil)
+
+    publish(dbPath: dbPath, userId: "user-a", libraryId: "   ")
+    precondition(AssistantRuntimeContextStore.shared.current().libraryId == nil, "blank libraryId trims to nil")
+    publish(dbPath: dbPath, userId: "user-a", libraryId: "lib-1")
+  }
+
+  static func assertLegacyContextDecodes() {
+    let legacy = """
+      {"dbPath":"/tmp/x.sqlite","userId":"user-a","accessMode":"serverBrowsing","canAttemptStreaming":true}
+      """
+    let context = try! JSONDecoder().decode(AssistantRuntimeContext.self, from: Data(legacy.utf8))
+    precondition(context.libraryId == nil)
+    precondition(context.userId == "user-a")
+    let dictionary = AssistantRuntimeContext(dictionary: [
+      "dbPath": "/tmp/x.sqlite",
+      "userId": "user-a",
+      "libraryId": " lib-9 ",
+      "accessMode": "serverBrowsing",
+      "canAttemptStreaming": true,
+    ])
+    precondition(dictionary?.libraryId == "lib-9")
+    let nullLibrary = AssistantRuntimeContext(dictionary: [
+      "dbPath": "/tmp/x.sqlite",
+      "userId": "user-a",
+      "libraryId": NSNull(),
+      "accessMode": "serverBrowsing",
+      "canAttemptStreaming": true,
+    ])
+    precondition(nullLibrary?.libraryId == nil)
   }
 
   static func assertNormalize() {
@@ -78,7 +195,7 @@ struct AssistantCatalogTests {
     precondition(AssistantCatalogReader.shared.search(text: "%%%").isEmpty)
     precondition(AssistantCatalogReader.shared.search(text: "___").isEmpty)
     switch AssistantCatalogReader.shared.query(AssistantSearchCriteria(text: "%_%")) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       preconditionFailure("wildcard query unavailable")
     case .success(let page):
       precondition(page.totalCount == 0, "literal wildcards must not match the catalog")
@@ -87,7 +204,7 @@ struct AssistantCatalogTests {
     switch AssistantCatalogReader.shared.query(
       AssistantSearchCriteria(author: .combinedCreditContains("%%%"))
     ) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       preconditionFailure("author wildcard query unavailable")
     case .success(let page):
       precondition(page.totalCount == 0, "empty author tokens must not return the whole catalog")
@@ -95,7 +212,7 @@ struct AssistantCatalogTests {
     switch AssistantCatalogReader.shared.query(
       AssistantSearchCriteria(author: .combinedCreditEquals("!!!"))
     ) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       preconditionFailure("author equals wildcard query unavailable")
     case .success(let page):
       precondition(page.totalCount == 0, "empty author equality must not match empty credits")
@@ -111,7 +228,7 @@ struct AssistantCatalogTests {
         offset: 0
       )
     ) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       preconditionFailure("author query unavailable")
     case .success(let page):
       precondition(page.totalCount == 12, "expected 12 overflow books, got \(page.totalCount)")
@@ -125,7 +242,7 @@ struct AssistantCatalogTests {
           offset: 10
         )
       ) {
-      case .unavailable:
+      case .unavailable, .libraryRequired:
         preconditionFailure("author page two unavailable")
       case .success(let second):
         precondition(second.totalCount == 12)
@@ -140,7 +257,7 @@ struct AssistantCatalogTests {
     switch AssistantCatalogReader.shared.query(
       AssistantSearchCriteria(author: .combinedCreditEquals("Stephen King"))
     ) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       preconditionFailure("equals query unavailable")
     case .success(let page):
       precondition(page.books.contains(where: { $0.title == "The Shining" }))
@@ -171,7 +288,7 @@ struct AssistantCatalogTests {
 
   static func assertAuthorCredits() {
     switch AssistantCatalogReader.shared.authors(matching: nil, limit: 25) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       preconditionFailure("author list unavailable")
     case .success(let credits):
       let overflow = credits.first { $0.displayName == "Overflow Author" }
@@ -183,7 +300,7 @@ struct AssistantCatalogTests {
     }
 
     switch AssistantCatalogReader.shared.authors(matching: "king", limit: 10) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       preconditionFailure("author match unavailable")
     case .success(let credits):
       precondition(!credits.contains(where: { $0.normalized == "overflow author" }))
@@ -231,58 +348,36 @@ struct AssistantCatalogTests {
   }
 
   static func assertWrongUserAndContract(db: OpaquePointer, dbPath: String) {
-    AssistantRuntimeContextStore.shared.publish(
-      AssistantRuntimeContext(
-        dbPath: dbPath,
-        userId: "user-b",
-        accessMode: .serverBrowsing,
-        canAttemptStreaming: true
-      )
-    )
+    publish(dbPath: dbPath, userId: "user-b", libraryId: "lib-1")
     switch AssistantCatalogReader.shared.query(AssistantSearchCriteria(text: "Shining")) {
     case .success(let page):
       precondition(page.totalCount == 0, "user-b must not see user-a books")
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       preconditionFailure("missing user-b contract should still be a supported empty catalog")
     }
 
     exec(db, "UPDATE assistant_catalog_meta SET contract_version = 2 WHERE user_id = 'user-a'")
-    AssistantRuntimeContextStore.shared.publish(
-      AssistantRuntimeContext(
-        dbPath: dbPath,
-        userId: "user-a",
-        accessMode: .serverBrowsing,
-        canAttemptStreaming: true
-      )
-    )
+    publish(dbPath: dbPath, userId: "user-a", libraryId: "lib-1")
     switch AssistantCatalogReader.shared.query(AssistantSearchCriteria(text: "Shining")) {
     case .unavailable:
       break
-    case .success:
+    case .success, .libraryRequired:
       preconditionFailure("old contract must be unavailable, not an empty success")
     }
     exec(db, "UPDATE assistant_catalog_meta SET contract_version = 1 WHERE user_id = 'user-a'")
-    AssistantRuntimeContextStore.shared.publish(
-      AssistantRuntimeContext(
-        dbPath: dbPath,
-        userId: "user-a",
-        accessMode: .serverBrowsing,
-        canAttemptStreaming: true
-      )
-    )
+    publish(dbPath: dbPath, userId: "user-a", libraryId: "lib-1")
   }
 
   static func assertDownloadedSession(dbPath: String) {
-    AssistantRuntimeContextStore.shared.publish(
-      AssistantRuntimeContext(
-        dbPath: dbPath,
-        userId: "user-a",
-        accessMode: .downloadedSessionOnly,
-        canAttemptStreaming: false
-      )
+    publish(
+      dbPath: dbPath,
+      userId: "user-a",
+      libraryId: "lib-1",
+      accessMode: .downloadedSessionOnly,
+      canAttemptStreaming: false
     )
     switch AssistantCatalogReader.shared.query(AssistantSearchCriteria(text: "Shining")) {
-    case .unavailable:
+    case .unavailable, .libraryRequired:
       preconditionFailure("downloaded session query unavailable")
     case .success(let page):
       precondition(page.books.allSatisfy(\.isDownloaded))
@@ -377,11 +472,14 @@ struct AssistantCatalogTests {
         author: "Overflow Author"
       )
     }
+    insert(db, id: "lib2-dune", title: "Dune", author: "Frank Herbert", libraryId: "lib-2")
+    insert(db, id: "lib2-homogenic", title: "Homogenic", author: "Björk", libraryId: "lib-2")
+    insert(db, id: "lib2-only", title: "Lib Two Only", author: "Lib Two Only Author", libraryId: "lib-2")
     exec(
       db,
       """
       INSERT INTO assistant_catalog_meta(user_id, built_at, row_count, contract_version)
-      VALUES ('user-a', 1, 18, 1), ('user-b', 1, 0, 1);
+      VALUES ('user-a', 1, 21, 1), ('user-b', 1, 0, 1);
       """
     )
   }
@@ -392,7 +490,8 @@ struct AssistantCatalogTests {
     title: String,
     author: String,
     narrator: String = "",
-    downloaded: Bool = false
+    downloaded: Bool = false,
+    libraryId: String = "lib-1"
   ) {
     let titleNormalized = AssistantText.normalize(title)
     let authorNormalized = AssistantText.normalize(author)
@@ -402,20 +501,21 @@ struct AssistantCatalogTests {
       INSERT INTO assistant_catalog (
         user_id, library_item_id, library_id, title, author, narrator, search_text,
         title_normalized, author_normalized, narrator_normalized, is_downloaded, updated_at
-      ) VALUES ('user-a', ?, 'lib-1', ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      ) VALUES ('user-a', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
       """
     var statement: OpaquePointer?
     sqlite3_prepare_v2(db, sql, -1, &statement, nil)
     defer { sqlite3_finalize(statement) }
     sqlite3_bind_text(statement, 1, id, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_text(statement, 2, title, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_text(statement, 3, author, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_text(statement, 4, narrator, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_text(statement, 5, searchText, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_text(statement, 6, titleNormalized, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_text(statement, 7, authorNormalized, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_text(statement, 8, narratorNormalized, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-    sqlite3_bind_int(statement, 9, downloaded ? 1 : 0)
+    sqlite3_bind_text(statement, 2, libraryId, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_text(statement, 3, title, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_text(statement, 4, author, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_text(statement, 5, narrator, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_text(statement, 6, searchText, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_text(statement, 7, titleNormalized, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_text(statement, 8, authorNormalized, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_text(statement, 9, narratorNormalized, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+    sqlite3_bind_int(statement, 10, downloaded ? 1 : 0)
     precondition(sqlite3_step(statement) == SQLITE_DONE, "insert failed for \(id)")
   }
 

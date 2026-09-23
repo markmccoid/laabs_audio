@@ -23,7 +23,7 @@ struct AssistantBooksAudiobookEntity: Identifiable {
     libraryItemId = row.libraryItemId
     title = row.title
     author = row.author
-    url = URL(string: "laabsaudio:///\(row.libraryItemId)")
+    url = AssistantBookLinks.url(libraryItemId: row.libraryItemId)
     seriesTitle = row.seriesName
     purchaseDate = nil
     genre = nil
@@ -51,7 +51,7 @@ struct AssistantBooksAudiobookQuery: EntityQuery, EntityStringQuery {
 
   func entities(matching string: String) async throws -> [AssistantBooksAudiobookEntity] {
     switch AssistantCatalogReader.shared.playbackMatch(text: string) {
-    case .unavailable, .none:
+    case .unavailable, .libraryRequired, .none:
       return []
     case .unique(let row):
       return [AssistantBooksAudiobookEntity(row: row)]

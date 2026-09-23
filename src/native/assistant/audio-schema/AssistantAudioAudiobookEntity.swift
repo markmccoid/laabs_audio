@@ -57,7 +57,7 @@ struct AssistantAudioAudiobookQuery: EntityQuery, EntityStringQuery {
 
   func entities(matching string: String) async throws -> [AssistantAudioAudiobookEntity] {
     switch AssistantCatalogReader.shared.playbackMatch(text: string) {
-    case .unavailable, .none:
+    case .unavailable, .libraryRequired, .none:
       return []
     case .unique(let row):
       return [AssistantAudioAudiobookEntity(row: row)]
@@ -69,6 +69,21 @@ struct AssistantAudioAudiobookQuery: EntityQuery, EntityStringQuery {
   func suggestedEntities() async throws -> [AssistantAudioAudiobookEntity] {
     AssistantCatalogReader.shared.suggested(limit: 25)
       .map { AssistantAudioAudiobookEntity(row: $0) }
+  }
+}
+
+@available(iOS 27.0, *)
+struct OpenAudioSchemaAudiobookIntent: OpenIntent {
+  static var title: LocalizedStringResource = "Open Audiobook"
+  static var isDiscoverable = false
+  static var openAppWhenRun = true
+
+  @Parameter(title: "Audiobook")
+  var target: AssistantAudioAudiobookEntity
+
+  func perform() async throws -> some IntentResult & OpensIntent {
+    AssistantPendingOpen.store(libraryItemId: target.libraryItemId)
+    return .result(opensIntent: OpenLAABSIntent())
   }
 }
 
@@ -90,7 +105,7 @@ struct AssistantAudioSearchQuery: IntentValueQuery {
     switch audioSearch.criteria {
     case .searchQuery(let query):
       switch AssistantCatalogReader.shared.playbackMatch(text: query) {
-      case .unavailable, .none:
+      case .unavailable, .libraryRequired, .none:
         return []
       case .unique(let row):
         return [.audiobook(AssistantAudioAudiobookEntity(row: row))]
