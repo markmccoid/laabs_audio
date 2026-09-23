@@ -200,7 +200,7 @@ describe("handleAssistantAction", () => {
     });
   });
 
-  it("pauses only audible playback", async () => {
+  it("pauses audible playback and a book Siri already interrupted", async () => {
     mockPlaybackState = playbackState({ playbackState: "playing" });
     await expect(handleAssistantAction({ ...requestContext, id: "action-3", kind: "pause" })).resolves.toEqual({
       ok: true,
@@ -209,7 +209,18 @@ describe("handleAssistantAction", () => {
     expect(mockPause).toHaveBeenCalledTimes(1);
 
     mockPlaybackState = playbackState({ playbackState: "paused" });
-    await expect(handleAssistantAction({ ...requestContext, id: "action-4", kind: "pause" })).resolves.toMatchObject({
+    await expect(handleAssistantAction({ ...requestContext, id: "action-4", kind: "pause" })).resolves.toEqual({
+      ok: true,
+      kind: "pause",
+    });
+    expect(mockPause).toHaveBeenCalledTimes(2);
+
+    mockPlaybackState = playbackState({
+      playbackState: "paused",
+      libraryItemId: null,
+      queue: [],
+    });
+    await expect(handleAssistantAction({ ...requestContext, id: "action-4b", kind: "pause" })).resolves.toMatchObject({
       ok: false,
       code: "nothingPlaying",
     });

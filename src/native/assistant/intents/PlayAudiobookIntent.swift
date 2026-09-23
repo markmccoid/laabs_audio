@@ -1,6 +1,6 @@
 import AppIntents
 
-struct PlayAudiobookIntent: AudioStartingIntent, ForegroundContinuableIntent {
+struct PlayAudiobookIntent: AudioPlaybackIntent, ForegroundContinuableIntent {
   static var title: LocalizedStringResource = "Play an Audiobook"
   static var description = IntentDescription("Plays an audiobook from your LAABS Audio library.")
   static var openAppWhenRun = false
@@ -19,37 +19,26 @@ struct PlayAudiobookIntent: AudioStartingIntent, ForegroundContinuableIntent {
     Summary("Play \(\.$book)")
   }
 
-  func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
+  func perform() async throws -> some IntentResult {
     guard let book else {
       let outcome = await AssistantActionDispatcher.shared.perform(
         AssistantActionRequest(kind: .resume)
       )
-      if case .failure(let code, _) = outcome, code == "signInRequired" {
-        try await requestToContinueInForeground("Open LAABS Audio to choose a session.")
-      }
-      return result(outcome: outcome, book: nil)
+      try await continueIfNeeded(outcome)
+      return try AssistantIntentSupport.finishPlaybackCommand(outcome)
     }
 
     let context = AssistantRuntimeContextStore.shared.current()
     guard let row = AssistantCatalogReader.shared.book(byID: book.id) else {
-      return result(
-        outcome: .failure(code: "notFound", message: "Audiobook not found"),
-        book: book
-      )
+      throw AssistantSpokenFailure(AssistantIntentSupport.failureMessage(code: "notFound"))
     }
 
     switch AssistantAccessPolicy.canPlay(row, context) {
     case .signInRequired:
       try await requestToContinueInForeground("Open LAABS Audio to choose a session.")
-      return result(
-        outcome: .failure(code: "signInRequired", message: "Sign in required"),
-        book: book
-      )
+      throw AssistantSpokenFailure(AssistantIntentSupport.failureMessage(code: "signInRequired"))
     case .cannotStream:
-      return result(
-        outcome: .failure(code: "cannotStream", message: "Download required"),
-        book: book
-      )
+      throw AssistantSpokenFailure(AssistantIntentSupport.failureMessage(code: "cannotStream"))
     case .allowed:
       if await AssistantActionDispatcher.shared.runtimeIsReady() == false {
         try await requestToContinueInForeground("Open LAABS Audio to play this audiobook.")
@@ -57,32 +46,14 @@ struct PlayAudiobookIntent: AudioStartingIntent, ForegroundContinuableIntent {
       let outcome = await AssistantActionDispatcher.shared.perform(
         AssistantActionRequest(kind: .play, libraryItemId: book.libraryItemId)
       )
-      return result(outcome: outcome, book: book)
+      try await continueIfNeeded(outcome)
+      return try AssistantIntentSupport.finishPlaybackCommand(outcome)
     }
   }
 
-  private func result(
-    outcome: AssistantActionOutcome,
-    book: AssistantBookEntity?
-  ) -> some IntentResult & ProvidesDialog & ShowsSnippetView {
-    switch outcome {
-    case .playback(let title, _):
-      let author = book?.author.map { " by \($0)" } ?? ""
-      return .result(dialog: "Playing \(title)\(author).") {
-        AssistantResultSnippet(heading: "Now playing", books: book.map { [$0] } ?? [])
-      }
-    case .failure(let code, _):
-      return .result(dialog: AssistantIntentSupport.failureDialog(code: code)) {
-        AssistantResultSnippet(
-          heading: AssistantIntentSupport.failureHeading(code: code),
-          books: book.map { [$0] } ?? []
-        )
-      }
-    default:
-      return .result(dialog: "LAABS Audio returned an unexpected playback result.") {
-        AssistantResultSnippet(heading: "Playback failed", books: book.map { [$0] } ?? [])
-      }
+  private func continueIfNeeded(_ outcome: AssistantActionOutcome) async throws {
+    if case .failure(let code, _) = outcome, code == "signInRequired" {
+      try await requestToContinueInForeground("Open LAABS Audio to choose a session.")
     }
   }
 }
-

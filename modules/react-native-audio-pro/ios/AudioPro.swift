@@ -447,8 +447,9 @@ class AudioPro: RCTEventEmitter {
 			log("wasPlayingBeforeInterruption at end:", wasPlayingBeforeInterruption)
 			log("shouldResume:", options.contains(.shouldResume))
 
-			// If playback should resume and we have permission to do so
-			if wasPlayingBeforeInterruption && options.contains(.shouldResume) {
+			// Resume only if the user did not pause while Siri held the session.
+			// pause() clears shouldBePlaying; the interruption itself does not.
+			if wasPlayingBeforeInterruption && shouldBePlaying && options.contains(.shouldResume) {
 				log("Interruption ended with resume option, resuming playback")
 
 				// Read (and clear) the position we saved when the interruption began so we can

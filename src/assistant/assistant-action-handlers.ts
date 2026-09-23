@@ -173,7 +173,17 @@ const resumePersistedPlayback = async (): Promise<AssistantActionResult> => {
 };
 
 const pauseActivePlayback = async (): Promise<AssistantActionResult> => {
-  if (playbackStore.getState().playbackState !== "playing") {
+  const state = playbackStore.getState();
+  const hasLoadedPlayback =
+    Boolean(state.libraryItemId) &&
+    (state.queue.length > 0 ||
+      state.playbackState === "playing" ||
+      state.playbackState === "paused" ||
+      state.playbackState === "ready" ||
+      state.playbackState === "loading");
+  // Siri's own voice already pauses the player before this runs. Pausing a
+  // loaded book still clears the native "should resume when Siri leaves" flag.
+  if (!hasLoadedPlayback) {
     return failure("nothingPlaying", "Nothing is currently playing.");
   }
   try {

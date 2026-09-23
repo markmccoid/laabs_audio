@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-23` `pending` - Make Siri Play, Resume, and Pause finish without a spoken reply, so Siri’s own voice no longer pauses the book it just started. Pause of a book Siri already interrupted stays paused when Siri leaves.
+  Tester focus: with a book playing, say “Pause LAABS Audio”; it should stay paused and Siri should dismiss quietly. Say “Play LAABS Audio” or “Resume LAABS Audio”; playback should start and keep going after Siri leaves. With nothing loaded, Pause should still say nothing is playing.
+
 - `2026-09-23` `pending` - Scope Siri search, author lists, play-by-name, Suggested books, and Spotlight to the currently open library, and send “show all results” / “Search … in LAABS Audio” into the normal Search tab with the spoken text filled in. Open from a Siri card retries a late pending destination so it no longer lands on Home. Spoken phrases no longer interpolate a book or author name (those only knew the top 25 titles/authors). Bookmark phrases no longer use the word “book,” so “find books by …” is not heard as a bookmark. Tapping Siri’s app-icon link for a found title opens that book.
   Tester focus: install this build (a JS reload is not enough). Confirm “Search Stephen King in LAABS Audio” opens the Search tab with that text, only in the open library. Say “Find books by an author in LAABS Audio,” then give the name when asked; empty results should offer to open Search. Open from a result card should land on the book even on a cold launch. “Save my place in LAABS Audio” still bookmarks; “Find books by Tim Ferriss in LAABS Audio” must not bookmark.
 

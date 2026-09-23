@@ -1,8 +1,16 @@
 import AppIntents
 import Foundation
 
+struct AssistantSpokenFailure: Error, CustomLocalizedStringResourceConvertible {
+  var localizedStringResource: LocalizedStringResource
+
+  init(_ message: String) {
+    localizedStringResource = "\(message)"
+  }
+}
+
 enum AssistantIntentSupport {
-  static func failureDialog(code: String) -> IntentDialog {
+  static func failureMessage(code: String) -> String {
     switch code {
     case "nothingPlaying":
       return "Nothing is playing in LAABS Audio."
@@ -18,6 +26,21 @@ enum AssistantIntentSupport {
       return "LAABS Audio is already handling another request."
     default:
       return "LAABS Audio couldn't complete that request."
+    }
+  }
+
+  static func failureDialog(code: String) -> IntentDialog {
+    "\(failureMessage(code: code))"
+  }
+
+  static func finishPlaybackCommand(_ outcome: AssistantActionOutcome) throws -> some IntentResult {
+    switch outcome {
+    case .playback, .paused:
+      return .result()
+    case .failure(let code, _):
+      throw AssistantSpokenFailure(failureMessage(code: code))
+    default:
+      throw AssistantSpokenFailure("LAABS Audio couldn't complete that request.")
     }
   }
 
