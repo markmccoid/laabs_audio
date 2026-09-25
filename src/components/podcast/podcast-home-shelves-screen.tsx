@@ -272,21 +272,6 @@ export const PodcastHomeShelvesScreen = () => {
     accessMode === "downloadedOnly" ||
     accessMode === "downloadedSessionOnly";
 
-  if (!hasHomeScope) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: themeColors.bg,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <ActivityIndicator color={themeColors.accent} />
-      </View>
-    );
-  }
-
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       {storedUsername ? (
@@ -395,7 +380,12 @@ export const PodcastHomeShelvesScreen = () => {
         </Stack.Toolbar.Menu>
       </Stack.Toolbar>
 
-      <AnimatedFlashList
+      {!hasHomeScope ? (
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <ActivityIndicator color={themeColors.accent} />
+        </View>
+      ) : (
+        <AnimatedFlashList
         key={homeListOrderKey}
         contentInsetAdjustmentBehavior="automatic"
         data={listData}
@@ -415,7 +405,8 @@ export const PodcastHomeShelvesScreen = () => {
             tintColor={themeColors.accent}
           />
         }
-      />
+        />
+      )}
     </View>
   );
 };

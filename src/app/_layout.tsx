@@ -731,6 +731,7 @@ export default function RootLayout() {
               />
               <Stack.Screen
                 name="main-player"
+                dangerouslySingular
                 options={{
                   presentation: "card",
                   headerShown: false,

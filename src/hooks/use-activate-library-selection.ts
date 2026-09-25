@@ -13,6 +13,7 @@ import { useCallback } from "react";
 type ActivateLibrarySelectionOptions = {
   mode?: "default" | "setup";
   returnToLibraryItemId?: string | null;
+  stayOnHome?: boolean;
 };
 
 const normalizedMediaType = (value: string | null | undefined) =>
@@ -58,13 +59,13 @@ export const runLibraryActivationSelection = async (
 
   if (activationState.status === "activating") return;
   if (canReuseActiveLibrary(library, authState)) {
-    router.replace("/(tabs)/(home)");
+    if (!options.stayOnHome) router.replace("/(tabs)/(home)");
     return;
   }
 
   const startedAt = Date.now();
   activationState.actions.start(library);
-  router.replace("/(tabs)/(home)");
+  if (!options.stayOnHome) router.replace("/(tabs)/(home)");
   await waitForNextFrame();
 
   try {

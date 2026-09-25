@@ -1,4 +1,8 @@
-const { withDangerousMod, createRunOncePlugin } = require("expo/config-plugins");
+const {
+  withDangerousMod,
+  createRunOncePlugin,
+  IOSConfig,
+} = require("expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
 
@@ -59,8 +63,12 @@ const insertAfterFirstMatch = (contents, pattern, insertion) => {
   return `${contents.slice(0, at)}${insertion}${contents.slice(at)}`;
 };
 
-const withReadiumPods = (config) =>
-  withDangerousMod(config, [
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const withReadiumPods = (config) => {
+  const appTargetName = IOSConfig.XcodeUtils.sanitizedName(config.name ?? "");
+
+  return withDangerousMod(config, [
     "ios",
     async (modConfig) => {
       const podfilePath = path.join(
@@ -91,12 +99,12 @@ const withReadiumPods = (config) =>
       if (!contents.includes(READIUM_MINIZIP_HOOK)) {
         const withPreInstall = insertAfterFirstMatch(
           contents,
-          /target 'LAABSAudiobookshelf' do\n/,
+          new RegExp(`target '${escapeRegExp(appTargetName)}' do\\n`),
           MINIZIP_PRE_INSTALL,
         );
         if (!withPreInstall) {
           throw new Error(
-            "with-readium could not find the app target in the iOS Podfile.",
+            `with-readium could not find target '${appTargetName}' in the iOS Podfile.`,
           );
         }
         contents = withPreInstall;
@@ -120,5 +128,6 @@ const withReadiumPods = (config) =>
       return modConfig;
     },
   ]);
+};
 
 module.exports = createRunOncePlugin(withReadiumPods, "with-readium", "1.0.0");

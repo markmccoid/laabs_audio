@@ -6,6 +6,7 @@ import { useExplicitLogout } from "../auth/use-explicit-logout";
 import { useLibraryActivationStore } from "../auth/library-activation-store";
 import { useActivateLibrarySelection } from "../hooks/use-activate-library-selection";
 import { useLibrarySelection } from "../hooks/use-library-selection";
+import { useHomeSessionSwitch } from "./Home/home-session-switch-store";
 
 export const LibrarySelectionGate = () => {
   // Auth + selection state needed to decide whether to auto-select or prompt.
@@ -19,6 +20,7 @@ export const LibrarySelectionGate = () => {
   const { clearActiveLibrary } = useAuthActions();
   const logout = useExplicitLogout();
   const activationStatus = useLibraryActivationStore((state) => state.status);
+  const pendingHomeSessionKey = useHomeSessionSwitch((state) => state.pendingSessionKey);
   const activateLibrarySelection = useActivateLibrarySelection();
   const segments = useSegments();
 
@@ -62,6 +64,8 @@ export const LibrarySelectionGate = () => {
 
   useEffect(() => {
     // Validate or resolve the Active Library after Libraries are known.
+    // The Home switcher owns resolution and activation while its request is pending.
+    if (pendingHomeSessionKey) return;
     if (status !== "authenticated") return;
     if (loginRequired) return;
     if (!isFetched) return;
@@ -136,6 +140,7 @@ export const LibrarySelectionGate = () => {
     isError,
     libraries,
     loginRequired,
+    pendingHomeSessionKey,
     segments,
     selectLibrary,
     status,

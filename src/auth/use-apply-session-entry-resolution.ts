@@ -5,6 +5,7 @@ import type { SessionEntryResolution } from "./enter-user-session";
 
 type ApplyOptions = {
   returnToLibraryItemId?: string;
+  stayOnHome?: boolean;
   onError: (message: string) => void;
   // Called for the "failed" outcome after onError, so a surface can react to the
   // failure kind (e.g. the list/edit screens open the edit form for a sign-in that
@@ -27,6 +28,7 @@ export const useApplySessionEntryResolution = () => {
           await activateLibrarySelection(resolution.library, {
             mode: "setup",
             returnToLibraryItemId: options.returnToLibraryItemId,
+            stayOnHome: options.stayOnHome,
           });
           return;
         case "needsLibrarySelection":

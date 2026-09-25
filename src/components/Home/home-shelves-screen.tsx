@@ -30,6 +30,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, InteractionManager, RefreshControl, Text, View } from "react-native";
 import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
 import { HomeShelfSection } from "./home-shelf-section";
+import { homeSessionSwitchStore, useHomeSessionSwitch } from "./home-session-switch-store";
 import { useHomeSignInSwitcher } from "./home-sign-in-switcher";
 
 type HomeShelvesListItem =
@@ -52,6 +53,10 @@ const HomeShelvesScreen = () => {
   const queryClient = useQueryClient();
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeSessionKey = useAuthStore((state) => state.activeSessionKey);
+  const activeLibraryReady = useAuthStore((state) => state.activeLibraryReady);
+  const pendingSessionKey = useHomeSessionSwitch((state) => state.pendingSessionKey);
+  const entryResolved = useHomeSessionSwitch((state) => state.entryResolved);
   const authStatus = useAuthStore((state) => state.status);
   const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
@@ -77,6 +82,14 @@ const HomeShelvesScreen = () => {
     progressByBookId,
     refreshDiscover,
   } = useHomeShelves();
+  useEffect(() => {
+    if (
+      pendingSessionKey && entryResolved && activeSessionKey === pendingSessionKey &&
+      activeLibraryReady && activeLibraryId && activeLibraryUserKey && !isCatalogLoading
+    ) {
+      homeSessionSwitchStore.getState().actions.clear();
+    }
+  }, [activeLibraryId, activeLibraryReady, activeLibraryUserKey, activeSessionKey, entryResolved, isCatalogLoading, pendingSessionKey]);
   const shelfOrder = useSettingsStore((state) => selectHomeShelfOrder(state, homeScopeKey));
   const activationProgress = useLibraryActivationStore((state) => state.progress);
   const activateLibrarySelection = useActivateLibrarySelection();

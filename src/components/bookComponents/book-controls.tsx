@@ -196,8 +196,8 @@ const BookControls = ({
       // before playback store session metadata is fully populated.
       setPendingLoadBookId(libraryItemId);
       try {
-        await playerService.requestStart(libraryItemId);
-        openMainPlayerAfterStart();
+        const result = await playerService.requestStart(libraryItemId);
+        if (result.status !== "ignored") openMainPlayerAfterStart();
       } catch (error) {
         if (isStreamedPlaybackStartFailure(error)) {
           showStreamedPlaybackStartFailureToast();
@@ -213,8 +213,8 @@ const BookControls = ({
       if (isPlaying) {
         await playerService.requestPause();
       } else {
-        await playerService.requestPlay();
-        openMainPlayerAfterStart();
+        const result = await playerService.requestPlay();
+        if (result.status !== "ignored") openMainPlayerAfterStart();
       }
     } catch (error) {
       if (isStreamedPlaybackStartFailure(error)) {

@@ -1,6 +1,7 @@
 import React from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { LibrarySelectionGate } from "../library-selection-gate";
+import { homeSessionSwitchStore } from "../Home/home-session-switch-store";
 
 const mockClearActiveLibrary = jest.fn();
 const mockRefetch = jest.fn();
@@ -63,6 +64,7 @@ describe("LibrarySelectionGate", () => {
     mockAuthState.activeLibraryReady = true;
     mockLibrarySelection.libraries = [];
     mockLibrarySelection.isError = true;
+    homeSessionSwitchStore.getState().actions.clear();
   });
 
   it("keeps the remembered Active Library when ABS is unreachable", async () => {
@@ -102,5 +104,24 @@ describe("LibrarySelectionGate", () => {
     await act(async () => {
       renderer?.unmount();
     });
+  });
+
+  it("leaves activation to the Home switcher while its sign-in is pending", async () => {
+    homeSessionSwitchStore.getState().actions.start("new-session", "podcast");
+    mockAuthState.activeLibraryMediaType = "podcast";
+    mockAuthState.activeLibraryReady = false;
+    mockLibrarySelection.isError = false;
+    mockLibrarySelection.libraries = [
+      { id: "library-1", name: "Podcasts", mediaType: "podcast" },
+    ];
+
+    let renderer: ReactTestRenderer | null = null;
+    await act(async () => {
+      renderer = create(React.createElement(LibrarySelectionGate));
+    });
+
+    expect(mockActivateLibrarySelection).not.toHaveBeenCalled();
+    await act(async () => { renderer?.unmount(); });
+    homeSessionSwitchStore.getState().actions.clear();
   });
 });

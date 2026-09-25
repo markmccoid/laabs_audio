@@ -113,6 +113,24 @@ describe("Active Library activation selection", () => {
     });
   });
 
+  it("keeps the current Home route during a switch from its sign-in pill", async () => {
+    await runLibraryActivationSelection(podcastLibrary, { stayOnHome: true });
+
+    expect(mockRouterReplace).not.toHaveBeenCalled();
+    expect(mockActivateLibrary).toHaveBeenCalled();
+  });
+
+  it("keeps the current Home route when the selected library is already ready", async () => {
+    mockAuthState.activeLibraryId = bookLibrary.id;
+    mockAuthState.activeLibraryMediaType = "book";
+    mockAuthState.activeLibraryReady = true;
+
+    await runLibraryActivationSelection(bookLibrary, { stayOnHome: true });
+
+    expect(mockRouterReplace).not.toHaveBeenCalled();
+    expect(mockActivateLibrary).not.toHaveBeenCalled();
+  });
+
   it("preserves the prior Active Library when activation fails", async () => {
     mockAuthState.activeLibraryId = bookLibrary.id;
     mockAuthState.activeLibraryMediaType = "book";

@@ -1,7 +1,10 @@
 import { enterUserSession } from "@/auth/enter-user-session";
 import { isConnectionFailureKind } from "@/auth/server-connection";
-import { getSessionDisplayName, type RememberedSessionRecord } from "@/auth/auth-storage";
-import { useAuthStore } from "@/auth/auth-store";
+import { authStorage, getSessionDisplayName, type RememberedSessionRecord } from "@/auth/auth-storage";
+import { libraryActivationStore } from "@/auth/library-activation-store";
+import { selectActiveLibraryExperience } from "@/auth/active-library-experience";
+import { authStore, useAuthStore } from "@/auth/auth-store";
+import { replaceAssistantSurfaceContent } from "@/auth/session-boundary";
 import { useApplySessionEntryResolution } from "@/auth/use-apply-session-entry-resolution";
 import { resolveSessionColor } from "@/auth/session-color";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -9,6 +12,7 @@ import { router } from "expo-router";
 import { useCallback, useMemo, useRef } from "react";
 import { Alert } from "react-native";
 import { useUniwind } from "uniwind";
+import { homeSessionSwitchStore, useHomeSessionSwitch } from "./home-session-switch-store";
 
 const BUTTON_LABEL_MAX_CHARS = 22;
 
@@ -20,12 +24,13 @@ const BUTTON_LABEL_MAX_CHARS = 22;
  *
  * Picking another session runs the shared enterUserSession restore path. Failure
  * mirrors the Sign-In list screen: credential failures open that session's edit
- * form, while connection failures / no-libraries surface an Alert. Success rides
- * Home's existing Library Activation loading.
+ * form, while connection failures / no-libraries surface an Alert. Home keeps
+ * a pending label and loading transition until the selected library is ready.
  */
 export const useHomeSignInSwitcher = () => {
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const activeSessionKey = useAuthStore((state) => state.activeSessionKey);
+  const pendingSessionKey = useHomeSessionSwitch((state) => state.pendingSessionKey);
   const sessions = useAuthStore((state) => state.rememberedSessions);
   const applyResolution = useApplySessionEntryResolution();
   const themeColors = useThemeColors();
@@ -34,8 +39,8 @@ export const useHomeSignInSwitcher = () => {
   const pendingRef = useRef(false);
 
   const activeSession = useMemo(
-    () => sessions.find((session) => session.key === activeSessionKey) ?? null,
-    [activeSessionKey, sessions],
+    () => sessions.find((session) => session.key === (pendingSessionKey ?? activeSessionKey)) ?? null,
+    [activeSessionKey, pendingSessionKey, sessions],
   );
 
   const activeColor = useMemo(
@@ -55,18 +60,53 @@ export const useHomeSignInSwitcher = () => {
   const otherSessions = useMemo(
     () =>
       sessions
-        .filter((session) => session.key !== activeSessionKey)
+        .filter((session) => session.key !== (pendingSessionKey ?? activeSessionKey))
         .sort((a, b) => a.label.localeCompare(b.label)),
-    [activeSessionKey, sessions],
+    [activeSessionKey, pendingSessionKey, sessions],
   );
 
   const switchTo = useCallback(
     async (session: RememberedSessionRecord) => {
-      if (pendingRef.current) return;
+      if (pendingRef.current || homeSessionSwitchStore.getState().pendingSessionKey) return;
       pendingRef.current = true;
+      const previous = authStore.getState();
+      const previousExperience = selectActiveLibraryExperience(previous);
+      homeSessionSwitchStore.getState().actions.start(
+        session.key,
+        previousExperience === "unresolved" ? null : previousExperience,
+      );
+      const restorePreviousSession = async () => {
+        if (!previous.activeSessionKey || authStore.getState().activeSessionKey !== session.key) return;
+        const secrets = previous.accessToken && previous.refreshToken
+          ? null
+          : await authStorage.getSessionSecrets(previous.activeSessionKey);
+        const accessToken = previous.accessToken ?? secrets?.accessToken;
+        const refreshToken = previous.refreshToken ?? secrets?.refreshToken;
+        if (!accessToken || !refreshToken) return;
+
+        authStore.getState().actions.commitActiveSession(previous.activeSessionKey, {
+          accessToken,
+          refreshToken,
+          hasPassword: previous.hasStoredCredentials,
+        });
+        authStore.getState().actions.setServerConnectionStatus(previous.serverConnectionStatus);
+        if (previous.storedUserId) {
+          await replaceAssistantSurfaceContent(previous.storedUserId, previous.activeLibraryId);
+        }
+      };
+      let waitingForHomeContent = false;
       try {
         const resolution = await enterUserSession({ via: "restore", sessionKey: session.key });
+        // Authentication can succeed while library resolution fails. Restore the
+        // previous session in that case so Home returns to its prior library.
+        if (
+          (resolution.outcome === "failed" || resolution.outcome === "noLibraries") &&
+          previous.activeSessionKey !== session.key
+        ) {
+          await restorePreviousSession();
+        }
         await applyResolution(resolution, {
+          stayOnHome: true,
           onError: (message) => {
             if (resolution.outcome === "noLibraries") {
               Alert.alert("No libraries available", message);
@@ -86,7 +126,27 @@ export const useHomeSignInSwitcher = () => {
             } as never);
           },
         });
+        if (
+          resolution.outcome === "activate" &&
+          libraryActivationStore.getState().status === "failed"
+        ) {
+          const message = libraryActivationStore.getState().errorMessage ?? "Could not load library.";
+          await restorePreviousSession();
+          libraryActivationStore.getState().actions.clear();
+          Alert.alert("Could not switch sign-in", message);
+          return;
+        }
+        if (
+          resolution.outcome === "activate" &&
+          libraryActivationStore.getState().status === "idle"
+        ) {
+          homeSessionSwitchStore.getState().actions.resolveEntry();
+          waitingForHomeContent = true;
+        }
+      } catch (error) {
+        Alert.alert("Could not switch sign-in", error instanceof Error ? error.message : "Try again.");
       } finally {
+        if (!waitingForHomeContent) homeSessionSwitchStore.getState().actions.clear();
         pendingRef.current = false;
       }
     },
