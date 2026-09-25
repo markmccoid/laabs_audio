@@ -14,7 +14,6 @@ type SettingsRowProps = {
     | "/(tabs)/settings/authentication"
     | "/(tabs)/settings/bookshelves"
     | "/(tabs)/settings/progress-logs"
-    | "/(tabs)/settings/readium-spike"
     | "/(tabs)/settings/siri-shortcuts"
     | "/(tabs)/settings/shadow-sqlite"
     | "/(tabs)/settings/playback"
@@ -210,17 +209,6 @@ export const SettingsHomeScreen = () => {
             /> */}
           </SettingsGroup>
         ) : null}
-
-        <SettingsGroup title="Developer">
-          <SettingsRow
-            href="/(tabs)/settings/readium-spike"
-            title="Readium Anchor Spike"
-            subtitle="Validate text-only Locator anchoring for the Alignment Map format"
-            icon="text.magnifyingglass"
-            isLast
-          />
-
-        </SettingsGroup>
 
         <SettingsGroup title="Support">
           <SettingsRow

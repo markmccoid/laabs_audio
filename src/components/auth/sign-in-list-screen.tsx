@@ -74,6 +74,7 @@ export function SignInListScreen() {
   const returnToLibraryItemId = resolveParam(params.returnToLibraryItemId);
   const [pendingSessionKey, setPendingSessionKey] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [sessionRowWidth, setSessionRowWidth] = useState<number | null>(null);
   const hasActiveSession = Boolean(activeSessionKey);
   const sortedSessions = useMemo(
     () =>
@@ -279,76 +280,111 @@ export function SignInListScreen() {
             });
 
             return (
-              <MenuView
+              <View
                 key={session.key}
-                title={session.label}
-                actions={actions}
-                onPressAction={(event) => handleMenuAction(event, session)}
-                style={{ flex: 1 }}
+                style={{ width: "100%" }}
+                onLayout={(event) => {
+                  const width = Math.round(event.nativeEvent.layout.width);
+                  setSessionRowWidth((current) =>
+                    current === width ? current : width,
+                  );
+                }}
               >
-                <View
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open actions for ${session.label}`}
-                  style={{
-                    borderWidth: 1,
-                    borderColor: isActive ? "#16a34a" : themeColors.border,
-                    borderRadius: 14,
-                    borderCurve: "continuous",
-                    backgroundColor: themeColors.surface,
-                    paddingHorizontal: 16,
-                    paddingVertical: 14,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 12,
-                  }}
+                <MenuView
+                  title={session.label}
+                  actions={actions}
+                  onPressAction={(event) => handleMenuAction(event, session)}
                 >
-                  <View style={{ flex: 1, gap: 5, paddingRight: isActive ? 18 : 0 }}>
-                    <Text
-                      selectable
+                  <View
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open actions for ${session.label}`}
+                    style={{
+                      width: sessionRowWidth ?? undefined,
+                      borderWidth: 1,
+                      borderColor: isActive ? "#16a34a" : themeColors.border,
+                      borderRadius: 14,
+                      borderCurve: "continuous",
+                      backgroundColor: themeColors.surface,
+                      paddingHorizontal: 16,
+                      paddingVertical: 14,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <View
                       style={{
-                        color: themeColors.text,
-                        fontSize: 17,
-                        fontWeight: "700",
+                        flex: 1,
+                        minWidth: 0,
+                        gap: 5,
+                        paddingRight: isActive ? 18 : 0,
                       }}
                     >
-                      {session.label}
-                    </Text>
-                    <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
-                      {session.username}
-                    </Text>
-                    <Text selectable style={{ color: themeColors.textMuted, fontSize: 13 }}>
-                      {session.serverUrl}
-                    </Text>
-                    {session.needsAttention ? (
-                      <Text selectable style={{ color: "#dc2626", fontSize: 13 }}>
-                        Sign in needs attention
+                      <Text
+                        selectable
+                        style={{
+                          color: themeColors.text,
+                          fontSize: 17,
+                          fontWeight: "700",
+                        }}
+                      >
+                        {session.label}
                       </Text>
+                      <Text
+                        selectable
+                        style={{ color: themeColors.textMuted, fontSize: 14 }}
+                      >
+                        {session.username}
+                      </Text>
+                      <Text
+                        selectable
+                        numberOfLines={1}
+                        ellipsizeMode="middle"
+                        style={{ color: themeColors.textMuted, fontSize: 13 }}
+                      >
+                        {session.serverUrl}
+                      </Text>
+                      {session.needsAttention ? (
+                        <Text
+                          selectable
+                          style={{ color: "#dc2626", fontSize: 13 }}
+                        >
+                          Sign in needs attention
+                        </Text>
+                      ) : null}
+                    </View>
+                    {isPending ? (
+                      <ActivityIndicator color={themeColors.accent} />
+                    ) : null}
+
+                    {isActive && !isPending ? (
+                      <View
+                        pointerEvents="none"
+                        style={{
+                          position: "absolute",
+                          top: -9,
+                          right: -9,
+                          width: 28,
+                          height: 28,
+                          borderRadius: 999,
+                          backgroundColor: "#16a34a",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderWidth: 2,
+                          borderColor: themeColors.bg,
+                        }}
+                      >
+                        <SymbolView
+                          name="checkmark"
+                          tintColor="#fff"
+                          size={15}
+                          weight="bold"
+                        />
+                      </View>
                     ) : null}
                   </View>
-                  {isPending ? <ActivityIndicator color={themeColors.accent} /> : null}
-
-                  {isActive && !isPending ? (
-                    <View
-                      pointerEvents="none"
-                      style={{
-                        position: "absolute",
-                        top: -9,
-                        right: -9,
-                        width: 28,
-                        height: 28,
-                        borderRadius: 999,
-                        backgroundColor: "#16a34a",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        borderWidth: 2,
-                        borderColor: themeColors.bg,
-                      }}
-                    >
-                      <SymbolView name="checkmark" tintColor="#fff" size={15} weight="bold" />
-                    </View>
-                  ) : null}
-                </View>
-              </MenuView>
+                </MenuView>
+              </View>
             );
           })
         )}

@@ -347,14 +347,9 @@ only ever agree with the parser.
 There is no EPUB dev harness any more — the surface picker in Read-Along is the way in. Play the
 book, open Read-Along from the main player, and switch to **Book**.
 
-**The Readium anchor spike is deliberately still there**, at Settings → Developer → *Readium Anchor
-Spike*. Its stated deletion trigger ("once the Alignment Map format is frozen") has passed. One of
-the two jobs it was kept for — verifying that **decoration taps reach JS** — is now done (E9,
-below). The other stands: **re-measuring decoration cost on other hardware**, since
-`DEFAULT_ACTIVE_LEAD_MS` is an iPhone 16 number. Keep it until tap-to-seek has actually shipped, then
-delete it, `src/spikes/readium-anchor`, and the whole Developer group.
-
-Note it is **untracked in git**, so deleting it is permanent.
+The Readium anchor spike has been removed now that its results have been incorporated into the
+read-along implementation. Tap-to-seek behavior is verified through the production Read-Along
+surface instead.
 
 ---
 
