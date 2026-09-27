@@ -9,6 +9,7 @@ type Props = {
   narrator?: string | null;
   publishedYear?: string | null;
   hasEbook?: boolean;
+  hasTranscript?: boolean;
   onEbookPress?: () => void;
   series?: string | null;
   durationSeconds?: number | null;
@@ -38,6 +39,7 @@ const BookKeyDetails = ({
   narrator,
   publishedYear,
   hasEbook = false,
+  hasTranscript = false,
   onEbookPress,
   series,
   durationSeconds,
@@ -67,20 +69,20 @@ const BookKeyDetails = ({
         icon: "person.fill" as SFSymbol,
         value: author?.trim() || "Unknown",
         onPress: author?.trim() ? onAuthorPress : undefined,
-        showEbookBadge: false,
+        showAvailabilityBadges: false,
       },
       {
         key: "narrator",
         icon: "person.wave.2.fill" as SFSymbol,
         value: narrator?.trim() || "Unknown",
         onPress: narrator?.trim() ? onNarratorPress : undefined,
-        showEbookBadge: false,
+        showAvailabilityBadges: false,
       },
       {
         key: "published",
         icon: "calendar" as SFSymbol,
         value: publishedYear?.trim() || "Unknown",
-        showEbookBadge: hasEbook,
+        showAvailabilityBadges: true,
       },
     ];
 
@@ -89,12 +91,12 @@ const BookKeyDetails = ({
         key: "series",
         icon: "books.vertical.fill" as SFSymbol,
         value: series.trim(),
-        showEbookBadge: false,
+        showAvailabilityBadges: false,
       });
     }
 
     return values;
-  }, [author, hasEbook, narrator, onAuthorPress, onNarratorPress, publishedYear, series]);
+  }, [author, narrator, onAuthorPress, onNarratorPress, publishedYear, series]);
 
   const elapsedLabel = formatDurationBadge(progressSeconds);
   const remainingLabel = `${formatDurationBadge(remainingSeconds)} left`;
@@ -193,7 +195,15 @@ const BookKeyDetails = ({
         </View>
       </View>
       {rows.map((row) => (
-        <View key={row.key} style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+        <View
+          key={row.key}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 7,
+            flexWrap: row.showAvailabilityBadges ? "wrap" : "nowrap",
+          }}
+        >
           <View style={{ width: 14, alignItems: "center" }}>
             <SymbolView
               name={row.icon}
@@ -222,34 +232,73 @@ const BookKeyDetails = ({
           ) : (
             <Text
               selectable
-              style={{ flex: 1, fontSize: 12, color: themeColors.text }}
+              style={{
+                flex: 1,
+                minWidth: row.showAvailabilityBadges ? 48 : undefined,
+                fontSize: 12,
+                color: themeColors.text,
+              }}
               numberOfLines={1}
             >
               {row.value}
             </Text>
           )}
-          {row.showEbookBadge ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Ebook available. Open downloads"
-              disabled={!onEbookPress}
-              onPress={onEbookPress}
-              style={({ pressed }) => ({
+          {row.showAvailabilityBadges && (hasEbook || hasTranscript) ? (
+            <View
+              style={{
                 flexDirection: "row",
                 alignItems: "center",
-                gap: 4,
-                borderRadius: 999,
-                borderCurve: "continuous",
-                borderWidth: 1,
-                borderColor: ebookGreen,
-                paddingHorizontal: 7,
-                paddingVertical: 2,
-                opacity: pressed ? 0.7 : 1,
-              })}
+                flexWrap: "wrap",
+                flexShrink: 1,
+                gap: 6,
+              }}
             >
-              <SymbolView name="book.badge.plus.fill" size={11} tintColor={ebookGreen} />
-              <Text style={{ fontSize: 11, fontWeight: "600", color: ebookGreen }}>EBook</Text>
-            </Pressable>
+              {hasEbook ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Ebook available. Open downloads"
+                  disabled={!onEbookPress}
+                  onPress={onEbookPress}
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                    borderRadius: 999,
+                    borderCurve: "continuous",
+                    borderWidth: 1,
+                    borderColor: ebookGreen,
+                    paddingHorizontal: 7,
+                    paddingVertical: 2,
+                    opacity: pressed ? 0.7 : 1,
+                  })}
+                >
+                  <SymbolView name="book.badge.plus.fill" size={11} tintColor={ebookGreen} />
+                  <Text style={{ fontSize: 11, fontWeight: "600", color: ebookGreen }}>EBook</Text>
+                </Pressable>
+              ) : null}
+              {hasTranscript ? (
+                <View
+                  accessible
+                  accessibilityLabel="Transcribed"
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                    borderRadius: 999,
+                    borderCurve: "continuous",
+                    borderWidth: 1,
+                    borderColor: themeColors.accent,
+                    paddingHorizontal: 7,
+                    paddingVertical: 2,
+                  }}
+                >
+                  <SymbolView name="pencil.and.scribble" size={11} tintColor={themeColors.accent} />
+                  <Text style={{ fontSize: 11, fontWeight: "600", color: themeColors.accent }}>
+                    Transcribed
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           ) : null}
         </View>
       ))}

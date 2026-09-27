@@ -20,14 +20,16 @@ import {
   useDeviceBooksStore,
 } from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
+import { useBookTranscriptionStatus } from "@/store/transcription-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { getBookTranscriptUiStatus } from "@/transcription/book-transcription";
 import { useShippedTranscriptIngest } from "@/transcription/use-shipped-transcript-ingest";
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Stack, router, useSegments } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -47,6 +49,7 @@ import BookKeyDetails from "./book-key-details";
 import { BookQuickActions } from "./book-quick-actions";
 import { hasEbookAvailable } from "./ebook-files";
 import BookRateSetter from "./book-rate-setter";
+import { hasTranscriptLibraryFile } from "./transcript-files";
 import { useBookProgressDisplay } from "./use-book-progress-display";
 
 type Props = {
@@ -78,6 +81,31 @@ const BookContainer = ({ libraryItemId }: Props) => {
   useReconcileBookProgress(libraryItemId);
   useShippedTranscriptIngest(libraryItemId);
   const { data: bookData, error: itemLoadError, isLoading } = useGetItemDetails(libraryItemId);
+  const transcriptionStatus = useBookTranscriptionStatus(libraryItemId);
+  const [localTranscript, setLocalTranscript] = useState<{
+    libraryItemId: string;
+    isComplete: boolean;
+  } | null>(null);
+
+  // SQLite survives app restarts; runtime changes refresh this after completion or deletion.
+  useEffect(() => {
+    if (!libraryItemId) return;
+    let cancelled = false;
+    void getBookTranscriptUiStatus(libraryItemId)
+      .catch(() => null)
+      .then((transcript) => {
+        if (!cancelled) {
+          setLocalTranscript({ libraryItemId, isComplete: transcript?.status === "complete" });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [libraryItemId, transcriptionStatus]);
+
+  const hasTranscript =
+    hasTranscriptLibraryFile(bookData) ||
+    (localTranscript?.libraryItemId === libraryItemId && localTranscript?.isComplete === true);
   const { data: userServerState } = useGetUserServerState();
   const isOffline = useAuthStore((state) => state.isOnline === false);
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
@@ -573,6 +601,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
                   narrator={narrator}
                   publishedYear={publishedYear}
                   hasEbook={hasEbook}
+                  hasTranscript={hasTranscript}
                   onEbookPress={openDownloadsSheet}
                   series={series}
                   durationSeconds={resolvedDurationSeconds}
