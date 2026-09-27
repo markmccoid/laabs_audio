@@ -4,7 +4,7 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
-- `2026-09-27` `66ffebf` - Fade between Home libraries when the user changes the active library, keeping the browsing screen in place while the new library loads.
+- `2026-09-27` `2345be7` - Fade between Home libraries when the user changes the active library, keeping the browsing screen in place while the new library loads.
   Tester focus: use Change Library from both audiobook and podcast Home screens. Confirm the old library fades under the loading overlay, then the newly selected library fades in without sliding from the right.
 
 - `2026-09-27` `4a69d68` - Make Open on Siri result cards deliver the selected book directly from Swift to the app, retain the request until its detail route is visible, and clear completed requests so later Open actions are not blocked.
