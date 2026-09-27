@@ -2,6 +2,8 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { Library } from "../types/absTypes";
 
+export const LIBRARY_FADE_OUT_MS = 180;
+
 export type LibraryActivationStatus = "idle" | "activating" | "failed";
 
 type LibraryActivationState = {

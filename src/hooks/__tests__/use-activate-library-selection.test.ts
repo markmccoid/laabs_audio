@@ -25,6 +25,7 @@ jest.mock("@/auth/library-activation", () => ({
 }));
 
 jest.mock("@/auth/library-activation-store", () => ({
+  LIBRARY_FADE_OUT_MS: 180,
   libraryActivationStore: {
     getState: () => ({
       status: "idle",
@@ -118,6 +119,30 @@ describe("Active Library activation selection", () => {
 
     expect(mockRouterReplace).not.toHaveBeenCalled();
     expect(mockActivateLibrary).toHaveBeenCalled();
+  });
+
+  it("covers Home before changing library content without replacing its route", async () => {
+    jest.useFakeTimers();
+    try {
+      const selection = runLibraryActivationSelection(bookLibrary, { stayOnHome: true });
+      await jest.advanceTimersByTimeAsync(179);
+      expect(mockActivationStart).toHaveBeenCalledWith(bookLibrary);
+      expect(mockActivateLibrary).not.toHaveBeenCalled();
+      expect(mockRouterReplace).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(1);
+      await selection;
+      expect(mockActivateLibrary).toHaveBeenCalled();
+      expect(mockSetActiveLibrary).toHaveBeenCalledWith({
+        id: bookLibrary.id,
+        name: bookLibrary.name,
+        mediaType: bookLibrary.mediaType,
+      });
+      expect(mockActivationClear).toHaveBeenCalled();
+      expect(mockRouterReplace).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("keeps the current Home route when the selected library is already ready", async () => {

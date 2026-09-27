@@ -188,7 +188,7 @@ const HomeShelvesScreen = () => {
     (library: Library) => {
       if (library.id === activeLibraryId) return;
       setRefreshMessage(null);
-      void activateLibrarySelection(library);
+      void activateLibrarySelection(library, { stayOnHome: true });
     },
     [activateLibrarySelection, activeLibraryId],
   );

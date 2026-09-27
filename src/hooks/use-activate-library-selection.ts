@@ -1,5 +1,5 @@
 import { activateLibrary } from "@/auth/library-activation";
-import { libraryActivationStore } from "@/auth/library-activation-store";
+import { LIBRARY_FADE_OUT_MS, libraryActivationStore } from "@/auth/library-activation-store";
 import { authStore, type AuthState } from "@/auth/auth-store";
 import { queryClient } from "@/query/query-client";
 import { sqliteSearchRepository } from "@/data/sqlite/search-repository";
@@ -67,6 +67,10 @@ export const runLibraryActivationSelection = async (
   activationState.actions.start(library);
   if (!options.stayOnHome) router.replace("/(tabs)/(home)");
   await waitForNextFrame();
+  // Cover the previous Home before changing its library content.
+  if (options.stayOnHome) {
+    await new Promise<void>((resolve) => setTimeout(resolve, LIBRARY_FADE_OUT_MS));
+  }
 
   try {
     await activateLibrary({

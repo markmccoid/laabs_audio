@@ -1,4 +1,5 @@
 import {
+  LIBRARY_FADE_OUT_MS,
   useLibraryActivationActions,
   useLibraryActivationStore,
 } from "@/auth/library-activation-store";
@@ -6,7 +7,8 @@ import { useAuthStore } from "@/auth/auth-store";
 import { useActivateLibrarySelection } from "@/hooks/use-activate-library-selection";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, Animated, Pressable, Text, View } from "react-native";
 
 export const LibraryActivationOverlay = () => {
   const themeColors = useThemeColors();
@@ -19,10 +21,21 @@ export const LibraryActivationOverlay = () => {
   const { clear } = useLibraryActivationActions();
   const activateSelection = useActivateLibrarySelection();
 
-  if (status === "idle" || !library) return null;
+  const [opacity] = useState(() => new Animated.Value(0));
+  const isVisible = status !== "idle" && library !== null;
+
+  useEffect(() => {
+    const animation = Animated.timing(opacity, {
+      toValue: isVisible ? 1 : 0,
+      duration: isVisible ? LIBRARY_FADE_OUT_MS : 240,
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [isVisible, opacity]);
 
   const handleRetry = () => {
-    void activateSelection(library);
+    if (library) void activateSelection(library, { stayOnHome: true });
   };
 
   const handleCancel = () => {
@@ -35,8 +48,12 @@ export const LibraryActivationOverlay = () => {
   const isFailed = status === "failed";
 
   return (
-    <View
+    <Animated.View
+      pointerEvents={isVisible ? "auto" : "none"}
+      accessibilityElementsHidden={!isVisible}
+      importantForAccessibility={isVisible ? "auto" : "no-hide-descendants"}
       style={{
+        opacity,
         position: "absolute",
         top: 0,
         left: 0,
@@ -50,7 +67,8 @@ export const LibraryActivationOverlay = () => {
         elevation: 9999,
       }}
     >
-      <View
+      {library ? (
+        <View
           style={{
             width: "100%",
             maxWidth: 360,
@@ -159,6 +177,7 @@ export const LibraryActivationOverlay = () => {
             </View>
           ) : null}
         </View>
-    </View>
+      ) : null}
+    </Animated.View>
   );
 };

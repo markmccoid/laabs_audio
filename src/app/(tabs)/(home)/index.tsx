@@ -13,6 +13,8 @@ export default function HomeIndex() {
   const previousExperience = useHomeSessionSwitch((state) => state.previousExperience);
   const entryResolved = useHomeSessionSwitch((state) => state.entryResolved);
   const activeSessionKey = useAuthStore((state) => state.activeSessionKey);
+  const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
+  const homeScopeKey = `${activeSessionKey}:${activeLibraryId}`;
   const activeLibraryReady = useAuthStore((state) => state.activeLibraryReady);
   const themeColors = useThemeColors();
   const [overlayOpacity] = useState(() => new Animated.Value(0));
@@ -52,9 +54,9 @@ export default function HomeIndex() {
   return (
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       {visibleExperience === "podcast" ? (
-        <PodcastHomeShelvesScreen />
+        <PodcastHomeShelvesScreen key={homeScopeKey} />
       ) : visibleExperience === "book" ? (
-        <HomeShelvesScreen />
+        <HomeShelvesScreen key={homeScopeKey} />
       ) : null}
       <Animated.View
         pointerEvents={pendingSessionKey ? "auto" : "none"}
