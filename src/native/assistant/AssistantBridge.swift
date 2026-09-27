@@ -1,4 +1,5 @@
 import AppIntents
+import Foundation
 internal import ExpoModulesCore
 
 private final class AssistantBridgeEventSink: @unchecked Sendable {
@@ -6,6 +7,12 @@ private final class AssistantBridgeEventSink: @unchecked Sendable {
 
   init(module: AssistantBridge) {
     self.module = module
+  }
+
+  func notifyOpen() {
+    DispatchQueue.main.async { [weak self] in
+      self?.module?.sendEvent("onAssistantOpen", [:])
+    }
   }
 
   func send(_ request: AssistantActionRequest) {
@@ -16,18 +23,30 @@ private final class AssistantBridgeEventSink: @unchecked Sendable {
 }
 
 class AssistantBridge: Module {
+  private var pendingOpenObserver: NSObjectProtocol?
+
   func definition() -> ModuleDefinition {
     let eventSink = AssistantBridgeEventSink(module: self)
 
     Name("AssistantBridge")
 
-    Events("onAssistantAction")
+    Events("onAssistantAction", "onAssistantOpen")
 
-    OnCreate {
+    OnCreate { [weak self] in
+      guard let self else { return }
+      self.pendingOpenObserver = NotificationCenter.default.addObserver(
+        forName: AssistantPendingOpen.didStore, object: nil, queue: nil
+      ) { _ in
+        eventSink.notifyOpen()
+      }
       AssistantShortcuts.updateAppShortcutParameters()
     }
 
-    OnDestroy {
+    OnDestroy { [weak self] in
+      if let observer = self?.pendingOpenObserver {
+        NotificationCenter.default.removeObserver(observer)
+        self?.pendingOpenObserver = nil
+      }
       Task {
         await AssistantActionDispatcher.shared.deactivateRuntime()
       }
@@ -85,6 +104,14 @@ class AssistantBridge: Module {
 
     Function("peekPendingOpen") { () -> String? in
       AssistantPendingOpen.peek()
+    }
+
+    Function("peekPendingOpenRequest") { () -> [String: String]? in
+      AssistantPendingOpen.peekRequest()
+    }
+
+    Function("acknowledgePendingOpen") { (requestId: String) -> Bool in
+      AssistantPendingOpen.acknowledge(requestId: requestId)
     }
 
     Function("takePendingOpen") { () -> String? in

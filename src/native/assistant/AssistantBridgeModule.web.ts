@@ -4,6 +4,7 @@ import type {
   AssistantActionResult,
   AssistantBridgeEvents,
   AssistantPendingSearch,
+  AssistantPendingOpenRequest,
   AssistantRuntimeContextPayload,
 } from "./AssistantBridge.types";
 
@@ -18,6 +19,14 @@ class AssistantBridgeModule extends NativeModule<AssistantBridgeEvents> {
 
   peekPendingOpen(): string | null {
     return null;
+  }
+
+  peekPendingOpenRequest(): AssistantPendingOpenRequest | null {
+    return null;
+  }
+
+  acknowledgePendingOpen(_requestId: string): boolean {
+    return false;
   }
 
   takePendingOpen(): string | null {

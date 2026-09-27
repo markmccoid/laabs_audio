@@ -3,6 +3,7 @@ export type {
   AssistantActionFailure,
   AssistantActionFailureCode,
   AssistantPendingSearch,
+  AssistantPendingOpenRequest,
   AssistantPlayableRef,
   AssistantActionRequest,
   AssistantActionResult,

@@ -349,3 +349,30 @@ runtimes only at the code level. Mark unavailable devices NOT RUN; never infer a
 - Core phrase outcomes and known platform limitations:
 - Documentation/settings/NEW_FEATURES updates where applicable:
 - Coordinator verdict and remaining acceptance gaps:
+
+
+## Durable result-card Open delivery — 2026-09-26
+
+- User report: Open foregrounds Home without showing the selected book; minimizing and
+  returning sometimes delivers it. The September 22 retry fix still had an 800ms cutoff,
+  and a retained previously delivered in-flight book could stop the next retry cycle immediately.
+- Swift now saves a single request containing a UUID and library item ID, then posts an
+  in-process notification. The Expo bridge forwards `onAssistantOpen` to JavaScript. Mount
+  and foreground peeks recover requests saved before a listener existed.
+- JavaScript subscribes before reading the request, waits for authentication/navigation readiness,
+  and leaves the native request intact until the matching book detail route is visible.
+  Acknowledgement compares request UUIDs under the store lock so an old completion cannot
+  erase a newer Open. Completed in-flight destinations are cleared. No timer window is used.
+- Regression verification: the real hook runs under React test renderer with native/router
+  boundaries mocked. Coverage includes a five-second delayed request, repeated Open,
+  duplicate notifications, subscription-time writes, readiness gates, newer requests during
+  navigation, foreground recovery, and avoiding replay after a completed route.
+- Native verification: `scripts/test-assistant-pending-open.swift` exercises the real Swift
+  store, including same-book fresh IDs, stale acknowledgements, legacy destination migration,
+  and notification ordering. Compiles and passes with Swift 6.
+- Validation passed: 74 tests across the navigation/assistant suites, `npx tsc --noEmit`,
+  targeted ESLint, and the full Debug iOS simulator build for arm64 and x86_64. The Swift
+  store regression executable also passes. The iOS build includes the updated Expo bridge.
+- Physical-device Siri verification remains pending. Install a rebuilt native app; a JavaScript
+  reload cannot supply the new bridge methods/events. Verify cold/background/already-running
+  Open, consecutive different books, repeat the same book after returning Home, and Play.

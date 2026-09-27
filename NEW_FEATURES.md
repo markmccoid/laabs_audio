@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-27` `14aae8f` - Make Open on Siri result cards deliver the selected book directly from Swift to the app, retain the request until its detail route is visible, and clear completed requests so later Open actions are not blocked.
+  Tester focus: install a fresh native build (a JS reload is not enough). Open a Siri result with the app cold, backgrounded, and already running; it should show that book without minimizing and reopening. Open another book, return Home, then open the same book again. Returning to the app after leaving a completed book detail should not reopen that book. Play should still work.
+
 - `2026-09-23` `pending` - Make Siri Play, Resume, and Pause finish without a spoken reply, so Siri’s own voice no longer pauses the book it just started. Pause of a book Siri already interrupted stays paused when Siri leaves.
   Tester focus: with a book playing, say “Pause LAABS Audio”; it should stay paused and Siri should dismiss quietly. Say “Play LAABS Audio” or “Resume LAABS Audio”; playback should start and keep going after Siri leaves. With nothing loaded, Pause should still say nothing is playing.
 

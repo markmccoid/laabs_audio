@@ -4,6 +4,7 @@ import type {
   AssistantActionResult,
   AssistantBridgeEvents,
   AssistantPendingSearch,
+  AssistantPendingOpenRequest,
   AssistantRuntimeContextPayload,
 } from "./AssistantBridge.types";
 
@@ -12,6 +13,8 @@ declare class AssistantBridgeModule extends NativeModule<AssistantBridgeEvents> 
   activateRuntimeAndTakePending(): Promise<AssistantActionRequest | null>;
   completeAction(id: string, result: AssistantActionResult): void;
   peekPendingOpen(): string | null;
+  peekPendingOpenRequest(): AssistantPendingOpenRequest | null;
+  acknowledgePendingOpen(requestId: string): boolean;
   takePendingOpen(): string | null;
   peekPendingSearch(): AssistantPendingSearch | null;
   takePendingSearch(): AssistantPendingSearch | null;

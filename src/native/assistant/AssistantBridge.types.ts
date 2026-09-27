@@ -57,7 +57,13 @@ export type AssistantActionFailure = {
 
 export type AssistantActionResult = AssistantActionSuccess | AssistantActionFailure;
 
+export type AssistantPendingOpenRequest = {
+  id: string;
+  libraryItemId: string;
+};
+
 export type AssistantBridgeEvents = {
+  onAssistantOpen: () => void;
   onAssistantAction: (request: AssistantActionRequest) => void;
 };
 

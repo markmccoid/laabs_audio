@@ -1,82 +1,96 @@
 import { AssistantBridgeModule } from "@/native/assistant";
 import * as Linking from "expo-linking";
-import { router } from "expo-router";
+import {
+  router,
+  useGlobalSearchParams,
+  useRootNavigationState,
+  useSegments,
+} from "expo-router";
 import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 import {
+  clearAssistantOpenInFlight,
   peekAssistantOpenInFlight,
   rememberAssistantOpenInFlight,
-  resolveAssistantOpenHoldId,
-  resolveAssistantOpenLibraryItemId,
 } from "./assistant-open-destination";
-import { schedulePendingDeliveryRetries } from "./assistant-pending-retry";
-import { getBookDetailHref } from "./book-links";
+import { extractBookDetailIdFromUrl, getBookDetailHref } from "./book-links";
 
 type UseAssistantOpenNavigationOptions = {
   canNavigate: boolean;
 };
 
-const peekNativePendingOpen = () =>
-  resolveAssistantOpenHoldId({
-    pending: AssistantBridgeModule.peekPendingOpen(),
-    inFlight: null,
-  });
-
-const navigateToAssistantOpen = (libraryItemId: string, consumePending: boolean) => {
-  rememberAssistantOpenInFlight(libraryItemId);
-  if (consumePending) AssistantBridgeModule.takePendingOpen();
-  router.push(getBookDetailHref(libraryItemId));
-};
-
 export const useAssistantOpenNavigation = ({
   canNavigate,
 }: UseAssistantOpenNavigationOptions) => {
-  const lastDeliveredIdRef = useRef<string | null>(null);
+  const navigationState = useRootNavigationState();
+  const segments = useSegments();
+  const params = useGlobalSearchParams<{ libraryItemId?: string | string[] }>();
+  const visibleBookId =
+    segments[0] === "(tabs)" &&
+    segments[segments.length - 1] === "[libraryItemId]"
+      ? Array.isArray(params.libraryItemId)
+        ? params.libraryItemId[0]
+        : params.libraryItemId
+      : undefined;
+  const navigationReady = Boolean(navigationState?.key) && canNavigate;
+  const dispatchedRequestIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!canNavigate) return;
+    if (!navigationReady) {
+      dispatchedRequestIdRef.current = null;
+      return;
+    }
 
-    const deliverPending = () => {
-      const pending = peekNativePendingOpen();
-      if (pending) {
-        lastDeliveredIdRef.current = pending;
-        navigateToAssistantOpen(pending, true);
-        return true;
+    const deliverPending = (retryUnconfirmed = false) => {
+      // Always read the latest durable request; queued notifications may refer to older requests.
+      const request = AssistantBridgeModule.peekPendingOpenRequest();
+      if (!request) {
+        if (visibleBookId === peekAssistantOpenInFlight())
+          clearAssistantOpenInFlight();
+        return;
       }
-      const inFlight = peekAssistantOpenInFlight();
-      if (!inFlight) return false;
-      if (lastDeliveredIdRef.current === inFlight) return true;
-      lastDeliveredIdRef.current = inFlight;
-      navigateToAssistantOpen(inFlight, false);
-      return true;
+      if (visibleBookId === request.libraryItemId) {
+        if (AssistantBridgeModule.acknowledgePendingOpen(request.id)) {
+          clearAssistantOpenInFlight();
+          dispatchedRequestIdRef.current = null;
+        }
+        return;
+      }
+      if (!retryUnconfirmed && dispatchedRequestIdRef.current === request.id)
+        return;
+      rememberAssistantOpenInFlight(request.libraryItemId);
+      dispatchedRequestIdRef.current = request.id;
+      // Keep the request in native storage until the destination route actually becomes visible.
+      router.push(getBookDetailHref(request.libraryItemId));
     };
 
-    const deliverUrl = (url?: string | null) => {
-      const libraryItemId = resolveAssistantOpenLibraryItemId({
-        url,
-        pendingLibraryItemId: peekNativePendingOpen() ?? peekAssistantOpenInFlight(),
-      });
-      if (!libraryItemId) return;
-      lastDeliveredIdRef.current = libraryItemId;
-      navigateToAssistantOpen(libraryItemId, Boolean(peekNativePendingOpen()));
-    };
-
-    let cancelActiveRetries = () => {};
-    const cancelMountRetries = schedulePendingDeliveryRetries(deliverPending);
+    // Subscribe before peeking so a write during startup cannot fall between the two operations.
+    const open = AssistantBridgeModule.addListener("onAssistantOpen", () =>
+      deliverPending(),
+    );
     const appState = AppState.addEventListener("change", (state) => {
-      if (state !== "active") return;
-      cancelActiveRetries();
-      cancelActiveRetries = schedulePendingDeliveryRetries(deliverPending);
+      if (state === "active") deliverPending(true);
     });
     const linking = Linking.addEventListener("url", ({ url }) => {
-      deliverUrl(url);
+      const libraryItemId = extractBookDetailIdFromUrl(url);
+      if (!libraryItemId) return;
+      if (
+        AssistantBridgeModule.peekPendingOpenRequest()?.libraryItemId ===
+        libraryItemId
+      ) {
+        deliverPending();
+        return;
+      }
+      if (visibleBookId === libraryItemId) return;
+      rememberAssistantOpenInFlight(libraryItemId);
+      router.push(getBookDetailHref(libraryItemId));
     });
+    deliverPending();
 
     return () => {
-      cancelMountRetries();
-      cancelActiveRetries();
+      open.remove();
       appState.remove();
       linking.remove();
     };
-  }, [canNavigate]);
+  }, [navigationReady, visibleBookId]);
 };

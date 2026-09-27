@@ -7,7 +7,7 @@ class AssistantBridge : Module() {
   override fun definition() = ModuleDefinition {
     Name("AssistantBridge")
 
-    Events("onAssistantAction")
+    Events("onAssistantAction", "onAssistantOpen")
 
     Function("publishRuntimeContext") { _: Map<String, Any?> ->
       Unit
@@ -22,6 +22,10 @@ class AssistantBridge : Module() {
     }
 
     Function("peekPendingOpen") { null }
+
+    Function("peekPendingOpenRequest") { null }
+
+    Function("acknowledgePendingOpen") { _: String -> false }
 
     Function("takePendingOpen") { null }
 
