@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-28` `pending` - Use an existing ABS book transcript instead of offering on-device transcription in the download sheet, and add Book Details to the mini-player cover menu.
+  Tester focus: open the download sheet for a book with `laabs.transcript.json` on ABS and confirm there is no after-download transcription checkbox or Transcribe/Retry action. Confirm the transcript remains available in Read-Along offline. For a book without a server transcript, verify the usual transcription controls remain. During book playback, tap the mini-player cover and choose Book Details; confirm it opens that book. During episode playback, the book action should be absent.
+
 - `2026-09-27` `2345be7` - Fade between Home libraries when the user changes the active library, keeping the browsing screen in place while the new library loads.
   Tester focus: use Change Library from both audiobook and podcast Home screens. Confirm the old library fades under the loading overlay, then the newly selected library fades in without sliding from the right.
 

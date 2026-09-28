@@ -23,6 +23,7 @@ import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, View }
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import DownloadControls from "./download-controls";
 import { collectEbookFiles } from "./ebook-files";
+import { hasTranscriptLibraryFile } from "./transcript-files";
 import TranscribeControls from "./transcribe-controls";
 import { TranscriptionLanguageRow } from "./transcription-language-row";
 
@@ -66,6 +67,10 @@ export const BookDownloadsSheet = () => {
 
   const summary = (bookData as LibraryItemSummary | undefined) ?? cachedSummary ?? null;
   const ebookFiles = useMemo(() => collectEbookFiles(bookData), [bookData]);
+  const hasResolvedLibraryFiles =
+    bookData?.id === libraryItemId && Array.isArray(bookData?.libraryFiles);
+  const hasServerTranscript =
+    bookData?.id === libraryItemId && hasTranscriptLibraryFile(bookData);
 
   //~~ "Also transcribe after download" (Book Transcript, plan Phase 4 item 3)
   const transcriptionAvailability = useTranscriptionAvailability();
@@ -89,6 +94,8 @@ export const BookDownloadsSheet = () => {
     Platform.OS === "ios" &&
     Boolean(libraryItemId) &&
     !isDownloaded &&
+    hasResolvedLibraryFiles &&
+    !hasServerTranscript &&
     Boolean(transcriptionAvailability?.available);
 
   // A deep link into `book-downloads` while this sheet is already open swaps it
@@ -99,6 +106,12 @@ export const BookDownloadsSheet = () => {
     setTranscribeAfterDownload(false);
     setLocaleOverride(null);
   }, [libraryItemId]);
+
+  useEffect(() => {
+    if (!hasServerTranscript || !libraryItemId) return;
+    setTranscribeAfterDownload(false);
+    cancelTranscribeAfterDownload(libraryItemId);
+  }, [hasServerTranscript, libraryItemId]);
 
   // The orchestrator already toasts when it has to drop the intent (no queue),
   // so this sheet must not toast again — it only clears the flag once seen.
@@ -128,7 +141,7 @@ export const BookDownloadsSheet = () => {
 
   const handleDownloadStart = () => {
     if (!libraryItemId) return;
-    if (transcribeAfterDownload && !isTranscriptionActive) {
+    if (transcribeAfterDownload && !hasServerTranscript && !isTranscriptionActive) {
       requestTranscribeAfterDownload(libraryItemId, transcriptionLocale);
     } else {
       cancelTranscribeAfterDownload(libraryItemId);
@@ -267,7 +280,9 @@ export const BookDownloadsSheet = () => {
         </View>
       ) : null}
 
-      <TranscribeControls libraryItemId={libraryItemId} />
+      {hasResolvedLibraryFiles ? (
+        <TranscribeControls libraryItemId={libraryItemId} hasServerTranscript={hasServerTranscript} />
+      ) : null}
 
       {libraryItemId && ebookFiles.length > 0 ? (
         <View

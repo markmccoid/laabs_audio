@@ -73,6 +73,7 @@ export default function TabLayout() {
             author={author}
             coverUri={coverUri}
             isLoading={isMiniPlayerLoading}
+            isEpisodePlayback={isEpisodePlayback}
             isPlaying={isPlaying}
             libraryItemId={miniPlayerLibraryItemId}
             localCoverUri={localCoverUri}

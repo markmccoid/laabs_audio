@@ -1,4 +1,5 @@
 import { CoverImage } from "@/components/images/cover-image";
+import { getBookDetailHref } from "@/navigation/book-links";
 import { playerService, usePlaybackStore } from "@/player";
 import type { PlaybackControlIntent } from "@/player/playback-store";
 import { clampPlaybackRateToRange, useSettingsStore } from "@/store/settings-store";
@@ -16,6 +17,7 @@ type MiniPlayerBottomAccessoryProps = {
   author?: string | null;
   coverUri?: string | null;
   isLoading: boolean;
+  isEpisodePlayback: boolean;
   isPlaying: boolean;
   libraryItemId?: string | null;
   localCoverUri?: string | null;
@@ -29,6 +31,7 @@ export function MiniPlayerBottomAccessory({
   author,
   coverUri,
   isLoading,
+  isEpisodePlayback,
   isPlaying,
   libraryItemId,
   localCoverUri,
@@ -55,8 +58,13 @@ export function MiniPlayerBottomAccessory({
   };
 
   // Tapping the cover opens a native menu (long-press was dropped because it raced
-  // the tap-to-open). Restores the old Close Book + Speed actions on a reliable tap.
+  // the tap-to-open).
+  const bookDetailsActions: MenuAction[] =
+    !isEpisodePlayback && libraryItemId
+      ? [{ id: "book-details", title: "Book Details", image: "book.fill" }]
+      : [];
   const menuActions: MenuAction[] = [
+    ...bookDetailsActions,
     {
       id: "speed",
       title: `Speed (${displayPlaybackRate}×)`,
@@ -77,7 +85,9 @@ export function MiniPlayerBottomAccessory({
 
   const handleMenuAction = ({ nativeEvent }: NativeActionEvent) => {
     const actionId = nativeEvent.event;
-    if (actionId === "close-book") {
+    if (actionId === "book-details" && libraryItemId && !isEpisodePlayback) {
+      router.push(getBookDetailHref(libraryItemId));
+    } else if (actionId === "close-book") {
       void playerService.stop();
     } else if (actionId.startsWith("rate-")) {
       void playerService.setRate(Number(actionId.slice("rate-".length)));

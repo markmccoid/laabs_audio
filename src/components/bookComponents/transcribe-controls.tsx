@@ -65,6 +65,7 @@ export const showTranscriptionBusyAlert = () => {
 
 type Props = {
   libraryItemId?: string;
+  hasServerTranscript?: boolean;
 };
 
 const CardButton = ({
@@ -114,7 +115,7 @@ const CardButton = ({
   );
 };
 
-const TranscribeControls = ({ libraryItemId }: Props) => {
+const TranscribeControls = ({ libraryItemId, hasServerTranscript = false }: Props) => {
   const themeColors = useThemeColors();
   const availability = useTranscriptionAvailability();
   const { clearStatus } = useTranscriptionActions();
@@ -248,7 +249,7 @@ const TranscribeControls = ({ libraryItemId }: Props) => {
 
   if (Platform.OS !== "ios") return null;
   if (!libraryItemId || !isDownloaded) return null;
-  if (!availability) return null;
+  if (!availability && !hasServerTranscript) return null;
 
   const status = isActiveBook ? "active" : (uiStatus?.status ?? storeStatus);
   // Availability can flip false AFTER a transcript exists (Apple Intelligence
@@ -290,7 +291,11 @@ const TranscribeControls = ({ libraryItemId }: Props) => {
         Transcript
       </Text>
 
-      {!availability.available && !hasTranscriptState ? (
+      {hasServerTranscript && status !== "complete" && status !== "active" ? (
+        <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
+          A transcript is available on the server. LAABS automatically saves it for offline reading.
+        </Text>
+      ) : availability && !availability.available && !hasTranscriptState ? (
         <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
           {describeTranscriptionUnavailable(availability)}
         </Text>
