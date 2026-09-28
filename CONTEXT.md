@@ -308,7 +308,7 @@ The small step controls for adjusting a Clip Bookmark's Starting Position by fix
 _Avoid_: Starting Position buttons
 
 **Listening Position**:
-The position in the current playable (audiobook or Episode) where normal listening should continue.
+The position in the current playable (audiobook or Episode) where normal listening should continue. Native playback retains owner-scoped committed checkpoints independently of JavaScript; setup positions, temporary previews, and failed seeks do not replace a confirmed checkpoint. See ADR-0041.
 _Avoid_: Playback cursor, episode cursor
 
 **Displayed Listening Position**:

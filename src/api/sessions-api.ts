@@ -12,13 +12,29 @@ export type SessionSyncResult = {
 };
 
 export const sessionsApi = {
-  closeSession(sessionId: string, data: SessionSyncPayload) {
-    return absClient.post<void>(`/api/session/${sessionId}/close`, data);
+  closeSession(
+    sessionId: string,
+    data: SessionSyncPayload,
+    options?: RequestInit,
+  ) {
+    return absClient.post<void>(
+      `/api/session/${sessionId}/close`,
+      data,
+      options,
+    );
   },
 
-  async syncSession(sessionId: string, data: SessionSyncPayload): Promise<SessionSyncResult> {
+  async syncSession(
+    sessionId: string,
+    data: SessionSyncPayload,
+    options?: RequestInit,
+  ): Promise<SessionSyncResult> {
     try {
-      await absClient.post<void>(`/api/session/${sessionId}/sync`, data);
+      await absClient.post<void>(
+        `/api/session/${sessionId}/sync`,
+        data,
+        options,
+      );
       return { success: true, currentTime: data.currentTime };
     } catch (error) {
       if (error instanceof AbsApiError && error.status === 404) {

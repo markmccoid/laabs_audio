@@ -24,6 +24,12 @@ export { useAudioPro } from './useAudioPro';
  * @see {@link ./types}
  */
 export type {
+	ListeningPositionScope,
+	ListeningContext,
+	ListeningPositionRecord,
+	ListeningPositionCommand,
+	PlaybackSnapshot,
+	AudioProEventOrder,
 	/** Represents an audio track with its properties */
 	AudioProTrack,
 	/** Lock screen remote command mode */

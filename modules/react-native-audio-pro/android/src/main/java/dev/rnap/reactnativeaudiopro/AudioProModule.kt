@@ -5,6 +5,9 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.LifecycleEventListener
+import com.facebook.react.bridge.Promise
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +43,7 @@ class AudioProModule(private val reactContext: ReactApplicationContext) :
 	}
 
 	init {
+		NativeListeningPosition.initialize(reactContext)
 		AudioProController.setReactContext(reactContext)
 		AudioProAmbientController.setReactContext(reactContext)
 		reactContext.addLifecycleEventListener(this)
@@ -48,9 +52,48 @@ class AudioProModule(private val reactContext: ReactApplicationContext) :
 	@ReactMethod
 	fun play(track: ReadableMap, options: ReadableMap) {
 		CoroutineScope(Dispatchers.Main).launch {
-			AudioProController.play(track, options)
+			try {
+				AudioProController.play(track, options)
+			} catch (error: Exception) {
+				AudioProController.onListeningPositionFailure()
+				Log.e(NAME, "Could not prepare protected playback (${error.javaClass.simpleName})")
+			}
 		}
 	}
+
+	private fun onPlayerThread(promise: Promise, operation: () -> Unit) {
+		Handler(Looper.getMainLooper()).post {
+			try { operation() } catch (error: Exception) { promise.reject("LISTENING_POSITION_ERROR", error) }
+		}
+	}
+
+	@ReactMethod
+	fun getListeningPosition(scope: ReadableMap, promise: Promise) =
+		onPlayerThread(promise) { NativeListeningPosition.get(scope, promise) }
+
+	@ReactMethod
+	fun getPlaybackSnapshot(promise: Promise) =
+		onPlayerThread(promise) { promise.resolve(NativeListeningPosition.snapshot()) }
+
+	@ReactMethod
+	fun checkpointListeningPosition(reason: String, promise: Promise) =
+		onPlayerThread(promise) { NativeListeningPosition.checkpoint(reason, promise) }
+
+	@ReactMethod
+	fun setListeningPosition(payload: ReadableMap, promise: Promise) =
+		onPlayerThread(promise) { NativeListeningPosition.set(payload, promise) }
+
+	@ReactMethod
+	fun acknowledgeListeningPosition(payload: ReadableMap, promise: Promise) =
+		onPlayerThread(promise) { NativeListeningPosition.acknowledge(payload, promise) }
+
+	@ReactMethod
+	fun getListeningPositionDiagnostics(promise: Promise) =
+		onPlayerThread(promise) { promise.resolve(NativeListeningPosition.diagnostics()) }
+
+	@ReactMethod
+	fun setListeningPositionCaptureEnabled(enabled: Boolean, promise: Promise) =
+		onPlayerThread(promise) { NativeListeningPosition.setCaptureEnabled(enabled, promise) }
 
 	@ReactMethod
 	fun pause() {

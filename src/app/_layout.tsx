@@ -40,6 +40,7 @@ import {
   getAuthenticatedRouteState,
   isKnownAuthenticatedRoute,
 } from "../navigation/authenticated-route-state";
+import { resolveListeningOwnerKey } from "../auth/listening-owner";
 import { playerService } from "../player/player-service";
 import { playbackStore, usePlaybackStore } from "../player/playback-store";
 import { configureRevenueCat } from "../purchases/revenuecat";
@@ -569,6 +570,7 @@ export default function RootLayout() {
 
     const state = playbackStore.getState();
     if (!state.libraryItemId) return;
+    if (state.ownerId && state.ownerId !== resolveListeningOwnerKey(state.libraryItemId)) return;
     if (state.queue.length > 0 || state.playbackControlIntent) return;
     if (!isRestorableIdlePlaybackState(state.playbackState)) return;
 

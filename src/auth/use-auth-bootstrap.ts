@@ -7,6 +7,7 @@ import {
   useDeviceBooksActions,
   useDeviceBooksStore,
 } from "../store/device-books-store";
+import { playerService } from "../player/player-service";
 import { playbackStore } from "../player/playback-store";
 import { recordProgressSyncIntent } from "../progress/progress-sync-intent-store";
 import { recordEpisodeProgressSyncIntent } from "../podcast/episode-progress-intent-store";
@@ -82,12 +83,17 @@ export const useAuthBootstrap = () => {
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "active") return;
+      if (nextState === "active") {
+        void playerService.reconcileNativePlayback().catch((error) => {
+          if (__DEV__) console.warn("[progress] native foreground reconciliation failed", error);
+        });
+        return;
+      }
 
       const playbackState = playbackStore.getState();
       const intent = resolveBackgroundProgressIntent({
         playback: playbackState,
-        userKey: resolvedUserKey,
+        userKey: playbackState.ownerId ?? resolvedUserKey,
         libraryId: activeLibraryId,
       });
       if (!intent) return;

@@ -10,6 +10,8 @@ const { AudioProEventType, AudioProState, DEFAULT_CONFIG } = jest.requireActual(
 
 type StoreSnapshot = Pick<
 	AudioProStore,
+	| 'activeLoadId'
+	| 'eventOrder'
 	| 'playerState'
 	| 'position'
 	| 'duration'
@@ -23,6 +25,8 @@ type StoreSnapshot = Pick<
 >;
 
 const baseState: StoreSnapshot = {
+	activeLoadId: null,
+	eventOrder: {},
 	playerState: AudioProState.IDLE,
 	position: 0,
 	duration: 0,
@@ -222,5 +226,78 @@ describe('internalStore.updateFromEvent', () => {
 		} as AudioProEvent);
 
 		expect(internalStore.getState().trackPlaying).toMatchObject(track2);
+	});
+});
+
+describe('ordered listening position events', () => {
+	const track = {
+		id: 'owned-track',
+		url: 'file:///book.mp3',
+		title: 'Book',
+		artwork: 'file:///cover.png',
+	};
+	beforeEach(() => {
+		resetStore({
+			activeLoadId: 'current-load',
+			trackPlaying: track,
+			playerState: AudioProState.PLAYING,
+			position: 2_700_000,
+			eventOrder: { playbackGeneration: 4, positionRevision: 3, positionSequence: 18 },
+		});
+	});
+	it('rejects previous same-track source loads and previous generations', () => {
+		const update = internalStore.getState().updateFromEvent;
+		update({
+			type: AudioProEventType.STATE_CHANGED,
+			track,
+			payload: { loadId: 'older-load', state: AudioProState.PAUSED, position: 180_000 },
+		});
+		update({
+			type: AudioProEventType.STATE_CHANGED,
+			track,
+			payload: {
+				loadId: 'current-load',
+				playbackGeneration: 3,
+				positionRevision: 8,
+				state: AudioProState.PAUSED,
+				position: 180_000,
+			},
+		});
+		expect(internalStore.getState().position).toBe(2_700_000);
+		expect(internalStore.getState().playerState).toBe(AudioProState.PLAYING);
+	});
+	it('processes a pause while rejecting zero within the current revision', () => {
+		internalStore
+			.getState()
+			.updateFromEvent({
+				type: AudioProEventType.STATE_CHANGED,
+				track,
+				payload: {
+					loadId: 'current-load',
+					playbackGeneration: 4,
+					positionRevision: 3,
+					positionSequence: 18,
+					state: AudioProState.PAUSED,
+					position: 0,
+				},
+			});
+		expect(internalStore.getState().position).toBe(2_700_000);
+		expect(internalStore.getState().playerState).toBe(AudioProState.PAUSED);
+	});
+	it('accepts an intentional backwards relocation in a new revision', () => {
+		internalStore
+			.getState()
+			.updateFromEvent({
+				type: AudioProEventType.SEEK_COMPLETE,
+				track,
+				payload: {
+					loadId: 'current-load',
+					playbackGeneration: 4,
+					positionRevision: 4,
+					positionSequence: 19,
+					position: 180_000,
+				},
+			});
+		expect(internalStore.getState().position).toBe(180_000);
 	});
 });

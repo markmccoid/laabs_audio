@@ -12,3 +12,5 @@ LAABS Audio models play, pause, and start commands as a single active Playback C
 - Future latest-intent-wins behaviour should be added inside the Playback Control Intent module, not by spreading cancellation logic across control surfaces.
 - Progress Sync Intent durability remains required, but remote sync work should not block the play/pause controls after Audible Playback State is reached.
 - Starting a different audiobook may block on old engine teardown and durable Listening Position capture, but best-effort remote sync and Streamed Playback Session close should run after new audio ownership is safe.
+
+ADR-0041 adds an explicit cancellation exception: Pause supersedes a pending play/start intent and reaches native pause immediately. Other concurrent controls keep the existing blocking policy.

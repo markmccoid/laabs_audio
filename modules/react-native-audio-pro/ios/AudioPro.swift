@@ -90,18 +90,35 @@ class AudioPro: RCTEventEmitter {
 
 	private var isInErrorState: Bool = false
 	private var lastEmittedState: String = ""
+    private var lastEmittedReason: String = ""
 	private var wasPlayingBeforeInterruption: Bool = false
 	private var pendingStartTimeMs: Double? = nil
+    private let listeningWriter = DispatchQueue(label: "dev.laabs.listening-position", qos: .utility)
+    private var listeningLedger: ListeningPositionLedger?
+    private var listeningLease: ListeningLease?
+    private var listeningContext: [String: Any]?
+    private var listeningReceipt: [String: Any]?
+    private var listeningTimer: Timer?
+    private var periodicSavePending = false
+    private var captureEnabled = false
+    private var persistenceFailed = false
+    private var loadId: String?
+    private var loadPositionIntent = "resume"
+    private var loadPositionCommandId: String?
+    private var loadSerial = 0
+    private var isPreparingLoad = false
+    private var initialSeekPending = false
+    private var pendingSeekCommand: String?
+    private var interruptionActive = false
+    private var transportReason = "idle"
+    private var timeControlObservation: NSKeyValueObservation?
+    private var itemNotificationTokens: [NSObjectProtocol] = []
+    private var noMovementSince = ProcessInfo.processInfo.systemUptime
+    private var lastObservedPosition: Double = 0
 
-	// When an audio-session interruption (e.g. an incoming text/call) pauses playback,
-	// the JS layer's progress save is async and can be lost if iOS suspends/terminates the
-	// app while it is backgrounded and no longer playing audio. To guarantee a durable save
-	// point, we persist the paused position synchronously to UserDefaults the instant the
-	// interruption begins. On the next play() for the same track (e.g. after a relaunch) we
-	// use it as a resume floor so playback never resumes behind where the interruption paused.
-	private let interruptionResumeDefaultsKey = "AudioProInterruptionResumeRecord"
-	// Safety bound so a very old record can never reposition an unrelated future session.
-	private let interruptionResumeMaxAgeSeconds: TimeInterval = 6 * 60 * 60
+
+    // Legacy evidence is retained for diagnostics; ownerless records are never assigned to a user.
+    private let interruptionResumeDefaultsKey = "AudioProInterruptionResumeRecord"
 	private var settingSkipForwardIntervalMs: Double = 30000.0
 	private var settingSkipBackwardIntervalMs: Double = 30000.0
 
@@ -183,8 +200,12 @@ class AudioPro: RCTEventEmitter {
 		addListener(CARPLAY_EVENT_NAME)
 	}
 
-	deinit {
-		removeCarPlayObservers()
+    deinit {
+        listeningTimer?.invalidate()
+        timer?.invalidate()
+        timeControlObservation = nil
+        itemNotificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
+        removeCarPlayObservers()
 		NotificationCenter.default.removeObserver(
 			self,
 			name: AudioWidgetPlaybackIntentNotification.name,
@@ -338,6 +359,7 @@ class AudioPro: RCTEventEmitter {
 	}
 
 	private func setupAudioSessionInterruptionObserver() {
+        removeAudioSessionInterruptionObserver()
 		// Register for audio session interruption notifications
 		NotificationCenter.default.addObserver(
 			self,
@@ -357,148 +379,243 @@ class AudioPro: RCTEventEmitter {
 		)
 	}
 
-	/// Synchronously persist the current playback position so it survives an app
-	/// suspension/termination that can happen while audio is paused in the background.
-	private func persistInterruptionResumePosition() {
-		guard let trackId = currentTrack?["id"] as? String else { return }
-		let positionMs = getPlaybackInfo().position
-		guard positionMs > 0 else { return }
+    @objc private func handleAudioSessionInterruption(_ notification: Notification) {
+        runOnMain { [weak self] in
+            guard let self, let userInfo = notification.userInfo,
+                  let raw = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            switch type {
+            case .began:
+                if !self.interruptionActive {
+                    self.interruptionActive = true
+                    self.wasPlayingBeforeInterruption = self.shouldBePlaying
+                }
+                self.transportReason = "interruption"
+                self.player?.pause()
+                self.captureListeningPosition(reason: "interruption")
+                self.stopTimer()
+                self.sendPausedStateEvent()
+                self.updateNowPlayingInfo(rate: 0, playbackState: .paused)
+            case .ended:
+                guard self.interruptionActive else { return }
+                self.interruptionActive = false
+                let options = AVAudioSession.InterruptionOptions(rawValue: userInfo[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+                let resume = self.wasPlayingBeforeInterruption && self.shouldBePlaying && options.contains(.shouldResume)
+                self.wasPlayingBeforeInterruption = false
+                if resume { self.resume() }
+                else {
+                    self.shouldBePlaying = false
+                    self.transportReason = "interruption-ended-paused"; self.sendPausedStateEvent()
+                }
+            @unknown default: break
+            }
+        }
+    }
 
-		let record: [String: Any] = [
-			"trackId": trackId,
-			"positionMs": positionMs,
-			"timestamp": Date().timeIntervalSince1970,
-		]
-		UserDefaults.standard.set(record, forKey: interruptionResumeDefaultsKey)
-		log("Persisted interruption resume position", positionMs, "for", trackId)
-	}
-
-	private func clearInterruptionResumePosition() {
-		UserDefaults.standard.removeObject(forKey: interruptionResumeDefaultsKey)
-	}
-
-	/// Read and clear a persisted interruption position if it belongs to `trackId` and is
-	/// still fresh. Returns the position in ms, or nil when there is nothing to apply.
-	private func consumeInterruptionResumePosition(for trackId: String) -> Double? {
-		guard let record = UserDefaults.standard.dictionary(forKey: interruptionResumeDefaultsKey),
-			  let storedTrackId = record["trackId"] as? String,
-			  storedTrackId == trackId,
-			  let positionMs = record["positionMs"] as? Int,
-			  let timestamp = record["timestamp"] as? TimeInterval else {
-			return nil
-		}
-
-		// Matched this track: consume it regardless of freshness so it can't be reused.
-		clearInterruptionResumePosition()
-
-		guard Date().timeIntervalSince1970 - timestamp <= interruptionResumeMaxAgeSeconds else {
-			log("Discarding stale interruption resume position for", trackId)
-			return nil
-		}
-
-		return Double(positionMs)
-	}
-
-	@objc private func handleAudioSessionInterruption(_ notification: Notification) {
-		guard let userInfo = notification.userInfo,
-			  let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
-			  let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
-			return
-		}
-
-		log("Audio session interruption: \(type)")
-
-		switch type {
-		case .began:
-			// Interruption began (e.g., phone call, Siri, other app playing audio)
-			wasPlayingBeforeInterruption = player?.rate != 0
-			log("wasPlayingBeforeInterruption set to", wasPlayingBeforeInterruption)
-
-			if wasPlayingBeforeInterruption {
-				log("Interruption began while playing, pausing playback")
-				// Pause playback without changing shouldBePlaying flag
-				player?.pause()
-				stopTimer()
-
-				// Durably save the paused position before iOS can suspend/terminate the app.
-				// The JS-side progress save is async and may not commit in time.
-				persistInterruptionResumePosition()
-
-				// Emit PAUSED state to ensure UI is in sync
-				sendPausedStateEvent()
-
-				// Momentary playback rate is 0 while paused; DefaultPlaybackRate
-				// still carries the selected speed for external UIs.
-				updateNowPlayingInfo(
-					time: player?.currentTime().seconds ?? 0,
-					rate: 0,
-					playbackState: .paused
-				)
-			}
-
-		case .ended:
-			// Interruption ended
-			guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else {
-				return
-			}
-
-			let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-
-			log("wasPlayingBeforeInterruption at end:", wasPlayingBeforeInterruption)
-			log("shouldResume:", options.contains(.shouldResume))
-
-			// Resume only if the user did not pause while Siri held the session.
-			// pause() clears shouldBePlaying; the interruption itself does not.
-			if wasPlayingBeforeInterruption && shouldBePlaying && options.contains(.shouldResume) {
-				log("Interruption ended with resume option, resuming playback")
-
-				// Read (and clear) the position we saved when the interruption began so we can
-				// guard against the player having lost its place across the interruption.
-				let savedResumeMs = (currentTrack?["id"] as? String)
-					.flatMap { consumeInterruptionResumePosition(for: $0) }
-
-				// Try to reactivate the audio session
-				do {
-					try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
-
-					// If the player drifted behind where the interruption paused, restore it
-					// before resuming so we never play back from an earlier position.
-					if let savedResumeMs = savedResumeMs, let player = player {
-						let currentMs = player.currentTime().seconds * 1000
-						if currentMs.isFinite && currentMs < savedResumeMs - 1000 {
-							log("Player drifted behind interruption point, seeking back to", savedResumeMs)
-							performSeek(to: savedResumeMs, isAbsolute: true)
-						}
-					}
-
-					// Resume playback
-					player?.play()
-					if currentPlaybackSpeed != 1.0 {
-						player?.rate = currentPlaybackSpeed
-					}
-					startProgressTimer()
-
-					// Emit PLAYING state
-					sendPlayingStateEvent()
-
-					// Update now playing info
-					updateNowPlayingInfo(time: player?.currentTime().seconds ?? 0, rate: currentPlaybackSpeed)
-				} catch {
-					log("Failed to reactivate audio session: \(error.localizedDescription)")
-					emitPlaybackError("Failed to resume after interruption: \(error.localizedDescription)")
-				}
-			} else {
-				// Not resuming in-process (e.g. no shouldResume). Leave the saved position in
-				// place so the next play()/relaunch can use it as a resume floor.
-				log("Interruption ended without in-process resume; keeping saved resume position")
-			}
-
-			// Reset the flag
-			wasPlayingBeforeInterruption = false
-		@unknown default:
-			break
-		}
-	}
+    // MARK: Native listening position ledger
+    private func ledgerOnWriter() throws -> ListeningPositionLedger {
+        if let listeningLedger { return listeningLedger }
+        let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let directory = base.appendingPathComponent("AudioProListeningPosition", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                               attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+        let path = directory.appendingPathComponent("positions.sqlite").path
+        let ledger = try ListeningPositionLedger(path: path)
+        for suffix in ["", "-wal", "-shm"] where FileManager.default.fileExists(atPath: path + suffix) {
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: path + suffix)
+        }
+        listeningLedger = ledger
+        return ledger
+    }
+    private func metadata() -> [String: Any] {
+        var fields: [String: Any] = ["loadId": loadId as Any? ?? NSNull(), "initialSeekPending": initialSeekPending || pendingSeekCommand != nil,
+                                   "reason": transportReason, "shouldBePlaying": shouldBePlaying,
+                                   "monotonicTimeMs": ProcessInfo.processInfo.systemUptime * 1000,
+                                   "positionSequence": listeningReceipt?["sequence"] ?? 0]
+        if let lease = listeningLease {
+            fields.merge(lease.scope.fields) { _, new in new }
+            fields["playbackGeneration"] = lease.generation; fields["positionRevision"] = lease.revision
+        }
+        return fields
+    }
+    private func snapshot() -> [String: Any] {
+        let info = getPlaybackInfo()
+        var fields = metadata()
+        fields["state"] = isInErrorState || persistenceFailed ? STATE_ERROR : initialSeekPending ? STATE_LOADING : transportReason == "stalled" ? STATE_LOADING : interruptionActive ? STATE_PAUSED : player?.timeControlStatus == .playing ? STATE_PLAYING : player?.timeControlStatus == .waitingToPlayAtSpecifiedRate ? STATE_LOADING : currentTrack == nil ? STATE_IDLE : STATE_PAUSED
+        fields["position"] = info.position; fields["duration"] = info.duration
+        fields["trackId"] = currentTrack?["id"] ?? NSNull()
+        fields["monotonicTimeMs"] = ProcessInfo.processInfo.systemUptime * 1000
+        return fields
+    }
+    private func savingFailed(_ error: Error, generation: Int64?) {
+        guard generation == nil || listeningLease?.generation == generation else { return }
+        isPreparingLoad = false
+        persistenceFailed = true; shouldBePlaying = false; player?.pause()
+        transportReason = "position-save-failed"; sendStateEvent(state: STATE_ERROR, track: currentTrack)
+        emitPlaybackError("Unable to save listening position. Playback paused to preserve your place.", code: 901)
+    }
+    private func captureListeningPosition(reason: String, commandId: String? = nil,
+                                          completion: ((Result<[String: Any]?, Error>) -> Void)? = nil) {
+        guard captureEnabled, let lease = listeningLease, (!initialSeekPending || reason == "initial-seek-complete"), let player,
+              player.currentTime().seconds.isFinite else { completion?(.success(nil)); return }
+        if pendingSeekCommand != nil && reason != "initial-seek-complete" && reason != "seek-complete" {
+            completion?(.success(nil)); return
+        }
+        if reason == "periodic" && periodicSavePending { return }
+        if reason == "periodic" { periodicSavePending = true }
+        let trackMs = reason == "natural-completion" && getPlaybackInfo().duration > 0
+            ? Double(getPlaybackInfo().duration) : max(0, player.currentTime().seconds * 1000)
+        let offset = getDouble(listeningContext?["trackStartOffsetMs"]) ?? 0
+        let duration = getDouble(listeningContext?["durationMs"]) ?? Double(getPlaybackInfo().duration)
+        let identity = currentTrack?["id"] as? String ?? ""
+        let capturedAt = Date().timeIntervalSince1970 * 1000
+        let capturedMonotonic = ProcessInfo.processInfo.systemUptime
+        let finished = reason == "natural-completion" && duration > 0 && offset + trackMs >= duration - 1000
+        var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+        if reason != "periodic" && UIApplication.shared.applicationState != .active {
+            backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Listening position") {
+                if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask); backgroundTask = .invalid }
+            }
+        }
+        listeningWriter.async { [weak self] in
+            guard let self else { return }
+            let result: Result<[String: Any]?, Error>
+            do { result = .success(try self.ledgerOnWriter().commit(lease, positionMs: offset + trackMs,
+                    trackPositionMs: trackMs, offsetMs: offset, trackId: identity, durationMs: duration,
+                    finished: finished, reason: reason, commandId: commandId,
+                    capturedAt: capturedAt, capturedMonotonic: capturedMonotonic)) }
+            catch { result = .failure(error) }
+            DispatchQueue.main.async {
+                if reason == "periodic" { self.periodicSavePending = false }
+                if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask); backgroundTask = .invalid }
+                switch result {
+                case .success(let record):
+                    if self.listeningLease?.generation == lease.generation && self.listeningLease?.revision == lease.revision { self.listeningReceipt = record }
+                case .failure(let error):
+                    if case ListeningLedgerError.stale = error {
+                        if self.listeningLease?.generation == lease.generation && self.listeningLease?.revision == lease.revision &&
+                           self.pendingSeekCommand == nil && !self.isPreparingLoad {
+                            self.shouldBePlaying = false; self.player?.pause()
+                            self.transportReason = "ownership-superseded"; self.sendPausedStateEvent()
+                        }
+                        break
+                    }
+                    self.savingFailed(error, generation: lease.generation)
+                }
+                completion?(result)
+            }
+        }
+    }
+    private func startListeningCapture() {
+        listeningTimer?.invalidate()
+        noMovementSince = ProcessInfo.processInfo.systemUptime
+        lastObservedPosition = player?.currentTime().seconds ?? 0
+        listeningTimer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self, !self.initialSeekPending else { return }
+            let position = self.player?.currentTime().seconds ?? 0
+            if position.isFinite && abs(position - self.lastObservedPosition) > 0.05 {
+                self.lastObservedPosition = position; self.noMovementSince = ProcessInfo.processInfo.systemUptime
+            } else if self.shouldBePlaying && !self.interruptionActive && ProcessInfo.processInfo.systemUptime - self.noMovementSince >= 5 {
+                self.transportReason = "stalled"
+                let info = self.getPlaybackInfo()
+                self.sendEvent(type: self.EVENT_TYPE_STATE_CHANGED, track: self.currentTrack,
+                               payload: ["state": self.STATE_LOADING, "position": info.position, "duration": info.duration])
+            }
+            if self.player?.timeControlStatus == .playing { self.captureListeningPosition(reason: "periodic") }
+        }
+        if let listeningTimer { RunLoop.main.add(listeningTimer, forMode: .common) }
+    }
+    @objc(getListeningPosition:withResolver:withRejecter:)
+    func getListeningPosition(_ payload: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        guard let scope = ListeningScope(payload as? [String: Any] ?? [:]) else { reject("INVALID_SCOPE", "Listening position requires owner and playable identity", nil); return }
+        listeningWriter.async { [weak self] in
+            do { resolve(try self?.ledgerOnWriter().read(scope) ?? NSNull()) }
+            catch { reject("POSITION_READ_FAILED", "Unable to read saved listening position", error) }
+        }
+    }
+    @objc(getPlaybackSnapshot:withRejecter:)
+    func getPlaybackSnapshot(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        runOnMain { resolve(self.snapshot()) }
+    }
+    @objc(checkpointListeningPosition:withResolver:withRejecter:)
+    func checkpointListeningPosition(_ reason: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        runOnMain {
+            self.captureListeningPosition(reason: reason) { result in
+                switch result { case .success(let record): resolve(record as Any? ?? NSNull())
+                case .failure(let error): reject("POSITION_SAVE_FAILED", "Listening position was not committed", error) }
+            }
+        }
+    }
+    @objc(setListeningPositionCaptureEnabled:withResolver:withRejecter:)
+    func setListeningPositionCaptureEnabled(_ enabled: Bool, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        runOnMain {
+            if enabled { self.captureEnabled = self.listeningLease != nil; resolve(true); return }
+            self.captureListeningPosition(reason: "temporary-preview") { result in
+                switch result { case .success: self.captureEnabled = false; resolve(true)
+                case .failure(let error): reject("POSITION_SAVE_FAILED", "Cannot enter preview until listening position is saved", error) }
+            }
+        }
+    }
+    @objc(setListeningPosition:withResolver:withRejecter:)
+    func setListeningPosition(_ payload: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        let fields = payload as? [String: Any] ?? [:]
+        guard let scope = ListeningScope(fields), let position = getDouble(fields["positionMs"]), position.isFinite, position >= 0 else { reject("INVALID_POSITION", "Invalid listening position", nil); return }
+        runOnMain {
+            let live = self.listeningLease
+            if live?.scope == scope { self.player?.pause(); self.shouldBePlaying = false }
+            self.listeningWriter.async {
+                do {
+                    let ledger = try self.ledgerOnWriter()
+                    let record = try ledger.setExplicit(scope, positionMs: position,
+                        durationMs: self.getDouble(fields["durationMs"]) ?? 0,
+                        finished: self.getBool(fields["isFinished"]) ?? false,
+                        reason: fields["reason"] as? String ?? "explicit-command",
+                        commandId: fields["commandId"] as? String ?? UUID().uuidString)
+                    DispatchQueue.main.async {
+                        if live?.scope == scope, self.listeningLease?.generation == live?.generation {
+                            if let generation = (record["playbackGeneration"] as? NSNumber)?.int64Value,
+                               let revision = (record["positionRevision"] as? NSNumber)?.int64Value {
+                                self.listeningLease = ListeningLease(scope: scope, generation: generation, revision: revision)
+                            }
+                            self.listeningReceipt = record
+                            // State commands alter saved progress; old live samples must not overwrite it.
+                            self.captureEnabled = false
+                        }
+                        resolve(record)
+                    }
+                } catch { reject("POSITION_SAVE_FAILED", "Listening position command was not committed", error) }
+            }
+        }
+    }
+    @objc(acknowledgeListeningPosition:withResolver:withRejecter:)
+    func acknowledgeListeningPosition(_ payload: NSDictionary, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        let fields = payload as? [String: Any] ?? [:]
+        guard let scope = ListeningScope(fields), let sequence = fields["sequence"] as? NSNumber, let kind = fields["kind"] as? String else { reject("INVALID_ACK", "Invalid listening position acknowledgement", nil); return }
+        listeningWriter.async {
+            do { resolve(try self.ledgerOnWriter().acknowledge(scope, sequence: sequence.int64Value, kind: kind) as Any? ?? NSNull()) }
+            catch { reject("POSITION_ACK_FAILED", "Unable to acknowledge listening position", error) }
+        }
+    }
+    @objc(getListeningPositionDiagnostics:withRejecter:)
+    func getListeningPositionDiagnostics(_ resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        listeningWriter.async {
+            do {
+                let ledger = try self.ledgerOnWriter()
+                let legacy = UserDefaults.standard.dictionary(forKey: self.interruptionResumeDefaultsKey)
+                let legacyIdentity = legacy?["trackId"] as? String
+                let quarantine: [String: Any] = [
+                    "positionMs": self.getDouble(legacy?["positionMs"]) as Any? ?? NSNull(),
+                    "timestamp": self.getDouble(legacy?["timestamp"]) as Any? ?? NSNull(),
+                    "trackIdentity": legacyIdentity?.contains("://") == true ? "redacted" : legacyIdentity as Any? ?? NSNull(),
+                    "ownerAssociation": "unproven"
+                ]
+                resolve(["entries": ledger.diagnostics, "failedWrites": ledger.failedWrites, "storage": "sqlite-wal-full",
+                         "legacyUnscopedEvidenceRetained": legacy != nil,
+                         "legacyUnscopedEvidence": legacy != nil ? quarantine as Any : NSNull()])
+            }
+            catch { reject("POSITION_DIAGNOSTICS_FAILED", "Unable to open listening position diagnostics", error) }
+        }
+    }
 
 	////////////////////////////////////////////////////////////
 	// MARK: - Debug Logging Helper
@@ -525,7 +642,9 @@ class AudioPro: RCTEventEmitter {
 		]
 
 		if let payload = payload {
-			body["payload"] = payload
+			var enriched = payload
+            enriched.merge(metadata()) { _, new in new }
+            body["payload"] = enriched
 		}
 
 		log(type)
@@ -558,7 +677,8 @@ class AudioPro: RCTEventEmitter {
 	}
 
 	private func sendProgressNoticeEvent() {
-		guard let player = player, let _ = player.currentItem, player.rate != 0 else { return }
+        guard pendingSeekCommand == nil, !initialSeekPending,
+              let player = player, let _ = player.currentItem, player.rate != 0 else { return }
 		let info = getPlaybackInfo()
 
 		let payload: [String: Any] = [
@@ -589,7 +709,10 @@ class AudioPro: RCTEventEmitter {
 	/// - Does not emit any state or clear currentTrack
 	/// - Does not destroy the media session
 	private func prepareForNewPlayback() {
-		// Pause the player if it's playing
+        timeControlObservation = nil
+        itemNotificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
+        itemNotificationTokens.removeAll()
+        // Pause the player if it's playing
 		player?.pause()
 
 		// Stop the progress timer
@@ -612,7 +735,59 @@ class AudioPro: RCTEventEmitter {
 	}
 
 	@objc(play:withOptions:)
-	func play(track: NSDictionary, options: NSDictionary) {
+    func play(track: NSDictionary, options: NSDictionary) {
+        runOnMain {
+            self.loadSerial += 1
+            let serial = self.loadSerial
+            self.isPreparingLoad = true
+            // Freeze initial intent before asynchronous disk work; a later pause must win.
+            self.shouldBePlaying = self.getBool(options["autoPlay"]) ?? true
+            self.player?.pause()
+            self.captureListeningPosition(reason: "source-switch") { result in
+                if case .failure(let error) = result {
+                    if case ListeningLedgerError.stale = error {} else {
+                        self.savingFailed(error, generation: self.listeningLease?.generation); return
+                    }
+                }
+                guard self.loadSerial == serial else { return }
+                let context = options["listeningContext"] as? [String: Any]
+                let scope = context.flatMap { ListeningScope($0) }
+                let enabled = self.getBool(context?["captureEnabled"]) ?? false
+                if enabled && scope == nil { self.savingFailed(ListeningLedgerError.invalid, generation: nil); return }
+                self.listeningWriter.async {
+                    do {
+                        let lease = scope != nil ? try self.ledgerOnWriter().activate(scope!) : nil
+                        let record = scope != nil ? try self.ledgerOnWriter().read(scope!) : nil
+                        let preparedOptions = options.mutableCopy() as! NSMutableDictionary
+                        if let scope, options["positionIntent"] as? String == "relocate",
+                           let command = options["positionCommandId"] as? String,
+                           let confirmed = try self.ledgerOnWriter().confirmedCommandRecord(scope, commandId: command) {
+                            // Retrying an already completed rewind must resolve current evidence, not rewind twice.
+                            guard confirmed["trackIdentity"] as? String == track["id"] as? String else {
+                                throw ListeningLedgerError.stale
+                            }
+                            preparedOptions["startTimeMs"] = confirmed["trackPositionMs"]
+                            preparedOptions["positionIntent"] = "resume"
+                        }
+                        DispatchQueue.main.async {
+                            guard self.loadSerial == serial else { return }
+                            self.listeningLease = lease; self.listeningReceipt = record
+                            self.listeningContext = context; self.captureEnabled = enabled
+                            self.persistenceFailed = false; self.interruptionActive = false
+                            self.loadId = options["loadId"] as? String ?? UUID().uuidString
+                            self.loadPositionIntent = preparedOptions["positionIntent"] as? String ?? "resume"
+                            self.loadPositionCommandId = preparedOptions["positionCommandId"] as? String
+                            self.initialSeekPending = true; self.pendingSeekCommand = nil
+                            self.transportReason = "source-load"
+                            self.playPrepared(track: track, options: preparedOptions)
+                        }
+                    } catch { DispatchQueue.main.async { self.savingFailed(error, generation: nil) } }
+                }
+            }
+        }
+    }
+    private func playPrepared(track: NSDictionary, options: NSDictionary) {
+        isPreparingLoad = false
 		// Reset error state when playing a new track
 		isInErrorState = false
 		// Reset last emitted state when playing a new track
@@ -629,16 +804,13 @@ class AudioPro: RCTEventEmitter {
 		let autoPlay = getBool(options["autoPlay"]) ?? true
 		pendingStartTimeMs = getDouble(options["startTimeMs"])
 
-		// If an interruption (e.g. an incoming text) paused this same track and the app was
-		// suspended/terminated before its progress durably synced, the requested start time
-		// can be an earlier (stale) save point. Use the position we saved at interruption time
-		// as a floor so playback never resumes behind where it was actually paused.
-		if let trackId = track["id"] as? String,
-		   let savedResumeMs = consumeInterruptionResumePosition(for: trackId),
-		   savedResumeMs > (pendingStartTimeMs ?? 0) {
-			log("Applying interruption resume floor", savedResumeMs, "over requested start", pendingStartTimeMs ?? 0)
-			pendingStartTimeMs = savedResumeMs
-		}
+        // Resolve before choosing a file in JS. A resume may use this record only for the same file.
+        if options["positionIntent"] as? String == "resume",
+           listeningReceipt?["trackIdentity"] as? String == track["id"] as? String,
+           let saved = getDouble(listeningReceipt?["trackPositionMs"]),
+           ((listeningReceipt?["sequence"] as? NSNumber)?.int64Value ?? 0) > ((listeningReceipt?["syncedThroughSequence"] as? NSNumber)?.int64Value ?? 0),
+           saved > (pendingStartTimeMs ?? 0) { pendingStartTimeMs = saved }
+        pendingStartTimeMs = pendingStartTimeMs ?? 0
 
 		applyConfigurationSettings(options)
 
@@ -654,10 +826,7 @@ class AudioPro: RCTEventEmitter {
 		log("Play", track["title"] ?? "Unknown", "speed:", speed, "volume:", volume, "autoPlay:", autoPlay)
 
 		if player != nil {
-			DispatchQueue.main.sync {
-				// Prepare for new playback without emitting state changes or destroying the media session
-				prepareForNewPlayback()
-			}
+            prepareForNewPlayback()
 		}
 
 		guard
@@ -672,13 +841,12 @@ class AudioPro: RCTEventEmitter {
 			return
 		}
 
-		do {
-			let contentType = options["contentType"] as? String ?? "MUSIC"
-			let mode: AVAudioSession.Mode = (contentType == "SPEECH") ? .spokenAudio : .default
-			try AVAudioSession.sharedInstance().setCategory(.playback, mode: mode)
-			try AVAudioSession.sharedInstance().setActive(true)
+			do {
+				let contentType = options["contentType"] as? String ?? "MUSIC"
+				let mode: AVAudioSession.Mode = (contentType == "SPEECH") ? .spokenAudio : .default
+				try AVAudioSession.sharedInstance().setCategory(.playback, mode: mode)
 
-			// Set up audio session interruption observer
+				// Set up audio session interruption observer
 			setupAudioSessionInterruptionObserver()
 		} catch {
 			onError("Audio session setup failed: \(error.localizedDescription)")
@@ -686,7 +854,7 @@ class AudioPro: RCTEventEmitter {
 		}
 
 		sendStateEvent(state: STATE_LOADING, position: 0, duration: 0, track: currentTrack)
-		shouldBePlaying = autoPlay
+        // shouldBePlaying was set when this load was requested. Do not overwrite a newer pause.
 
 		let album = track["album"] as? String
 		let artist = track["artist"] as? String
@@ -758,9 +926,9 @@ class AudioPro: RCTEventEmitter {
 
 		updateNowPlayingInfo(
 			time: 0,
-			rate: autoPlay ? currentPlaybackSpeed : 0,
-			duration: item.asset.duration.seconds,
-			playbackState: autoPlay ? .playing : .paused
+            rate: 0,
+            duration: item.asset.duration.seconds,
+            playbackState: .paused
 		)
 
 		// Add notification observer for track completion to the new item
@@ -771,43 +939,19 @@ class AudioPro: RCTEventEmitter {
 			object: item
 		)
 
-		// Set up playback speed. Only pre-roll the rate when auto-playing:
-		// assigning a non-zero rate to AVPlayer STARTS playback, which
-		// silently defeated autoPlay:false for any track with a speed ≠ 1
-		// (app startup restore audibly began playing). When paused,
-		// currentPlaybackSpeed is applied by resume().
-		if autoPlay && currentPlaybackSpeed != 1.0 {
-			player?.rate = currentPlaybackSpeed
-
-			let speed = Double(currentPlaybackSpeed)
-			DispatchQueue.main.async {
-				var currentInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-				currentInfo[MPNowPlayingInfoPropertyPlaybackRate] = speed
-				MPNowPlayingInfoCenter.default().nowPlayingInfo = currentInfo
-			}
-		}
-
-		if autoPlay {
-			player?.play()
-		} else {
-			DispatchQueue.main.async {
-				self.sendStateEvent(state: self.STATE_PAUSED, position: 0, duration: 0, track: self.currentTrack)
-			}
-		}
-
-		DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-			// Don't emit PLAYING state if we're in an error state
-			if self.isInErrorState {
-				self.log("Ignoring delayed PLAYING state after ERROR")
-				return
-			}
-
-			if self.player?.rate != 0 && self.hasListeners {
-				// Use sendPlayingStateEvent to ensure lastEmittedState is updated
-				self.sendPlayingStateEvent()
-				self.startProgressTimer()
-			}
-		}
+        // Playback begins only after initial seek completion has committed the applied position.
+        player?.pause()
+        observeTransport(player!, item: item)
+        startListeningCapture()
+        let pendingLoadSerial = loadSerial
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+            guard let self, self.loadSerial == pendingLoadSerial, self.initialSeekPending else { return }
+            self.shouldBePlaying = false; self.player?.pause()
+            self.transportReason = "initial-seek-timeout"
+            self.sendStateEvent(state: self.STATE_ERROR, track: self.currentTrack)
+            self.emitPlaybackError("Audio did not become ready; saved listening position retained")
+        }
+        if item.status == .readyToPlay { applyInitialSeek() }
 
 		// Fetch artwork asynchronously and update Now Playing info
 		DispatchQueue.global().async {
@@ -954,20 +1098,53 @@ class AudioPro: RCTEventEmitter {
 	/// bridge queue) take exactly the same path as CarPlay/lock-screen remote
 	/// commands (main thread) — MediaRemote/CarPlay track the session state
 	/// unreliably when the player is driven from a background thread.
-	private func runOnMain(_ block: @escaping () -> Void) {
+		private func runOnMain(_ block: @escaping () -> Void) {
 		if Thread.isMainThread {
 			block()
-		} else {
-			DispatchQueue.main.async(execute: block)
+			} else {
+				DispatchQueue.main.async(execute: block)
+			}
 		}
-	}
 
-	@objc(pause)
+    private func activateAudioSessionForPlayback() -> Bool {
+        let otherAudioWasPlaying = AVAudioSession.sharedInstance().isOtherAudioPlaying
+        let activeLoadId = loadId ?? "none"
+        do {
+            // A Play command is an explicit request to take audio ownership,
+            // including when another app is currently playing.
+            try AVAudioSession.sharedInstance().setActive(true)
+            listeningWriter.async { [weak self] in
+                self?.listeningLedger?.trace("audio-session-activation", [
+                    "loadId": activeLoadId, "otherAudioWasPlaying": otherAudioWasPlaying,
+                    "result": "success"
+                ])
+            }
+            return true
+        } catch {
+            let errorCode = (error as NSError).code
+            listeningWriter.async { [weak self] in
+                self?.listeningLedger?.trace("audio-session-activation", [
+                    "loadId": activeLoadId, "otherAudioWasPlaying": otherAudioWasPlaying,
+                    "result": "failure", "errorCode": errorCode
+                ])
+            }
+            shouldBePlaying = false
+            player?.pause()
+            transportReason = "activation-failed"
+            sendPausedStateEvent()
+            emitPlaybackError("Unable to activate audio session: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+		@objc(pause)
 	func pause() {
 		runOnMain { [weak self] in
 			guard let self = self else { return }
 			self.shouldBePlaying = false
 			self.player?.pause()
+            self.transportReason = "user-pause"
+            self.captureListeningPosition(reason: "pause")
 			self.stopTimer()
 			self.sendPausedStateEvent()
 			self.updateNowPlayingInfo(
@@ -982,19 +1159,21 @@ class AudioPro: RCTEventEmitter {
 	func resume() {
 		runOnMain { [weak self] in
 			guard let self = self else { return }
-			self.shouldBePlaying = true
+            guard !self.persistenceFailed, !self.initialSeekPending, self.pendingSeekCommand == nil, !self.interruptionActive else { return }
+            self.shouldBePlaying = true
+            self.transportReason = "resume-requested"
+            self.noMovementSince = ProcessInfo.processInfo.systemUptime
+            guard self.activateAudioSessionForPlayback() else { return }
 
-			// Try to reactivate the audio session if needed
-			do {
-				if !AVAudioSession.sharedInstance().isOtherAudioPlaying {
-					try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
-				}
-			} catch {
-				self.log("Failed to reactivate audio session: \(error.localizedDescription)")
-				// Continue anyway, as the play command might still work
-			}
-
-			self.player?.play()
+            // Restore committed evidence if the item lost its time during a system interruption.
+            if self.captureEnabled, let saved = self.getDouble(self.listeningReceipt?["trackPositionMs"]),
+               self.listeningReceipt?["trackIdentity"] as? String == self.currentTrack?["id"] as? String,
+               let current = self.player?.currentTime().seconds, current.isFinite,
+               current * 1000 < saved - 1000 {
+                self.performSeek(to: saved, intentional: false)
+                return
+            }
+            self.player?.play()
 
 			// play() resets the rate to the player's default (1.0); re-apply the
 			// configured speed so native-initiated resumes (remote commands,
@@ -1004,12 +1183,8 @@ class AudioPro: RCTEventEmitter {
 				self.player?.rate = self.currentPlaybackSpeed
 			}
 
-			// Ensure lock screen controls are properly updated
-			self.updateNowPlayingInfo(
-				time: self.player?.currentTime().seconds ?? 0,
-				rate: self.currentPlaybackSpeed,
-				playbackState: .playing
-			)
+            // Requested play is not proof that native transport started.
+            self.publishTransport()
 
 			// Note: We don't need to call sendPlayingStateEvent() here because
 			// the rate change will trigger observeValue which now calls sendPlayingStateEvent()
@@ -1019,7 +1194,8 @@ class AudioPro: RCTEventEmitter {
 	/// stop is meant to halt playback and update the state without destroying persistent info
 	/// such as artwork and remote control settings. This allows the lock screen/Control Center
 	/// to continue displaying the track details for a potential resume.
-	@objc func stop() {
+    @objc func stop() {
+        if !Thread.isMainThread { runOnMain { self.stop() }; return }
 		// Reset error state when explicitly stopping
 		isInErrorState = false
 		// Reset last emitted state when stopping playback
@@ -1028,8 +1204,9 @@ class AudioPro: RCTEventEmitter {
 
 		pendingStartTimeMs = nil
 
-		player?.pause()
-		player?.seek(to: .zero)
+        player?.pause()
+        captureListeningPosition(reason: "stop")
+        // Keep the live position; a stop is not a command to reset listening progress.
 		stopTimer()
 		// Do not set currentTrack = nil as STOPPED state should preserve track metadata
 		sendStoppedStateEvent()
@@ -1049,7 +1226,23 @@ class AudioPro: RCTEventEmitter {
 	/// Shared internal function that performs the teardown and emits the correct state.
 	/// Used by both clear() and error transitions.
 	/// - Parameter finalState: The state to emit after resetting (IDLE or ERROR)
-	private func resetInternal(_ finalState: String) {
+    private func resetInternal(_ finalState: String) {
+        if !Thread.isMainThread { runOnMain { self.resetInternal(finalState) }; return }
+        loadSerial += 1
+        let resetSerial = loadSerial
+        shouldBePlaying = false
+        player?.pause()
+        captureListeningPosition(reason: finalState == STATE_ERROR ? "player-error" : "teardown") { result in
+            if case .failure(let error) = result { self.savingFailed(error, generation: self.listeningLease?.generation); return }
+            guard self.loadSerial == resetSerial else { return }
+            self.resetAfterCheckpoint(finalState)
+        }
+    }
+    private func resetAfterCheckpoint(_ finalState: String) {
+        captureEnabled = false
+        isPreparingLoad = false
+        initialSeekPending = false
+        pendingSeekCommand = nil
 		// Reset error state
 		isInErrorState = finalState == STATE_ERROR
 		// Reset last emitted state
@@ -1084,8 +1277,12 @@ class AudioPro: RCTEventEmitter {
 	@objc func cleanup(emitStateChange: Bool = true, clearTrack: Bool = true) {
 		log("Cleanup", "emitStateChange:", emitStateChange, "clearTrack:", clearTrack)
 
-		// Reset pending start time
-		pendingStartTimeMs = nil
+        listeningTimer?.invalidate(); listeningTimer = nil
+        timeControlObservation = nil
+        itemNotificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
+        itemNotificationTokens.removeAll()
+        // Reset pending start time
+        pendingStartTimeMs = nil
 
 		shouldBePlaying = false
 
@@ -1147,86 +1344,100 @@ class AudioPro: RCTEventEmitter {
 	////////////////////////////////////////////////////////////
 
 	/// Common seek implementation used by all seek methods
-	private func performSeek(to position: Double, isAbsolute: Bool = true) {
-		guard let player = player else {
-			onError("Cannot seek: no track is playing")
-			return
-		}
-
-		guard let currentItem = player.currentItem else {
-			onError("Cannot seek: no item loaded")
-			return
-		}
-
-		let duration = currentItem.duration.seconds
-		let currentTime = player.currentTime().seconds
-
-		// For relative seeking (forward/back), we need valid current time
-		if !isAbsolute && (currentTime.isNaN || currentTime.isInfinite) {
-			onError("Cannot seek: invalid track position")
-			return
-		}
-
-		// For all seeks, we need valid duration
-		if duration.isNaN || duration.isInfinite {
-			onError("Cannot seek: invalid track duration")
-			return
-		}
-
-		stopTimer()
-
-		// Calculate target position based on whether this is absolute or relative
-		let targetPosition: Double
-		if isAbsolute {
-			// For seekTo, convert ms to seconds
-			targetPosition = position / 1000.0
-		} else {
-			// For seekForward/Back, position is the amount in ms
-			let amountInSeconds = position / 1000.0
-			targetPosition = (position >= 0) ? min(currentTime + amountInSeconds, duration) :
-											  max(0, currentTime + amountInSeconds)
-		}
-
-		// Ensure position is within valid range
-		let validPosition = max(0, min(targetPosition, duration))
-		let time = CMTime(seconds: validPosition, preferredTimescale: 1000)
-		let targetPositionMs = validPosition * 1000
-		let completionToleranceSeconds = 0.05 // Allow small drift when AVPlayer reports interrupted completion
-
-		let executeSeek = { [weak self] in
-			guard let self = self else { return }
-
-			// Cancel any pending seeks before issuing a new one to avoid AVPlayer interrupting the callback
-			currentItem.cancelPendingSeeks()
-
-			player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] completed in
-				guard let self = self else { return }
-
-				let currentTime = player.currentTime().seconds
-				let isEffectivelyAtTarget = abs(currentTime - validPosition) <= completionToleranceSeconds
-
-				if completed || isEffectivelyAtTarget {
-					self.updateNowPlayingInfoWithCurrentTime(validPosition)
-					self.completeSeekingAndSendSeekCompleteNoticeEvent(newPosition: targetPositionMs)
-
-					// Force update the now playing info to ensure controls work
-					if isAbsolute { // Only do this for absolute seeks to avoid redundant updates
-						DispatchQueue.main.async {
-							self.updateNowPlayingInfo(time: validPosition, rate: player.rate)
-						}
-					}
-				} else if player.rate != 0 {
-					self.startProgressTimer()
-				}
-			}
-		}
-
-		if Thread.isMainThread {
-			executeSeek()
-		} else {
-			DispatchQueue.main.async(execute: executeSeek)
-		}
-	}
+    private func performSeek(to position: Double, isAbsolute: Bool = true, intentional: Bool = true) {
+        runOnMain {
+            guard let player = self.player, let item = player.currentItem else { self.emitPlaybackError("Cannot seek: no item loaded"); return }
+            let duration = item.duration.seconds
+            let current = player.currentTime().seconds
+            guard position.isFinite, duration.isFinite, current.isFinite else { self.emitPlaybackError("Cannot seek: invalid timing"); return }
+            let target = max(0, min(isAbsolute ? position / 1000 : current + position / 1000, duration))
+            let command = self.initialSeekPending ? (self.loadPositionCommandId ?? UUID().uuidString) : UUID().uuidString
+            let serial = self.loadSerial
+            let lease = self.captureEnabled && intentional ? self.listeningLease : nil
+            self.pendingSeekCommand = command
+            self.stopTimer()
+            let execute: (ListeningLease?) -> Void = { next in
+                guard self.loadSerial == serial, self.pendingSeekCommand == command else { return }
+                if let next { self.listeningLease = next }
+                item.cancelPendingSeeks()
+                player.seek(to: CMTime(seconds: target, preferredTimescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { completed in
+                    self.runOnMain {
+                        guard self.player === player, self.loadSerial == serial, self.pendingSeekCommand == command else { return }
+                        guard completed, player.currentTime().seconds.isFinite, abs(player.currentTime().seconds - target) <= 0.1 else {
+                            self.player?.pause(); self.shouldBePlaying = false
+                            self.transportReason = "seek-failed"; self.sendStateEvent(state: self.STATE_ERROR, track: self.currentTrack)
+                            self.emitPlaybackError("Audio seek did not complete; saved listening position retained"); return
+                        }
+                        let wasInitialSeek = self.initialSeekPending
+                        self.captureListeningPosition(reason: wasInitialSeek ? "initial-seek-complete" : "seek-complete", commandId: intentional ? command : nil) { result in
+                            guard self.loadSerial == serial, self.pendingSeekCommand == command else { return }
+                            if case .failure = result { return }
+                            self.initialSeekPending = false
+                            self.pendingSeekCommand = nil
+                            self.transportReason = "seek-complete"
+                            self.completeSeekingAndSendSeekCompleteNoticeEvent(newPosition: player.currentTime().seconds * 1000)
+                            if self.shouldBePlaying && !self.interruptionActive && !self.persistenceFailed {
+                                guard self.activateAudioSessionForPlayback() else { return }
+                                player.playImmediately(atRate: self.currentPlaybackSpeed)
+                                self.noMovementSince = ProcessInfo.processInfo.systemUptime
+                            }
+                            self.publishTransport()
+                        }
+                    }
+                }
+            }
+            if let lease {
+                self.listeningWriter.async {
+                    do {
+                        let next = try self.ledgerOnWriter().beginRelocation(lease, target: (self.getDouble(self.listeningContext?["trackStartOffsetMs"]) ?? 0) + target * 1000, commandId: command)
+                        DispatchQueue.main.async { execute(next) }
+                    } catch { DispatchQueue.main.async { self.savingFailed(error, generation: lease.generation) } }
+                }
+            } else { execute(nil) }
+        }
+    }
+    private func applyInitialSeek() {
+        guard initialSeekPending, pendingSeekCommand == nil, let target = pendingStartTimeMs,
+              let player, player.currentItem?.status == .readyToPlay else { return }
+        pendingStartTimeMs = nil
+        performSeek(to: target, intentional: loadPositionIntent == "relocate")
+    }
+    private func observeTransport(_ observed: AVPlayer, item: AVPlayerItem) {
+        timeControlObservation = observed.observe(\.timeControlStatus, options: [.new]) { [weak self, weak observed] _, _ in
+            self?.runOnMain { [weak self, weak observed] in
+                guard let self, let observed, self.player === observed else { return }
+                self.publishTransport()
+            }
+        }
+        let center = NotificationCenter.default
+        itemNotificationTokens.append(center.addObserver(forName: .AVPlayerItemPlaybackStalled, object: item, queue: .main) { [weak self] _ in
+            guard let self, self.player?.currentItem === item else { return }
+            self.transportReason = "stalled"; self.captureListeningPosition(reason: "stalled")
+            self.sendStateEvent(state: self.STATE_LOADING, track: self.currentTrack)
+        })
+        itemNotificationTokens.append(center.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+            guard let self, self.player?.currentItem === item else { return }
+            self.transportReason = "item-failed"; self.onError("The audio stream failed")
+        })
+        itemNotificationTokens.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] notice in
+            guard let self else { return }
+            self.captureListeningPosition(reason: "route-change")
+            if (notice.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt) == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue { self.pause() }
+        })
+        itemNotificationTokens.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.transportReason = "media-services-reset"; self?.onError("Audio services were reset")
+        })
+    }
+    private func publishTransport() {
+        guard !initialSeekPending, !isInErrorState, !persistenceFailed, let player else { return }
+        let state = interruptionActive ? STATE_PAUSED : player.timeControlStatus == .playing ? STATE_PLAYING : player.timeControlStatus == .waitingToPlayAtSpecifiedRate ? STATE_LOADING : STATE_PAUSED
+        transportReason = interruptionActive ? "interruption" : state == STATE_LOADING ? "buffering" : state == STATE_PLAYING ? "transport-playing" : "transport-paused"
+        let diagnostic = snapshot()
+        listeningWriter.async { [weak self] in self?.listeningLedger?.trace("transport", diagnostic) }
+        sendStateEvent(state: state, track: currentTrack)
+        updateNowPlayingInfo(rate: state == STATE_PLAYING ? player.rate : 0, playbackState: state == STATE_PLAYING ? .playing : .paused)
+        if state == STATE_PLAYING { startProgressTimer() } else { stopTimer() }
+    }
 
 	@objc(seekTo:)
 	func seekTo(position: Double) {
@@ -1268,7 +1479,8 @@ class AudioPro: RCTEventEmitter {
 	////////////////////////////////////////////////////////////
 
 	@objc(setPlaybackSpeed:)
-	func setPlaybackSpeed(speed: Double) {
+    func setPlaybackSpeed(speed: Double) {
+        if !Thread.isMainThread { runOnMain { self.setPlaybackSpeed(speed: speed) }; return }
 		currentPlaybackSpeed = Float(speed)
 
 		guard let player = player else {
@@ -1302,7 +1514,8 @@ class AudioPro: RCTEventEmitter {
 	}
 
 	@objc(setVolume:)
-	func setVolume(volume: Double) {
+    func setVolume(volume: Double) {
+        if !Thread.isMainThread { runOnMain { self.setVolume(volume: volume) }; return }
 		activeVolume = Float(volume)
 
 		guard let player = player else {
@@ -1326,21 +1539,22 @@ class AudioPro: RCTEventEmitter {
 	 *   - TRACK_ENDED
 	 */
 	@objc private func playerItemDidPlayToEndTime(_ notification: Notification) {
-		guard let _ = player?.currentItem else { return }
+        guard let ended = notification.object as? AVPlayerItem, ended === player?.currentItem else { return }
 
 		if isInErrorState {
 			log("Ignoring track end notification while in ERROR state")
 			return
 		}
 
-		let info = getPlaybackInfo()
-
-		isInErrorState = false
+        let info = getPlaybackInfo()
+        transportReason = "natural-completion"
+        captureListeningPosition(reason: "natural-completion")
+        isInErrorState = false
 		lastEmittedState = ""
 		shouldBePlaying = false
 
-		player?.seek(to: .zero)
-		stopTimer()
+        player?.pause()
+        stopTimer()
 
 		updateNowPlayingInfo(time: 0, rate: 0)
 
@@ -1371,14 +1585,11 @@ class AudioPro: RCTEventEmitter {
 
 		switch keyPath {
 		case "status":
-			if let item = object as? AVPlayerItem {
+            if let item = object as? AVPlayerItem, item === player?.currentItem {
 				switch item.status {
 				case .readyToPlay:
 					log("Player item ready to play")
-					if let pendingStartTimeMs = pendingStartTimeMs {
-						performSeek(to: pendingStartTimeMs, isAbsolute: true)
-						self.pendingStartTimeMs = nil
-					}
+                    applyInitialSeek()
 				case .failed:
 					if let error = item.error {
 						onError("Player item failed: \(error.localizedDescription)")
@@ -1391,22 +1602,8 @@ class AudioPro: RCTEventEmitter {
 					break
 				}
 			}
-		case "rate":
-			if let newRate = change?[.newKey] as? Float {
-				if newRate == 0 {
-					if shouldBePlaying && hasListeners {
-						let info = getPlaybackInfo()
-						sendStateEvent(state: STATE_LOADING, position: info.position, duration: info.duration, track: info.track)
-						stopTimer()
-					}
-				} else {
-					if shouldBePlaying && hasListeners {
-						// Use sendPlayingStateEvent to ensure lastEmittedState is updated
-						sendPlayingStateEvent()
-						startProgressTimer()
-					}
-				}
-			}
+        case "rate":
+            if let observed = object as? AVPlayer, observed === player { publishTransport() }
 		default:
 			super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
 		}
@@ -1448,7 +1645,7 @@ class AudioPro: RCTEventEmitter {
 
 		// Filter out duplicate state emissions
 		// This prevents rapid-fire transitions of the same state being emitted repeatedly
-		if state == lastEmittedState {
+        if state == lastEmittedState && transportReason == lastEmittedReason {
 			log("Ignoring duplicate \(state) state emission")
 			return
 		}
@@ -1464,7 +1661,8 @@ class AudioPro: RCTEventEmitter {
 		sendEvent(type: EVENT_TYPE_STATE_CHANGED, track: info.track ?? track, payload: payload)
 
 		// Track the last emitted state
-		lastEmittedState = state
+        lastEmittedState = state
+        lastEmittedReason = transportReason
 	}
 
 	private func sendStoppedStateEvent() {
@@ -1472,6 +1670,7 @@ class AudioPro: RCTEventEmitter {
 	}
 
 	private func sendPlayingStateEvent() {
+        guard player?.timeControlStatus == .playing, !initialSeekPending, !interruptionActive else { return }
 		sendStateEvent(state: STATE_PLAYING, track: currentTrack)
 	}
 
@@ -1631,7 +1830,8 @@ class AudioPro: RCTEventEmitter {
 	 * This method is for unrecoverable player failures that require player teardown.
 	 * For non-critical errors that don't require state transition, use emitPlaybackError() instead.
 	 */
-	func onError(_ errorMessage: String) {
+    func onError(_ errorMessage: String) {
+        if !Thread.isMainThread { runOnMain { self.onError(errorMessage) }; return }
 		// If we're already in an error state, just log and return
 		if isInErrorState {
 			log("Already in error state, ignoring additional error: \(errorMessage)")
@@ -2072,7 +2272,9 @@ class AudioPro: RCTEventEmitter {
 		var body: [String: Any] = ["type": type]
 
 		if let payload = payload {
-			body["payload"] = payload
+			var enriched = payload
+            enriched.merge(metadata()) { _, new in new }
+            body["payload"] = enriched
 		}
 
 		sendEvent(withName: AMBIENT_EVENT_NAME, body: body)

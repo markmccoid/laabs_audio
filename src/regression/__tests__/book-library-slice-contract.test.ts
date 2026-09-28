@@ -8,6 +8,7 @@ jest.mock("@/auth/auth-store", () => ({
   authStore: {
     getState: jest.fn(() => ({
       accessToken: "book-token",
+      storedUserId: "book-listener",
       serverUrl: "https://abs.example.test",
       isOnline: true,
       status: "authenticated",
@@ -40,6 +41,7 @@ jest.mock("@/progress/progress-sync-intent-store", () => ({
   clearSyncedProgressSyncIntent: jest.fn(),
   getProgressIntentUpdatedAt: jest.fn((intent) => intent?.updatedAt ?? 0),
   hasPendingProgressSyncIntent: jest.fn(() => false),
+  getPendingProgressSyncIntent: jest.fn(() => null),
   recordProgressSyncIntent: jest.fn(() => ({
     libraryItemId: "book-1",
     updatedAt: 100,
@@ -120,10 +122,14 @@ describe("Book Library podcast-slice regression contract", () => {
       setLastSyncAt,
     });
 
-    expect(meApi.updateProgress).toHaveBeenCalledWith("book-1", {
-      currentTime: 30,
-      isFinished: false,
-    });
+    expect(meApi.updateProgress).toHaveBeenCalledWith(
+      "book-1",
+      {
+        currentTime: 30,
+        isFinished: false,
+      },
+      expect.objectContaining({ signal: expect.anything() }),
+    );
     expect(meApi.updateEpisodeProgress).not.toHaveBeenCalled();
     expect(updateLocalProgress).toHaveBeenCalledWith({
       libraryItemId: "book-1",

@@ -36,7 +36,7 @@ export class AuthUnavailableError extends Error {
       | "SERVER_UNREACHABLE"
       | "UNAUTHENTICATED"
       | "MISSING_SERVER_URL"
-      | "TOKEN_REFRESH_FAILED"
+      | "TOKEN_REFRESH_FAILED",
   ) {
     super(message);
     this.name = "AuthUnavailableError";
@@ -64,11 +64,15 @@ const fetchFromAudiobookshelf = async (
 
   if (options.signal) {
     if (options.signal.aborted) abortFromParent();
-    else options.signal.addEventListener("abort", abortFromParent, { once: true });
+    else
+      options.signal.addEventListener("abort", abortFromParent, { once: true });
   }
 
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
     if (isAudiobookshelfGatewayUnavailable(response.status)) {
       provider.setServerConnectionStatus("unreachable");
       throw new AuthUnavailableError(
@@ -90,6 +94,11 @@ const fetchFromAudiobookshelf = async (
     clearTimeout(timeoutId);
     options.signal?.removeEventListener("abort", abortFromParent);
   }
+};
+
+const throwIfRequestAborted = (signal?: AbortSignal | null) => {
+  if (signal?.aborted)
+    throw signal.reason ?? new Error("Audiobookshelf request was cancelled");
 };
 
 const withAuthHeader = (headers: HeadersInit | undefined, token: string) => {
@@ -120,15 +129,16 @@ const ensureAccessToken = async (forceRefresh = false) => {
 
 export const authFetch = async (
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<Response> => {
   const provider = getProvider();
+  throwIfRequestAborted(options.signal);
   const method = (options.method ?? "GET").toUpperCase();
 
   if (provider.getIsAnonymous()) {
     throw new AuthUnavailableError(
       "User is not authenticated",
-      "UNAUTHENTICATED"
+      "UNAUTHENTICATED",
     );
   }
 
@@ -147,6 +157,7 @@ export const authFetch = async (
   try {
     token = await ensureAccessToken(false);
   } catch (error) {
+    throwIfRequestAborted(options.signal);
     if (__DEV__) {
       console.warn("[auth-fetch] token:error", { method, path, error });
     }
@@ -160,10 +171,11 @@ export const authFetch = async (
     provider.setLoginRequired(true, "Login required to stream");
     throw new AuthUnavailableError(
       "Unable to refresh session",
-      "TOKEN_REFRESH_FAILED"
+      "TOKEN_REFRESH_FAILED",
     );
   }
 
+  throwIfRequestAborted(options.signal);
   if (!token) {
     if (__DEV__) {
       console.warn("[auth-fetch] token:missing", { method, path });
@@ -171,14 +183,18 @@ export const authFetch = async (
     provider.setLoginRequired(true, "Login required to stream");
     throw new AuthUnavailableError(
       "Unable to refresh session",
-      "TOKEN_REFRESH_FAILED"
+      "TOKEN_REFRESH_FAILED",
     );
   }
 
-  const response = await fetchFromAudiobookshelf(url, {
-    ...options,
-    headers: withAuthHeader(options.headers, token),
-  }, provider);
+  const response = await fetchFromAudiobookshelf(
+    url,
+    {
+      ...options,
+      headers: withAuthHeader(options.headers, token),
+    },
+    provider,
+  );
 
   if (response.status !== 401) {
     return response;
@@ -191,6 +207,7 @@ export const authFetch = async (
   try {
     refreshed = await ensureAccessToken(true);
   } catch (error) {
+    throwIfRequestAborted(options.signal);
     if (error instanceof AuthError && error.code === "NETWORK_ERROR") {
       provider.setServerConnectionStatus("unreachable");
       throw new AuthUnavailableError(
@@ -200,21 +217,26 @@ export const authFetch = async (
     }
     throw new AuthUnavailableError(
       "Unable to refresh session",
-      "TOKEN_REFRESH_FAILED"
+      "TOKEN_REFRESH_FAILED",
     );
   }
+  throwIfRequestAborted(options.signal);
   if (!refreshed) {
     provider.setLoginRequired(true, "Login required to stream");
     throw new AuthUnavailableError(
       "Unable to refresh session",
-      "TOKEN_REFRESH_FAILED"
+      "TOKEN_REFRESH_FAILED",
     );
   }
 
-  return fetchFromAudiobookshelf(buildUrl(serverUrl, path), {
-    ...options,
-    headers: withAuthHeader(options.headers, refreshed),
-  }, provider);
+  return fetchFromAudiobookshelf(
+    buildUrl(serverUrl, path),
+    {
+      ...options,
+      headers: withAuthHeader(options.headers, refreshed),
+    },
+    provider,
+  );
 };
 
 export const shouldRefreshSoon = () => {

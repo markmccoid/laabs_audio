@@ -59,6 +59,81 @@ export type AudioProPlayOptions = {
 	autoPlay?: boolean;
 	headers?: AudioProHeaders;
 	startTimeMs?: number;
+	listeningContext?: ListeningContext;
+	positionIntent?: 'resume' | 'relocate' | 'preview';
+	positionCommandId?: string;
+	loadId?: string;
+};
+
+export type ListeningPositionScope = {
+	ownerId: string;
+	libraryItemId: string;
+	episodeId: string | null;
+};
+
+export type ListeningContext = ListeningPositionScope & {
+	trackStartOffsetMs: number;
+	durationMs: number;
+	captureEnabled: boolean;
+};
+
+export type ListeningPositionRecord = ListeningPositionScope & {
+	schemaVersion: number;
+	playbackGeneration: number;
+	positionRevision: number;
+	sequence: number;
+	positionMs: number;
+	trackPositionMs: number;
+	trackStartOffsetMs: number;
+	trackIdentity: string;
+	durationMs: number;
+	isFinished: boolean;
+	reason: string;
+	capturedAt: number;
+	committedAt: number;
+	projectedThroughSequence: number;
+	syncedThroughSequence: number;
+};
+
+export type ListeningPositionCommand = ListeningPositionScope & {
+	positionMs: number;
+	durationMs: number;
+	isFinished: boolean;
+	reason: string;
+	commandId?: string;
+};
+
+export type PlaybackSnapshot = {
+	state: AudioProState;
+	position: number;
+	duration: number;
+	trackId: string | null;
+	loadId: string | null;
+	initialSeekPending: boolean;
+	playbackGeneration: number;
+	positionRevision: number;
+	positionSequence: number;
+	ownerId: string | null;
+	libraryItemId: string | null;
+	episodeId: string | null;
+	reason?: string;
+	/** Native monotonic clock; safe across suspended JavaScript delivery. */
+	monotonicTimeMs?: number;
+	shouldBePlaying?: boolean;
+};
+
+export type AudioProEventOrder = {
+	loadId?: string | null;
+	initialSeekPending?: boolean;
+	playbackGeneration?: number;
+	positionRevision?: number;
+	positionSequence?: number;
+	ownerId?: string | null;
+	libraryItemId?: string | null;
+	episodeId?: string | null;
+	reason?: string;
+	monotonicTimeMs?: number;
+	shouldBePlaying?: boolean;
 };
 
 // ==============================
@@ -70,7 +145,7 @@ export type AudioProEventCallback = (event: AudioProEvent) => void;
 export interface AudioProEvent {
 	type: AudioProEventType;
 	track: AudioProTrack | null; // Required for all events except REMOTE_NEXT and REMOTE_PREV
-	payload?: {
+	payload?: AudioProEventOrder & {
 		state?: AudioProState;
 		position?: number;
 		duration?: number;

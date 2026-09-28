@@ -1,5 +1,7 @@
 # Startup Active Playback Restore Relies on Session Teardown, Not an Owner Tag
 
+Superseded for startup ownership checks by [ADR-0041](0041-native-listening-position-survives-playback-failure.md). The saved pointer now carries its owner; paused restoration and session teardown remain required.
+
 Startup Active Playback Restore brings the most recent Active Playback back as a loaded,
 paused Active Playback when the app is reopened (governed by a "Restore last book on
 startup" preference, default on). The saved last audiobook lives in the already-persisted

@@ -5,17 +5,14 @@ import {
   type UserBookProgress,
   type UserServerState,
 } from "@/api/me-api";
-import { useAuthStore } from "@/auth/auth-store";
+import { authStore, useAuthStore } from "@/auth/auth-store";
 import { canUseAudiobookshelfServer } from "@/auth/server-connection";
 import type {
   BookActionHandlers,
   BookActionId,
   ResolvedBookAction,
 } from "@/components/books/book-action-types";
-import {
-  upsertShadowPendingProgressIntent,
-  upsertShadowServerProgressProjection,
-} from "@/data/sqlite/overlay-writes";
+import { upsertShadowServerProgressProjection } from "@/data/sqlite/overlay-writes";
 import type { SqliteHomeProjection } from "@/data/sqlite/home-repository";
 import { useFavoriteBookAction } from "@/hooks/use-favorite-book-action";
 import type { ShelfMembershipOption } from "@/hooks/use-shelf-membership-options";
@@ -27,10 +24,11 @@ import {
 } from "@/store/device-books-store";
 import { shareBook } from "@/sharing/book-share";
 import { playerService, usePlaybackStore } from "@/player";
-import {
-  clearSyncedProgressSyncIntent,
-  recordProgressSyncIntent,
-} from "@/progress/progress-sync-intent-store";
+import { resolveListeningOwnerKey } from "@/auth/listening-owner";
+import { commitListeningStateCommand } from "@/progress/commit-listening-state-command";
+import { nativeListeningPosition } from "@/progress/native-listening-position";
+import { syncListeningPosition } from "@/progress/listening-position-sync";
+import type { PlaybackStoreState } from "@/player/playback-store";
 import { queryKeys } from "@/query/query-keys";
 import { invalidateSqliteOverlayProjections } from "@/query/sqlite-invalidation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
@@ -63,21 +61,25 @@ const updateUserServerStateProgress = (
   const nextState: UserServerState = previousState ?? {
     ...createEmptyUserServerState(userKey),
   };
-  const previousProgress = nextState.progressByLibraryItemId[payload.libraryItemId];
+  const previousProgress =
+    nextState.progressByLibraryItemId[payload.libraryItemId];
   const now = Date.now();
   const resolvedDuration =
     (payload.durationSeconds ?? 0) > 0
-      ? payload.durationSeconds ?? 0
+      ? (payload.durationSeconds ?? 0)
       : (previousProgress?.duration ?? 0);
   const resolvedCurrentTime = Math.max(
     0,
-    Math.floor(payload.currentTimeSeconds ?? previousProgress?.currentTime ?? 0),
+    Math.floor(
+      payload.currentTimeSeconds ?? previousProgress?.currentTime ?? 0,
+    ),
   );
   const progressPercent =
     resolvedDuration > 0
       ? Math.max(0, Math.min(1, resolvedCurrentTime / resolvedDuration))
       : (previousProgress?.progressPercent ?? 0);
-  const resolvedIsFinished = payload.isFinished ?? previousProgress?.isFinished ?? false;
+  const resolvedIsFinished =
+    payload.isFinished ?? previousProgress?.isFinished ?? false;
   const resolvedHideFromContinueListening =
     payload.hideFromContinueListening ??
     previousProgress?.hideFromContinueListening ??
@@ -100,7 +102,9 @@ const updateUserServerStateProgress = (
         isFinished: resolvedIsFinished,
         hideFromContinueListening: resolvedHideFromContinueListening,
         startedAt: previousProgress?.startedAt ?? now,
-        finishedAt: resolvedIsFinished ? (previousProgress?.finishedAt ?? now) : null,
+        finishedAt: resolvedIsFinished
+          ? (previousProgress?.finishedAt ?? now)
+          : null,
         lastUpdate: now,
       },
     },
@@ -121,13 +125,21 @@ const buildOptimisticProgress = (
   const updatedAt = Date.now();
   const resolvedDuration = Math.max(
     0,
-    Math.floor(payload.durationSeconds ?? previousProgress?.duration ?? book.duration ?? 0),
+    Math.floor(
+      payload.durationSeconds ??
+        previousProgress?.duration ??
+        book.duration ??
+        0,
+    ),
   );
   const resolvedCurrentTime = Math.max(
     0,
-    Math.floor(payload.currentTimeSeconds ?? previousProgress?.currentTime ?? 0),
+    Math.floor(
+      payload.currentTimeSeconds ?? previousProgress?.currentTime ?? 0,
+    ),
   );
-  const resolvedIsFinished = payload.isFinished ?? previousProgress?.isFinished ?? false;
+  const resolvedIsFinished =
+    payload.isFinished ?? previousProgress?.isFinished ?? false;
   const resolvedHideFromContinueListening =
     payload.hideFromContinueListening ??
     previousProgress?.hideFromContinueListening ??
@@ -149,13 +161,16 @@ const buildOptimisticProgress = (
     isFinished: resolvedIsFinished,
     hideFromContinueListening: resolvedHideFromContinueListening,
     startedAt: previousProgress?.startedAt ?? updatedAt,
-    finishedAt: resolvedIsFinished ? (previousProgress?.finishedAt ?? updatedAt) : null,
+    finishedAt: resolvedIsFinished
+      ? (previousProgress?.finishedAt ?? updatedAt)
+      : null,
     lastUpdate: updatedAt,
   };
 };
 
 const updateSqliteHomeProjectionProgress = (
   queryClient: QueryClient,
+  ownerId: string,
   book: LibraryItemSummary,
   previousProgress: UserBookProgress | undefined,
   payload: {
@@ -175,7 +190,8 @@ const updateSqliteHomeProjectionProgress = (
   queryClient.setQueriesData<SqliteHomeProjection>(
     {
       predicate: (query) =>
-        Array.isArray(query.queryKey) && query.queryKey.includes("homeProjection"),
+        Array.isArray(query.queryKey) &&
+        query.queryKey.includes("homeProjection"),
     },
     (previousProjection) => {
       if (!previousProjection) return previousProjection;
@@ -217,9 +233,13 @@ export const useBookActionController = ({
   const queryClient = useQueryClient();
   const authStatus = useAuthStore((state) => state.status);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
-  const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
+  const activeLibraryUserKey = useAuthStore(
+    (state) => state.activeLibraryUserKey,
+  );
   const isOnline = useAuthStore((state) => state.isOnline);
-  const serverConnectionStatus = useAuthStore((state) => state.serverConnectionStatus);
+  const serverConnectionStatus = useAuthStore(
+    (state) => state.serverConnectionStatus,
+  );
   const {
     addBookToCustomShelf,
     addBooksToPlaylistShelfOptimistic,
@@ -243,13 +263,17 @@ export const useBookActionController = ({
   const [busyAction, setBusyAction] = useState<
     "primary" | "favorite" | "finished" | "hide" | "shelf" | null
   >(null);
-  const { canToggleFavorite, isToggleFavoritePending, toggleFavorite } = useFavoriteBookAction();
+  const { canToggleFavorite, isToggleFavoritePending, toggleFavorite } =
+    useFavoriteBookAction();
 
   const isBookActive = currentLibraryItemId === book.id;
   const isBookPlaying = isBookActive && playbackState === "playing";
   const isBookLoading = isBookActive && playbackState === "loading";
   const isBookLoaded = isBookActive && activeQueueLength > 0;
-  const canUseServer = canUseAudiobookshelfServer({ isOnline, serverConnectionStatus });
+  const canUseServer = canUseAudiobookshelfServer({
+    isOnline,
+    serverConnectionStatus,
+  });
   const canPlay = !isBookLoading && (canUseServer || isDownloaded);
   const canMutateShelves = Boolean(activeLibraryId && activeLibraryUserKey);
   const hasStartedContinueListening =
@@ -269,8 +293,11 @@ export const useBookActionController = ({
     : "play.fill";
   const isMarkedFinished = isFinished ?? Boolean(progress?.isFinished);
   const finishedLabel = isMarkedFinished ? "Mark as Unread" : "Mark as Read";
-  const finishedSystemImage: "arrow.counterclockwise.circle" | "checkmark.circle" =
-    isMarkedFinished ? "arrow.counterclockwise.circle" : "checkmark.circle";
+  const finishedSystemImage:
+    | "arrow.counterclockwise.circle"
+    | "checkmark.circle" = isMarkedFinished
+    ? "arrow.counterclockwise.circle"
+    : "checkmark.circle";
   const favoriteLabel = isFavorite ? "Remove Favorite" : "Mark as Favorite";
   const favoriteSystemImage: "heart.slash" | "heart" = isFavorite
     ? "heart.slash"
@@ -283,194 +310,129 @@ export const useBookActionController = ({
   const continueListeningVisibilityIcon: "eye" | "eye.slash" =
     progress?.hideFromContinueListening ? "eye" : "eye.slash";
 
-  const syncFinishedProgress = async () => {
+  const changeFinishedProgress = async (finished: boolean) => {
     const durationSeconds = Math.max(
       0,
       Math.floor(progress?.duration ?? 0),
       Math.floor(book.duration ?? 0),
       Math.floor(activeDurationMs / 1000),
     );
-
-    if (activeLibraryUserKey) {
-      updateSqliteHomeProjectionProgress(queryClient, book, progress, {
-        currentTimeSeconds: durationSeconds,
-        durationSeconds,
-        isFinished: true,
-      });
-      queryClient.setQueryData<UserServerState>(
-        queryKeys.userServerState(activeLibraryUserKey),
-        (previousState) =>
-          updateUserServerStateProgress(previousState, activeLibraryUserKey, {
-            libraryItemId: book.id,
-            currentTimeSeconds: durationSeconds,
-            durationSeconds,
-            isFinished: true,
-          }),
-      );
-    }
-
+    const currentTimeSeconds = finished ? durationSeconds : 0;
+    const ownerId = resolveListeningOwnerKey(book.id);
+    if (!ownerId) throw new Error("Unable to resolve this book's listener.");
+    const commandAuth = authStore.getState();
+    let record = null;
+    let isCurrent = () =>
+      resolveListeningOwnerKey(book.id) === ownerId &&
+      authStore.getState().serverUrl === commandAuth.serverUrl &&
+      authStore.getState().activeSessionKey === commandAuth.activeSessionKey;
+    let serverUrl: string | null | undefined = commandAuth.serverUrl;
     if (isBookLoaded) {
-      await playerService.finishActiveBook({
-        libraryItemId: book.id,
-        durationSeconds,
-      });
-      if (activeLibraryUserKey) {
-        await upsertShadowServerProgressProjection(
-          activeLibraryUserKey,
-          buildOptimisticProgress(book, progress, {
-            currentTimeSeconds: durationSeconds,
-            durationSeconds,
-            isFinished: true,
-          }),
-        );
+      if (finished)
+        await playerService.finishActiveBook({
+          libraryItemId: book.id,
+          durationSeconds,
+        });
+      else
+        await playerService.resetActiveBook({
+          libraryItemId: book.id,
+          durationSeconds,
+        });
+      if (nativeListeningPosition.capability() === "native") {
+        record = await nativeListeningPosition.get({
+          ownerId,
+          libraryItemId: book.id,
+          episodeId: null,
+        });
       }
-      toast.success("Marked read");
-      return;
+    } else {
+      const committed = await commitListeningStateCommand({
+        libraryItemId: book.id,
+        positionMs: currentTimeSeconds * 1000,
+        durationMs: durationSeconds * 1000,
+        isFinished: finished,
+        reason: finished ? "mark_read" : "mark_unread",
+      });
+      record = committed.record;
+      serverUrl = committed.serverUrl;
+      isCurrent = () =>
+        committed.ticket.isLatest() && committed.isRouteCurrent();
     }
-
-    if (canUseServer && authStatus === "authenticated") {
-      const intent = recordProgressSyncIntent({
-        libraryItemId: book.id,
-        currentTimeSeconds: durationSeconds,
-        durationSeconds,
-        isFinished: true,
-        title: book.title,
-        trigger: "mark_read",
-        intentKind: "mark_finished",
-      });
-      if (activeLibraryUserKey && intent) {
-        await upsertShadowPendingProgressIntent(activeLibraryUserKey, intent);
-      }
-      await meApi.updateProgress(book.id, {
-        currentTime: durationSeconds,
-        isFinished: true,
-      });
-      clearSyncedProgressSyncIntent({
-        libraryItemId: book.id,
-        // eslint-disable-next-line react-hooks/purity -- event-handler timestamp, not render work
-        syncedThroughUpdatedAt: intent?.updatedAt ?? Date.now(),
-      });
-      if (activeLibraryUserKey) {
-        await upsertShadowServerProgressProjection(
-          activeLibraryUserKey,
-          buildOptimisticProgress(book, progress, {
-            currentTimeSeconds: durationSeconds,
-            durationSeconds,
-            isFinished: true,
-            progressId: progress?.progressId,
-          }),
-        );
-      }
-      invalidateSqliteOverlayProjections(queryClient);
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.booksInProgress(activeLibraryId),
-      });
-      toast.success("Marked read");
+    if (
+      !isCurrent() ||
+      (record &&
+        (record.isFinished !== finished ||
+          Math.abs(record.positionMs - currentTimeSeconds * 1000) >= 1000))
+    )
       return;
-    }
-
-    const offlineIntent = recordProgressSyncIntent({
-      libraryItemId: book.id,
-      currentTimeSeconds: durationSeconds,
+    const optimistic = buildOptimisticProgress(book, progress, {
+      currentTimeSeconds,
       durationSeconds,
-      isFinished: true,
-      title: book.title,
-      trigger: "mark_read_offline",
-      intentKind: "mark_finished",
+      isFinished: finished,
+      progressId: progress?.progressId,
+      hideFromContinueListening: progress?.hideFromContinueListening ?? false,
     });
-    if (activeLibraryUserKey && offlineIntent) {
-      await upsertShadowPendingProgressIntent(activeLibraryUserKey, offlineIntent);
-    }
-    invalidateSqliteOverlayProjections(queryClient);
-    toast.success("Marked read offline");
-  };
-
-  const syncUnfinishedProgress = async () => {
-    const durationSeconds = Math.max(
-      0,
-      Math.floor(progress?.duration ?? 0),
-      Math.floor(book.duration ?? 0),
-      Math.floor(activeDurationMs / 1000),
+    updateSqliteHomeProjectionProgress(queryClient, ownerId, book, progress, {
+      currentTimeSeconds,
+      durationSeconds,
+      isFinished: finished,
+      progressId: progress?.progressId,
+      hideFromContinueListening: progress?.hideFromContinueListening ?? false,
+    });
+    queryClient.setQueryData<UserServerState>(
+      queryKeys.userServerState(ownerId),
+      (previousState) =>
+        updateUserServerStateProgress(previousState, ownerId, {
+          libraryItemId: book.id,
+          currentTimeSeconds,
+          durationSeconds,
+          isFinished: finished,
+          progressId: progress?.progressId,
+        }),
     );
-
-    if (activeLibraryUserKey) {
-      updateSqliteHomeProjectionProgress(queryClient, book, progress, {
-        currentTimeSeconds: 0,
-        durationSeconds,
-        isFinished: false,
-        progressId: progress?.progressId,
-      });
-      queryClient.setQueryData<UserServerState>(
-        queryKeys.userServerState(activeLibraryUserKey),
-        (previousState) =>
-          updateUserServerStateProgress(previousState, activeLibraryUserKey, {
-            libraryItemId: book.id,
-            currentTimeSeconds: 0,
-            durationSeconds,
-            isFinished: false,
-            progressId: progress?.progressId,
-          }),
+    await upsertShadowServerProgressProjection(ownerId, optimistic);
+    if (!isCurrent()) return;
+    if (record)
+      await nativeListeningPosition.acknowledge(
+        { ownerId, libraryItemId: book.id, episodeId: null },
+        record.sequence,
+        "projected",
       );
-    }
-
-    if (canUseServer && authStatus === "authenticated") {
-      const intent = recordProgressSyncIntent({
-        libraryItemId: book.id,
-        currentTimeSeconds: 0,
+    if (!isBookLoaded || !finished) {
+      await syncListeningPosition({
+        state: {
+          libraryItemId: book.id,
+          ownerId,
+          episodeId: null,
+          sessionId: "local",
+          positionSequence: record?.sequence ?? null,
+          positionRevision: record?.positionRevision ?? null,
+          secondaryTitle: null,
+        } as PlaybackStoreState,
+        reason: finished ? "mark_read" : "mark_unread",
+        currentTimeSeconds,
         durationSeconds,
-        isFinished: false,
+        timeListenedSeconds: 0,
+        isFinished: finished,
         title: book.title,
-        trigger: "mark_unread",
-        intentKind: "mark_unread",
+        sessionKind: "unknown",
+        serverUrl,
+        intentKind: finished ? "mark_finished" : "mark_unread",
+        updateLocalProgress: () => {},
+        setLastSyncAt: () => {},
       });
-      if (activeLibraryUserKey && intent) {
-        await upsertShadowPendingProgressIntent(activeLibraryUserKey, intent);
-      }
-      await meApi.updateProgress(book.id, {
-        currentTime: 0,
-        isFinished: false,
-        hideFromContinueListening: progress?.hideFromContinueListening ?? false,
-      });
-      clearSyncedProgressSyncIntent({
-        libraryItemId: book.id,
-        // eslint-disable-next-line react-hooks/purity -- event-handler timestamp, not render work
-        syncedThroughUpdatedAt: intent?.updatedAt ?? Date.now(),
-      });
-      if (activeLibraryUserKey) {
-        await upsertShadowServerProgressProjection(
-          activeLibraryUserKey,
-          buildOptimisticProgress(book, progress, {
-            currentTimeSeconds: 0,
-            durationSeconds,
-            isFinished: false,
-            hideFromContinueListening: progress?.hideFromContinueListening ?? false,
-            progressId: progress?.progressId,
-          }),
-        );
-      }
-      invalidateSqliteOverlayProjections(queryClient);
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.booksInProgress(activeLibraryId),
-      });
-      toast.success("Marked unread");
-      return;
-    }
-
-    const offlineIntent = recordProgressSyncIntent({
-      libraryItemId: book.id,
-      currentTimeSeconds: 0,
-      durationSeconds,
-      isFinished: false,
-      title: book.title,
-      trigger: "mark_unread_offline",
-      intentKind: "mark_unread",
-    });
-    if (activeLibraryUserKey && offlineIntent) {
-      await upsertShadowPendingProgressIntent(activeLibraryUserKey, offlineIntent);
     }
     invalidateSqliteOverlayProjections(queryClient);
-    toast.success("Marked unread offline");
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.booksInProgress(activeLibraryId),
+    });
+    toast.success(
+      `Marked ${finished ? "read" : "unread"}${canUseServer ? "" : " offline"}`,
+    );
   };
+
+  const syncFinishedProgress = () => changeFinishedProgress(true);
+  const syncUnfinishedProgress = () => changeFinishedProgress(false);
 
   const toggleContinueListeningVisibility = async () => {
     if (!activeLibraryUserKey || !progress) {
@@ -481,13 +443,19 @@ export const useBookActionController = ({
     const nextHiddenValue = !progress.hideFromContinueListening;
     // eslint-disable-next-line react-hooks/purity -- event-handler timestamp, not render work
     const updatedAt = Date.now();
-    updateSqliteHomeProjectionProgress(queryClient, book, progress, {
-      currentTimeSeconds: progress.currentTime,
-      durationSeconds: progress.duration,
-      hideFromContinueListening: nextHiddenValue,
-      isFinished: progress.isFinished,
-      progressId: progress.progressId,
-    });
+    updateSqliteHomeProjectionProgress(
+      queryClient,
+      activeLibraryUserKey,
+      book,
+      progress,
+      {
+        currentTimeSeconds: progress.currentTime,
+        durationSeconds: progress.duration,
+        hideFromContinueListening: nextHiddenValue,
+        isFinished: progress.isFinished,
+        progressId: progress.progressId,
+      },
+    );
     await meApi.updateProgress(book.id, {
       currentTime: progress.currentTime,
       isFinished: progress.isFinished,
@@ -515,7 +483,9 @@ export const useBookActionController = ({
       queryKey: queryKeys.booksInProgress(activeLibraryId),
     });
     toast.success(
-      nextHiddenValue ? "Hidden from Continue Listening" : "Shown in Continue Listening",
+      nextHiddenValue
+        ? "Hidden from Continue Listening"
+        : "Shown in Continue Listening",
     );
   };
 
@@ -553,32 +523,32 @@ export const useBookActionController = ({
         : `Set progress in Audiobookshelf to the end of "${book.title}" and mark it as finished?`;
     const confirmLabel = isMarkedFinished ? "Mark Unread" : "Mark Read";
 
-    Alert.alert(
-      alertTitle,
-      alertMessage,
-      [
-        {
-          text: "Cancel",
-          style: "cancel",
+    Alert.alert(alertTitle, alertMessage, [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: confirmLabel,
+        onPress: () => {
+          setBusyAction("finished");
+          void (
+            isMarkedFinished ? syncUnfinishedProgress() : syncFinishedProgress()
+          )
+            .catch(() => {
+              invalidateSqliteOverlayProjections(queryClient);
+              toast.error(
+                isMarkedFinished
+                  ? "Unable to mark as unread"
+                  : "Unable to mark as read",
+              );
+            })
+            .finally(() => {
+              setBusyAction(null);
+            });
         },
-        {
-          text: confirmLabel,
-          onPress: () => {
-            setBusyAction("finished");
-            void (isMarkedFinished ? syncUnfinishedProgress() : syncFinishedProgress())
-              .catch(() => {
-                invalidateSqliteOverlayProjections(queryClient);
-                toast.error(
-                  isMarkedFinished ? "Unable to mark as unread" : "Unable to mark as read",
-                );
-              })
-              .finally(() => {
-                setBusyAction(null);
-              });
-          },
-        },
-      ],
-    );
+      },
+    ]);
   };
 
   const handleToggleContinueListeningVisibility = async () => {
@@ -589,7 +559,9 @@ export const useBookActionController = ({
       await toggleContinueListeningVisibility();
     } catch {
       invalidateSqliteOverlayProjections(queryClient);
-      toast.error(`Unable to ${continueListeningVisibilityLabel.toLowerCase()}`);
+      toast.error(
+        `Unable to ${continueListeningVisibilityLabel.toLowerCase()}`,
+      );
     } finally {
       setBusyAction(null);
     }
@@ -645,15 +617,29 @@ export const useBookActionController = ({
         }
       } else {
         if (option.isMember) {
-          await removeBooksFromPlaylistShelfOptimistic(option.shelfId, [book.id], scopeOptions);
+          await removeBooksFromPlaylistShelfOptimistic(
+            option.shelfId,
+            [book.id],
+            scopeOptions,
+          );
         } else {
-          await addBooksToPlaylistShelfOptimistic(option.shelfId, [book.id], scopeOptions);
+          await addBooksToPlaylistShelfOptimistic(
+            option.shelfId,
+            [book.id],
+            scopeOptions,
+          );
         }
       }
 
-      toast.success(option.isMember ? `Removed from ${option.title}` : `Added to ${option.title}`);
+      toast.success(
+        option.isMember
+          ? `Removed from ${option.title}`
+          : `Added to ${option.title}`,
+      );
     } catch {
-      toast.error(`Unable to ${option.isMember ? "remove from" : "add to"} shelf`);
+      toast.error(
+        `Unable to ${option.isMember ? "remove from" : "add to"} shelf`,
+      );
     } finally {
       setBusyAction(null);
     }

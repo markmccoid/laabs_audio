@@ -1,6 +1,12 @@
+import { nativeListeningPosition } from "../progress/native-listening-position";
 import { playbackStore } from "./playback-store";
 import { playerService } from "./player-service";
 
+jest.mock("../progress/native-listening-position", () => ({
+  nativeListeningPosition: { capability: jest.fn(() => "web"), checkpoint: jest.fn(async () => null),
+    snapshot: jest.fn(async () => null), acknowledge: jest.fn(async () => null),
+    get: jest.fn(async () => null), capture: jest.fn(async () => undefined), set: jest.fn(async () => null) },
+}));
 jest.mock("react-native-mmkv", () => ({
   createMMKV: () => ({
     getString: jest.fn(),
@@ -107,6 +113,8 @@ describe("automatic multi-file playback transitions", () => {
     expect(engine.load).toHaveBeenCalledTimes(1);
     expect(engine.load).toHaveBeenCalledWith(queue[1], {
       initialPositionMs: 0,
+      listeningContext: undefined,
+      positionIntent: "resume",
       rate: 1,
       pitchCorrectionQuality: "medium",
       autoPlay: true,

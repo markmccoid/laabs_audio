@@ -5,12 +5,16 @@ import { AudioProEventType, AudioProState, DEFAULT_CONFIG } from './values';
 
 import type {
 	AudioProConfigureOptions,
+	AudioProEventOrder,
 	AudioProEvent,
 	AudioProPlaybackErrorPayload,
 	AudioProTrack,
 } from './types';
 
 export interface AudioProStore {
+	activeLoadId: string | null;
+	eventOrder: AudioProEventOrder;
+	setActiveLoad: (loadId: string | null) => void;
 	playerState: AudioProState;
 	position: number;
 	duration: number;
@@ -56,6 +60,9 @@ function hasTrackMetadataChanged(prev: AudioProTrack, next: AudioProTrack) {
 }
 
 export const internalStore = create<AudioProStore>((set, get) => ({
+	activeLoadId: null,
+	eventOrder: {},
+	setActiveLoad: (activeLoadId) => set({ activeLoadId, eventOrder: {} }),
 	playerState: AudioProState.IDLE,
 	position: 0,
 	duration: 0,
@@ -84,7 +91,42 @@ export const internalStore = create<AudioProStore>((set, get) => ({
 
 		const { type, track, payload } = event;
 		const current = get();
+		const previousOrder = current.eventOrder;
+		if (current.activeLoadId && payload?.loadId && payload.loadId !== current.activeLoadId)
+			return;
+		if (
+			payload?.playbackGeneration !== undefined &&
+			previousOrder.playbackGeneration !== undefined &&
+			payload.playbackGeneration < previousOrder.playbackGeneration
+		)
+			return;
+		if (
+			payload?.playbackGeneration === previousOrder.playbackGeneration &&
+			payload?.positionRevision !== undefined &&
+			previousOrder.positionRevision !== undefined &&
+			payload.positionRevision < previousOrder.positionRevision
+		)
+			return;
 		const updates: Partial<AudioProStore> = {};
+		if (payload?.loadId || payload?.positionRevision !== undefined)
+			updates.eventOrder = { ...previousOrder, ...payload };
+		const sameRevision =
+			payload?.positionRevision !== undefined &&
+			payload.positionRevision === previousOrder.positionRevision &&
+			payload.playbackGeneration === previousOrder.playbackGeneration;
+		if (
+			sameRevision &&
+			payload?.positionSequence !== undefined &&
+			previousOrder.positionSequence !== undefined &&
+			payload.positionSequence < previousOrder.positionSequence
+		)
+			return;
+		const acceptsPosition =
+			payload?.initialSeekPending !== true &&
+			payload?.position !== undefined &&
+			Number.isFinite(payload.position) &&
+			payload.position >= 0 &&
+			(!sameRevision || payload.position >= current.position);
 
 		// Warn if a non-error event has no track
 		if (track === undefined && type !== AudioProEventType.PLAYBACK_ERROR) {
@@ -139,7 +181,11 @@ export const internalStore = create<AudioProStore>((set, get) => ({
 		}
 
 		// 4. Progress updates
-		if (payload?.position !== undefined && payload.position !== current.position) {
+		if (
+			acceptsPosition &&
+			payload?.position !== undefined &&
+			payload.position !== current.position
+		) {
 			updates.position = payload.position;
 		}
 		if (payload?.duration !== undefined && payload.duration !== current.duration) {

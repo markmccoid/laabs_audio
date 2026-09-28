@@ -15,13 +15,13 @@ import androidx.core.os.bundleOf
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DataSource
-import androidx.media3.exoplayer.util.EventLogger
 import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
@@ -88,14 +88,40 @@ open class AudioProPlaybackService : MediaLibraryService() {
 	private val playbackListener = object : Player.Listener {
 		override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
 			if (::player.isInitialized) {
+				NativeListeningPosition.checkpoint(if (playWhenReady) "play-request" else "pause-or-focus-loss")
 				updateForegroundState(player)
 			}
 		}
 
 		override fun onPlaybackStateChanged(playbackState: Int) {
 			if (::player.isInitialized) {
+				when (playbackState) {
+					Player.STATE_READY -> NativeListeningPosition.ready()
+					Player.STATE_ENDED -> NativeListeningPosition.checkpoint("natural-completion")
+					Player.STATE_BUFFERING -> NativeListeningPosition.checkpoint("buffering")
+					Player.STATE_IDLE -> NativeListeningPosition.checkpoint("idle")
+				}
 				updateForegroundState(player)
 			}
+		}
+
+		override fun onIsPlayingChanged(isPlaying: Boolean) {
+			if (!isPlaying) NativeListeningPosition.checkpoint("transport-stopped")
+			if (::player.isInitialized) updateForegroundState(player)
+		}
+
+		override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+			NativeListeningPosition.checkpoint("audio-focus-suppression")
+			if (::player.isInitialized) updateForegroundState(player)
+		}
+
+		override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+			NativeListeningPosition.discontinuity(newPosition.positionMs,
+				reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT)
+		}
+
+		override fun onPlayerError(error: PlaybackException) {
+			NativeListeningPosition.checkpoint("playback-error")
 		}
 	}
 
@@ -108,6 +134,7 @@ open class AudioProPlaybackService : MediaLibraryService() {
 
 		// Force stop playback and release resources
 		try {
+			if (::player.isInitialized) NativeListeningPosition.detach(player, "task-removed")
 			val hasSession = ::mediaLibrarySession.isInitialized
 			if (hasSession) {
 				mediaLibrarySession.player.stop()
@@ -137,6 +164,7 @@ open class AudioProPlaybackService : MediaLibraryService() {
 
 		// Make sure to release all resources
 		try {
+			if (::player.isInitialized) NativeListeningPosition.detach(player, "service-destroyed")
 			val hasSession = ::mediaLibrarySession.isInitialized
 			if (hasSession) {
 				// Stop playback first
@@ -195,10 +223,6 @@ open class AudioProPlaybackService : MediaLibraryService() {
 				AudioProController.headersAudio?.let { headers ->
 					if (headers.isNotEmpty()) {
 						httpDataSourceFactory.setDefaultRequestProperties(headers)
-						android.util.Log.d(
-							"AudioProPlaybackService",
-							"Applied custom headers: $headers"
-						)
 					}
 				}
 
@@ -224,8 +248,9 @@ open class AudioProPlaybackService : MediaLibraryService() {
 				.build()
 		player.setHandleAudioBecomingNoisy(true)
 		player.repeatMode = Player.REPEAT_MODE_OFF
-		player.addAnalyticsListener(EventLogger())
+		// EventLogger may include authenticated source URLs. Keep diagnostics position-only.
 		player.addListener(playbackListener)
+		NativeListeningPosition.attach(applicationContext, player)
 
 		mediaLibrarySession =
 			MediaLibrarySession.Builder(this, player, createLibrarySessionCallback())
@@ -412,7 +437,7 @@ open class AudioProPlaybackService : MediaLibraryService() {
 			!artist.isNullOrBlank() -> artist
 			currentPlayer == null -> if (ongoing) "Playing..." else "Playback ready"
 			currentPlayer.playbackState == Player.STATE_BUFFERING -> "Buffering..."
-			currentPlayer.playbackState == Player.STATE_READY && currentPlayer.playWhenReady -> "Playing..."
+			currentPlayer.isPlaying -> "Playing..."
 			currentPlayer.playbackState == Player.STATE_ENDED -> "Playback ended"
 			else -> "Paused"
 		}

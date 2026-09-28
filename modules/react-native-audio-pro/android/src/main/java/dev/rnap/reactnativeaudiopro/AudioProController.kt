@@ -24,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.guava.await
 import kotlin.math.abs
+import java.util.UUID
 
 object AudioProController {
 	private const val DUPLICATE_POSITION_EPSILON_MS = 250L
@@ -46,6 +47,8 @@ object AudioProController {
 	private var activeTrack: ReadableMap? = null
 	private var activeVolume: Float = 1.0f
 	private var activePlaybackSpeed: Float = 1.0f
+	private var pendingAutoPlay = false
+	private var playRequest = 0L
 
 	private var flowIsInErrorState: Boolean = false
 	private var flowLastEmittedState: String = ""
@@ -111,6 +114,13 @@ object AudioProController {
 
 	private suspend fun internalPrepareSession() {
 		if (engineBrowserConnecting) {
+			if (::engineBrowserFuture.isInitialized) {
+				val connected = engineBrowserFuture.await()
+				if (!hasConnectedBrowser()) {
+					enginerBrowser = connected
+					attachPlayerListener()
+				}
+			}
 			return
 		}
 		engineBrowserConnecting = true
@@ -269,15 +279,15 @@ object AudioProController {
 	}
 
 	suspend fun play(track: ReadableMap, options: ReadableMap) {
+		val request = ++playRequest
 		val opts = extractPlaybackOptions(options)
 
 		ensurePreparedForNewPlayback()
+		if (request != playRequest) return
 		activeTrack = track
 
-		// If startTimeMs is provided, set a pending seek position
-		if (opts.startTimeMs != null) {
-			flowPendingSeekPosition = opts.startTimeMs
-		}
+		// Set the initial position with the media item, before prepare/play can emit zero.
+		flowPendingSeekPosition = null
 
 		log(
 			"Configured with " +
@@ -327,21 +337,26 @@ object AudioProController {
 
 		// Parse the URL string into a Uri object to properly handle all URI schemes including file://
 		val uri = url.toUri()
-		log("Parsed URI: $uri, scheme: ${uri.scheme}")
+		log("Audio URI scheme:", uri.scheme)
 
+		val mediaId = "audio-pro-load:${UUID.randomUUID()}"
+		val trackId = if (track.hasKey("id")) track.getString("id") ?: mediaId else mediaId
+		val resolvedPosition = NativeListeningPosition.prepareLoad(trackId, mediaId, options, opts.startTimeMs ?: 0)
+		if (request != playRequest) return
+		pendingAutoPlay = opts.autoPlay && NativeListeningPosition.needsLoadConfirmation()
 		val mediaItem = MediaItem.Builder()
 			.setUri(uri)
-			.setMediaId("custom_track_1")
+			.setMediaId(mediaId)
 			.setMediaMetadata(metadataBuilder.build())
 			.build()
 
 		runOnUiThread {
-			log("Play", title, url)
+			log("Play", title)
 			emitState(AudioProModule.STATE_LOADING, 0L, 0L, "play()")
 
 			enginerBrowser?.let {
 				// Set the new media item and prepare the player
-				it.setMediaItem(mediaItem)
+				it.setMediaItem(mediaItem, resolvedPosition)
 				it.prepare()
 
 				// Set playback speed regardless of autoPlay
@@ -349,19 +364,22 @@ object AudioProController {
 				// Set volume regardless of autoPlay
 				it.setVolume(opts.volume)
 
-				if (opts.autoPlay) {
+				if (opts.autoPlay && !pendingAutoPlay) {
 					it.play()
 				} else {
-					emitState(AudioProModule.STATE_PAUSED, 0L, 0L, "play(autoPlay=false)")
+					emitState(AudioProModule.STATE_LOADING, resolvedPosition, 0L, "play(autoPlay=false, initial-seek-pending)")
 				}
 			} ?: Log.w("[react-native-audio-pro]", "MediaBrowser not ready")
 		}
 	}
 
 	fun pause() {
+		playRequest++
+		pendingAutoPlay = false
 		log("pause() called")
 		ensureSession()
 		runOnUiThread {
+			NativeListeningPosition.checkpoint("explicit-pause")
 			enginerBrowser?.pause()
 			enginerBrowser?.let {
 				val pos = it.currentPosition
@@ -375,16 +393,22 @@ object AudioProController {
 		log("resume() called")
 		ensureSession()
 		runOnUiThread {
+			if (NativeListeningPosition.needsLoadConfirmation()) {
+				pendingAutoPlay = true
+				return@runOnUiThread
+			}
 			enginerBrowser?.play()
 			enginerBrowser?.let {
 				val pos = it.currentPosition
 				val dur = it.duration.takeIf { d -> d > 0 } ?: 0L
-				emitState(AudioProModule.STATE_PLAYING, pos, dur, "resume()")
+				emitState(NativeListeningPosition.state(), pos, dur, "resume-request")
 			}
 		}
 	}
 
 	fun stop() {
+		playRequest++
+		pendingAutoPlay = false
 		log("stop() called")
 		// Reset error state when explicitly stopping
 		flowIsInErrorState = false
@@ -397,13 +421,13 @@ object AudioProController {
 			// Do not detach player listener to ensure lock screen controls still work
 			// and state changes are emitted when playback is resumed from lock screen
 
+			NativeListeningPosition.checkpoint("explicit-stop")
 			enginerBrowser?.stop()
-			enginerBrowser?.seekTo(0)
 			enginerBrowser?.let {
-				// Use position 0 for STOPPED state as per logic.md contract
+				// A stopped transport retains its last listening position.
 				val dur = it.duration.takeIf { d -> d > 0 } ?: 0L
 				// Do not set currentTrack = null as STOPPED state should preserve track metadata
-				emitState(AudioProModule.STATE_STOPPED, 0L, dur, "stop()")
+				emitState(AudioProModule.STATE_STOPPED, it.currentPosition.coerceAtLeast(0), dur, "stop()")
 			}
 		}
 		stopProgressTimer()
@@ -415,7 +439,7 @@ object AudioProController {
 		// Only clear() and unrecoverable onError() should call release()
 
 		// Do not destroy the playback service in stop() as it should maintain the media session
-		// stop() is a non-destructive state that stops playback and seeks to 0,
+		// stop() retains the last position,
 		// but retains lock screen info, current track, and player state
 	}
 
@@ -424,6 +448,8 @@ object AudioProController {
 	 * and removes all media sessions.
 	 */
 	fun clear() {
+		playRequest++
+		pendingAutoPlay = false
 		resetInternal(AudioProModule.STATE_IDLE)
 	}
 
@@ -457,6 +483,7 @@ object AudioProController {
 		// Stop playback and ensure player is fully released before destroying service
 		runOnUiThread {
 			try {
+				NativeListeningPosition.checkpoint("player-teardown")
 				// First stop playback
 				enginerBrowser?.stop()
 				// Then detach listener to prevent callbacks during teardown
@@ -481,13 +508,14 @@ object AudioProController {
 		release()
 
 		// Add a small delay before destroying service to ensure player is fully released
+		val teardownRequest = playRequest
 		Handler(Looper.getMainLooper()).postDelayed({
 			// Destroy the playback service to remove notification and tear down the media session
-			destroyPlaybackService()
+			if (playRequest == teardownRequest) destroyPlaybackService()
 		}, 50)
 
 		// Emit final state
-		emitState(finalState, 0L, 0L, "resetInternal($finalState)")
+		runOnUiThread { emitState(finalState, 0L, 0L, "resetInternal($finalState)") }
 	}
 
 	fun release() {
@@ -534,7 +562,7 @@ object AudioProController {
 			val dur = enginerBrowser?.duration ?: 0L
 			val validPosition = when {
 				position < 0 -> 0L
-				position > dur -> dur
+				dur > 0 && position > dur -> dur
 				else -> position
 			}
 
@@ -545,7 +573,9 @@ object AudioProController {
 			stopProgressTimer()
 
 			log("Seeking to position: $validPosition")
-			enginerBrowser?.seekTo(validPosition)
+			NativeListeningPosition.seek(validPosition) { applied ->
+				enginerBrowser?.seekTo(applied)
+			}
 
 			// SEEK_COMPLETE will be emitted in onPositionDiscontinuity
 		}
@@ -555,7 +585,7 @@ object AudioProController {
 		runOnUiThread {
 			val current = enginerBrowser?.currentPosition ?: 0L
 			val dur = enginerBrowser?.duration ?: 0L
-			val newPos = (current + amount).coerceAtMost(dur)
+			val newPos = if (dur > 0) (current + amount).coerceAtMost(dur) else current + amount
 
 			log("Seeking forward to position: $newPos")
 			seekTo(newPos)
@@ -585,6 +615,17 @@ object AudioProController {
 
 		enginePlayerListener = object : Player.Listener {
 
+			override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+				emitState(NativeListeningPosition.state(), enginerBrowser?.currentPosition ?: 0L,
+					enginerBrowser?.duration ?: 0L, if (playWhenReady) "play-request" else "pause-or-focus-loss")
+			}
+
+			override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+				emitState(NativeListeningPosition.state(), enginerBrowser?.currentPosition ?: 0L,
+					enginerBrowser?.duration ?: 0L, "audio-focus-interruption")
+				if (enginerBrowser?.isPlaying != true) stopProgressTimer()
+			}
+
 			override fun onIsPlayingChanged(isPlaying: Boolean) {
 				log("onIsPlayingChanged", "isPlaying=", isPlaying)
 				log(
@@ -597,10 +638,10 @@ object AudioProController {
 				val dur = enginerBrowser?.duration ?: 0L
 
 				if (isPlaying) {
-					emitState(AudioProModule.STATE_PLAYING, pos, dur, "onIsPlayingChanged(true)")
+					emitState(NativeListeningPosition.state(), pos, dur, "onIsPlayingChanged(true)")
 					startProgressTimer()
 				} else {
-					emitState(AudioProModule.STATE_PAUSED, pos, dur, "onIsPlayingChanged(false)")
+					emitState(NativeListeningPosition.state(), pos, dur, "onIsPlayingChanged(false)")
 					stopProgressTimer()
 				}
 			}
@@ -642,16 +683,11 @@ object AudioProController {
 					}
 
 					Player.STATE_READY -> {
-						// If there's a pending seek position, perform the seek now that the player is ready
-						flowPendingSeekPosition?.let { seekPos ->
-							log("Performing pending seek to $seekPos in STATE_READY")
-							enginerBrowser?.seekTo(seekPos)
-							// pendingSeekPosition will be cleared in onPositionDiscontinuity
-						}
+						NativeListeningPosition.ready()
 
 						if (isActuallyPlaying) {
 							emitState(
-								AudioProModule.STATE_PLAYING,
+								NativeListeningPosition.state(),
 								pos,
 								dur,
 								"onPlaybackStateChanged(STATE_READY, isPlaying=true)"
@@ -659,7 +695,7 @@ object AudioProController {
 							startProgressTimer()
 						} else {
 							emitState(
-								AudioProModule.STATE_PAUSED,
+								NativeListeningPosition.state(),
 								pos,
 								dur,
 								"onPlaybackStateChanged(STATE_READY, isPlaying=false)"
@@ -676,6 +712,7 @@ object AudioProController {
 					 *   - TRACK_ENDED
 					 */
 					Player.STATE_ENDED -> {
+						NativeListeningPosition.checkpoint("natural-completion")
 						stopProgressTimer()
 
 						// Reset error state and last emitted state
@@ -687,8 +724,7 @@ object AudioProController {
 						// 1. Pause playback to ensure state is correct
 						enginerBrowser?.pause()
 
-						// 2. Seek to position 0
-						enginerBrowser?.seekTo(0)
+						// Preserve the completed position; a transport reset must not become a rewind.
 
 						// 3. Cancel any pending seek operations
 						flowPendingSeekPosition = null
@@ -696,7 +732,7 @@ object AudioProController {
 						// 4. Emit STOPPED (stopped = loaded but at 0, not playing)
 						emitState(
 							AudioProModule.STATE_STOPPED,
-							0L,
+							pos,
 							dur,
 							"onPlaybackStateChanged(STATE_ENDED)"
 						)
@@ -714,8 +750,8 @@ object AudioProController {
 						stopProgressTimer()
 						emitState(
 							AudioProModule.STATE_STOPPED,
-							0L,
-							0L,
+							pos,
+							dur,
 							"onPlaybackStateChanged(STATE_IDLE)"
 						)
 					}
@@ -738,7 +774,7 @@ object AudioProController {
 					}
 
 					// Determine position for user-initiated seeks
-					val pos = flowPendingSeekPosition ?: newPosition.positionMs
+					val pos = newPosition.positionMs
 					flowPendingSeekPosition = null
 
 					val payload = Arguments.createMap().apply {
@@ -772,18 +808,19 @@ object AudioProController {
 			override fun onPlayerError(error: PlaybackException) {
 				// If we're already in an error state, just log and return
 				if (flowIsInErrorState) {
-					log("Already in error state, ignoring additional error: ${error.message}")
+					log("Already in error state, ignoring additional error code:", error.errorCode)
 					return
 				}
 
-				val message = error.message ?: "Unknown error"
+				val message = "Playback failed (${error.errorCode})"
 				// First, emit PLAYBACK_ERROR event with error details
-				emitError(message, 500, "onPlayerError(${error.errorCode})")
+				emitError(message, error.errorCode, "onPlayerError(${error.errorCode})")
 
-				// Then use the shared resetInternal function to:
-				// 1. Clear the player state (like clear())
-				// 2. Emit STATE_CHANGED: ERROR
-				resetInternal(AudioProModule.STATE_ERROR)
+				NativeListeningPosition.checkpoint("playback-error")
+				flowIsInErrorState = true
+				stopProgressTimer()
+				emitState(AudioProModule.STATE_ERROR, enginerBrowser?.currentPosition ?: 0L,
+					enginerBrowser?.duration ?: 0L, "playback-error")
 			}
 		}
 
@@ -816,7 +853,8 @@ object AudioProController {
 	}
 
 	private fun runOnUiThread(block: () -> Unit) {
-		Handler(Looper.getMainLooper()).post(block)
+		if (Looper.myLooper() == Looper.getMainLooper()) block()
+		else Handler(Looper.getMainLooper()).post(block)
 	}
 
 	private fun emitEvent(
@@ -825,6 +863,7 @@ object AudioProController {
 		payload: WritableMap?,
 		reason: String = ""
 	) {
+		if (payload != null) NativeListeningPosition.metadata(payload, reason)
 		log("emitEvent", type, "reason=", reason)
 		val context = reactContext
 		if (context is ReactApplicationContext) {
@@ -853,6 +892,42 @@ object AudioProController {
 		}
 	}
 
+	internal fun onListeningPositionReady() {
+		val browser = enginerBrowser ?: return
+		if (pendingAutoPlay) {
+			pendingAutoPlay = false
+			browser.play()
+		}
+		val pos = browser.currentPosition.coerceAtLeast(0)
+		val dur = browser.duration.coerceAtLeast(0)
+		emitState(NativeListeningPosition.state(), pos, dur, "listening-position-confirmed")
+		val payload = Arguments.createMap().apply {
+			putDouble("position", pos.toDouble())
+			putDouble("duration", dur.toDouble())
+			putString("triggeredBy", AudioProModule.TRIGGER_SOURCE_SYSTEM)
+		}
+		emitEvent(AudioProModule.EVENT_TYPE_SEEK_COMPLETE, activeTrack, payload, "listening-position-confirmed")
+	}
+
+	internal fun cancelPendingPlayback() {
+		pendingAutoPlay = false
+	}
+
+	internal fun onListeningPositionFailure() {
+		pendingAutoPlay = false
+		enginerBrowser?.pause()
+		flowIsInErrorState = true
+		stopProgressTimer()
+		emitError("Unable to save listening position. Playback paused to protect your place.", 507, "listening-position-save-failed")
+		emitState(AudioProModule.STATE_ERROR, enginerBrowser?.currentPosition ?: 0,
+			enginerBrowser?.duration ?: 0, "listening-position-save-failed")
+	}
+
+	internal fun onNativeStalled() {
+		emitState(AudioProModule.STATE_LOADING, enginerBrowser?.currentPosition ?: 0L,
+			enginerBrowser?.duration ?: 0L, "stalled")
+	}
+
 	private fun emitState(state: String, position: Long, duration: Long, reason: String = "") {
 		val sanitizedPosition = if (position < 0) 0L else position
 		val sanitizedDuration = if (duration < 0) 0L else duration
@@ -878,9 +953,10 @@ object AudioProController {
 			return
 		}
 
-		// Filter out duplicate state emissions
+		// Stalled heartbeats carry native time so recovery cannot rely on suspended JS timers.
+		// Filter out other duplicate state emissions
 		// This prevents rapid-fire transitions of the same state being emitted repeatedly
-		if (state == flowLastEmittedState) {
+		if (state == flowLastEmittedState && reason != "stalled") {
 			val lastPosition = flowLastEmittedPosition
 			val lastDuration = flowLastEmittedDuration
 			if (lastPosition != null && lastDuration != null) {

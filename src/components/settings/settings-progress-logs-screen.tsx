@@ -1,3 +1,4 @@
+import { nativeListeningPosition } from "../../progress/native-listening-position";
 import {
   type ProgressLogEntry,
   type ProgressLogEventType,
@@ -621,6 +622,10 @@ export const SettingsProgressLogsScreen = () => {
 
       const payload = {
         exportedAt: new Date().toISOString(),
+        nativeListeningPosition: await nativeListeningPosition.diagnostics().catch((error) => ({
+          capability: nativeListeningPosition.capability(),
+          error: error instanceof Error ? error.message : String(error),
+        })),
         filters: {
           eventType: eventTypeFilter,
           sessionKind: sessionKindFilter,

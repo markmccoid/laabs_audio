@@ -49,6 +49,7 @@ android {
 	defaultConfig {
 		minSdkVersion getExtOrIntegerDefault("minSdkVersion")
 		targetSdkVersion getExtOrIntegerDefault("targetSdkVersion")
+		testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 	}
 
 	buildTypes {
@@ -87,4 +88,6 @@ dependencies {
 	implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.8.7"
 
 	implementation "org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0"
+	androidTestImplementation "androidx.test:runner:1.6.2"
+	androidTestImplementation "androidx.test.ext:junit:1.2.1"
 }

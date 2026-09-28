@@ -65,6 +65,8 @@ export const recordProgressSyncIntent = (payload: {
   sessionKind?: ProgressLogSessionKind;
   userKey?: string | null;
   updatedAt?: number;
+  serverUrl?: string | null;
+  username?: string | null;
 }) => {
   const userKey = resolveProgressSyncUserKey(payload.libraryItemId, payload.userKey);
   if (!userKey) return null;
@@ -96,8 +98,8 @@ export const recordProgressSyncIntent = (payload: {
       title: payload.title,
       sessionKind: payload.sessionKind,
       trigger: payload.trigger,
-      serverUrl: authState.serverUrl,
-      username: authState.storedUsername,
+      serverUrl: payload.serverUrl !== undefined ? payload.serverUrl : authState.serverUrl,
+      username: payload.username !== undefined ? payload.username : authState.storedUsername,
     },
   );
 

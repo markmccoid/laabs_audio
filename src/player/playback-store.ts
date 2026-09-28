@@ -19,6 +19,10 @@ export type PlaybackControlIntent = {
 };
 
 export type PlaybackStoreState = {
+  ownerId: string | null;
+  playbackGeneration: number | null;
+  positionRevision: number | null;
+  positionSequence: number | null;
   playbackState: PlaybackState;
   playbackControlIntent: PlaybackControlIntent | null;
   libraryItemId: string | null;
@@ -51,6 +55,12 @@ export type PlaybackStoreState = {
   debugSnapshot: Record<string, unknown> | null;
   debugMessage: string | null;
   actions: {
+    setListeningIdentity: (payload: {
+      ownerId: string | null;
+      playbackGeneration?: number | null;
+      positionRevision?: number | null;
+      positionSequence?: number | null;
+    }) => void;
     reset: () => void;
     setPlaybackState: (state: PlaybackState) => void;
     setPlaybackControlIntent: (intent: PlaybackControlIntent | null) => void;
@@ -101,6 +111,9 @@ export type PlaybackStoreState = {
     setDebugSnapshot: (snapshot: PlaybackStoreState["debugSnapshot"]) => void;
     setDebugMessage: (message: string | null) => void;
     resetAfterFailedStart: (payload: {
+      ownerId?: string | null;
+      episodeId?: string | null;
+      secondaryTitle?: string | null;
       libraryItemId: string;
       bookTitle: string | null;
       positionMs: number;
@@ -119,6 +132,10 @@ export type PlaybackStoreState = {
 };
 
 const getBaseState = () => ({
+  ownerId: null as string | null,
+  playbackGeneration: null as number | null,
+  positionRevision: null as number | null,
+  positionSequence: null as number | null,
   playbackState: "idle" as PlaybackState,
   playbackControlIntent: null as PlaybackControlIntent | null,
   libraryItemId: null,
@@ -148,6 +165,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
     (set, get) => ({
       ...getBaseState(),
       actions: {
+        setListeningIdentity: (payload) => set(payload),
         reset: () => set((state) => ({ ...getBaseState(), actions: state.actions })),
         setPlaybackState: (playbackState) => set({ playbackState }),
         setPlaybackControlIntent: (playbackControlIntent) => set({ playbackControlIntent }),
@@ -253,11 +271,14 @@ export const playbackStore = createStore<PlaybackStoreState>()(
         setDebugStatus: (debugStatus) => set({ debugStatus }),
         setDebugSnapshot: (debugSnapshot) => set({ debugSnapshot }),
         setDebugMessage: (debugMessage) => set({ debugMessage }),
-        resetAfterFailedStart: ({ libraryItemId, bookTitle, positionMs, rate, error }) =>
+        resetAfterFailedStart: ({ libraryItemId, bookTitle, positionMs, rate, error, ownerId, episodeId, secondaryTitle }) =>
           set({
             ...getBaseState(),
             actions: get().actions,
             playbackState: "error",
+            ownerId: ownerId ?? (get().libraryItemId === libraryItemId ? get().ownerId : null),
+            episodeId: episodeId ?? null,
+            secondaryTitle: secondaryTitle ?? null,
             libraryItemId,
             bookTitle,
             positionMs,
@@ -295,7 +316,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
     {
       name: "playback-store",
       storage: createJSONStorage(() => mmkvStorage),
-      version: 3,
+      version: 4,
       migrate: (persistedState) => {
         if (
           persistedState &&
@@ -312,6 +333,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
         return persistedState as PlaybackStoreState;
       },
       partialize: (state) => ({
+        ownerId: state.ownerId,
         libraryItemId: state.libraryItemId,
         bookTitle: state.bookTitle,
         secondaryTitle: state.secondaryTitle,

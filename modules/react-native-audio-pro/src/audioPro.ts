@@ -2,12 +2,7 @@ import { NativeModules } from 'react-native';
 
 import { ambientEmitter, emitter } from './emitter';
 import { internalStore } from './internalStore';
-import {
-	guardTrackPlaying,
-	logDebug,
-	validateTrack,
-	validateFilePath,
-} from './utils';
+import { guardTrackPlaying, logDebug, validateTrack, validateFilePath } from './utils';
 import { normalizeVolume } from './volume';
 import {
 	AudioProAmbientEventType,
@@ -24,9 +19,21 @@ import type {
 	AudioProEventCallback,
 	AudioProPlayOptions,
 	AudioProTrack,
+	ListeningPositionScope,
+	ListeningPositionRecord,
+	ListeningPositionCommand,
+	PlaybackSnapshot,
 } from './types';
 
 const NativeAudioPro = NativeModules.AudioPro;
+
+function requireNativeMethod(name: string) {
+	const method = NativeAudioPro?.[name];
+	if (typeof method !== 'function') {
+		throw new Error(`AudioPro native capability unavailable: ${name}. Rebuild the native app.`);
+	}
+	return method.bind(NativeAudioPro);
+}
 
 function normalizeConfigureOptions(
 	options: AudioProConfigureOptions,
@@ -116,6 +123,30 @@ function isValidPlayerStateForOperation(operation: string): boolean {
 }
 
 export const AudioPro = {
+	/** These methods read committed storage or the actual native transport, never the JS cache. */
+	getListeningPosition(scope: ListeningPositionScope): Promise<ListeningPositionRecord | null> {
+		return requireNativeMethod('getListeningPosition')(scope);
+	},
+	getPlaybackSnapshot(): Promise<PlaybackSnapshot> {
+		return requireNativeMethod('getPlaybackSnapshot')();
+	},
+	checkpointListeningPosition(reason: string): Promise<ListeningPositionRecord | null> {
+		return requireNativeMethod('checkpointListeningPosition')(reason);
+	},
+	setListeningPosition(payload: ListeningPositionCommand): Promise<ListeningPositionRecord> {
+		return requireNativeMethod('setListeningPosition')(payload);
+	},
+	acknowledgeListeningPosition(
+		payload: ListeningPositionScope & { sequence: number; kind: 'projected' | 'synced' },
+	): Promise<ListeningPositionRecord | null> {
+		return requireNativeMethod('acknowledgeListeningPosition')(payload);
+	},
+	getListeningPositionDiagnostics(): Promise<Record<string, unknown>> {
+		return requireNativeMethod('getListeningPositionDiagnostics')();
+	},
+	setListeningPositionCaptureEnabled(enabled: boolean): Promise<void> {
+		return requireNativeMethod('setListeningPositionCaptureEnabled')(enabled);
+	},
 	/**
 	 * Configure the audio player with the specified options
 	 *
@@ -222,6 +253,7 @@ export const AudioPro = {
 
 		// Clear errors and set track as playing
 		setTrackPlaying(resolvedTrack);
+		internalStore.getState().setActiveLoad?.(options.loadId ?? null);
 		if (error) {
 			setError(null);
 		}

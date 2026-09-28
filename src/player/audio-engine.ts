@@ -8,11 +8,19 @@ import {
   AudioProState,
   type AudioProEvent,
   type AudioProTrack,
+  type AudioProEventOrder,
+  type ListeningContext,
+  type PlaybackSnapshot,
 } from "react-native-audio-pro";
+import { nativeListeningPosition } from "../progress/native-listening-position";
 import { DEFAULT_BOOK_COVER } from "../constants/default-book-cover";
 import { settingsStore, type RemoteCommandMode } from "../store/settings-store";
 import { describeLocalAudioSourceUri } from "./local-audio-source-diagnostics";
-import type { PitchCorrectionQuality, PlaybackQueueItem, PlaybackSource } from "./types";
+import type {
+  PitchCorrectionQuality,
+  PlaybackQueueItem,
+  PlaybackSource,
+} from "./types";
 
 type AudioHeaders = {
   audio?: Record<string, string>;
@@ -48,7 +56,8 @@ export type AudioEngineEvents = {
   onStatus?: (status: AudioEngineStatus) => void;
 };
 
-export type AudioEngineStatus = {
+export type AudioEngineStatus = AudioProEventOrder & {
+  state: AudioProState;
   positionMs: number;
   durationMs: number;
   // null means loading, stopped at a natural track boundary, idle, or failed.
@@ -56,6 +65,14 @@ export type AudioEngineStatus = {
   isPlaying: boolean | null;
   didJustFinish: boolean;
   trackId: string | null;
+};
+
+export type AudioEngineLoadResult = {
+  positionMs: number;
+  loadId: string;
+  playbackGeneration?: number;
+  positionRevision?: number;
+  positionSequence?: number;
 };
 
 export type AudioEngine = {
@@ -66,12 +83,23 @@ export type AudioEngine = {
       rate?: number;
       pitchCorrectionQuality?: PitchCorrectionQuality;
       autoPlay?: boolean;
+      listeningContext?: ListeningContext;
+      positionIntent?: "resume" | "relocate" | "preview";
+      positionCommandId?: string;
+      loadId?: string;
     },
-  ) => Promise<void>;
+  ) => Promise<AudioEngineLoadResult>;
   play: () => Promise<void>;
   pause: () => Promise<void>;
-  seek: (positionMs: number) => Promise<void>;
-  setRate: (rate: number, pitchCorrectionQuality?: PitchCorrectionQuality) => Promise<void>;
+  seek: (
+    positionMs: number,
+    options?: { commandId?: string; reason?: string },
+  ) => Promise<void>;
+  getPlaybackSnapshot: () => Promise<PlaybackSnapshot | null>;
+  setRate: (
+    rate: number,
+    pitchCorrectionQuality?: PitchCorrectionQuality,
+  ) => Promise<void>;
   getPositionMs: () => Promise<number>;
   getDurationMs: () => Promise<number>;
   waitForReady: (options?: { timeoutMs?: number }) => Promise<void>;
@@ -94,7 +122,11 @@ const DEFAULT_ARTWORK = DEFAULT_BOOK_COVER;
 // AudioPro only supports http(s):// and file:// schemes.
 const ensureFileScheme = (uri: string) => {
   if (!uri) return uri;
-  if (uri.startsWith("file://") || uri.startsWith("http://") || uri.startsWith("https://")) {
+  if (
+    uri.startsWith("file://") ||
+    uri.startsWith("http://") ||
+    uri.startsWith("https://")
+  ) {
     return uri;
   }
   if (uri.startsWith("/")) {
@@ -103,7 +135,8 @@ const ensureFileScheme = (uri: string) => {
   return uri;
 };
 
-const isRemoteHttpUri = (uri: string) => uri.startsWith("http://") || uri.startsWith("https://");
+const isRemoteHttpUri = (uri: string) =>
+  uri.startsWith("http://") || uri.startsWith("https://");
 const remoteArtworkValidationCache = new Map<string, string | null>();
 
 // Resolve a bundled asset module into a local file URI AudioPro can read.
@@ -181,10 +214,18 @@ const toStatus = (
   state: AudioProState,
   didJustFinish = false,
   trackId: string | null = null,
+  order: AudioProEventOrder = {},
 ): AudioEngineStatus => ({
+  ...order,
+  state,
   positionMs: Math.max(0, Math.round(position)),
   durationMs: Math.max(0, Math.round(duration)),
-  isPlaying: state === AudioProState.PLAYING ? true : state === AudioProState.PAUSED ? false : null,
+  isPlaying:
+    state === AudioProState.PLAYING
+      ? true
+      : state === AudioProState.PAUSED
+        ? false
+        : null,
   didJustFinish,
   trackId,
 });
@@ -200,6 +241,12 @@ export const createAudioEngine = (): AudioEngine => {
   let currentState: AudioProState = AudioProState.IDLE;
   let currentTrack: AudioProTrack | null = null;
   let currentHeaders: AudioHeaders | undefined;
+  let loadAttempt = 0;
+  let activeLoadId: string | null = null;
+  let lastAppliedPositionMs = 0;
+  let lastOrder: AudioProEventOrder = {};
+  let durableContext: ListeningContext | undefined;
+  let currentPlayOptions: Parameters<typeof AudioPro.play>[1];
   type StateWaiter = {
     label: string;
     timeoutId: ReturnType<typeof setTimeout>;
@@ -213,6 +260,91 @@ export const createAudioEngine = (): AudioEngine => {
     reject: (error: Error) => void;
   };
   let stateWaiters: StateWaiter[] = [];
+  let sampleMovement: (() => void) | null = null;
+  let cancelMovement: ((error: Error) => void) | null = null;
+
+  const waitForNativeMovement = async (timeoutMs: number) => {
+    const attempt = loadAttempt;
+    const first = await nativeListeningPosition.snapshot();
+    if (attempt !== loadAttempt)
+      throw new Error("Play confirmation was cancelled");
+    if (!first) return;
+    const expectedLoadId = activeLoadId;
+    if (first.loadId !== expectedLoadId)
+      throw new Error("Playback ownership changed before play confirmation");
+    if (first.reason === "activation-failed")
+      throw new Error("Audio session activation failed");
+    await new Promise<void>((resolve, reject) => {
+      let polling = false;
+      let settled = false;
+      const startedAt = Date.now();
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearInterval(interval);
+        clearTimeout(timeout);
+        sampleMovement = null;
+        cancelMovement = null;
+        if (error) reject(error);
+        else resolve();
+      };
+      const poll = async () => {
+        if (polling || settled) return;
+        polling = true;
+        try {
+          const snapshot = await nativeListeningPosition.snapshot();
+          if (settled) return;
+          if (
+            !snapshot ||
+            snapshot.loadId !== expectedLoadId ||
+            snapshot.playbackGeneration !== first.playbackGeneration ||
+            snapshot.positionRevision !== first.positionRevision
+          ) {
+            finish(
+              new Error("Playback ownership changed during play confirmation"),
+            );
+            return;
+          }
+          const elapsed =
+            snapshot.monotonicTimeMs !== undefined &&
+            first.monotonicTimeMs !== undefined
+              ? snapshot.monotonicTimeMs - first.monotonicTimeMs
+              : Date.now() - startedAt;
+          if (elapsed >= timeoutMs) {
+            finish(new Error("Timed out waiting for native playback movement"));
+          } else if (
+            snapshot.state === AudioProState.ERROR ||
+            snapshot.reason === "activation-failed"
+          ) {
+            finish(new Error("Native playback failed before movement"));
+          } else if (
+            snapshot.state === AudioProState.PLAYING &&
+            !snapshot.initialSeekPending &&
+            snapshot.position > first.position + 50
+          ) {
+            finish();
+          }
+        } catch (error) {
+          finish(error instanceof Error ? error : new Error(String(error)));
+        } finally {
+          polling = false;
+        }
+      };
+      const interval = setInterval(() => {
+        void poll();
+      }, 250);
+      const timeout = setTimeout(
+        () =>
+          finish(new Error("Timed out waiting for native playback movement")),
+        timeoutMs,
+      );
+      sampleMovement = () => {
+        void poll();
+      };
+      cancelMovement = finish;
+      void poll();
+    });
+  };
 
   const buildAudioProConfig = (): AudioProRuntimeConfig => {
     const {
@@ -221,8 +353,14 @@ export const createAudioEngine = (): AudioEngine => {
       seekBackwardSeconds,
       seekForwardSeconds,
     } = settingsStore.getState();
-    const skipBackwardIntervalMs = Math.max(1000, Math.round(seekBackwardSeconds * 1000));
-    const skipForwardIntervalMs = Math.max(1000, Math.round(seekForwardSeconds * 1000));
+    const skipBackwardIntervalMs = Math.max(
+      1000,
+      Math.round(seekBackwardSeconds * 1000),
+    );
+    const skipForwardIntervalMs = Math.max(
+      1000,
+      Math.round(seekForwardSeconds * 1000),
+    );
     return {
       // Speech keeps pitch aligned for audiobook-style speed changes.
       contentType: AudioProContentType.SPEECH,
@@ -285,7 +423,9 @@ export const createAudioEngine = (): AudioEngine => {
         // waiter never fires while the app is backgrounded/headless.
         clearTimeout(waiter.timeoutId);
         waiter.reject(
-          new Error(`Timed out waiting for ${waiter.label} (state=${AudioPro.getState()})`),
+          new Error(
+            `Timed out waiting for ${waiter.label} (state=${AudioPro.getState()})`,
+          ),
         );
       } else {
         pending.push(waiter);
@@ -316,8 +456,14 @@ export const createAudioEngine = (): AudioEngine => {
 
     return new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        stateWaiters = stateWaiters.filter((waiter) => waiter.timeoutId !== timeoutId);
-        reject(new Error(`Timed out waiting for ${label} (state=${AudioPro.getState()})`));
+        stateWaiters = stateWaiters.filter(
+          (waiter) => waiter.timeoutId !== timeoutId,
+        );
+        reject(
+          new Error(
+            `Timed out waiting for ${label} (state=${AudioPro.getState()})`,
+          ),
+        );
       }, timeoutMs);
 
       stateWaiters.push({
@@ -333,15 +479,70 @@ export const createAudioEngine = (): AudioEngine => {
 
   // Map AudioPro events to the engine's simplified status callbacks.
   const handleEvent = (event: AudioProEvent) => {
+    const order = event.payload ?? {};
+    // A source replacement can reuse a track id, so track equality alone is insufficient.
+    if (activeLoadId && order.loadId && order.loadId !== activeLoadId) return;
+    if (activeLoadId && durableContext && order.loadId !== activeLoadId) return;
+    if (
+      durableContext?.captureEnabled &&
+      (order.ownerId !== durableContext.ownerId ||
+        order.libraryItemId !== durableContext.libraryItemId ||
+        order.episodeId !== durableContext.episodeId)
+    )
+      return;
+    if (currentTrack && event.track && event.track.id !== currentTrack.id)
+      return;
+    if (
+      order.playbackGeneration !== undefined &&
+      lastOrder.playbackGeneration !== undefined &&
+      order.playbackGeneration < lastOrder.playbackGeneration
+    )
+      return;
+    if (
+      order.playbackGeneration === lastOrder.playbackGeneration &&
+      order.positionRevision !== undefined &&
+      lastOrder.positionRevision !== undefined &&
+      order.positionRevision < lastOrder.positionRevision
+    )
+      return;
+    const sameRevision =
+      order.positionRevision !== undefined &&
+      order.positionRevision === lastOrder.positionRevision &&
+      order.playbackGeneration === lastOrder.playbackGeneration;
+    if (
+      sameRevision &&
+      order.positionSequence !== undefined &&
+      lastOrder.positionSequence !== undefined &&
+      order.positionSequence < lastOrder.positionSequence
+    )
+      return;
+    const acceptsPosition =
+      Number.isFinite(order.position) &&
+      order.position! >= 0 &&
+      order.initialSeekPending !== true &&
+      (!sameRevision || order.position! >= lastAppliedPositionMs);
+    lastOrder = { ...lastOrder, ...order };
+    sampleMovement?.();
+    if (acceptsPosition) lastAppliedPositionMs = order.position!;
     switch (event.type) {
       case AudioProEventType.STATE_CHANGED: {
         const state = event.payload?.state ?? currentState;
         currentState = state;
         settleStateWaiters(event);
-        const position = event.payload?.position ?? AudioPro.getTimings().position;
-        const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
+        const position = acceptsPosition
+          ? order.position!
+          : lastAppliedPositionMs;
+        const duration =
+          event.payload?.duration ?? AudioPro.getTimings().duration;
         events.onStatus?.(
-          toStatus(position, duration, currentState, false, event.track?.id ?? null),
+          toStatus(
+            position,
+            duration,
+            currentState,
+            false,
+            event.track?.id ?? null,
+            order,
+          ),
         );
         if (state === AudioProState.ERROR && event.payload?.error) {
           rejectStateWaiters(new Error(event.payload.error));
@@ -350,33 +551,68 @@ export const createAudioEngine = (): AudioEngine => {
         break;
       }
       case AudioProEventType.PROGRESS: {
-        const position = event.payload?.position ?? AudioPro.getTimings().position;
-        const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
+        const position = acceptsPosition
+          ? order.position!
+          : lastAppliedPositionMs;
+        const duration =
+          event.payload?.duration ?? AudioPro.getTimings().duration;
         settleStateWaiters(event);
         events.onStatus?.(
-          toStatus(position, duration, currentState, false, event.track?.id ?? null),
+          toStatus(
+            position,
+            duration,
+            currentState,
+            false,
+            event.track?.id ?? null,
+            order,
+          ),
         );
         break;
       }
       case AudioProEventType.SEEK_COMPLETE: {
-        const position = event.payload?.position ?? AudioPro.getTimings().position;
-        const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
+        const position = acceptsPosition
+          ? order.position!
+          : lastAppliedPositionMs;
+        const duration =
+          event.payload?.duration ?? AudioPro.getTimings().duration;
         settleStateWaiters(event);
         events.onStatus?.(
-          toStatus(position, duration, currentState, false, event.track?.id ?? null),
+          toStatus(
+            position,
+            duration,
+            currentState,
+            false,
+            event.track?.id ?? null,
+            order,
+          ),
         );
         break;
       }
       case AudioProEventType.TRACK_ENDED: {
-        const position = event.payload?.position ?? AudioPro.getTimings().position;
-        const duration = event.payload?.duration ?? AudioPro.getTimings().duration;
+        const position = acceptsPosition
+          ? order.position!
+          : lastAppliedPositionMs;
+        const duration =
+          event.payload?.duration ?? AudioPro.getTimings().duration;
         events.onStatus?.(
-          toStatus(position, duration, currentState, false, event.track?.id ?? null),
+          toStatus(
+            position,
+            duration,
+            currentState,
+            false,
+            event.track?.id ?? null,
+            order,
+          ),
         );
         events.onEnded?.();
         break;
       }
       case AudioProEventType.PLAYBACK_ERROR: {
+        cancelMovement?.(
+          new Error(event.payload?.error ?? "Native playback failed"),
+        );
+        // Native PLAYBACK_ERROR reports a failed command. Only a native
+        // STATE_CHANGED: ERROR means the transport itself entered ERROR.
         if (event.payload?.error) {
           rejectStateWaiters(new Error(event.payload.error));
           events.onError?.(new Error(event.payload.error));
@@ -407,12 +643,20 @@ export const createAudioEngine = (): AudioEngine => {
       ensureListener();
     },
     async load(track, options) {
+      const attempt = ++loadAttempt;
+      const loadId = options?.loadId ?? `audio-load-${Date.now()}-${attempt}`;
+      const assertCurrent = () => {
+        if (attempt !== loadAttempt)
+          throw new Error("Audio load was superseded");
+      };
       configure();
       ensureListener();
 
       // Resolve source + artwork into URLs AudioPro accepts.
       const url = await resolveSourceUri(track.source);
+      assertCurrent();
       const artwork = await resolveArtworkUri(track);
+      assertCurrent();
       const audioTrack: AudioProTrack = {
         id: track.id,
         url,
@@ -434,7 +678,9 @@ export const createAudioEngine = (): AudioEngine => {
               exists: fileInfo.exists,
               sizeBytes: fileInfo.exists ? fileInfo.size : null,
               isDirectory: fileInfo.exists ? fileInfo.isDirectory : null,
-              modificationTime: fileInfo.exists ? fileInfo.modificationTime : null,
+              modificationTime: fileInfo.exists
+                ? fileInfo.modificationTime
+                : null,
             }),
           );
         } catch (error) {
@@ -445,15 +691,25 @@ export const createAudioEngine = (): AudioEngine => {
               mimeType: track.source.mimeType ?? null,
               ...sourceDescription,
               exists: null,
-              inspectionError: error instanceof Error ? error.message : String(error),
+              inspectionError:
+                error instanceof Error ? error.message : String(error),
             }),
           );
         }
       }
 
+      assertCurrent();
+      cancelMovement?.(new Error("Audio load was superseded"));
+      rejectStateWaiters(new Error("Audio load was superseded"));
+      activeLoadId = loadId;
+      lastOrder = {};
+      lastAppliedPositionMs = 0;
+      durableContext = options?.listeningContext;
       currentTrack = audioTrack;
 
-      const headers = track.source.headers ? { audio: track.source.headers } : undefined;
+      const headers = track.source.headers
+        ? { audio: track.source.headers }
+        : undefined;
       currentHeaders = headers;
 
       // Set the rate BEFORE play() so the new session is established at the
@@ -466,46 +722,115 @@ export const createAudioEngine = (): AudioEngine => {
         AudioPro.setPlaybackSpeed(options.rate);
       }
 
-      // Automatic queue advances start the replacement natively so there is
-      // no pause/resume cycle between audiobook files. Other loads stay paused.
-      AudioPro.play(audioTrack, {
+      currentPlayOptions = {
         autoPlay: options?.autoPlay ?? false,
         startTimeMs: options?.initialPositionMs ?? 0,
         headers,
-      });
-      // AudioPro can still start playback even with autoPlay: false; force paused state.
-      // AudioPro.pause();
-
-      // Re-assert after play(): native play() resets currentPlaybackSpeed from
-      // the options snapshot, so a final set pins the intended rate once the
-      // new player exists.
-      if (typeof options?.rate === "number") {
-        AudioPro.setPlaybackSpeed(options.rate);
-      }
-
-      const targetTrackId = audioTrack.id;
-      await waitForState(
-        "track to be ready",
+        loadId,
+        listeningContext: options?.listeningContext,
+        positionIntent: options?.positionIntent ?? "resume",
+        positionCommandId: options?.positionCommandId,
+      };
+      // Register first: native readiness can arrive synchronously on a local file.
+      const ready = waitForState(
+        "track and initial seek to be ready",
         (event) => {
-          const resolvedTrackId = event?.track?.id ?? AudioPro.getPlayingTrack()?.id;
-          const state = AudioPro.getState();
-          if (!resolvedTrackId || resolvedTrackId !== targetTrackId) return false;
-          return options?.autoPlay ? state === AudioProState.PLAYING : isReadyState(state);
+          if (!event) return false;
+          if (event.track?.id !== audioTrack.id) return false;
+          if (options?.listeningContext && event.payload?.loadId !== loadId)
+            return false;
+          if (event.payload?.loadId && event.payload.loadId !== loadId)
+            return false;
+          if (event.payload?.initialSeekPending === true) return false;
+          const target = options?.initialPositionMs ?? 0;
+          // Compatibility for old bridges: a setup PAUSED-zero cannot prove a nonzero seek.
+          if (
+            event.payload?.initialSeekPending === undefined &&
+            target > 0 &&
+            event.type !== AudioProEventType.SEEK_COMPLETE
+          )
+            return false;
+          const state = event.payload?.state ?? currentState;
+          return options?.autoPlay
+            ? state === AudioProState.PLAYING
+            : isReadyState(state);
         },
-        options?.initialPositionMs ? DEFAULT_READY_TIMEOUT_MS + 5000 : DEFAULT_READY_TIMEOUT_MS,
+        options?.initialPositionMs
+          ? DEFAULT_READY_TIMEOUT_MS + 5000
+          : DEFAULT_READY_TIMEOUT_MS,
         { allowImmediate: false },
       );
+      AudioPro.play(audioTrack, currentPlayOptions);
+      if (typeof options?.rate === "number")
+        AudioPro.setPlaybackSpeed(options.rate);
+      await ready;
+      assertCurrent();
+      if (options?.listeningContext) {
+        const snapshot = await nativeListeningPosition.snapshot();
+        assertCurrent();
+        if (snapshot) {
+          if (
+            snapshot.loadId !== loadId ||
+            snapshot.initialSeekPending ||
+            snapshot.trackId !== audioTrack.id ||
+            (options?.autoPlay
+              ? snapshot.state !== AudioProState.PLAYING
+              : !isReadyState(snapshot.state)) ||
+            (options.listeningContext.captureEnabled &&
+              (snapshot.ownerId !== options.listeningContext.ownerId ||
+                snapshot.libraryItemId !==
+                  options.listeningContext.libraryItemId ||
+                snapshot.episodeId !== options.listeningContext.episodeId))
+          ) {
+            throw new Error(
+              "Native load did not confirm its applied listening position",
+            );
+          }
+          lastAppliedPositionMs = snapshot.position;
+          lastOrder = { ...snapshot };
+          currentState = snapshot.state;
+          return {
+            positionMs: snapshot.position,
+            loadId,
+            playbackGeneration: snapshot.playbackGeneration,
+            positionRevision: snapshot.positionRevision,
+            positionSequence: snapshot.positionSequence,
+          };
+        }
+      }
+      return {
+        positionMs: lastAppliedPositionMs,
+        loadId,
+        playbackGeneration: lastOrder.playbackGeneration,
+        positionRevision: lastOrder.positionRevision,
+        positionSequence: lastOrder.positionSequence,
+      };
     },
     async play() {
+      const attempt = loadAttempt;
       configure();
       ensureListener();
       const playingTrack = AudioPro.getPlayingTrack();
       if (!playingTrack && currentTrack) {
-        AudioPro.play(currentTrack, { autoPlay: true, headers: currentHeaders });
+        AudioPro.play(currentTrack, {
+          ...currentPlayOptions,
+          autoPlay: true,
+          startTimeMs: lastAppliedPositionMs,
+          headers: currentHeaders,
+        });
         return;
       }
-      const state = AudioPro.getState();
+      const snapshot =
+        durableContext && nativeListeningPosition.capability() !== "web"
+          ? await nativeListeningPosition.snapshot()
+          : null;
+      if (attempt !== loadAttempt)
+        throw new Error("Playback request was superseded");
+      const state = snapshot?.state ?? AudioPro.getState();
       if (state === AudioProState.PLAYING) {
+        // The app requested Play explicitly. Reassert native audio-session
+        // ownership even if a stale transport snapshot still says PLAYING.
+        AudioPro.resume();
         return;
       }
       if (state === AudioProState.PAUSED || state === AudioProState.STOPPED) {
@@ -514,35 +839,57 @@ export const createAudioEngine = (): AudioEngine => {
       }
       if (state === AudioProState.IDLE && currentTrack) {
         // Reload the last track if the engine was cleared.
-        AudioPro.play(currentTrack, { autoPlay: true, headers: currentHeaders });
+        AudioPro.play(currentTrack, {
+          ...currentPlayOptions,
+          autoPlay: true,
+          startTimeMs: lastAppliedPositionMs,
+          headers: currentHeaders,
+        });
         return;
       }
       AudioPro.resume();
     },
     async pause() {
+      ++loadAttempt;
+      cancelMovement?.(new Error("Play confirmation cancelled by pause"));
+      rejectStateWaiters(new Error("Audio load cancelled by pause"));
       AudioPro.pause();
     },
-    async seek(positionMs) {
-      AudioPro.seekTo(positionMs);
-      await waitForState(
+    async seek(positionMs, _options) {
+      const completed = waitForState(
         "seek to complete",
         (event) => {
           if (event?.type !== AudioProEventType.SEEK_COMPLETE) return false;
-          const completedPosition = event.payload?.position ?? AudioPro.getTimings().position;
-          return Math.abs(completedPosition - positionMs) <= SEEK_COMPLETE_TOLERANCE_MS;
+          const completedPosition =
+            event.payload?.position ?? AudioPro.getTimings().position;
+          return (
+            Math.abs(completedPosition - positionMs) <=
+            SEEK_COMPLETE_TOLERANCE_MS
+          );
         },
         DEFAULT_SEEK_TIMEOUT_MS,
         { allowImmediate: false },
       );
+      AudioPro.seekTo(positionMs);
+      await completed;
     },
     async setRate(rate) {
       AudioPro.setPlaybackSpeed(rate);
     },
+    async getPlaybackSnapshot() {
+      return nativeListeningPosition.snapshot();
+    },
     async getPositionMs() {
+      if (durableContext && nativeListeningPosition.capability() !== "web") {
+        return (await nativeListeningPosition.snapshot())!.position;
+      }
       const { position } = AudioPro.getTimings();
       return position;
     },
     async getDurationMs() {
+      if (durableContext && nativeListeningPosition.capability() !== "web") {
+        return (await nativeListeningPosition.snapshot())!.duration;
+      }
       const { duration } = AudioPro.getTimings();
       return duration;
     },
@@ -557,6 +904,12 @@ export const createAudioEngine = (): AudioEngine => {
       );
     },
     async waitForPlaying(options) {
+      if (durableContext && nativeListeningPosition.capability() !== "web") {
+        await waitForNativeMovement(
+          options?.timeoutMs ?? DEFAULT_PLAYING_TIMEOUT_MS,
+        );
+        return;
+      }
       const targetTrackId = currentTrack?.id;
       await waitForState(
         "playback to start",
@@ -564,7 +917,8 @@ export const createAudioEngine = (): AudioEngine => {
           const state = AudioPro.getState();
           if (state !== AudioProState.PLAYING) return false;
           if (!targetTrackId) return true;
-          const resolvedTrackId = event?.track?.id ?? AudioPro.getPlayingTrack()?.id;
+          const resolvedTrackId =
+            event?.track?.id ?? AudioPro.getPlayingTrack()?.id;
           return resolvedTrackId === targetTrackId;
         },
         options?.timeoutMs ?? DEFAULT_PLAYING_TIMEOUT_MS,
@@ -585,6 +939,12 @@ export const createAudioEngine = (): AudioEngine => {
       };
     },
     async unload() {
+      ++loadAttempt;
+      cancelMovement?.(new Error("Audio engine was unloaded"));
+      activeLoadId = null;
+      durableContext = undefined;
+      currentPlayOptions = undefined;
+      lastOrder = {};
       rejectStateWaiters(new Error("Audio engine was unloaded"));
       AudioPro.clear();
       currentTrack = null;
