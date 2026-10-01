@@ -1,3 +1,6 @@
+import { usePlaybackControls } from "@/player/use-playback-controls";
+import { requestPlaybackToggleForIdentity } from "@/player/request-playback-toggle";
+import { showPlaybackError } from "@/player/show-playback-error";
 import { meApi } from "@/api/me-api";
 import { authStore } from "@/auth/auth-store";
 import { setTouchedEpisodeContinueListeningHidden } from "@/data/sqlite/touched-episodes";
@@ -100,11 +103,11 @@ export const useEpisodeActionController = ({
     (state) => state.libraryItemId,
   );
   const playbackEpisodeId = usePlaybackStore((state) => state.episodeId);
-  const playbackState = usePlaybackStore((state) => state.playbackState);
+  const controls = usePlaybackControls(identity);
   const isEpisodeLoaded =
     playbackLibraryItemId === identity.libraryItemId &&
     playbackEpisodeId === identity.episodeId;
-  const isEpisodePlaying = isEpisodeLoaded && playbackState === "playing";
+  const isEpisodePlaying = controls.action === "pause";
 
   const eligibilityInput: ResolveEpisodeActionSetInput = {
     actionIds,
@@ -158,29 +161,14 @@ export const useEpisodeActionController = ({
   };
 
   const handlePlayPause = async () => {
-    if (busyAction) return;
-    setBusyAction("playPause");
+    if (busyAction || !controls.canToggle) return;
     try {
-      if (isEpisodePlaying) {
-        await playerService.requestPause();
-        return;
-      }
-      if (isEpisodeLoaded) {
-        await playerService.requestPlay();
-        return;
-      }
-      await playerService.requestStartEpisode(
-        identity.libraryItemId,
-        identity.episodeId,
-        {
-          episodeTitle: episodeTitle ?? undefined,
-          podcastTitle: podcastTitle ?? undefined,
-        },
-      );
-    } catch {
-      toast.error(isEpisodePlaying ? "Unable to pause" : "Unable to play");
-    } finally {
-      setBusyAction(null);
+      await requestPlaybackToggleForIdentity(identity, true, {
+        episodeTitle: episodeTitle ?? undefined,
+        podcastTitle: podcastTitle ?? undefined,
+      });
+    } catch (error) {
+      showPlaybackError(error);
     }
   };
 

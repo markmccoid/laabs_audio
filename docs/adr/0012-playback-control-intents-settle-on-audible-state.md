@@ -1,5 +1,7 @@
 # Playback Control Intents Settle on Audible State
 
+The first-intent-wins, Pause-cancels-preparation, and button-state policies below are superseded by [ADR-0042](0042-latest-requested-playback-state.md). They describe the preceding implementation; the replacement was implemented on 2026-09-30. The separation from follow-up progress/cache work remains required.
+
 LAABS Audio models play, pause, and start commands as a single active Playback Control Intent separate from `playbackState`, rather than adding transient `starting` or `pausing` playback states. For now, the first intent wins: additional play/start/pause presses are ignored while one intent is active, and controls unlock when the requested Audible Playback State is reached. Follow-up progress sync, cache updates, downloaded-progress watchdogs, and playback-rate reconciliation must not keep the intent locked unless they are required before audio can start or pause.
 
 **Considered Options**

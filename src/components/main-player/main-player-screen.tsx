@@ -1,3 +1,4 @@
+import { getPlaybackErrorPresentation } from "@/player/playback-error-presentation";
 import { useCoverImageSource } from "@/components/images/cover-image";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
@@ -52,6 +53,8 @@ const MainPlayerScreen = () => {
   const { data: bookData, isLoading } = useGetItemDetails(
     playerDisplayMedia.isEpisodePlayback ? undefined : currentLibraryItemId,
   );
+  const playbackError = usePlaybackStore((state) => state.error);
+  const errorPresentation = playbackError ? getPlaybackErrorPresentation(playbackError) : null;
   const storeTitle = usePlaybackStore((state) => state.bookTitle);
   const storeSecondaryTitle = usePlaybackStore((state) => state.secondaryTitle);
   const storeDurationMs = usePlaybackStore((state) => state.durationMs);
@@ -69,7 +72,7 @@ const MainPlayerScreen = () => {
       : "Unknown author";
   const title = playerDisplayMedia.isEpisodePlayback
     ? (storeTitle?.trim() || "Episode")
-    : (bookData?.title ?? "No book selected");
+    : (bookData?.title ?? storeTitle ?? "No book selected");
   const coverURL = bookData?.coverUri;
   const backgroundImage = useCoverImageSource({
     libraryItemId: currentLibraryItemId,
@@ -232,7 +235,7 @@ const MainPlayerScreen = () => {
               <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
                 Starting playback...
               </Text>
-            ) : !hasLoadedMedia ? (
+            ) : !hasLoadedMedia && !errorPresentation ? (
               <Text selectable style={{ fontSize: 12, color: themeColors.textMuted }}>
                 Start playback from Home to load a book.
               </Text>
@@ -241,6 +244,20 @@ const MainPlayerScreen = () => {
         </View>
 
         <View style={{ gap: 10 }}>
+          {errorPresentation ? (
+            <View
+              accessibilityLiveRegion="polite"
+              style={{ padding: 12, borderRadius: 14, backgroundColor: themeColors.surface,
+                borderWidth: 1, borderColor: themeColors.border, gap: 4 }}
+            >
+              <Text style={{ color: themeColors.text, fontWeight: "700" }}>
+                {errorPresentation.title}
+              </Text>
+              <Text style={{ color: themeColors.textMuted }}>
+                {errorPresentation.description}
+              </Text>
+            </View>
+          ) : null}
           <BookTimeSlider
             libraryItemId={currentLibraryItemId}
             fallbackDurationMs={fallbackDurationMs}

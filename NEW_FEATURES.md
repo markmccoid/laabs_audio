@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-09-30` `86c2268` - Fortify streamed playback recovery and make Play/Pause follow the latest request across app and system controls. Natural audiobook completion now resets the control to Play and records the book as finished, including offline.
+  Tester focus: start streamed and downloaded books, pause or resume during preparation, and confirm the latest request takes effect without cancelling reusable preparation. Stall a stream and verify recovery is bounded and Play remains available after failure. Play multi-file audiobooks through file boundaries and then through the book's end; transitions should keep playing, while natural completion shows Play and marks the audiobook finished, even offline.
+
 - `2026-09-28` `pending` - Use an existing ABS book transcript instead of offering on-device transcription in the download sheet, and add Book Details to the mini-player cover menu.
   Tester focus: open the download sheet for a book with `laabs.transcript.json` on ABS and confirm there is no after-download transcription checkbox or Transcribe/Retry action. Confirm the transcript remains available in Read-Along offline. For a book without a server transcript, verify the usual transcription controls remain. During book playback, tap the mini-player cover and choose Book Details; confirm it opens that book. During episode playback, the book action should be absent.
 

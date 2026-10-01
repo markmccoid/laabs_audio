@@ -96,7 +96,18 @@ class AudioProModule(private val reactContext: ReactApplicationContext) :
 		onPlayerThread(promise) { NativeListeningPosition.setCaptureEnabled(enabled, promise) }
 
 	@ReactMethod
-	fun pause() {
+    fun setRequestedPlaybackState(state: String, commandId: String, targetId: String?) {
+        AudioProController.setRequestedPlaybackState(state, commandId, targetId)
+    }
+
+    @ReactMethod
+    fun resumeRequested(commandId: String) { AudioProController.resumeRequested(commandId) }
+
+    @ReactMethod
+    fun pauseRequested() { AudioProController.pauseRequested() }
+
+    @ReactMethod
+    fun pause() {
 		AudioProController.pause()
 	}
 

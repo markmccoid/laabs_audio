@@ -19,7 +19,7 @@ describe("isPlaybackControlIntentBlocking", () => {
     ).toBe(false);
   });
 
-  it("continues blocking while a playback-control intent is still settling", () => {
+  it("releases a completed intent immediately without a settling gate", () => {
     const finishedAt = 10_000;
 
     expect(
@@ -34,6 +34,6 @@ describe("isPlaybackControlIntentBlocking", () => {
         },
         finishedAt + 349,
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 });

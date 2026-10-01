@@ -1,16 +1,16 @@
 import { MiniPlayerBottomAccessory } from "@/components/main-player/mini-player-bottom-accessory";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
-import { playerService, usePlaybackStore, usePlayerDisplayMedia } from "@/player";
+import { usePlaybackStore, usePlayerDisplayMedia } from "@/player";
 import { resolveStoredDownloadCoverUri, useDeviceBooksStore } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { requestPlaybackToggleForIdentity } from "@/player/request-playback-toggle";
+import { showPlaybackError } from "@/player/show-playback-error";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 
 export default function TabLayout() {
-  const playbackState = usePlaybackStore((state) => state.playbackState);
-  const playbackControlIntent = usePlaybackStore((state) => state.playbackControlIntent);
   const playerDisplayMedia = usePlayerDisplayMedia();
   const miniPlayerLibraryItemId = playerDisplayMedia.displayLibraryItemId;
-  const isMiniPlayerLoading = playerDisplayMedia.isPlaybackStartAttempt;
+  const playbackError = usePlaybackStore((state) => state.error);
   const isEpisodePlayback = playerDisplayMedia.isEpisodePlayback;
   const localCoverUri = useDeviceBooksStore((state) =>
     !isEpisodePlayback && miniPlayerLibraryItemId
@@ -21,22 +21,22 @@ export default function TabLayout() {
     isEpisodePlayback ? undefined : miniPlayerLibraryItemId || undefined,
   );
   const themeColors = useThemeColors();
-  const isPlaying = playbackState === "playing";
   const hasLoadedMedia = playerDisplayMedia.hasLoadedMedia;
-  const shouldShowMiniPlayer = hasLoadedMedia || playerDisplayMedia.isPlaybackStartAttempt;
+  const shouldShowMiniPlayer = hasLoadedMedia || playerDisplayMedia.isPlaybackStartAttempt ||
+    Boolean(playbackError && miniPlayerLibraryItemId);
   const title = isEpisodePlayback
     ? (playerDisplayMedia.displayTitle ?? "Episode")
-    : currentBook?.title;
+    : (currentBook?.title ?? playerDisplayMedia.displayTitle);
   const author = isEpisodePlayback
     ? (playerDisplayMedia.displaySecondaryTitle ?? "Podcast")
     : currentBook?.author;
   const coverUri = isEpisodePlayback ? undefined : currentBook?.coverFull;
   const handleToggle = async () => {
-    if (playbackControlIntent) return;
-    if (isPlaying) {
-      await playerService.requestPause();
-    } else {
-      await playerService.requestPlay();
+    try {
+      await requestPlaybackToggleForIdentity({ libraryItemId: miniPlayerLibraryItemId,
+        episodeId: playerDisplayMedia.displayEpisodeId });
+    } catch (error) {
+      showPlaybackError(error);
     }
   };
 
@@ -72,12 +72,10 @@ export default function TabLayout() {
           <MiniPlayerBottomAccessory
             author={author}
             coverUri={coverUri}
-            isLoading={isMiniPlayerLoading}
             isEpisodePlayback={isEpisodePlayback}
-            isPlaying={isPlaying}
             libraryItemId={miniPlayerLibraryItemId}
+            episodeId={playerDisplayMedia.displayEpisodeId}
             localCoverUri={localCoverUri}
-            playbackControlIntent={playbackControlIntent}
             themeColors={themeColors}
             title={title}
             onToggle={handleToggle}

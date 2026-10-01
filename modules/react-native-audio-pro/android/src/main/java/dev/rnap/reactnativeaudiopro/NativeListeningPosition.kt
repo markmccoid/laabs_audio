@@ -400,6 +400,7 @@ internal object NativeListeningPosition {
     }
 
     fun metadata(payload: WritableMap, reason: String) {
+        AudioProController.requestMetadata(payload)
         val owned = assignment
         payload.putString("reason", reason)
         payload.putString("loadId", currentLoadId)

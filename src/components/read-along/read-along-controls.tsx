@@ -1,4 +1,7 @@
-import { playbackStore, playerService, usePlaybackStore } from "@/player";
+import { usePlaybackControls } from "@/player/use-playback-controls";
+import { requestPlaybackToggleForIdentity } from "@/player/request-playback-toggle";
+import { showPlaybackError } from "@/player/show-playback-error";
+import { playerService, usePlaybackStore } from "@/player";
 import {
   buildReadAlongRateLadder,
   isSameRate,
@@ -179,6 +182,7 @@ export const ReadAlongControls = ({
   const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const playingLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const episodeId = usePlaybackStore((state) => state.episodeId);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const playbackRate = usePlaybackStore((state) => state.rate);
   const playbackRateRangeMin = useSettingsStore((state) => state.playbackRateRangeMin);
@@ -186,11 +190,10 @@ export const ReadAlongControls = ({
   const storedRate = useBookPlaybackRate(boundLibraryItemId);
   const [isRateMenuOpen, setIsRateMenuOpen] = useState(false);
 
-  const isBoundBookLoaded = playingLibraryItemId === boundLibraryItemId && queueLength > 0;
-  const isPlaying = isBoundBookLoaded && playbackState === "playing";
-  // Skips only make sense against the bound book; when the player holds another
-  // book (or nothing) the play button becomes "start this book" instead.
-  const canSkip = isBoundBookLoaded && (playbackState === "playing" || playbackState === "paused");
+  const isBoundBookLoaded = playingLibraryItemId === boundLibraryItemId && !episodeId && queueLength > 0;
+  const controls = usePlaybackControls({ libraryItemId: boundLibraryItemId });
+  const canSkip = isBoundBookLoaded && !controls.isPreparing &&
+    (playbackState === "playing" || playbackState === "paused" || playbackState === "ready");
 
   // The live rate once the book is loaded, its saved rate before that — the
   // pill states the truth in both cases, it is only actionable in the first.
@@ -213,23 +216,7 @@ export const ReadAlongControls = ({
   };
 
   const handleToggle = () => {
-    void (async () => {
-      const state = playbackStore.getState();
-      const isLoadedNow = state.libraryItemId === boundLibraryItemId && state.queue.length > 0;
-      // idle / ended / another book loaded: restart the bound book, the same
-      // load-if-needed path the chapter viewer uses for its seeks.
-      if (!isLoadedNow) {
-        await playerService.loadBook(boundLibraryItemId, { autoPlay: true });
-        return;
-      }
-      if (state.playbackState === "playing") {
-        await playerService.requestPause();
-        return;
-      }
-      await playerService.requestPlay();
-    })().catch(() => {
-      // Playback surfaces its own failure toasts; the reader stays put.
-    });
+    void requestPlaybackToggleForIdentity({ libraryItemId: boundLibraryItemId }).catch(showPlaybackError);
   };
 
   return (
@@ -320,7 +307,8 @@ export const ReadAlongControls = ({
           />
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={isPlaying ? "Pause" : "Play"}
+            accessibilityLabel={controls.action === "pause" ? "Pause" : "Play"}
+            disabled={!controls.canToggle}
             onPress={handleToggle}
             style={({ pressed }) => ({
               width: 56,
@@ -330,11 +318,11 @@ export const ReadAlongControls = ({
               alignItems: "center",
               justifyContent: "center",
               backgroundColor: themeColors.accent,
-              opacity: pressed ? 0.85 : 1,
+              opacity: !controls.canToggle ? 0.4 : pressed ? 0.85 : 1,
             })}
           >
             <SymbolView
-              name={isPlaying ? "pause.fill" : "play.fill"}
+              name={controls.action === "pause" ? "pause.fill" : "play.fill"}
               size={24}
               tintColor={themeColors.accentForeground}
             />

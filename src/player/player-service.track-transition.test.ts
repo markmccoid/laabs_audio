@@ -1,6 +1,16 @@
-import { nativeListeningPosition } from "../progress/native-listening-position";
 import { playbackStore } from "./playback-store";
 import { playerService } from "./player-service";
+import { authStore } from "../auth/auth-store";
+import { getPendingProgressSyncIntent } from "../progress/progress-sync-intent-store";
+import { deviceBooksStore } from "../store/device-books-store";
+import { resolvePlaybackControls } from "./playback-controls-policy";
+
+let mockOwner: string | null = null;
+jest.mock("../auth/listening-owner", () => ({ resolveListeningOwnerKey: () => mockOwner }));
+jest.mock("../data/sqlite/overlay-writes", () => ({
+  upsertShadowPendingProgressIntent: jest.fn(async () => undefined),
+  upsertShadowServerProgressProjection: jest.fn(async () => undefined),
+}));
 
 jest.mock("../progress/native-listening-position", () => ({
   nativeListeningPosition: { capability: jest.fn(() => "web"), checkpoint: jest.fn(async () => null),
@@ -48,7 +58,46 @@ const queue = [
 ];
 
 describe("automatic multi-file playback transitions", () => {
+  let originalAuth: ReturnType<typeof authStore.getState>;
+  beforeEach(() => {
+    originalAuth = authStore.getState();
+  });
+
+  it("shows Play and durably marks the book finished when its final file ends offline", async () => {
+    mockOwner = "listener";
+    const engine = {
+      pause: jest.fn(async () => undefined),
+      unload: jest.fn(async () => undefined),
+      setRequestedPlaybackState: jest.fn(),
+    };
+    (playerService as any).engine = engine;
+    (playerService as any).temporaryPlaybackSession = null;
+    authStore.setState({ storedUserId: "listener", activeLibraryUserKey: "listener", isOnline: false });
+    deviceBooksStore.getState().actions.clearPendingProgressSync("book-1", { userKey: "listener" });
+    playbackStore.getState().actions.setSession({
+      libraryItemId: "book-1", bookTitle: "Book", sessionId: "local",
+      queue, durationMs: 20_000, chapterIndex: [],
+    });
+    playbackStore.getState().actions.setCurrentTrack(1, 10_000);
+    playbackStore.getState().actions.setPosition({ positionMs: 19_900, trackPositionMs: 9_900 });
+    playbackStore.getState().actions.setPlaybackState("playing");
+    (playerService as any).publishPlaybackRequest("playing", { libraryItemId: "book-1", episodeId: null });
+
+    await (playerService as any).handleTrackEnded();
+
+    const state = playbackStore.getState();
+    expect(resolvePlaybackControls({ hasIdentity: true, isPlaying: state.playbackState === "playing",
+      requestedPlaybackState: state.requestedPlaybackState }).action).toBe("play");
+    expect(state).toMatchObject({ playbackState: "ended", requestedPlaybackState: "paused", positionMs: 20_000 });
+    expect(getPendingProgressSyncIntent("book-1", "listener")).toMatchObject({
+      isFinished: true, intentKind: "mark_finished", currentTime: 20, duration: 20,
+    });
+  });
+
   afterEach(() => {
+    authStore.setState(originalAuth);
+    mockOwner = null;
+    deviceBooksStore.getState().actions.clearPendingProgressSync("book-1", { userKey: "listener" });
     playbackStore.getState().actions.reset();
   });
 
@@ -69,6 +118,7 @@ describe("automatic multi-file playback transitions", () => {
     };
 
     (playerService as any).engine = engine;
+    (playerService as any).publishPlaybackRequest("playing", { libraryItemId: "book-1", episodeId: null });
     (playerService as any).runPlaybackFollowUp = jest.fn();
     playbackStore.getState().actions.setSession({
       libraryItemId: "book-1",
@@ -143,6 +193,7 @@ describe("automatic multi-file playback transitions", () => {
     };
 
     (playerService as any).engine = engine;
+    (playerService as any).publishPlaybackRequest("playing", { libraryItemId: "book-1", episodeId: null });
     (playerService as any).runPlaybackFollowUp = jest.fn();
     playbackStore.getState().actions.setSession({
       libraryItemId: "book-1",

@@ -79,7 +79,17 @@ export const runLibraryActivationSelection = async (
       queryClient,
     });
 
-    await playerService.endActivePlaybackForLibrarySwitch();
+    const playbackTeardownStartedAt = Date.now();
+    let playbackTeardownSucceeded = false;
+    try {
+      await playerService.endActivePlaybackForLibrarySwitch();
+      playbackTeardownSucceeded = true;
+    } finally {
+      void recordTimingLog("library_switch", "playback_teardown", playbackTeardownStartedAt, {
+        libraryId: library.id,
+        success: playbackTeardownSucceeded,
+      });
+    }
     authState.actions.setActiveLibrary({
       id: library.id,
       name: library.name,

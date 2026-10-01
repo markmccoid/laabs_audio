@@ -1,4 +1,8 @@
+import { AbortController as RNAbortController } from "abort-controller";
 import {
+  withPlaybackStartTimeout,
+  abortPlaybackAttempt,
+  StreamedPlaybackStartFailureError,
   resolveLocalPlaybackFallbackTarget,
   runLocalPlaybackFallback,
 } from "./playback-start-attempt";
@@ -60,5 +64,26 @@ describe("resolveLocalPlaybackFallbackTarget", () => {
       episodeId: "episode-2",
     });
     expect(loadBook).not.toHaveBeenCalled();
+  });
+});
+
+describe("bounded playback stages", () => {
+  afterEach(() => jest.useRealTimers());
+
+  it("releases timeout resources when a stage succeeds", async () => {
+    jest.useFakeTimers();
+    expect(await withPlaybackStartTimeout(Promise.resolve("ready"))).toBe("ready");
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("preserves deadline failure classification with React Native's reasonless AbortController", async () => {
+    jest.useFakeTimers();
+    const controller = new RNAbortController();
+    const stage = withPlaybackStartTimeout(new Promise(() => undefined), 20_000, controller.signal as unknown as AbortSignal);
+    const failure = expect(stage).rejects.toBeInstanceOf(StreamedPlaybackStartFailureError);
+    abortPlaybackAttempt(controller as unknown as AbortController, new StreamedPlaybackStartFailureError());
+    await failure;
+    expect("reason" in controller.signal).toBe(false);
+    expect(jest.getTimerCount()).toBe(0);
   });
 });

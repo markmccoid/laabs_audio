@@ -14,7 +14,7 @@ export type SessionSyncResult = {
 export const sessionsApi = {
   closeSession(
     sessionId: string,
-    data: SessionSyncPayload,
+    data?: SessionSyncPayload,
     options?: RequestInit,
   ) {
     return absClient.post<void>(

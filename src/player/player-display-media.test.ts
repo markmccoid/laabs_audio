@@ -5,6 +5,8 @@ const playbackState = (
   overrides: Partial<PlaybackStoreState>,
 ): PlaybackStoreState => ({
   playbackState: "idle",
+  requestedPlaybackState: null,
+  isPreparingPlayback: false,
   playbackControlIntent: null,
   libraryItemId: null,
   bookTitle: null,
@@ -43,7 +45,7 @@ describe("selectPlayerDisplayMedia", () => {
           libraryItemId: "book-1",
           episodeId: null,
           requestedAudibleState: "playing",
-          startedAt: 1,
+          startedAt: Date.now(),
         },
       }),
     );
@@ -67,7 +69,7 @@ describe("selectPlayerDisplayMedia", () => {
           libraryItemId: "podcast-1",
           episodeId: "episode-1",
           requestedAudibleState: "playing",
-          startedAt: 1,
+          startedAt: Date.now(),
         },
       }),
     );
@@ -78,6 +80,15 @@ describe("selectPlayerDisplayMedia", () => {
       isEpisodePlayback: true,
       isPlaybackStartAttempt: true,
     });
+  });
+
+  it("keeps the incoming target visible while preparation is requested paused", () => {
+    const selected = selectPlayerDisplayMedia(playbackState({
+      libraryItemId: "outgoing", requestedPlaybackState: "paused", isPreparingPlayback: true,
+      playbackControlIntent: { id: "start", kind: "start", libraryItemId: "incoming",
+        requestedAudibleState: "paused", startedAt: 1000 },
+    }), 1500);
+    expect(selected).toMatchObject({ displayLibraryItemId: "incoming", isPlaybackStartAttempt: true });
   });
 
   it("falls back to Active Playback only when no start intent exists", () => {
@@ -94,6 +105,23 @@ describe("selectPlayerDisplayMedia", () => {
       displayEpisodeId: "episode-1",
       isEpisodePlayback: true,
       source: "active-playback",
+    });
+  });
+
+  it.each([
+    { startedAt: 1000 },
+    { startedAt: 23000, finishedAt: 23001 },
+  ])("ignores stale or finished incoming starts and shows retained failure identity", (timing) => {
+    const selected = selectPlayerDisplayMedia(playbackState({
+      libraryItemId: "failed-book", playbackState: "error", queue: [], error: "Audio did not load",
+      playbackControlIntent: {
+        id: "stale", kind: "start", libraryItemId: "incoming-book",
+        requestedAudibleState: "playing", ...timing,
+      },
+    }), 23002);
+    expect(selected).toMatchObject({
+      displayLibraryItemId: "failed-book", source: "active-playback",
+      isPlaybackStartAttempt: false, hasLoadedMedia: false,
     });
   });
 });

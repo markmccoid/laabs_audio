@@ -51,7 +51,7 @@ export const runLocalPlaybackFallback = async (
 };
 
 export class StreamedPlaybackStartFailureError extends Error {
-  constructor(message = "Connection is not good enough for streaming") {
+  constructor(message = "Couldn’t load the audio. Tap Play to try again.") {
     super(message);
     this.name = "StreamedPlaybackStartFailureError";
   }
@@ -63,19 +63,48 @@ export const isStreamedPlaybackStartFailure = (
   error instanceof StreamedPlaybackStartFailureError ||
   (error instanceof Error && error.name === "StreamedPlaybackStartFailureError");
 
+export class PlaybackCancelledError extends Error {
+  constructor() { super("Playback request superseded"); this.name = "PlaybackCancelledError"; }
+}
+
+export class PlaybackStorageFailureError extends Error {
+  constructor() {
+    super("Couldn’t save your listening position. Playback was paused. Tap Play to try again.");
+    this.name = "PlaybackStorageFailureError";
+  }
+}
+
+// React Native's AbortController polyfill discards abort(reason).
+const playbackAbortReasons = new WeakMap<AbortSignal, Error>();
+export const abortPlaybackAttempt = (controller: AbortController, error: Error) => {
+  if (controller.signal.aborted) return;
+  playbackAbortReasons.set(controller.signal, error);
+  controller.abort();
+};
+export const playbackAbortReason = (signal?: AbortSignal): Error =>
+  (signal && playbackAbortReasons.get(signal)) ?? signal?.reason ?? new PlaybackCancelledError();
+
+/** A bounded stage always releases its timer and cancellation subscription. */
 export const withPlaybackStartTimeout = async <T>(
   promise: Promise<T>,
   timeoutMs = STREAMED_PLAYBACK_START_TIMEOUT_MS,
-): Promise<T> =>
-  Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => {
-        reject(
-          new StreamedPlaybackStartFailureError(
-            `Streamed playback did not start within ${timeoutMs}ms`,
-          ),
-        );
-      }, timeoutMs);
-    }),
-  ]);
+  signal?: AbortSignal,
+  timeoutError: Error = new StreamedPlaybackStartFailureError(),
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let abort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(timeoutError), Math.max(0, timeoutMs));
+        abort = () => reject(playbackAbortReason(signal));
+        if (signal?.aborted) abort();
+        else signal?.addEventListener("abort", abort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (abort) signal?.removeEventListener("abort", abort);
+  }
+};

@@ -1,4 +1,8 @@
-import { isStreamedPlaybackStartFailure, playerService, usePlaybackStore } from "@/player";
+import { playbackStore, playerService, usePlaybackStore } from "@/player";
+import { usePlaybackControls } from "@/player/use-playback-controls";
+import { isPlaybackControlTarget, resolvePlaybackControls } from "@/player/playback-controls-policy";
+import { requestPlaybackToggleForIdentity } from "@/player/request-playback-toggle";
+import { showPlaybackError } from "@/player/show-playback-error";
 import { useAuthStore } from "@/auth/auth-store";
 import { canUseAudiobookshelfServer } from "@/auth/server-connection";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
@@ -6,10 +10,7 @@ import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
 import { SymbolView, type SFSymbol } from "expo-symbols";
-import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
-import { toast } from "react-native-sonner";
-import PlayPauseAnimation, { type PlaybackControlVisualState } from "./play-pause-animation";
 
 type Props = {
   libraryItemId?: string;
@@ -96,13 +97,6 @@ const resolveSeekForwardIcon = (seconds: number): SFSymbol => {
   }
 };
 
-const showStreamedPlaybackStartFailureToast = () => {
-  toast.error("Unable to start streaming", {
-    description:
-      "Your connection is not good enough for streaming right now. Try again when it improves, or download the audiobook.",
-  });
-};
-
 const BookControls = ({
   libraryItemId,
   variant = "full",
@@ -114,8 +108,9 @@ const BookControls = ({
   const seekBackwardSeconds = useSettingsStore((state) => state.seekBackwardSeconds);
   const seekForwardSeconds = useSettingsStore((state) => state.seekForwardSeconds);
   const playbackState = usePlaybackStore((state) => state.playbackState);
-  const playbackControlIntent = usePlaybackStore((state) => state.playbackControlIntent);
+  const playbackError = usePlaybackStore((state) => state.error);
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+  const currentEpisodeId = usePlaybackStore((state) => state.episodeId);
   const chapterCount = usePlaybackStore((state) => state.chapterIndex.length);
   const queueLength = usePlaybackStore((state) => state.queue.length);
   const isDownloaded = useDeviceBooksStore((state) => {
@@ -123,58 +118,15 @@ const BookControls = ({
     return selectHasPlayableBookDownload(state, libraryItemId);
   });
   const canUseServer = canUseAudiobookshelfServer({ isOnline, serverConnectionStatus });
-  const [pendingLoadBookId, setPendingLoadBookId] = useState<string | null>(null);
-
   const hasBookId = Boolean(libraryItemId);
-  const isBookActive = hasBookId && currentLibraryItemId === libraryItemId;
+  const isBookActive = hasBookId && currentLibraryItemId === libraryItemId && !currentEpisodeId;
   const isBookLoaded = isBookActive && queueLength > 0;
-  const isPendingForViewedBook = Boolean(libraryItemId && pendingLoadBookId === libraryItemId);
-  const hasActivePlaybackControlIntent = playbackControlIntent !== null;
-  const isStartIntentForViewedBook =
-    playbackControlIntent?.kind === "start" && playbackControlIntent.libraryItemId === libraryItemId;
-
-  // Clear pending-load marker once the viewed book has either loaded or playback left loading.
-  useEffect(() => {
-    if (!libraryItemId) return;
-    if (pendingLoadBookId !== libraryItemId) return;
-
-    const isLoadedForViewedBook = isBookActive && isBookLoaded;
-    const canResolvePending =
-      isLoadedForViewedBook || playbackState === "error" || playbackState === "ended";
-
-    if (!canResolvePending) return;
-
-    const timeoutId = setTimeout(() => {
-      setPendingLoadBookId(null);
-    }, 0);
-
-    return () => {
-      clearTimeout(timeoutId);
-    };
-  }, [libraryItemId, pendingLoadBookId, playbackState, isBookActive, isBookLoaded]);
-
-  const viewedBookState: PlaybackControlVisualState = (() => {
-    if (!libraryItemId) return "not-loaded";
-    if (isStartIntentForViewedBook) return "loading";
-    if (isPendingForViewedBook && (!isBookActive || playbackState === "loading")) return "loading";
-    if (isBookActive && playbackState === "loading") return "loading";
-    if (!isBookActive || !isBookLoaded) return "not-loaded";
-    if (playbackState === "playing") return "playing";
-    if (playbackState === "paused") return "paused";
-    return "loaded-active";
-  })();
-
-  const isLoading = viewedBookState === "loading";
-  const isPlaying = viewedBookState === "playing";
+  const canStart = canUseServer || isDownloaded || Boolean(isBookActive && playbackError);
+  const { canToggle, action, isPreparing } = usePlaybackControls({ libraryItemId }, canStart);
   const isPlayOnly = variant === "play-only";
-  const canControl =
-    !hasActivePlaybackControlIntent &&
-    (viewedBookState === "playing" ||
-      viewedBookState === "paused" ||
-      viewedBookState === "loaded-active");
+  const canControl = isBookLoaded && !isPreparing &&
+    (playbackState === "playing" || playbackState === "paused" || playbackState === "ready");
   const canUseChapterControls = canControl && chapterCount > 0;
-  const canToggle =
-    hasBookId && !isLoading && !hasActivePlaybackControlIntent && (canUseServer || isDownloaded);
 
   const seekBackwardIcon = resolveSeekBackwardIcon(seekBackwardSeconds);
   const seekForwardIcon = resolveSeekForwardIcon(seekForwardSeconds);
@@ -185,42 +137,23 @@ const BookControls = ({
 
   // Only after playback actually started — a failed start keeps the user on the book.
   const openMainPlayerAfterStart = () => {
-    if (!openMainPlayerOnStart) return;
+    const state = playbackStore.getState();
+    if (!openMainPlayerOnStart || state.requestedPlaybackState !== "playing" || state.playbackState !== "playing" ||
+        state.libraryItemId !== libraryItemId || state.episodeId) return;
     router.push("/main-player");
   };
 
   const handleToggle = async () => {
-    if (!libraryItemId || isLoading || hasActivePlaybackControlIntent) return;
-    if (!isBookActive) {
-      // Mark this viewed book as pending immediately so the loading animation starts
-      // before playback store session metadata is fully populated.
-      setPendingLoadBookId(libraryItemId);
-      try {
-        const result = await playerService.requestStart(libraryItemId);
-        if (result.status !== "ignored") openMainPlayerAfterStart();
-      } catch (error) {
-        if (isStreamedPlaybackStartFailure(error)) {
-          showStreamedPlaybackStartFailureToast();
-        }
-        setPendingLoadBookId(null);
-      }
-      return;
-    }
-    if (!isBookLoaded) {
-      setPendingLoadBookId(libraryItemId);
-    }
+    if (!libraryItemId) return;
+    const state = playbackStore.getState();
+    const isTarget = isPlaybackControlTarget(state, { libraryItemId });
+    const tappedAction = resolvePlaybackControls({ hasIdentity: true, isTarget,
+      requestedPlaybackState: state.requestedPlaybackState, isPlaying: isTarget && state.playbackState === "playing" }).action;
     try {
-      if (isPlaying) {
-        await playerService.requestPause();
-      } else {
-        const result = await playerService.requestPlay();
-        if (result.status !== "ignored") openMainPlayerAfterStart();
-      }
+      const result = await requestPlaybackToggleForIdentity({ libraryItemId }, canStart);
+      if (tappedAction === "play" && result?.status !== "ignored") openMainPlayerAfterStart();
     } catch (error) {
-      if (isStreamedPlaybackStartFailure(error)) {
-        showStreamedPlaybackStartFailureToast();
-      }
-      setPendingLoadBookId(null);
+      showPlaybackError(error);
     }
   };
 
@@ -249,7 +182,7 @@ const BookControls = ({
       <View style={{ alignItems: "center", justifyContent: "center", paddingBottom: 2 }}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={isLoading ? "Loading book" : isPlaying ? "Pause" : "Play"}
+          accessibilityLabel={action === "pause" ? "Pause" : "Play"}
           onPress={handleToggle}
           disabled={!canToggle}
           style={({ pressed }) => ({
@@ -265,12 +198,7 @@ const BookControls = ({
             boxShadow: "0 14px 24px rgba(15, 23, 42, 0.25)",
           })}
         >
-          <PlayPauseAnimation
-            visualState={viewedBookState}
-            size={34}
-            duration={600}
-            tintColor="#f8fafc"
-          />
+          <SymbolView name={action === "pause" ? "pause.fill" : "play.fill"} size={34} tintColor="#f8fafc" />
         </Pressable>
       </View>
     );
@@ -318,7 +246,7 @@ const BookControls = ({
           />
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={isLoading ? "Loading book" : isPlaying ? "Pause" : "Play"}
+            accessibilityLabel={action === "pause" ? "Pause" : "Play"}
             onPress={handleToggle}
             disabled={!canToggle}
             style={({ pressed }) => ({
@@ -334,12 +262,7 @@ const BookControls = ({
               boxShadow: "0 14px 24px rgba(15, 23, 42, 0.25)",
             })}
           >
-            <PlayPauseAnimation
-              visualState={viewedBookState}
-              size={34}
-              duration={600}
-              tintColor="#f8fafc"
-            />
+            <SymbolView name={action === "pause" ? "pause.fill" : "play.fill"} size={34} tintColor="#f8fafc" />
           </Pressable>
           <ControlButton
             accessibilityLabel={`Skip forward ${seekForwardSeconds} seconds`}

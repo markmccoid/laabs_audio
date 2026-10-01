@@ -49,6 +49,7 @@ export enum AudioProEventType {
 	PLAYBACK_SPEED_CHANGED = 'PLAYBACK_SPEED_CHANGED',
 	/** Remote next button pressed */
 	REMOTE_NEXT = 'REMOTE_NEXT',
+	REQUESTED_PLAYBACK_STATE_CHANGED = 'REQUESTED_PLAYBACK_STATE_CHANGED',
 	/** Remote previous button pressed */
 	REMOTE_PREV = 'REMOTE_PREV',
 	/** Playback error has occurred */

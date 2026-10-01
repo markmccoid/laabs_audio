@@ -1,3 +1,6 @@
+import { usePlaybackControls } from "@/player/use-playback-controls";
+import { requestPlaybackToggleForIdentity } from "@/player/request-playback-toggle";
+import { showPlaybackError } from "@/player/show-playback-error";
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import {
   createEmptyUserServerState,
@@ -253,7 +256,8 @@ export const useBookActionController = ({
     resolveStoredDownloadCoverUri(state.downloadedBookData[book.id]),
   );
   const currentLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
-  const playbackState = usePlaybackStore((state) => state.playbackState);
+  const currentEpisodeId = usePlaybackStore((state) => state.episodeId);
+  const playbackError = usePlaybackStore((state) => state.error);
   const activeQueueLength = usePlaybackStore((state) =>
     state.libraryItemId === book.id ? state.queue.length : 0,
   );
@@ -266,15 +270,16 @@ export const useBookActionController = ({
   const { canToggleFavorite, isToggleFavoritePending, toggleFavorite } =
     useFavoriteBookAction();
 
-  const isBookActive = currentLibraryItemId === book.id;
-  const isBookPlaying = isBookActive && playbackState === "playing";
-  const isBookLoading = isBookActive && playbackState === "loading";
+  const isBookActive = currentLibraryItemId === book.id && !currentEpisodeId;
   const isBookLoaded = isBookActive && activeQueueLength > 0;
   const canUseServer = canUseAudiobookshelfServer({
     isOnline,
     serverConnectionStatus,
   });
-  const canPlay = !isBookLoading && (canUseServer || isDownloaded);
+  const canStart = canUseServer || isDownloaded || Boolean(isBookActive && playbackError);
+  const controls = usePlaybackControls({ libraryItemId: book.id }, canStart);
+  const canPlay = controls.canToggle;
+  const isBookPlaying = controls.action === "pause";
   const canMutateShelves = Boolean(activeLibraryId && activeLibraryUserKey);
   const hasStartedContinueListening =
     Math.max(0, Math.floor(progress?.currentTime ?? 0)) > 0 ||
@@ -491,24 +496,10 @@ export const useBookActionController = ({
 
   const handlePrimaryAction = async () => {
     if (busyAction || !canPlay) return;
-
-    setBusyAction("primary");
     try {
-      if (isBookPlaying) {
-        await playerService.requestPause();
-        return;
-      }
-
-      if (isBookLoaded) {
-        await playerService.requestPlay();
-        return;
-      }
-
-      await playerService.requestStart(book.id);
-    } catch {
-      toast.error(`Unable to ${primaryLabel.toLowerCase()}`);
-    } finally {
-      setBusyAction(null);
+      await requestPlaybackToggleForIdentity({ libraryItemId: book.id }, canStart);
+    } catch (error) {
+      showPlaybackError(error);
     }
   };
 

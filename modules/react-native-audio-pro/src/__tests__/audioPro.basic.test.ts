@@ -325,3 +325,21 @@ describe('AudioPro clear functionality', () => {
 		expect(internalStore.getState().setVolume).toHaveBeenCalledWith(1.0);
 	});
 });
+
+describe('requested playback bridge', () => {
+	it('records requests without a loaded track and carries the target/acknowledgment fence', () => {
+		AudioPro.setRequestedPlaybackState('paused', 'request-2', 'book:episode');
+		expect(NativeModules.AudioPro.setRequestedPlaybackState).toHaveBeenCalledWith(
+			'paused',
+			'request-2',
+			'book:episode',
+		);
+	});
+	it('applies a request without issuing an unconditional resume', () => {
+		AudioPro.resumeRequested('request-2');
+		AudioPro.pauseRequested();
+		expect(NativeModules.AudioPro.resumeRequested).toHaveBeenCalledWith('request-2');
+		expect(NativeModules.AudioPro.pauseRequested).toHaveBeenCalledTimes(1);
+		expect(NativeModules.AudioPro.resume).not.toHaveBeenCalled();
+	});
+});

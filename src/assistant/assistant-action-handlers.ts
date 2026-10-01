@@ -36,12 +36,18 @@ const resolveChosenAssistantUserId = (): string | null => {
 };
 
 const playableFromState = (
-  state: Pick<PlaybackStoreState, "episodeId" | "libraryItemId">,
+  state: Pick<PlaybackStoreState, "episodeId" | "libraryItemId" | "isPreparingPlayback" | "playbackControlIntent">,
 ): AssistantPlayableRef | null => {
-  if (!state.libraryItemId) return null;
-  return state.episodeId
-    ? { kind: "episode", libraryItemId: state.libraryItemId, episodeId: state.episodeId }
-    : { kind: "audiobook", libraryItemId: state.libraryItemId };
+  // A start publishes its target before metadata replaces the loaded identity.
+  const preparing = state.isPreparingPlayback && state.playbackControlIntent?.kind === "start"
+    ? state.playbackControlIntent
+    : null;
+  const libraryItemId = preparing?.libraryItemId ?? state.libraryItemId;
+  const episodeId = preparing?.libraryItemId ? preparing.episodeId : state.episodeId;
+  if (!libraryItemId) return null;
+  return episodeId
+    ? { kind: "episode", libraryItemId, episodeId }
+    : { kind: "audiobook", libraryItemId };
 };
 
 const isExpectedPlayable = (
@@ -123,7 +129,10 @@ const activePlaybackState = (): PlaybackStoreState | null => {
 const playAudiobook = async (libraryItemId: string): Promise<AssistantActionResult> => {
   const playable: AssistantPlayableRef = { kind: "audiobook", libraryItemId };
   try {
-    await playerService.loadBook(libraryItemId, { autoPlay: true });
+    const request = await playerService.requestStart(libraryItemId);
+    if (request.status === "ignored") {
+      return failure("busy", "LAABS Audio is already handling another playback request.");
+    }
     const playing = await waitForAudiblePlayback(playable);
     return {
       ok: true,
@@ -145,18 +154,19 @@ const resumePersistedPlayback = async (): Promise<AssistantActionResult> => {
   }
 
   try {
-    if (state.playbackState !== "playing") {
-      if (state.queue.length > 0) {
-        await playerService.play();
-      } else if (playable.kind === "episode") {
-        await playerService.loadEpisode(playable.libraryItemId, playable.episodeId, {
-          autoPlay: true,
-          episodeTitle: state.bookTitle,
-          podcastTitle: state.secondaryTitle,
-        });
-      } else {
-        await playerService.loadBook(playable.libraryItemId, { autoPlay: true });
-      }
+    // Audible state may still say playing after a newer Pause request. Resume
+    // must publish Play explicitly so the shared preparation keeps that desire.
+    const request = state.queue.length > 0 ||
+      (state.isPreparingPlayback && state.playbackControlIntent?.kind === "start")
+      ? await playerService.requestPlay()
+      : playable.kind === "episode"
+        ? await playerService.requestStartEpisode(playable.libraryItemId, playable.episodeId, {
+            episodeTitle: state.bookTitle,
+            podcastTitle: state.secondaryTitle,
+          })
+        : await playerService.requestStart(playable.libraryItemId);
+    if (request.status === "ignored") {
+      return failure("busy", "LAABS Audio is already handling another playback request.");
     }
 
     const playing = await waitForAudiblePlayback(playable);

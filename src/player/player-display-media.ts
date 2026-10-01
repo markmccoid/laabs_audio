@@ -1,4 +1,5 @@
 import type { PlaybackStoreState } from "./playback-store";
+import { isPlaybackControlIntentBlocking } from "./playback-control-intent";
 
 export type PlayerDisplaySource =
   | "playback-start-attempt"
@@ -21,10 +22,14 @@ export type PlayerDisplayMedia = {
 
 export const selectPlayerDisplayMedia = (
   state: PlaybackStoreState,
+  nowMs = Date.now(),
 ): PlayerDisplayMedia => {
   const activeLibraryItemId = state.libraryItemId ?? undefined;
   const startIntent =
-    state.playbackControlIntent?.kind === "start" ? state.playbackControlIntent : null;
+    state.playbackControlIntent?.kind === "start" &&
+    state.playbackControlIntent.finishedAt === undefined &&
+    isPlaybackControlIntentBlocking(state.playbackControlIntent, nowMs)
+      ? state.playbackControlIntent : null;
   const startIntentLibraryItemId = startIntent?.libraryItemId ?? undefined;
   const displayLibraryItemId = startIntentLibraryItemId ?? activeLibraryItemId;
   // A start intent owns the complete incoming media identity. In particular,

@@ -1,6 +1,12 @@
 package dev.rnap.reactnativeaudiopro
 
 import android.content.ComponentName
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioManager
+import androidx.core.content.ContextCompat
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -48,6 +54,50 @@ object AudioProController {
 	private var activeVolume: Float = 1.0f
 	private var activePlaybackSpeed: Float = 1.0f
 	private var pendingAutoPlay = false
+    private val requestedPlayback = RequestedPlaybackState()
+    private var transportPlayer: Player? = null
+    private var isPreparingLoad = false
+    internal fun attachTransportPlayer(player: Player) { transportPlayer = player }
+    internal fun requestedPlayWhenReady() = requestedPlayback.playing
+    internal fun onSystemPlayWhenReadyChanged(playing: Boolean, reason: Int) {
+        if (!playing && (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY ||
+            reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)) {
+            requestedPlayback.request(false)
+            pendingAutoPlay = false
+            publishRequestedPlayback()
+        }
+    }
+    internal fun requestMetadata(payload: WritableMap) {
+        payload.putString("requestedPlaybackState", if (requestedPlayback.playing) "playing" else "paused")
+        payload.putString("playbackRequestCommandId", requestedPlayback.commandId)
+        payload.putString("playbackTargetId", requestedPlayback.targetId)
+        payload.putDouble("playbackRequestRevision", requestedPlayback.revision.toDouble())
+    }
+    private fun publishRequestedPlayback() {
+        emitEvent("REQUESTED_PLAYBACK_STATE_CHANGED", activeTrack, Arguments.createMap(), "requested-playback")
+    }
+    fun setRequestedPlaybackState(state: String, commandId: String, targetId: String?) {
+        runOnUiThread {
+            requestedPlayback.request(state == "playing", commandId, targetId)
+            requestedPlayback.startAllowed = false
+            publishRequestedPlayback()
+            if (state == "paused" || requestedPlayback.targetId != requestedPlayback.loadedTargetId) pauseRequested()
+        }
+    }
+    fun resumeRequested(commandId: String) {
+        runOnUiThread {
+            if (!requestedPlayback.allowStart(commandId)) return@runOnUiThread
+            applyRequestedPlayback()
+        }
+    }
+    private fun applyRequestedPlayback() {
+        if (!requestedPlayback.mayStart) return
+        if (isPreparingLoad || NativeListeningPosition.needsLoadConfirmation()) {
+            pendingAutoPlay = true
+            return
+        }
+        transportPlayer?.play()
+    }
 	private var playRequest = 0L
 
 	private var flowIsInErrorState: Boolean = false
@@ -77,9 +127,22 @@ object AudioProController {
 		}
 	}
 
-	fun setReactContext(context: ReactApplicationContext?) {
-		reactContext = context
-	}
+    private val noisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) pause()
+        }
+    }
+    fun setReactContext(context: ReactApplicationContext?) {
+        if (reactContext === context) return
+        reactContext?.unregisterReceiver(noisyReceiver)
+        reactContext = context
+        if (context != null) ContextCompat.registerReceiver(context, noisyReceiver,
+            IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+    internal fun onSystemSuppressionChanged(reason: Int) {
+        requestedPlayback.interrupted = reason != Player.PLAYBACK_SUPPRESSION_REASON_NONE
+        if (!requestedPlayback.interrupted) applyRequestedPlayback()
+    }
 
 	private fun ensureSession() {
 		if (!engineBrowserConnecting && (!::engineBrowserFuture.isInitialized || !hasConnectedBrowser())) {
@@ -266,7 +329,7 @@ object AudioProController {
 		log("Preparing for new playback")
 
 		runOnUiThread {
-			enginerBrowser?.pause()
+			transportPlayer?.pause()
 		}
 
 		stopProgressTimer()
@@ -280,9 +343,14 @@ object AudioProController {
 
 	suspend fun play(track: ReadableMap, options: ReadableMap) {
 		val request = ++playRequest
-		val opts = extractPlaybackOptions(options)
-
-		ensurePreparedForNewPlayback()
+        val opts = extractPlaybackOptions(options)
+        isPreparingLoad = true
+        if (!options.hasKey("playbackRequestCommandId")) {
+            requestedPlayback.request(opts.autoPlay)
+            requestedPlayback.startAllowed = opts.autoPlay
+        }
+        requestedPlayback.loadedTargetId = if (options.hasKey("playbackTargetId")) options.getString("playbackTargetId") else null
+        ensurePreparedForNewPlayback()
 		if (request != playRequest) return
 		activeTrack = track
 
@@ -343,15 +411,17 @@ object AudioProController {
 		val trackId = if (track.hasKey("id")) track.getString("id") ?: mediaId else mediaId
 		val resolvedPosition = NativeListeningPosition.prepareLoad(trackId, mediaId, options, opts.startTimeMs ?: 0)
 		if (request != playRequest) return
-		pendingAutoPlay = opts.autoPlay && NativeListeningPosition.needsLoadConfirmation()
+		pendingAutoPlay = requestedPlayback.mayStart && NativeListeningPosition.needsLoadConfirmation()
 		val mediaItem = MediaItem.Builder()
 			.setUri(uri)
 			.setMediaId(mediaId)
 			.setMediaMetadata(metadataBuilder.build())
 			.build()
 
-		runOnUiThread {
-			log("Play", title)
+        runOnUiThread {
+            if (request != playRequest) return@runOnUiThread
+            isPreparingLoad = false
+            log("Play", title)
 			emitState(AudioProModule.STATE_LOADING, 0L, 0L, "play()")
 
 			enginerBrowser?.let {
@@ -364,8 +434,8 @@ object AudioProController {
 				// Set volume regardless of autoPlay
 				it.setVolume(opts.volume)
 
-				if (opts.autoPlay && !pendingAutoPlay) {
-					it.play()
+				if (requestedPlayback.mayStart && !pendingAutoPlay) {
+                    transportPlayer?.play()
 				} else {
 					emitState(AudioProModule.STATE_LOADING, resolvedPosition, 0L, "play(autoPlay=false, initial-seek-pending)")
 				}
@@ -373,41 +443,39 @@ object AudioProController {
 		}
 	}
 
-	fun pause() {
-		playRequest++
-		pendingAutoPlay = false
-		log("pause() called")
-		ensureSession()
-		runOnUiThread {
-			NativeListeningPosition.checkpoint("explicit-pause")
-			enginerBrowser?.pause()
-			enginerBrowser?.let {
-				val pos = it.currentPosition
-				val dur = it.duration.takeIf { d -> d > 0 } ?: 0L
-				emitState(AudioProModule.STATE_PAUSED, pos, dur, "pause()")
-			}
-		}
-	}
+    fun pause() {
+        runOnUiThread {
+            requestedPlayback.request(false)
+            publishRequestedPlayback()
+            pauseRequested()
+        }
+    }
 
-	fun resume() {
-		log("resume() called")
-		ensureSession()
-		runOnUiThread {
-			if (NativeListeningPosition.needsLoadConfirmation()) {
-				pendingAutoPlay = true
-				return@runOnUiThread
-			}
-			enginerBrowser?.play()
-			enginerBrowser?.let {
-				val pos = it.currentPosition
-				val dur = it.duration.takeIf { d -> d > 0 } ?: 0L
-				emitState(NativeListeningPosition.state(), pos, dur, "resume-request")
-			}
-		}
-	}
+    fun pauseRequested() {
+        runOnUiThread {
+            requestedPlayback.startAllowed = false
+            pendingAutoPlay = false
+            NativeListeningPosition.checkpoint("explicit-pause")
+            transportPlayer?.pause()
+            enginerBrowser?.let {
+                emitState(AudioProModule.STATE_PAUSED, it.currentPosition,
+                    it.duration.coerceAtLeast(0), "pause()")
+            }
+        }
+    }
 
-	fun stop() {
-		playRequest++
+    fun resume() {
+        runOnUiThread {
+            requestedPlayback.request(true)
+            requestedPlayback.startAllowed = true
+            publishRequestedPlayback()
+            applyRequestedPlayback()
+        }
+    }
+
+    fun stop() {
+        requestedPlayback.request(false)
+        playRequest++
 		pendingAutoPlay = false
 		log("stop() called")
 		// Reset error state when explicitly stopping
@@ -722,7 +790,7 @@ object AudioProController {
 						flowLastEmittedDuration = null
 
 						// 1. Pause playback to ensure state is correct
-						enginerBrowser?.pause()
+						transportPlayer?.pause()
 
 						// Preserve the completed position; a transport reset must not become a rewind.
 
@@ -863,7 +931,10 @@ object AudioProController {
 		payload: WritableMap?,
 		reason: String = ""
 	) {
-		if (payload != null) NativeListeningPosition.metadata(payload, reason)
+		if (payload != null) {
+            NativeListeningPosition.metadata(payload, reason)
+            requestMetadata(payload)
+        }
 		log("emitEvent", type, "reason=", reason)
 		val context = reactContext
 		if (context is ReactApplicationContext) {
@@ -894,9 +965,9 @@ object AudioProController {
 
 	internal fun onListeningPositionReady() {
 		val browser = enginerBrowser ?: return
-		if (pendingAutoPlay) {
+		if (pendingAutoPlay && requestedPlayback.mayStart) {
 			pendingAutoPlay = false
-			browser.play()
+			transportPlayer?.play()
 		}
 		val pos = browser.currentPosition.coerceAtLeast(0)
 		val dur = browser.duration.coerceAtLeast(0)
@@ -915,7 +986,7 @@ object AudioProController {
 
 	internal fun onListeningPositionFailure() {
 		pendingAutoPlay = false
-		enginerBrowser?.pause()
+		transportPlayer?.pause()
 		flowIsInErrorState = true
 		stopProgressTimer()
 		emitError("Unable to save listening position. Playback paused to protect your place.", 507, "listening-position-save-failed")

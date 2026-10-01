@@ -1,7 +1,7 @@
 import { CoverImage } from "@/components/images/cover-image";
 import { getBookDetailHref } from "@/navigation/book-links";
 import { playerService, usePlaybackStore } from "@/player";
-import type { PlaybackControlIntent } from "@/player/playback-store";
+import { usePlaybackControls } from "@/player/use-playback-controls";
 import { clampPlaybackRateToRange, useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
@@ -9,19 +9,17 @@ import { MenuView, type MenuAction, type NativeActionEvent } from "@expo/ui/comm
 import { router } from "expo-router";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 const RATE_OPTIONS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4];
 
 type MiniPlayerBottomAccessoryProps = {
   author?: string | null;
   coverUri?: string | null;
-  isLoading: boolean;
   isEpisodePlayback: boolean;
-  isPlaying: boolean;
   libraryItemId?: string | null;
+  episodeId?: string | null;
   localCoverUri?: string | null;
-  playbackControlIntent?: PlaybackControlIntent | null;
   themeColors: ReturnType<typeof useThemeColors>;
   title?: string | null;
   onToggle: () => Promise<void>;
@@ -30,18 +28,17 @@ type MiniPlayerBottomAccessoryProps = {
 export function MiniPlayerBottomAccessory({
   author,
   coverUri,
-  isLoading,
   isEpisodePlayback,
-  isPlaying,
   libraryItemId,
+  episodeId,
   localCoverUri,
-  playbackControlIntent,
   themeColors,
   title,
   onToggle,
 }: MiniPlayerBottomAccessoryProps) {
   const placement = NativeTabs.BottomAccessory.usePlacement();
   const isInline = placement === "inline";
+  const controls = usePlaybackControls({ libraryItemId, episodeId });
   const playbackRate = usePlaybackStore((state) => state.rate);
   const playbackRateRangeMin = useSettingsStore((state) => state.playbackRateRangeMin);
   const playbackRateRangeMax = useSettingsStore((state) => state.playbackRateRangeMax);
@@ -138,15 +135,13 @@ export function MiniPlayerBottomAccessory({
             numberOfLines={1}
             style={{ fontSize: 10, color: themeColors.textMuted }}
           >
-            {isLoading ? "Starting playback..." : `by ${author ?? ""}`}
+            {`by ${author ?? ""}`}
           </Text>
         </View>
       </Pressable>
 
       <PlayPauseButton
-        isLoading={isLoading}
-        isPlaying={isPlaying}
-        playbackControlIntent={playbackControlIntent}
+        controls={controls}
         themeColors={themeColors}
         onToggle={onToggle}
       />
@@ -155,35 +150,27 @@ export function MiniPlayerBottomAccessory({
 }
 
 type PlayPauseButtonProps = {
-  isLoading: boolean;
-  isPlaying: boolean;
-  playbackControlIntent?: PlaybackControlIntent | null;
+  controls: ReturnType<typeof usePlaybackControls>;
   themeColors: ReturnType<typeof useThemeColors>;
   onToggle: () => Promise<void>;
 };
 
 function PlayPauseButton({
-  isLoading,
-  isPlaying,
-  playbackControlIntent,
+  controls,
   themeColors,
   onToggle,
 }: PlayPauseButtonProps) {
   return (
     <Pressable
       onPress={onToggle}
-      disabled={Boolean(playbackControlIntent)}
+      accessibilityRole="button"
+      accessibilityLabel={controls.action === "pause" ? "Pause" : "Play"}
+      disabled={!controls.canToggle}
       className="h-full items-center flex-row w-8 justify-center"
       hitSlop={10}
-      style={[styles.fixedControl, { opacity: playbackControlIntent ? 0.45 : 1 }]}
+      style={[styles.fixedControl, { opacity: controls.canToggle ? 1 : 0.45 }]}
     >
-      {isLoading ? (
-        <ActivityIndicator size="small" color={themeColors.accent} />
-      ) : !isPlaying ? (
-        <SymbolView name="play.fill" tintColor={themeColors.accent} />
-      ) : (
-        <SymbolView name="pause.fill" tintColor={themeColors.accent} />
-      )}
+      <SymbolView name={controls.action === "pause" ? "pause.fill" : "play.fill"} tintColor={themeColors.accent} />
     </Pressable>
   );
 }

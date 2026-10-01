@@ -1,0 +1,18 @@
+# Requested playback state
+
+`setRequestedPlaybackState(state, commandId, targetId)` publishes app intent before metadata or audio exists. It accepts explicit `playing`/`paused` states without depending on the current player rate. The setter does not start an unprepared source. `resumeRequested(commandId)` releases the current request only if that command is still acknowledged and native intent still requests playback; a remote Pause can therefore reject a delayed JavaScript Play completion before JavaScript receives the Pause event. `pauseRequested()` silences transport and closes the start gate without discarding source preparation or publishing another intent.
+
+Each native request has a monotonic `playbackRequestRevision`. Native remote commands retain the most recently acknowledged `playbackRequestCommandId` and `playbackTargetId`; app requests assign a fresh command ID. Events and playback snapshots carry these fields plus `requestedPlaybackState`. The app engine accepts only its current command/target and increasing native revisions. Acknowledgments with unchanged intent do not generate another app command. `REQUESTED_PLAYBACK_STATE_CHANGED` is delivered independently of audio-source events so Pause is observable while metadata is still loading. Audible transport and listening-position order remain separate evidence.
+
+The target ID represents the playable (book or book+episode), not a track or source URL. Choosing another target prevents remote commands from starting the preceding source while new metadata is pending. Native clear/source teardown preserves the latest request; timeout/cancellation closes the start gate, and a new source is required for retry after a failed attempt.
+
+On iOS, lock-screen, CarPlay, widgets and Magic Tap set or toggle requested state even at rate zero. Playback readiness checks the requested target, start gate and interruption state. Interruption and route-change observers survive source teardown so headphone removal or a call during metadata preparation cannot be overwritten by later readiness. Headphone removal requests Pause. Temporary interruption may resume only with OS permission and an unchanged current Play request.
+
+On Android, MediaSession uses a forwarding player for explicit Play/Pause and requested-state toggles, while reconciliation uses the underlying transport player to avoid generating another command. The listening-position checkpoint must still finish before audio starts. Audio focus suppression preserves intent; permanent focus loss and headphone removal request Pause, including while silent preparation is pending. The noisy-audio receiver lives with the module rather than only active playback.
+
+## Checks
+
+- `python3 scripts/test-native-requested-playback.py` exercises the production Swift policy: delayed completion, repeated explicit Play, remote Pause before JS acknowledgment, changing target, OS refusal and Pause during interruption.
+- Engine regression tests verify preserved preparation, cancellation of audible confirmation, stale acknowledgment/target/revision rejection and remote Pause before a source exists.
+- Module bridge regression tests verify request publication without a loaded track and guarded transport methods.
+- The app's unsigned iOS simulator Debug build passed on 2026-09-30. Android compilation and physical-device tests remain outstanding; running this bridge requires a new native build. Android compile/instrumentation requires a configured JDK and Android SDK. Device checks must cover lock-screen/headset toggles during metadata and audio preparation, calls, headphone disconnection, CarPlay/headless operation, and background/suspended JavaScript.

@@ -57,6 +57,8 @@ export type AudioProHeaders = {
 
 export type AudioProPlayOptions = {
 	autoPlay?: boolean;
+	playbackRequestCommandId?: string;
+	playbackTargetId?: string;
 	headers?: AudioProHeaders;
 	startTimeMs?: number;
 	listeningContext?: ListeningContext;
@@ -120,6 +122,10 @@ export type PlaybackSnapshot = {
 	/** Native monotonic clock; safe across suspended JavaScript delivery. */
 	monotonicTimeMs?: number;
 	shouldBePlaying?: boolean;
+	requestedPlaybackState?: 'playing' | 'paused';
+	playbackRequestRevision?: number;
+	playbackRequestCommandId?: string | null;
+	playbackTargetId?: string | null;
 };
 
 export type AudioProEventOrder = {
@@ -134,6 +140,10 @@ export type AudioProEventOrder = {
 	reason?: string;
 	monotonicTimeMs?: number;
 	shouldBePlaying?: boolean;
+	requestedPlaybackState?: 'playing' | 'paused';
+	playbackRequestRevision?: number;
+	playbackRequestCommandId?: string | null;
+	playbackTargetId?: string | null;
 };
 
 // ==============================

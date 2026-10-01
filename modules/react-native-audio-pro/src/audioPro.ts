@@ -275,6 +275,20 @@ export const AudioPro = {
 	 * Pause the current playback
 	 * No-op if no track is playing or player is in IDLE or ERROR state
 	 */
+	setRequestedPlaybackState(state: 'playing' | 'paused', commandId: string, targetId?: string) {
+		requireNativeMethod('setRequestedPlaybackState')(state, commandId, targetId ?? null);
+	},
+
+	/** Apply the latest request without turning a stale continuation into a new Play. */
+	resumeRequested(commandId: string) {
+		requireNativeMethod('resumeRequested')(commandId);
+	},
+
+	/** Pause transport without invalidating preparation or publishing a new request. */
+	pauseRequested() {
+		requireNativeMethod('pauseRequested')();
+	},
+
 	pause() {
 		if (!guardTrackPlaying('pause')) return;
 		logDebug('AudioPro: pause()');

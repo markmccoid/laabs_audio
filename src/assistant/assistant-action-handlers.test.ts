@@ -4,9 +4,9 @@ import type { PlaybackStoreState } from "@/player/playback-store";
 import type { AssistantActionFailureCode } from "@/native/assistant/AssistantBridge.types";
 import { handleAssistantAction } from "./assistant-action-handlers";
 
-const mockLoadBook = jest.fn();
-const mockLoadEpisode = jest.fn();
-const mockPlay = jest.fn();
+const mockRequestStart = jest.fn();
+const mockRequestStartEpisode = jest.fn();
+const mockRequestPlay = jest.fn();
 const mockPause = jest.fn();
 const mockStop = jest.fn();
 const mockAddBookmark = jest.fn();
@@ -28,9 +28,9 @@ jest.mock("@/auth/auth-store", () => ({
 
 jest.mock("@/player/player-service", () => ({
   playerService: {
-    loadBook: (...args: unknown[]) => mockLoadBook(...args),
-    loadEpisode: (...args: unknown[]) => mockLoadEpisode(...args),
-    play: (...args: unknown[]) => mockPlay(...args),
+    requestStart: (...args: unknown[]) => mockRequestStart(...args),
+    requestStartEpisode: (...args: unknown[]) => mockRequestStartEpisode(...args),
+    requestPlay: (...args: unknown[]) => mockRequestPlay(...args),
     pause: (...args: unknown[]) => mockPause(...args),
     stop: (...args: unknown[]) => mockStop(...args),
   },
@@ -97,6 +97,8 @@ const playbackState = (
 ): PlaybackStoreState =>
   ({
     playbackState: "paused",
+    requestedPlaybackState: "paused",
+    isPreparingPlayback: false,
     playbackControlIntent: null,
     libraryItemId: "book-1",
     bookTitle: "Dune",
@@ -138,9 +140,9 @@ describe("handleAssistantAction", () => {
     mockPlaybackState = playbackState();
     mockPlaybackListeners = [];
     mockSleepDraftMinutes = 10;
-    mockLoadBook.mockResolvedValue(undefined);
-    mockLoadEpisode.mockResolvedValue(undefined);
-    mockPlay.mockResolvedValue(undefined);
+    mockRequestStart.mockResolvedValue({ status: "accepted", intentId: "start-1" });
+    mockRequestStartEpisode.mockResolvedValue({ status: "accepted", intentId: "episode-start-1" });
+    mockRequestPlay.mockResolvedValue({ status: "accepted", intentId: "play-1" });
     mockPause.mockResolvedValue(undefined);
     mockStop.mockResolvedValue(undefined);
     mockAddBookmark.mockResolvedValue(undefined);
@@ -151,8 +153,9 @@ describe("handleAssistantAction", () => {
 
   it("plays a selected audiobook and waits on the playback subscription", async () => {
     mockPlaybackState = playbackState({ playbackState: "idle", queue: [] });
-    mockLoadBook.mockImplementation(async () => {
+    mockRequestStart.mockImplementation(async () => {
       setTimeout(() => emitPlayback({ playbackState: "playing", queue }), 0);
+      return { status: "accepted", intentId: "start-1" };
     });
 
     await expect(
@@ -164,7 +167,7 @@ describe("handleAssistantAction", () => {
       title: "Dune",
       isPlaying: true,
     });
-    expect(mockLoadBook).toHaveBeenCalledWith("book-1", { autoPlay: true });
+    expect(mockRequestStart).toHaveBeenCalledWith("book-1");
     expect(mockPlaybackListeners).toHaveLength(0);
   });
 
@@ -177,13 +180,14 @@ describe("handleAssistantAction", () => {
       bookTitle: "The Episode",
       secondaryTitle: "The Podcast",
     });
-    mockLoadEpisode.mockImplementation(async () => {
+    mockRequestStartEpisode.mockImplementation(async () => {
       mockPlaybackState = playbackState({
         playbackState: "playing",
         libraryItemId: "podcast-1",
         episodeId: "episode-2",
         bookTitle: "The Episode",
       });
+      return { status: "accepted", intentId: "episode-start-1" };
     });
 
     await expect(handleAssistantAction({ ...requestContext, id: "action-2", kind: "resume" })).resolves.toEqual({
@@ -193,11 +197,131 @@ describe("handleAssistantAction", () => {
       title: "The Episode",
       isPlaying: true,
     });
-    expect(mockLoadEpisode).toHaveBeenCalledWith("podcast-1", "episode-2", {
-      autoPlay: true,
+    expect(mockRequestStartEpisode).toHaveBeenCalledWith("podcast-1", "episode-2", {
       episodeTitle: "The Episode",
       podcastTitle: "The Podcast",
     });
+  });
+
+  it("starts a persisted audiobook through the shared preparation", async () => {
+    mockPlaybackState = playbackState({ playbackState: "idle", queue: [] });
+    mockRequestStart.mockImplementation(async () => {
+      emitPlayback({ playbackState: "playing", queue });
+      return { status: "accepted", intentId: "start-1" };
+    });
+
+    await expect(handleAssistantAction({ ...requestContext, id: "persisted-book", kind: "resume" })).resolves.toMatchObject({
+      ok: true,
+      kind: "resume",
+      playable: { kind: "audiobook", libraryItemId: "book-1" },
+    });
+    expect(mockRequestStart).toHaveBeenCalledWith("book-1");
+    expect(mockRequestPlay).not.toHaveBeenCalled();
+  });
+
+  it("reasserts Play when audible playback still says playing after a Pause request", async () => {
+    mockPlaybackState = playbackState({
+      playbackState: "playing",
+      requestedPlaybackState: "paused",
+      isPreparingPlayback: true,
+    });
+    mockRequestPlay.mockImplementation(async () => {
+      emitPlayback({ requestedPlaybackState: "playing" });
+      return { status: "accepted", intentId: "play-1" };
+    });
+
+    await expect(handleAssistantAction({ ...requestContext, id: "reassert-play", kind: "resume" })).resolves.toMatchObject({
+      ok: true,
+      kind: "resume",
+      isPlaying: true,
+    });
+    expect(mockRequestPlay).toHaveBeenCalledTimes(1);
+    expect(mockPlaybackState.requestedPlaybackState).toBe("playing");
+    expect(mockRequestStart).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed Resume request even when stale audible state says playing", async () => {
+    mockPlaybackState = playbackState({ playbackState: "playing", requestedPlaybackState: "paused" });
+    mockRequestPlay.mockRejectedValue(new StreamedPlaybackStartFailureError());
+
+    await expect(handleAssistantAction({ ...requestContext, id: "failed-resume", kind: "resume" })).resolves.toMatchObject({
+      ok: false,
+      code: "cannotStream",
+    });
+    expect(mockRequestPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{ loadedQueue: queue }, { loadedQueue: [] }])("resumes the preparing Episode instead of reporting the previously loaded audiobook", async ({ loadedQueue }) => {
+    mockPlaybackState = playbackState({
+      playbackState: "playing",
+      queue: loadedQueue,
+      requestedPlaybackState: "paused",
+      isPreparingPlayback: true,
+      playbackControlIntent: {
+        id: "episode-start-1",
+        kind: "start",
+        libraryItemId: "podcast-2",
+        episodeId: "episode-3",
+        requestedAudibleState: "paused",
+        startedAt: Date.now(),
+      },
+    });
+    mockRequestPlay.mockResolvedValue({ status: "accepted", intentId: "episode-start-1" });
+    let completed = false;
+    const resuming = handleAssistantAction({ ...requestContext, id: "resume-preparing", kind: "resume" });
+    void resuming.then(() => { completed = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(completed).toBe(false);
+    expect(mockRequestPlay).toHaveBeenCalledTimes(1);
+    expect(mockRequestStart).not.toHaveBeenCalled();
+    expect(mockRequestStartEpisode).not.toHaveBeenCalled();
+    emitPlayback({
+      libraryItemId: "podcast-2",
+      episodeId: "episode-3",
+      bookTitle: "Preparing Episode",
+      queue,
+      playbackState: "playing",
+      requestedPlaybackState: "playing",
+      isPreparingPlayback: false,
+      playbackControlIntent: null,
+    });
+
+    await expect(resuming).resolves.toEqual({
+      ok: true,
+      kind: "resume",
+      playable: { kind: "episode", libraryItemId: "podcast-2", episodeId: "episode-3" },
+      title: "Preparing Episode",
+      isPlaying: true,
+    });
+    expect(mockPlaybackListeners).toHaveLength(0);
+  });
+
+  it("accepts an already satisfied Play request after confirming audible playback", async () => {
+    mockPlaybackState = playbackState({ playbackState: "playing", requestedPlaybackState: "playing" });
+    mockRequestPlay.mockResolvedValue({ status: "already_satisfied", state: "playing" });
+
+    await expect(handleAssistantAction({ ...requestContext, id: "already-playing", kind: "resume" })).resolves.toMatchObject({
+      ok: true,
+      kind: "resume",
+    });
+    expect(mockRequestPlay).toHaveBeenCalledTimes(1);
+    expect(mockPlaybackListeners).toHaveLength(0);
+  });
+
+  it.each(["play", "resume"] as const)("reports busy when a %s request is ignored despite stale audible playback", async (kind) => {
+    mockPlaybackState = playbackState({ playbackState: "playing", requestedPlaybackState: "paused" });
+    const ignored = { status: "ignored", reason: "intent_active", activeIntentKind: "pause" };
+    mockRequestStart.mockResolvedValue(ignored);
+    mockRequestPlay.mockResolvedValue(ignored);
+
+    await expect(handleAssistantAction({
+      ...requestContext,
+      id: `ignored-${kind}`,
+      kind,
+      ...(kind === "play" ? { libraryItemId: "book-1" } : {}),
+    })).resolves.toMatchObject({ ok: false, code: "busy" });
+    expect(mockPlaybackListeners).toHaveLength(0);
   });
 
   it("pauses audible playback and a book Siri already interrupted", async () => {
@@ -309,7 +433,7 @@ describe("handleAssistantAction", () => {
     [new AbsApiError("gone", 404), "notFound"],
     [new Error("engine failed"), "playbackFailed"],
   ] as const)("maps playback errors to %s", async (error, code) => {
-    mockLoadBook.mockRejectedValue(error);
+    mockRequestStart.mockRejectedValue(error);
     await expect(
       handleAssistantAction({ ...requestContext, id: `failure-${code}`, kind: "play", libraryItemId: "book-1" }),
     ).resolves.toMatchObject({ ok: false, code });
@@ -338,7 +462,7 @@ describe("handleAssistantAction", () => {
         libraryItemId: "book-1",
       }),
     ).resolves.toMatchObject({ ok: false, code: "signInRequired" });
-    expect(mockLoadBook).not.toHaveBeenCalled();
+    expect(mockRequestStart).not.toHaveBeenCalled();
   });
 
   it("rejects an expired action before playback starts", async () => {
@@ -351,7 +475,7 @@ describe("handleAssistantAction", () => {
         libraryItemId: "book-1",
       }),
     ).resolves.toMatchObject({ ok: false, code: "timeout" });
-    expect(mockLoadBook).not.toHaveBeenCalled();
+    expect(mockRequestStart).not.toHaveBeenCalled();
   });
 
   it("keeps the complete native failure-code contract type checked", () => {

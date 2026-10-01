@@ -15,6 +15,7 @@ import androidx.core.os.bundleOf
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -86,7 +87,8 @@ open class AudioProPlaybackService : MediaLibraryService() {
 	}
 
 	private val playbackListener = object : Player.Listener {
-		override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            AudioProController.onSystemPlayWhenReadyChanged(playWhenReady, reason)
 			if (::player.isInitialized) {
 				NativeListeningPosition.checkpoint(if (playWhenReady) "play-request" else "pause-or-focus-loss")
 				updateForegroundState(player)
@@ -110,7 +112,8 @@ open class AudioProPlaybackService : MediaLibraryService() {
 			if (::player.isInitialized) updateForegroundState(player)
 		}
 
-		override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+        override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+            AudioProController.onSystemSuppressionChanged(playbackSuppressionReason)
 			NativeListeningPosition.checkpoint("audio-focus-suppression")
 			if (::player.isInitialized) updateForegroundState(player)
 		}
@@ -252,8 +255,19 @@ open class AudioProPlaybackService : MediaLibraryService() {
 		player.addListener(playbackListener)
 		NativeListeningPosition.attach(applicationContext, player)
 
-		mediaLibrarySession =
-			MediaLibrarySession.Builder(this, player, createLibrarySessionCallback())
+        AudioProController.attachTransportPlayer(player)
+        // Remote explicit commands must update intent even when ExoPlayer is already silent.
+        // Expose requested state so headset toggles flip the latest request during buffering.
+        val controlPlayer = object : ForwardingPlayer(player) {
+            override fun play() { AudioProController.resume() }
+            override fun pause() { AudioProController.pause() }
+            override fun setPlayWhenReady(playWhenReady: Boolean) {
+                if (playWhenReady) AudioProController.resume() else AudioProController.pause()
+            }
+            override fun getPlayWhenReady(): Boolean = AudioProController.requestedPlayWhenReady()
+        }
+        mediaLibrarySession =
+            MediaLibrarySession.Builder(this, controlPlayer, createLibrarySessionCallback())
 				.also { builder -> getSessionActivityIntent()?.let { builder.setSessionActivity(it) } }
 				.build()
 				.also { mediaLibrarySession ->

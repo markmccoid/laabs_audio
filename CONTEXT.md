@@ -244,9 +244,17 @@ _Avoid_: Ambient book metadata, global ambient settings, per-track volume
 A user-requested attempt to make an audiobook or Episode become Active Playback.
 _Avoid_: Pending load, playback request, loading state
 
+**Playback Preparation**:
+The work that makes an audiobook or Episode ready for listening, independent of whether the user wants audio to play when it is ready.
+_Avoid_: Playback Start Attempt when meaning preparation alone, cancellation when meaning a request to remain silent
+
 **Playback Control Intent**:
 A user-requested play, pause, or start action whose requested Audible Playback State has not yet been reached. A Playback Start Attempt is the start-playable form of Playback Control Intent.
 _Avoid_: Transition, touch guard, pending command
+
+**Requested Playback State**:
+The user's latest choice for whether the targeted audiobook or Episode should play or remain silent, including while Playback Preparation or an audible transition is underway.
+_Avoid_: Audible Playback State when meaning the user's choice, queued toggles
 
 **Audible Playback State**:
 The player condition where the user-facing audio engine has reached the requested listening state, such as playing or paused, even if follow-up progress or cache work is still running.
@@ -631,7 +639,9 @@ _Avoid_: Siri response, dialog, snippet
 - **Startup Active Playback Restore** relies on **User Session** boundary teardown to clear the previous Active Playback, so it is not separately scoped to an **Audiobookshelf User Identity**.
 - **Startup Active Playback Restore** is best-effort: a failed restore leaves the player idle rather than in an error state and preserves the saved last audiobook for a later attempt.
 - Only one **Playback Control Intent** may be active at a time.
-- Play and pause controls should follow **Audible Playback State**, not completion of follow-up progress or cache work.
+- Play and pause controls show the next action from **Requested Playback State**, while **Audible Playback State** describes the audio actually reached.
+- Pause during **Playback Preparation** changes **Requested Playback State** to silent without cancelling preparation; selecting a different playable replaces preparation for the previous target.
+- Follow-up progress or cache work does not block changes to **Requested Playback State**.
 - A **Skip Burst** is not a **Playback Control Intent** because it changes **Listening Position**, not **Audible Playback State**.
 - **Downloaded-Only Mode** allows local playback of Downloaded Audio Assets without a signed-in User Session.
 - **Signed-Out Required Sign-In** is not an **Offline User Session**.

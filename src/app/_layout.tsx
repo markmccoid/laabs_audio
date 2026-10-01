@@ -20,6 +20,7 @@ import { AmbientCoordinator } from "../ambient/ambient-coordinator";
 import { selectAccessMode, useAuthStore } from "../auth/auth-store";
 import { CarPlayShelfPublisher } from "../carplay/carplay-shelf-publisher";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
+import { PlaybackLoadingToastCoordinator } from "../player/playback-loading-toast-coordinator";
 import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
 import { useSqliteActiveLibraryRefresh } from "../data/sqlite/use-sqlite-active-library-refresh";
 import { LibraryActivationOverlay } from "../components/library-activation-overlay";
@@ -696,6 +697,7 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1, backgroundColor: themeColors.bg }}>
           <LibrarySelectionGate />
           <ActiveDownloadToastCoordinator />
+          <PlaybackLoadingToastCoordinator />
           <OfflineConnectionBanner />
           <SleepTimerCoordinator />
           <AmbientCoordinator />

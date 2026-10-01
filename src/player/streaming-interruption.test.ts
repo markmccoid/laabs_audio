@@ -26,13 +26,17 @@ jest.mock("react-native-mmkv", () => {
 });
 jest.mock("react-native-audio-pro", () => ({
   AudioPro: {
+    setRequestedPlaybackState: jest.fn(),
+    resumeRequested: jest.fn(),
+    pauseRequested: jest.fn(),
+    clear: jest.fn(),
     addEventListener: jest.fn((listener) => {
       mockListener = listener;
       return { remove: jest.fn() };
     }),
   },
   AudioProContentType: { SPEECH: "speech" },
-  AudioProEventType: { STATE_CHANGED: "STATE_CHANGED", PROGRESS: "PROGRESS" },
+  AudioProEventType: { STATE_CHANGED: "STATE_CHANGED", PROGRESS: "PROGRESS", REQUESTED_PLAYBACK_STATE_CHANGED: "REQUESTED_PLAYBACK_STATE_CHANGED" },
   AudioProState: { IDLE: "IDLE", LOADING: "LOADING", PLAYING: "PLAYING", PAUSED: "PAUSED", ERROR: "ERROR" },
 }));
 
@@ -69,7 +73,11 @@ describe("streamed interruption safety contracts", () => {
     playbackStore.getState().actions.setPlaybackState("playing");
     statuses = [];
     engine = createAudioEngine();
-    engine.setEvents({ onStatus: (status) => statuses.push(service.handleStatus(status)) });
+    service.engine = engine;
+    engine.setEvents({
+      onStatus: (status) => statuses.push(service.handleStatus(status)),
+      onRequestedPlaybackState: (state) => service.publishPlaybackRequest(state, undefined, true),
+    });
   });
   afterEach(() => { jest.restoreAllMocks(); });
   async function nativeState(state: string, position = 2_700_000) {
@@ -225,9 +233,11 @@ describe("streamed interruption safety contracts", () => {
     expect(service.temporaryPlaybackSession).toBeNull();
   });
 
-  it("observed lock-screen playback restores recovery intent", async () => {
+  it("an explicit lock-screen Play restores recovery intent", async () => {
     service.wantedPlayback = false;
     playbackStore.getState().actions.setPlaybackState("paused");
+    mockListener?.({ type: AudioProEventType.REQUESTED_PLAYBACK_STATE_CHANGED, track: null,
+      payload: { requestedPlaybackState: "playing", playbackRequestRevision: 1 } });
     await nativeState(AudioProState.PLAYING);
     expect(service.wantedPlayback).toBe(true);
     expect(playbackStore.getState().playbackState).toBe("playing");

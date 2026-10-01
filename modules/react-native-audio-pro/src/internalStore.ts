@@ -84,7 +84,8 @@ export const internalStore = create<AudioProStore>((set, get) => ({
 		// Early exit for simple remote commands (no state change)
 		if (
 			event.type === AudioProEventType.REMOTE_NEXT ||
-			event.type === AudioProEventType.REMOTE_PREV
+			event.type === AudioProEventType.REMOTE_PREV ||
+			event.type === AudioProEventType.REQUESTED_PLAYBACK_STATE_CHANGED
 		) {
 			return;
 		}

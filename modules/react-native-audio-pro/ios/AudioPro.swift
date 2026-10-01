@@ -60,7 +60,8 @@ class AudioPro: RCTEventEmitter {
 	private let STATE_ERROR = "ERROR"
 
 	private let GENERIC_ERROR_CODE = 900
-	private var shouldBePlaying = false
+	private let requestedPlayback = RequestedPlaybackState()
+    private var shouldBePlaying = false
 	private var isRemoteCommandCenterSetup = false
 
 	private var isRateObserverAdded = false
@@ -185,7 +186,10 @@ class AudioPro: RCTEventEmitter {
 
 	override init() {
 		super.init()
-		addCarPlayObservers()
+        addCarPlayObservers()
+        setupAudioSessionInterruptionObserver()
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAudioRouteChange(_:)),
+            name: AVAudioSession.routeChangeNotification, object: nil)
 		NotificationCenter.default.addObserver(
 			self,
 			selector: #selector(handleAudioWidgetPlaybackIntent(_:)),
@@ -206,6 +210,8 @@ class AudioPro: RCTEventEmitter {
         timeControlObservation = nil
         itemNotificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
         removeCarPlayObservers()
+        removeAudioSessionInterruptionObserver()
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
 		NotificationCenter.default.removeObserver(
 			self,
 			name: AudioWidgetPlaybackIntentNotification.name,
@@ -217,24 +223,20 @@ class AudioPro: RCTEventEmitter {
 		guard
 			let target = notification.userInfo?[AudioWidgetPlaybackIntentNotification.targetKey]
 				as? String,
-			let player
+            (currentTrack != nil || requestedPlayback.targetId != nil)
 		else {
 			return
 		}
 
 		switch target {
 		case AudioWidgetPlaybackIntentNotification.playTarget:
-			if player.rate == 0, currentTrack != nil {
-				resume()
-			}
+            resume()
 		case AudioWidgetPlaybackIntentNotification.pauseTarget:
-			if player.rate != 0 {
-				pause()
-			}
+            pause()
 		case AudioWidgetPlaybackIntentNotification.toggleTarget:
-			if player.rate > 0 {
+			if requestedPlayback.playing {
 				pause()
-			} else if currentTrack != nil {
+			} else {
 				resume()
 			}
 		default:
@@ -379,6 +381,15 @@ class AudioPro: RCTEventEmitter {
 		)
 	}
 
+    @objc private func handleAudioRouteChange(_ notice: Notification) {
+        runOnMain {
+            self.captureListeningPosition(reason: "route-change")
+            if (notice.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt) == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue {
+                self.pause()
+            }
+        }
+    }
+
     @objc private func handleAudioSessionInterruption(_ notification: Notification) {
         runOnMain { [weak self] in
             guard let self, let userInfo = notification.userInfo,
@@ -388,7 +399,8 @@ class AudioPro: RCTEventEmitter {
             case .began:
                 if !self.interruptionActive {
                     self.interruptionActive = true
-                    self.wasPlayingBeforeInterruption = self.shouldBePlaying
+                    self.requestedPlayback.interrupted = true
+                    self.wasPlayingBeforeInterruption = self.requestedPlayback.playing
                 }
                 self.transportReason = "interruption"
                 self.player?.pause()
@@ -400,9 +412,10 @@ class AudioPro: RCTEventEmitter {
                 guard self.interruptionActive else { return }
                 self.interruptionActive = false
                 let options = AVAudioSession.InterruptionOptions(rawValue: userInfo[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
-                let resume = self.wasPlayingBeforeInterruption && self.shouldBePlaying && options.contains(.shouldResume)
+                let resume = self.wasPlayingBeforeInterruption && self.requestedPlayback.playing && options.contains(.shouldResume)
                 self.wasPlayingBeforeInterruption = false
-                if resume { self.resume() }
+                self.requestedPlayback.endInterruption(shouldResume: resume)
+                if resume { self.applyRequestedPlayback() }
                 else {
                     self.shouldBePlaying = false
                     self.transportReason = "interruption-ended-paused"; self.sendPausedStateEvent()
@@ -430,6 +443,10 @@ class AudioPro: RCTEventEmitter {
     private func metadata() -> [String: Any] {
         var fields: [String: Any] = ["loadId": loadId as Any? ?? NSNull(), "initialSeekPending": initialSeekPending || pendingSeekCommand != nil,
                                    "reason": transportReason, "shouldBePlaying": shouldBePlaying,
+                                   "requestedPlaybackState": requestedPlayback.playing ? "playing" : "paused",
+                                   "playbackRequestCommandId": requestedPlayback.commandId as Any? ?? NSNull(),
+                                   "playbackRequestRevision": requestedPlayback.revision,
+                                   "playbackTargetId": requestedPlayback.targetId as Any? ?? NSNull(),
                                    "monotonicTimeMs": ProcessInfo.processInfo.systemUptime * 1000,
                                    "positionSequence": listeningReceipt?["sequence"] ?? 0]
         if let lease = listeningLease {
@@ -515,7 +532,7 @@ class AudioPro: RCTEventEmitter {
             let position = self.player?.currentTime().seconds ?? 0
             if position.isFinite && abs(position - self.lastObservedPosition) > 0.05 {
                 self.lastObservedPosition = position; self.noMovementSince = ProcessInfo.processInfo.systemUptime
-            } else if self.shouldBePlaying && !self.interruptionActive && ProcessInfo.processInfo.systemUptime - self.noMovementSince >= 5 {
+            } else if self.shouldBePlaying && self.requestedPlayback.mayStart && !self.isPreparingLoad && !self.interruptionActive && ProcessInfo.processInfo.systemUptime - self.noMovementSince >= 5 {
                 self.transportReason = "stalled"
                 let info = self.getPlaybackInfo()
                 self.sendEvent(type: self.EVENT_TYPE_STATE_CHANGED, track: self.currentTrack,
@@ -741,7 +758,13 @@ class AudioPro: RCTEventEmitter {
             let serial = self.loadSerial
             self.isPreparingLoad = true
             // Freeze initial intent before asynchronous disk work; a later pause must win.
-            self.shouldBePlaying = self.getBool(options["autoPlay"]) ?? true
+            if options["playbackRequestCommandId"] == nil {
+                self.shouldBePlaying = self.getBool(options["autoPlay"]) ?? true
+                self.requestedPlayback.request(self.shouldBePlaying)
+                self.requestedPlayback.startAllowed = self.shouldBePlaying
+            }
+            self.shouldBePlaying = self.requestedPlayback.playing
+            self.requestedPlayback.loadedTargetId = options["playbackTargetId"] as? String
             self.player?.pause()
             self.captureListeningPosition(reason: "source-switch") { result in
                 if case .failure(let error) = result {
@@ -773,7 +796,7 @@ class AudioPro: RCTEventEmitter {
                             guard self.loadSerial == serial else { return }
                             self.listeningLease = lease; self.listeningReceipt = record
                             self.listeningContext = context; self.captureEnabled = enabled
-                            self.persistenceFailed = false; self.interruptionActive = false
+                            self.persistenceFailed = false
                             self.loadId = options["loadId"] as? String ?? UUID().uuidString
                             self.loadPositionIntent = preparedOptions["positionIntent"] as? String ?? "resume"
                             self.loadPositionCommandId = preparedOptions["positionCommandId"] as? String
@@ -1141,8 +1164,45 @@ class AudioPro: RCTEventEmitter {
 	func pause() {
 		runOnMain { [weak self] in
 			guard let self = self else { return }
-			self.shouldBePlaying = false
-			self.player?.pause()
+            self.requestedPlayback.request(false)
+            self.shouldBePlaying = false
+            self.publishRequestedPlayback()
+            self.pauseRequested()
+        }
+    }
+
+    @objc(setRequestedPlaybackState:commandId:targetId:)
+    func setRequestedPlaybackState(_ state: String, commandId: String, targetId: String?) {
+        runOnMain {
+            self.requestedPlayback.request(state == "playing", commandId: commandId, targetId: targetId)
+            self.shouldBePlaying = self.requestedPlayback.playing
+            // JS must explicitly release the prepared source. Requesting B cannot play A.
+            self.requestedPlayback.startAllowed = false
+            self.publishRequestedPlayback()
+            if state == "paused" || self.requestedPlayback.targetId != self.requestedPlayback.loadedTargetId {
+                self.pauseRequested()
+            }
+        }
+    }
+
+    private func publishRequestedPlayback() {
+        sendEvent(type: "REQUESTED_PLAYBACK_STATE_CHANGED", track: currentTrack, payload: [:])
+    }
+
+    @objc(resumeRequested:)
+    func resumeRequested(_ commandId: String) {
+        runOnMain {
+            guard self.requestedPlayback.allowStart(commandId: commandId) else { return }
+            self.applyRequestedPlayback()
+        }
+    }
+
+    @objc(pauseRequested)
+    func pauseRequested() {
+        runOnMain { [weak self] in
+            guard let self else { return }
+            self.requestedPlayback.startAllowed = false
+            self.player?.pause()
             self.transportReason = "user-pause"
             self.captureListeningPosition(reason: "pause")
 			self.stopTimer()
@@ -1159,7 +1219,18 @@ class AudioPro: RCTEventEmitter {
 	func resume() {
 		runOnMain { [weak self] in
 			guard let self = self else { return }
-            guard !self.persistenceFailed, !self.initialSeekPending, self.pendingSeekCommand == nil, !self.interruptionActive else { return }
+            self.requestedPlayback.request(true)
+            self.shouldBePlaying = true
+            self.requestedPlayback.startAllowed = true
+            self.publishRequestedPlayback()
+            self.applyRequestedPlayback()
+        }
+    }
+
+    private func applyRequestedPlayback() {
+        runOnMain { [weak self] in
+            guard let self else { return }
+            guard self.requestedPlayback.mayStart, !self.isPreparingLoad, !self.persistenceFailed, !self.initialSeekPending, self.pendingSeekCommand == nil, !self.interruptionActive else { return }
             self.shouldBePlaying = true
             self.transportReason = "resume-requested"
             self.noMovementSince = ProcessInfo.processInfo.systemUptime
@@ -1200,9 +1271,11 @@ class AudioPro: RCTEventEmitter {
 		isInErrorState = false
 		// Reset last emitted state when stopping playback
 		lastEmittedState = ""
-		shouldBePlaying = false
+        shouldBePlaying = false
+        requestedPlayback.request(false)
+        publishRequestedPlayback()
 
-		pendingStartTimeMs = nil
+        pendingStartTimeMs = nil
 
         player?.pause()
         captureListeningPosition(reason: "stop")
@@ -1231,6 +1304,7 @@ class AudioPro: RCTEventEmitter {
         loadSerial += 1
         let resetSerial = loadSerial
         shouldBePlaying = false
+        requestedPlayback.startAllowed = false
         player?.pause()
         captureListeningPosition(reason: finalState == STATE_ERROR ? "player-error" : "teardown") { result in
             if case .failure(let error) = result { self.savingFailed(error, generation: self.listeningLease?.generation); return }
@@ -1247,7 +1321,6 @@ class AudioPro: RCTEventEmitter {
 		isInErrorState = finalState == STATE_ERROR
 		// Reset last emitted state
 		lastEmittedState = ""
-		shouldBePlaying = false
 
 		// Reset volume to default
 		activeVolume = 1.0
@@ -1283,10 +1356,10 @@ class AudioPro: RCTEventEmitter {
         itemNotificationTokens.removeAll()
         // Reset pending start time
         pendingStartTimeMs = nil
+        shouldBePlaying = false
+        requestedPlayback.startAllowed = false
 
-		shouldBePlaying = false
-
-		// Remove ONLY the main player's end-of-track observer. The previous
+        // Remove ONLY the main player's end-of-track observer. The previous
 		// blanket removeObserver(self) also tore down the CarPlay
 		// NotificationCenter observers registered in init — cleanup() runs on
 		// every book switch (clear() → resetInternal), so after the FIRST
@@ -1301,8 +1374,7 @@ class AudioPro: RCTEventEmitter {
 			)
 		}
 
-		// Explicitly remove audio session interruption observer
-		removeAudioSessionInterruptionObserver()
+        // Interruption and route observation survives teardown during metadata preparation.
 
 		if let player = player {
 			if isRateObserverAdded {
@@ -1376,7 +1448,7 @@ class AudioPro: RCTEventEmitter {
                             self.pendingSeekCommand = nil
                             self.transportReason = "seek-complete"
                             self.completeSeekingAndSendSeekCompleteNoticeEvent(newPosition: player.currentTime().seconds * 1000)
-                            if self.shouldBePlaying && !self.interruptionActive && !self.persistenceFailed {
+                            if self.requestedPlayback.mayStart && !self.interruptionActive && !self.persistenceFailed {
                                 guard self.activateAudioSessionForPlayback() else { return }
                                 player.playImmediately(atRate: self.currentPlaybackSpeed)
                                 self.noMovementSince = ProcessInfo.processInfo.systemUptime
@@ -1418,11 +1490,6 @@ class AudioPro: RCTEventEmitter {
         itemNotificationTokens.append(center.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] _ in
             guard let self, self.player?.currentItem === item else { return }
             self.transportReason = "item-failed"; self.onError("The audio stream failed")
-        })
-        itemNotificationTokens.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] notice in
-            guard let self else { return }
-            self.captureListeningPosition(reason: "route-change")
-            if (notice.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt) == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue { self.pause() }
         })
         itemNotificationTokens.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
             self?.transportReason = "media-services-reset"; self?.onError("Audio services were reset")
@@ -1484,7 +1551,8 @@ class AudioPro: RCTEventEmitter {
 		currentPlaybackSpeed = Float(speed)
 
 		guard let player = player else {
-			onError("Cannot set playback speed: no track is playing")
+			// Rate is configuration while source preparation is still creating
+			// the player. Keep it for readiness/resume without resetting the load.
 			return
 		}
 
@@ -1935,34 +2003,30 @@ class AudioPro: RCTEventEmitter {
 		// button state (e.g. CarPlay Now Playing) otherwise gets a dead button —
 		// its tap routes to the "wrong" command, which then refuses to act.
 		commandCenter.playCommand.addTarget { [weak self] _ in
-			guard let self = self, self.player != nil else { return .commandFailed }
-			if self.player?.rate == 0 {
-				self.resume()
-			}
+            guard let self else { return .commandFailed }
+            self.resume()
 			return .success
 		}
 
 		commandCenter.pauseCommand.addTarget { [weak self] _ in
-			guard let self = self, self.player != nil else { return .commandFailed }
-			if self.player?.rate != 0 {
-				self.pause()
-			}
+            guard let self else { return .commandFailed }
+            self.pause()
 			return .success
 		}
 
 		// Magic Tap Support: Toggle Play/Pause command
 		// This enables VoiceOver Magic Tap (two-finger double-tap) functionality
 		commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
-			guard let self = self, let player = self.player else { return .commandFailed }
+			guard let self else { return .commandFailed }
 
 			self.log("Magic Tap (togglePlayPause) triggered")
 
-			if player.rate > 0 {
+			if self.requestedPlayback.playing {
 				// Currently playing → pause
 				self.pause()
 				self.log("Magic Tap: Paused")
 				return .success
-			} else if self.currentTrack != nil {
+			} else if self.currentTrack != nil || self.requestedPlayback.targetId != nil {
 				// Has track but paused → resume
 				self.resume()
 				self.log("Magic Tap: Resumed")

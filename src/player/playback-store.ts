@@ -24,6 +24,8 @@ export type PlaybackStoreState = {
   positionRevision: number | null;
   positionSequence: number | null;
   playbackState: PlaybackState;
+  requestedPlaybackState: "playing" | "paused" | null;
+  isPreparingPlayback: boolean;
   playbackControlIntent: PlaybackControlIntent | null;
   libraryItemId: string | null;
   /** Episode title when Active Playback is an Episode; otherwise audiobook title. */
@@ -63,6 +65,8 @@ export type PlaybackStoreState = {
     }) => void;
     reset: () => void;
     setPlaybackState: (state: PlaybackState) => void;
+    setRequestedPlaybackState: (state: "playing" | "paused" | null) => void;
+    setIsPreparingPlayback: (isPreparingPlayback: boolean) => void;
     setPlaybackControlIntent: (intent: PlaybackControlIntent | null) => void;
     setError: (message: string | null) => void;
     endSession: (payload: {
@@ -86,6 +90,7 @@ export type PlaybackStoreState = {
       chapterIndex: ResolvedChapter[];
     }) => void;
     commitStartedSession: (payload: {
+      playbackState?: "playing" | "paused";
       libraryItemId: string;
       bookTitle: string | null;
       secondaryTitle?: string | null;
@@ -137,6 +142,8 @@ const getBaseState = () => ({
   positionRevision: null as number | null,
   positionSequence: null as number | null,
   playbackState: "idle" as PlaybackState,
+  requestedPlaybackState: null as "playing" | "paused" | null,
+  isPreparingPlayback: false,
   playbackControlIntent: null as PlaybackControlIntent | null,
   libraryItemId: null,
   bookTitle: null,
@@ -168,6 +175,8 @@ export const playbackStore = createStore<PlaybackStoreState>()(
         setListeningIdentity: (payload) => set(payload),
         reset: () => set((state) => ({ ...getBaseState(), actions: state.actions })),
         setPlaybackState: (playbackState) => set({ playbackState }),
+        setRequestedPlaybackState: (requestedPlaybackState) => set({ requestedPlaybackState }),
+        setIsPreparingPlayback: (isPreparingPlayback) => set({ isPreparingPlayback }),
         setPlaybackControlIntent: (playbackControlIntent) => set({ playbackControlIntent }),
         setError: (error) => set({ error }),
         endSession: ({
@@ -182,6 +191,8 @@ export const playbackStore = createStore<PlaybackStoreState>()(
         }) =>
           set({
             playbackState: "ended",
+            requestedPlaybackState: "paused",
+            isPreparingPlayback: false,
             playbackControlIntent: null,
             libraryItemId,
             bookTitle,
@@ -226,6 +237,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
             error: null,
           }),
         commitStartedSession: ({
+          playbackState = "playing",
           libraryItemId,
           bookTitle,
           secondaryTitle = null,
@@ -242,7 +254,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
           trackDurationMs,
         }) =>
           set({
-            playbackState: "playing",
+            playbackState,
             libraryItemId,
             bookTitle,
             secondaryTitle,
@@ -276,6 +288,7 @@ export const playbackStore = createStore<PlaybackStoreState>()(
             ...getBaseState(),
             actions: get().actions,
             playbackState: "error",
+            requestedPlaybackState: "paused",
             ownerId: ownerId ?? (get().libraryItemId === libraryItemId ? get().ownerId : null),
             episodeId: episodeId ?? null,
             secondaryTitle: secondaryTitle ?? null,

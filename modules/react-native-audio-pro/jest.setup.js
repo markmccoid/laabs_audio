@@ -1,3 +1,4 @@
+/* global jest, beforeEach */
 jest.useFakeTimers();
 
 jest.mock('react-native', () => ({
@@ -8,6 +9,9 @@ jest.mock('react-native', () => ({
 		AudioPro: {
 			play: jest.fn(),
 			updateConfiguration: jest.fn(),
+			setRequestedPlaybackState: jest.fn(),
+			resumeRequested: jest.fn(),
+			pauseRequested: jest.fn(),
 			pause: jest.fn(),
 			resume: jest.fn(),
 			stop: jest.fn(),

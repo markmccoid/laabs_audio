@@ -50,6 +50,7 @@ type NativeAudioProWithLiveConfiguration = {
 // Adapter layer that keeps the rest of the app insulated from the underlying player.
 export type AudioEngineEvents = {
   onEnded?: () => void;
+  onRequestedPlaybackState?: (state: "playing" | "paused") => void;
   onError?: (error: Error) => void;
   onRemoteNext?: () => void;
   onRemotePrevious?: () => void;
@@ -87,8 +88,14 @@ export type AudioEngine = {
       positionIntent?: "resume" | "relocate" | "preview";
       positionCommandId?: string;
       loadId?: string;
+      signal?: AbortSignal;
+      playbackTargetId?: string;
     },
   ) => Promise<AudioEngineLoadResult>;
+  setRequestedPlaybackState: (
+    state: "playing" | "paused",
+    targetId?: string,
+  ) => void;
   play: () => Promise<void>;
   pause: () => Promise<void>;
   seek: (
@@ -115,6 +122,8 @@ const UPDATE_INTERVAL_MS = 1000;
 const DEFAULT_READY_TIMEOUT_MS = 15000;
 const DEFAULT_PLAYING_TIMEOUT_MS = 15000;
 const DEFAULT_SEEK_TIMEOUT_MS = 5000;
+const NATIVE_SNAPSHOT_TIMEOUT_MS = 5000;
+const ARTWORK_TIMEOUT_MS = 2500;
 const SEEK_COMPLETE_TOLERANCE_MS = 1500;
 // AudioPro requires a valid artwork URL/string for each track.
 const DEFAULT_ARTWORK = DEFAULT_BOOK_COVER;
@@ -137,7 +146,7 @@ const ensureFileScheme = (uri: string) => {
 
 const isRemoteHttpUri = (uri: string) =>
   uri.startsWith("http://") || uri.startsWith("https://");
-const remoteArtworkValidationCache = new Map<string, string | null>();
+const remoteArtworkValidationCache = new Map<string, string>();
 
 // Resolve a bundled asset module into a local file URI AudioPro can read.
 const resolveAssetFileUri = async (moduleId: number) => {
@@ -171,33 +180,86 @@ const resolveSourceUri = async (source: PlaybackSource) => {
   throw new Error("Invalid audio source: missing uri or sourceModule.");
 };
 
-const validateRemoteArtworkUri = async (uri: string) => {
-  const cached = remoteArtworkValidationCache.get(uri);
-  if (cached !== undefined) {
-    return cached;
-  }
+// Reject promptly even when a bridge or fetch implementation ignores abort.
+// Keep the underlying rejection observed; a timeout is never committed evidence.
+const awaitBounded = <T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  signal?: AbortSignal,
+): Promise<T> =>
+  new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: unknown, value?: T) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+      if (error !== undefined) reject(error);
+      else resolve(value as T);
+    };
+    const onAbort = () =>
+      finish(new Error(`${label} was cancelled or superseded`));
+    const deadlineAt = Date.now() + timeoutMs;
+    const timeout = setTimeout(
+      () => finish(new Error(`Timed out waiting for ${label}`)),
+      timeoutMs,
+    );
+    signal?.addEventListener("abort", onAbort, { once: true });
+    operation.then(
+      (value) => {
+        if (Date.now() >= deadlineAt)
+          finish(new Error(`Timed out waiting for ${label}`));
+        else finish(undefined, value);
+      },
+      (error) => finish(error),
+    );
+    if (signal?.aborted) onAbort();
+  });
 
+const validateRemoteArtworkUri = async (uri: string, signal?: AbortSignal) => {
+  const cached = remoteArtworkValidationCache.get(uri);
+  if (cached !== undefined) return cached;
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  if (signal?.aborted) controller.abort();
   try {
-    const response = await fetch(uri, {
-      method: "GET",
-      cache: "no-store",
-    });
-    const resolved = response.ok ? uri : null;
-    remoteArtworkValidationCache.set(uri, resolved);
-    return resolved;
-  } catch {
-    remoteArtworkValidationCache.set(uri, null);
+    const response = await awaitBounded(
+      fetch(uri, {
+        method: "GET",
+        cache: "no-store",
+        signal: controller.signal,
+      }),
+      ARTWORK_TIMEOUT_MS,
+      "artwork",
+      signal,
+    );
+    // Failed responses may reflect temporary network/server/auth conditions.
+    if (response.ok) remoteArtworkValidationCache.set(uri, uri);
+    return response.ok ? uri : null;
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return null;
+  } finally {
+    controller.abort();
+    signal?.removeEventListener("abort", onAbort);
   }
 };
 
 // AudioPro validates artwork URLs, so only pass remote artwork that we have
 // verified resolves successfully for the current session.
-const resolveArtworkUri = async (track: PlaybackQueueItem) => {
+const resolveArtworkUri = async (
+  track: PlaybackQueueItem,
+  signal?: AbortSignal,
+) => {
   if (track.artworkUri) {
     const resolved = ensureFileScheme(track.artworkUri);
     if (isRemoteHttpUri(resolved)) {
-      const validatedRemoteArtwork = await validateRemoteArtworkUri(resolved);
+      const validatedRemoteArtwork = await validateRemoteArtworkUri(
+        resolved,
+        signal,
+      );
       if (validatedRemoteArtwork) {
         return validatedRemoteArtwork;
       }
@@ -262,10 +324,32 @@ export const createAudioEngine = (): AudioEngine => {
   let stateWaiters: StateWaiter[] = [];
   let sampleMovement: (() => void) | null = null;
   let cancelMovement: ((error: Error) => void) | null = null;
+  let operationController = new AbortController();
+  let movementController = new AbortController();
+  let detachLoadSignal: (() => void) | null = null;
+  let abandonedLoad = false;
+
+  const readNativeSnapshot = (
+    timeoutMs = NATIVE_SNAPSHOT_TIMEOUT_MS,
+    signal = operationController.signal,
+  ) =>
+    awaitBounded(
+      nativeListeningPosition.snapshot(),
+      timeoutMs,
+      "native playback snapshot",
+      signal,
+    );
 
   const waitForNativeMovement = async (timeoutMs: number) => {
     const attempt = loadAttempt;
-    const first = await nativeListeningPosition.snapshot();
+    movementController.abort();
+    movementController = new AbortController();
+    const signal = movementController.signal;
+    const deadlineAt = Date.now() + timeoutMs;
+    const first = await readNativeSnapshot(
+      Math.min(timeoutMs, NATIVE_SNAPSHOT_TIMEOUT_MS),
+      signal,
+    );
     if (attempt !== loadAttempt)
       throw new Error("Play confirmation was cancelled");
     if (!first) return;
@@ -292,7 +376,11 @@ export const createAudioEngine = (): AudioEngine => {
         if (polling || settled) return;
         polling = true;
         try {
-          const snapshot = await nativeListeningPosition.snapshot();
+          const remaining = Math.max(1, deadlineAt - Date.now());
+          const snapshot = await readNativeSnapshot(
+            Math.min(remaining, NATIVE_SNAPSHOT_TIMEOUT_MS),
+            signal,
+          );
           if (settled) return;
           if (
             !snapshot ||
@@ -336,7 +424,7 @@ export const createAudioEngine = (): AudioEngine => {
       const timeout = setTimeout(
         () =>
           finish(new Error("Timed out waiting for native playback movement")),
-        timeoutMs,
+        Math.max(1, deadlineAt - Date.now()),
       );
       sampleMovement = () => {
         void poll();
@@ -478,7 +566,35 @@ export const createAudioEngine = (): AudioEngine => {
   };
 
   // Map AudioPro events to the engine's simplified status callbacks.
+  let requestedPlaybackState: "playing" | "paused" | null = null;
+  let playbackRequestCommandId: string | undefined;
+  let playbackTargetId: string | undefined;
+  let playbackRequestRevision = -1;
+  let requestSequence = 0;
+  const requestInstanceId = `${Date.now()}-${Math.random()}`;
+  const wantsPause = () => requestedPlaybackState === "paused";
+  const acceptRequestedPlayback = (request?: AudioProEventOrder) => {
+    if (
+      request?.requestedPlaybackState &&
+      (!playbackRequestCommandId ||
+        request.playbackRequestCommandId === playbackRequestCommandId) &&
+      (!playbackTargetId || request.playbackTargetId === playbackTargetId) &&
+      (request.playbackRequestRevision ?? -1) > playbackRequestRevision
+    ) {
+      playbackRequestRevision =
+        request.playbackRequestRevision ?? playbackRequestRevision;
+      const changed = requestedPlaybackState !== request.requestedPlaybackState;
+      requestedPlaybackState = request.requestedPlaybackState;
+      // The acknowledgment of our own request is not another user command.
+      if (changed) events.onRequestedPlaybackState?.(requestedPlaybackState);
+    }
+  };
   const handleEvent = (event: AudioProEvent) => {
+    acceptRequestedPlayback(event.payload);
+    if (event.type === AudioProEventType.REQUESTED_PLAYBACK_STATE_CHANGED)
+      return;
+    // An aborted startup can still deliver native callbacks after cancellation.
+    if (abandonedLoad) return;
     const order = event.payload ?? {};
     // A source replacement can reuse a track id, so track equality alone is insufficient.
     if (activeLoadId && order.loadId && order.loadId !== activeLoadId) return;
@@ -638,14 +754,50 @@ export const createAudioEngine = (): AudioEngine => {
   };
 
   return {
+    setRequestedPlaybackState(state, targetId) {
+      requestedPlaybackState = state;
+      playbackTargetId = targetId ?? playbackTargetId;
+      playbackRequestCommandId = `${requestInstanceId}-${++requestSequence}`;
+      ensureListener();
+      AudioPro.setRequestedPlaybackState(
+        state,
+        playbackRequestCommandId,
+        playbackTargetId,
+      );
+    },
     setEvents(nextEvents) {
       events = nextEvents;
       ensureListener();
     },
     async load(track, options) {
+      operationController.abort();
+      movementController.abort();
+      detachLoadSignal?.();
+      cancelMovement?.(new Error("Audio load was superseded"));
+      rejectStateWaiters(new Error("Audio load was superseded"));
+      // Native pause clears pending autoplay as well as audible playback.
+      if (currentTrack) AudioPro.pauseRequested();
+      operationController = new AbortController();
+      const signal = operationController.signal;
       const attempt = ++loadAttempt;
+      const onAbort = () => {
+        if (attempt !== loadAttempt) return;
+        ++loadAttempt;
+        abandonedLoad = true;
+        operationController.abort();
+        movementController.abort();
+        cancelMovement?.(new Error("Audio load was cancelled"));
+        rejectStateWaiters(new Error("Audio load was cancelled"));
+        AudioPro.pauseRequested();
+      };
+      options?.signal?.addEventListener("abort", onAbort, { once: true });
+      detachLoadSignal = () =>
+        options?.signal?.removeEventListener("abort", onAbort);
+      if (options?.signal?.aborted) onAbort();
       const loadId = options?.loadId ?? `audio-load-${Date.now()}-${attempt}`;
       const assertCurrent = () => {
+        if (signal.aborted)
+          throw new Error("Audio load was cancelled or superseded");
         if (attempt !== loadAttempt)
           throw new Error("Audio load was superseded");
       };
@@ -653,9 +805,20 @@ export const createAudioEngine = (): AudioEngine => {
       ensureListener();
 
       // Resolve source + artwork into URLs AudioPro accepts.
-      const url = await resolveSourceUri(track.source);
       assertCurrent();
-      const artwork = await resolveArtworkUri(track);
+      const url = await awaitBounded(
+        resolveSourceUri(track.source),
+        DEFAULT_READY_TIMEOUT_MS,
+        "audio source",
+        signal,
+      );
+      assertCurrent();
+      const artwork = await awaitBounded(
+        resolveArtworkUri(track, signal),
+        DEFAULT_READY_TIMEOUT_MS,
+        "artwork resolution",
+        signal,
+      );
       assertCurrent();
       const audioTrack: AudioProTrack = {
         id: track.id,
@@ -701,6 +864,7 @@ export const createAudioEngine = (): AudioEngine => {
       assertCurrent();
       cancelMovement?.(new Error("Audio load was superseded"));
       rejectStateWaiters(new Error("Audio load was superseded"));
+      abandonedLoad = false;
       activeLoadId = loadId;
       lastOrder = {};
       lastAppliedPositionMs = 0;
@@ -730,6 +894,8 @@ export const createAudioEngine = (): AudioEngine => {
         listeningContext: options?.listeningContext,
         positionIntent: options?.positionIntent ?? "resume",
         positionCommandId: options?.positionCommandId,
+        playbackRequestCommandId,
+        playbackTargetId: options?.playbackTargetId ?? playbackTargetId,
       };
       // Register first: native readiness can arrive synchronously on a local file.
       const ready = waitForState(
@@ -760,13 +926,25 @@ export const createAudioEngine = (): AudioEngine => {
           : DEFAULT_READY_TIMEOUT_MS,
         { allowImmediate: false },
       );
-      AudioPro.play(audioTrack, currentPlayOptions);
-      if (typeof options?.rate === "number")
-        AudioPro.setPlaybackSpeed(options.rate);
+      try {
+        AudioPro.play(audioTrack, currentPlayOptions);
+        // play() already carries the rate configured above. Native source
+        // preparation is asynchronous; a live rate command here can arrive
+        // before a player exists and invalidate the pending load.
+      } catch (error) {
+        // Settle the registered waiter too, so a synchronous native failure
+        // cannot leave a later unhandled readiness rejection.
+        rejectStateWaiters(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
       await ready;
       assertCurrent();
       if (options?.listeningContext) {
-        const snapshot = await nativeListeningPosition.snapshot();
+        const snapshot = await readNativeSnapshot(
+          NATIVE_SNAPSHOT_TIMEOUT_MS,
+          signal,
+        );
         assertCurrent();
         if (snapshot) {
           if (
@@ -807,6 +985,9 @@ export const createAudioEngine = (): AudioEngine => {
       };
     },
     async play() {
+      if (wantsPause()) return;
+      if (abandonedLoad || operationController.signal.aborted)
+        throw new Error("Playback request was cancelled; load a fresh source");
       const attempt = loadAttempt;
       configure();
       ensureListener();
@@ -817,24 +998,33 @@ export const createAudioEngine = (): AudioEngine => {
           autoPlay: true,
           startTimeMs: lastAppliedPositionMs,
           headers: currentHeaders,
+          playbackRequestCommandId,
+          playbackTargetId,
         });
+        if (playbackRequestCommandId)
+          AudioPro.resumeRequested(playbackRequestCommandId);
         return;
       }
       const snapshot =
         durableContext && nativeListeningPosition.capability() !== "web"
-          ? await nativeListeningPosition.snapshot()
+          ? await readNativeSnapshot()
           : null;
       if (attempt !== loadAttempt)
         throw new Error("Playback request was superseded");
+      if (wantsPause()) return;
       const state = snapshot?.state ?? AudioPro.getState();
       if (state === AudioProState.PLAYING) {
         // The app requested Play explicitly. Reassert native audio-session
         // ownership even if a stale transport snapshot still says PLAYING.
-        AudioPro.resume();
+        if (playbackRequestCommandId)
+          AudioPro.resumeRequested(playbackRequestCommandId);
+        else AudioPro.resume();
         return;
       }
       if (state === AudioProState.PAUSED || state === AudioProState.STOPPED) {
-        AudioPro.resume();
+        if (playbackRequestCommandId)
+          AudioPro.resumeRequested(playbackRequestCommandId);
+        else AudioPro.resume();
         return;
       }
       if (state === AudioProState.IDLE && currentTrack) {
@@ -844,16 +1034,28 @@ export const createAudioEngine = (): AudioEngine => {
           autoPlay: true,
           startTimeMs: lastAppliedPositionMs,
           headers: currentHeaders,
+          playbackRequestCommandId,
+          playbackTargetId,
         });
+        if (playbackRequestCommandId)
+          AudioPro.resumeRequested(playbackRequestCommandId);
         return;
       }
-      AudioPro.resume();
+      if (playbackRequestCommandId)
+        AudioPro.resumeRequested(playbackRequestCommandId);
+      else AudioPro.resume();
     },
     async pause() {
-      ++loadAttempt;
+      // Same-target Pause preserves load/readiness and only cancels audible confirmation.
+      movementController.abort();
+      stateWaiters = stateWaiters.filter((waiter) => {
+        if (waiter.label !== "playback to start") return true;
+        clearTimeout(waiter.timeoutId);
+        waiter.reject(new Error("Play confirmation cancelled by pause"));
+        return false;
+      });
       cancelMovement?.(new Error("Play confirmation cancelled by pause"));
-      rejectStateWaiters(new Error("Audio load cancelled by pause"));
-      AudioPro.pause();
+      AudioPro.pauseRequested();
     },
     async seek(positionMs, _options) {
       const completed = waitForState(
@@ -877,23 +1079,27 @@ export const createAudioEngine = (): AudioEngine => {
       AudioPro.setPlaybackSpeed(rate);
     },
     async getPlaybackSnapshot() {
-      return nativeListeningPosition.snapshot();
+      const snapshot = await readNativeSnapshot();
+      if (snapshot) acceptRequestedPlayback(snapshot);
+      return snapshot;
     },
     async getPositionMs() {
       if (durableContext && nativeListeningPosition.capability() !== "web") {
-        return (await nativeListeningPosition.snapshot())!.position;
+        return (await readNativeSnapshot())!.position;
       }
       const { position } = AudioPro.getTimings();
       return position;
     },
     async getDurationMs() {
       if (durableContext && nativeListeningPosition.capability() !== "web") {
-        return (await nativeListeningPosition.snapshot())!.duration;
+        return (await readNativeSnapshot())!.duration;
       }
       const { duration } = AudioPro.getTimings();
       return duration;
     },
     async waitForReady(options) {
+      if (abandonedLoad || operationController.signal.aborted)
+        throw new Error("Audio readiness was cancelled");
       await waitForState(
         "track to be ready",
         () => {
@@ -904,6 +1110,8 @@ export const createAudioEngine = (): AudioEngine => {
       );
     },
     async waitForPlaying(options) {
+      if (abandonedLoad || operationController.signal.aborted)
+        throw new Error("Play confirmation was cancelled");
       if (durableContext && nativeListeningPosition.capability() !== "web") {
         await waitForNativeMovement(
           options?.timeoutMs ?? DEFAULT_PLAYING_TIMEOUT_MS,
@@ -939,7 +1147,13 @@ export const createAudioEngine = (): AudioEngine => {
       };
     },
     async unload() {
+      movementController.abort();
       ++loadAttempt;
+      operationController.abort();
+      operationController = new AbortController();
+      detachLoadSignal?.();
+      detachLoadSignal = null;
+      abandonedLoad = true;
       cancelMovement?.(new Error("Audio engine was unloaded"));
       activeLoadId = null;
       durableContext = undefined;
