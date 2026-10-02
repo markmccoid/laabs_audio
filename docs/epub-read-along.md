@@ -129,6 +129,8 @@ Tapping anywhere in the book seeks the narration to that point and **resumes Fol
 is the clearest statement a reader can make about where they want to be, and leaving following
 suspended would strand them while the audio walked away.
 
+After a successful tap seek, a 10-second **Go back** toast restores the Listening Position from immediately before the tap and resumes Follow Mode. This preserves the audio's current paused/playing state; each new document seek replaces the previous undo. Failed seeks show playback feedback and offer no undo. When audio has already moved and only a native progress checkpoint is superseded, the confirmed jump still offers recovery.
+
 **This needs a patch to `react-native-readium`** — see
 [react-native-readium-ios.md](./react-native-readium-ios.md).
 

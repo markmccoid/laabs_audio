@@ -1,20 +1,9 @@
-/**
- * The control that chooses which Read-Along surface is showing.
- *
- * Read-Along is the umbrella; Transcript Read-Along shows the words the narrator
- * said and EPUB Read-Along shows the words the book says (CONTEXT.md, ADR-0039).
- * They are two views of one reading position, so this is a switch inside the
- * screen rather than two routes — a reader comparing the publisher's text
- * against the ASR text should not have to leave and come back.
- *
- * It sits at the top deliberately: swipes that start inside the Readium panel
- * are swallowed by the WebView and turn pages instead.
- */
+/** Chooses among the available Transcript, EPUB, and PDF views of the same audiobook. */
 
 import type { ThemeColors } from "@/theme/use-app-theme";
 import { Pressable, Text, View } from "react-native";
 
-export type ReadAlongSurface = "transcript" | "book";
+export type ReadAlongSurface = "transcript" | "epub" | "pdf";
 
 /**
  * Which surface to open on.
@@ -27,24 +16,34 @@ export type ReadAlongSurface = "transcript" | "book";
  */
 export const initialReadAlongSurface = (
   requested: string | null | undefined,
-  hasMap: boolean,
+  available: readonly ReadAlongSurface[],
 ): ReadAlongSurface => {
-  if (requested === "transcript") return "transcript";
-  if (requested === "book") return hasMap ? "book" : "transcript";
-  return hasMap ? "book" : "transcript";
+  const explicit = requested === "book" ? "epub" : requested;
+  if (available.includes(explicit as ReadAlongSurface))
+    return explicit as ReadAlongSurface;
+  return available.includes("epub")
+    ? "epub"
+    : available.includes("transcript")
+      ? "transcript"
+      : available.includes("pdf")
+        ? "pdf"
+        : "transcript";
 };
 
 const SEGMENTS: { value: ReadAlongSurface; label: string }[] = [
   { value: "transcript", label: "Transcript" },
-  { value: "book", label: "Book" },
+  { value: "epub", label: "EPUB" },
+  { value: "pdf", label: "PDF" },
 ];
 
 export const ReadAlongSurfacePicker = ({
   surface,
+  available,
   onChange,
   themeColors,
 }: {
   surface: ReadAlongSurface;
+  available: readonly ReadAlongSurface[];
   onChange: (next: ReadAlongSurface) => void;
   themeColors: ThemeColors;
 }) => (
@@ -60,33 +59,37 @@ export const ReadAlongSurfacePicker = ({
       borderColor: themeColors.border,
     }}
   >
-    {SEGMENTS.map((segment) => {
-      const isSelected = surface === segment.value;
-      return (
-        <Pressable
-          key={segment.value}
-          accessibilityRole="button"
-          accessibilityState={{ selected: isSelected }}
-          accessibilityLabel={`Show ${segment.label}`}
-          onPress={() => onChange(segment.value)}
-          style={{
-            paddingHorizontal: 18,
-            paddingVertical: 6,
-            borderRadius: 999,
-            backgroundColor: isSelected ? themeColors.accent : "transparent",
-          }}
-        >
-          <Text
+    {SEGMENTS.filter((segment) => available.includes(segment.value)).map(
+      (segment) => {
+        const isSelected = surface === segment.value;
+        return (
+          <Pressable
+            key={segment.value}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isSelected }}
+            accessibilityLabel={`Show ${segment.label}`}
+            onPress={() => onChange(segment.value)}
             style={{
-              fontSize: 13,
-              fontWeight: "600",
-              color: isSelected ? themeColors.accentForeground : themeColors.textMuted,
+              paddingHorizontal: 18,
+              paddingVertical: 6,
+              borderRadius: 999,
+              backgroundColor: isSelected ? themeColors.accent : "transparent",
             }}
           >
-            {segment.label}
-          </Text>
-        </Pressable>
-      );
-    })}
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: "600",
+                color: isSelected
+                  ? themeColors.accentForeground
+                  : themeColors.textMuted,
+              }}
+            >
+              {segment.label}
+            </Text>
+          </Pressable>
+        );
+      },
+    )}
   </View>
 );

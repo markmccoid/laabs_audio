@@ -4,6 +4,9 @@ Use this file as the tester-facing change log. When making a commit, add a new e
 
 ## Recent Changes
 
+- `2026-10-01` `d021916` - Add iOS PDF Read-Along with audio-following pages and a single translucent box that follows the narrated paragraph. Optional paragraph maps are validated and cached separately; manual browsing clears the box, and Resume following restores it at the current Listening Position.
+  Tester focus: open a mapped PDF during playback and confirm pages and paragraph boxes follow narration. Pause and resume, seek, change speed, and check paragraph boundaries and gaps. Browse to another page and verify audio does not move; Resume following should return to the current page and paragraph. Confirm a missing or mismatched paragraph map leaves page following available.
+
 - `2026-09-30` `86c2268` - Fortify streamed playback recovery and make Play/Pause follow the latest request across app and system controls. Natural audiobook completion now resets the control to Play and records the book as finished, including offline.
   Tester focus: start streamed and downloaded books, pause or resume during preparation, and confirm the latest request takes effect without cancelling reusable preparation. Stall a stream and verify recovery is bounded and Play remains available after failure. Play multi-file audiobooks through file boundaries and then through the book's end; transitions should keep playing, while natural completion shows Play and marks the audiobook finished, even offline.
 

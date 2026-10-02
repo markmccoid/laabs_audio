@@ -440,7 +440,7 @@ One timed span of words within a Book Transcript.
 _Avoid_: caption, subtitle line
 
 **Read-Along**:
-The reading experience that displays text synchronized with the Listening Position. It has two surfaces: Transcript Read-Along and EPUB Read-Along.
+The reading experience that displays the audiobook's transcript or accompanying document synchronized with the Listening Position. Its surfaces are Transcript Read-Along, EPUB Read-Along, and PDF Read-Along.
 _Avoid_: karaoke mode, follow-along
 
 **Transcript Read-Along**:
@@ -451,8 +451,20 @@ _Avoid_: Read-Along (when the surface matters), transcript mode, ASR view
 The Read-Along surface that displays the audiobook's EPUB — the words the book says — highlighting each Text Unit as an Alignment Map times it.
 _Avoid_: Read-Along (when the surface matters), reader mode, ebook mode, book view
 
+**PDF Read-Along**:
+The Read-Along surface that displays the audiobook's PDF and synchronizes its pages with the Listening Position using a PDF Page Map. An optional PDF Paragraph Map selects a translucent box around the narrated paragraph while following.
+_Avoid_: EPUB Read-Along, PDF word highlighting, PDF transcript
+
+**PDF Page Map**:
+The correspondence between a PDF's physical pages and audiobook time ranges, produced by LAABS Align and supplied with that PDF. It records matched, interpolated, and unaligned pages; it is distinct from an EPUB Alignment Map.
+_Avoid_: Alignment Map (when referring to PDF pages), PDF transcript, word alignment
+
+**PDF Paragraph Map**:
+The optional correspondence between paragraph bounds in a PDF and audiobook time ranges, produced by LAABS Align. It references a PDF Page Map for document identity and the audio-track manifest. It selects one paragraph box during Follow Mode; the PDF Page Map controls navigation. Missing or invalid paragraph maps leave page following available.
+_Avoid_: word alignment, PDF Page Map (when referring to paragraph bounds)
+
 **Follow Mode**:
-The Read-Along state in which the view scrolls itself to keep the Listening Position's text in view. Follow Mode pauses when the user scrolls manually and resumes only by explicit request.
+The Read-Along state that keeps the displayed text or PDF page synchronized with the Listening Position. Manual browsing pauses following on every surface. Resume following returns the reader to the current Listening Position without seeking audio. PDF Read-Along changes the Listening Position only through an explicit Listen from page action. PDF page seeks and EPUB text taps offer a brief Go back action to restore the pre-seek Listening Position.
 _Avoid_: auto-scroll, sticky scroll
 
 **Alignment Map**:

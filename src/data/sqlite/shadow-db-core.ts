@@ -1,7 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 const DATABASE_NAME = "laabs-shadow-library.db";
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -591,6 +591,29 @@ CREATE TABLE IF NOT EXISTS book_transcript_segments (
 );
 CREATE INDEX IF NOT EXISTS idx_transcript_segments_book_section
   ON book_transcript_segments(library_item_id, section_index, start_ms);
+
+-- PDF Page Maps are small page schedules, independent of EPUB Alignment Maps.
+-- Keep the original contract JSON so it can be revalidated/rebased offline.
+CREATE TABLE IF NOT EXISTS pdf_page_maps (
+  library_item_id TEXT NOT NULL,
+  pdf_ino TEXT NOT NULL,
+  pdf_filename TEXT NOT NULL,
+  map_ino TEXT NOT NULL,
+  artifact_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (library_item_id, pdf_ino)
+);
+
+-- Optional paragraph sidecars remain independent of the physical page schedule.
+CREATE TABLE IF NOT EXISTS pdf_paragraph_maps (
+  library_item_id TEXT NOT NULL,
+  pdf_ino TEXT NOT NULL,
+  page_map_alignment_id TEXT NOT NULL,
+  map_ino TEXT NOT NULL,
+  artifact_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (library_item_id, pdf_ino)
+);
 
 -- Alignment Map (ADR-0039). A library asset like an Ingested Book Transcript:
 -- it does not belong to the download and does not die with it. Keyed by book

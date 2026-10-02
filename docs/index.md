@@ -77,6 +77,9 @@ Routing guide for the `docs/` folder. Domain vocabulary lives in
 | [epub-read-along-implementation-plan.md](./epub-read-along-implementation-plan.md) | the phased plan for EPUB Read-Along, and which phases are done |
 | [epub-read-along.md](./epub-read-along.md) | **how EPUB Read-Along actually works** — module map, the Readium binding facts earned on device, what every log line means, and what is still open |
 | [epub-read-along-todo.md](./epub-read-along-todo.md) | the follow-on work after v1 — tap-to-seek, clip marks, appearance — with the decisions already taken |
+| [pdf-read-along.md](./pdf-read-along.md) | PDF Read-Along behavior, storage, synchronization, and validation |
+| [pdf-read-along-implementation-plan.md](./pdf-read-along-implementation-plan.md) | the confirmed page-only PDF implementation scope |
+| [research/pdf-read-along-options.md](./research/pdf-read-along-options.md) | PDF extraction and reader options, page following versus word highlighting, download size, and performance tradeoffs |
 
 ## Decisions (ADRs)
 
@@ -113,6 +116,8 @@ propose superseding it.
 | [0038](./adr/0038-alignment-maps-are-paired-by-enumeration-not-by-name.md) | Alignment Maps are paired by enumeration, not by constructing a filename |
 | [0039](./adr/0039-epub-read-along-is-a-second-surface-over-ingested-alignment-maps.md) | EPUB Read-Along is a second Read-Along surface over an ingested Alignment Map |
 | [0040](./adr/0040-assistant-actions-live-in-the-app-target-over-an-assistant-catalog.md) | Assistant Actions live in the app target over a session-isolated Assistant Catalog |
+
+| [0043](./adr/0043-pdf-read-along-follows-physical-pages.md) | PDF Read-Along follows physical pages with strict document validation and reader-led seeking |
 
 Note: ADRs are point-in-time records. ADR-0017's phased-cutover details are completed and
 superseded in part by ADR-0019; read 0017 for the why, 0019 plus

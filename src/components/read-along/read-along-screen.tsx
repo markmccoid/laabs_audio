@@ -33,7 +33,10 @@ import {
 import { getFollowViewPosition } from "@/read-along/read-along-follow-alignment";
 import { useFollowMode } from "@/read-along/use-follow-mode";
 import { useReadAlongHighlight } from "@/read-along/use-read-along-highlight";
-import { deviceBooksStore, useDeviceBooksStore } from "@/store/device-books-store";
+import {
+  deviceBooksStore,
+  useDeviceBooksStore,
+} from "@/store/device-books-store";
 import { useSettingsStore } from "@/store/settings-store";
 import {
   useTranscriptionStore,
@@ -50,12 +53,21 @@ import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useKeepAwake } from "expo-keep-awake";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { toast } from "react-native-sonner";
 import { ReadAlongControls } from "./read-along-controls";
 import { useAlignmentIngest } from "@/alignment/use-alignment-ingest";
 import { EpubReadAlongSurface } from "./epub-read-along-surface";
+import { PdfReadAlongSurface } from "./pdf-read-along-surface";
+import { usePdfPageSources } from "@/pdf/use-pdf-page-sources";
+import { hasTranscriptLibraryFile } from "@/components/bookComponents/transcript-files";
 import { ReadAlongEmptyState } from "./read-along-empty-state";
 import {
   initialReadAlongSurface,
@@ -133,7 +145,10 @@ type ReadAlongScreenProps = {
   initialSurface?: string;
 };
 
-const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps) => {
+const ReadAlongScreen = ({
+  libraryItemId,
+  initialSurface,
+}: ReadAlongScreenProps) => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlashListRef<ReadAlongListItem>>(null);
@@ -151,10 +166,59 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
 
   const ingest = useShippedTranscriptIngest(boundLibraryItemId);
   const fontSize = useSettingsStore((state) => state.readAlongFontSize);
-  const followAlignment = useSettingsStore((state) => state.readAlongFollowAlignment);
-  const wordHighlightCount = useSettingsStore((state) => state.readAlongWordHighlightCount);
-  const wordHighlightStyle = useSettingsStore((state) => state.readAlongWordHighlightStyle);
+  const followAlignment = useSettingsStore(
+    (state) => state.readAlongFollowAlignment,
+  );
+  const wordHighlightCount = useSettingsStore(
+    (state) => state.readAlongWordHighlightCount,
+  );
+  const wordHighlightStyle = useSettingsStore(
+    (state) => state.readAlongWordHighlightStyle,
+  );
   const playingLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
+
+  // Discover document surfaces cheaply; download their assets only when selected.
+  const alignment = useAlignmentIngest(boundLibraryItemId, { enabled: false });
+  const pdfSources = usePdfPageSources(boundLibraryItemId);
+  const canReadEpub = Platform.OS === "ios" && alignment.hasMapOnServer;
+  const canReadPdf = Platform.OS === "ios" && pdfSources.sources.length > 0;
+  const canReadTranscript =
+    (snapshot?.libraryItemId === boundLibraryItemId &&
+      snapshot.segments.length > 0) ||
+    hasTranscriptLibraryFile(pdfSources.details);
+  const availableSurfaces = useMemo<ReadAlongSurface[]>(
+    () => [
+      ...(canReadTranscript ? ["transcript" as const] : []),
+      ...(canReadEpub ? ["epub" as const] : []),
+      ...(canReadPdf ? ["pdf" as const] : []),
+    ],
+    [canReadTranscript, canReadEpub, canReadPdf],
+  );
+  const [surface, setSurface] = useState<ReadAlongSurface>(() =>
+    initialReadAlongSurface(initialSurface, availableSurfaces),
+  );
+  const chosenSurface = useRef(false);
+  const surfaceBook = useRef(boundLibraryItemId);
+  useEffect(() => {
+    if (surfaceBook.current !== boundLibraryItemId) {
+      surfaceBook.current = boundLibraryItemId;
+      chosenSurface.current = false;
+    }
+    if (
+      !chosenSurface.current ||
+      (availableSurfaces.length > 0 && !availableSurfaces.includes(surface))
+    ) {
+      setSurface(
+        initialReadAlongSurface(
+          chosenSurface.current ? surface : initialSurface,
+          availableSurfaces,
+        ),
+      );
+    }
+  }, [availableSurfaces, initialSurface, surface, boundLibraryItemId]);
+  const isBookSurface = surface === "epub" && canReadEpub;
+  const isPdfSurface = surface === "pdf" && canReadPdf;
+  const isDocumentSurface = isBookSurface || isPdfSurface;
 
   //~~ Data assembly ------------------------------------------------------
   // A frontier advance re-runs this whole load: the transcription runtime store
@@ -166,14 +230,18 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
       : null,
   );
   const runtimeStatus = useTranscriptionStore((state) =>
-    boundLibraryItemId ? (state.statusById[boundLibraryItemId] ?? "idle") : "idle",
+    boundLibraryItemId
+      ? (state.statusById[boundLibraryItemId] ?? "idle")
+      : "idle",
   );
   // The transcript row (and its frozen sections) is only written once the speech
   // model is ready, i.e. when the phase leaves `preparing_model`. Reloading on
   // that flip is what turns the "Preparing speech model..." state into the
   // reader's pending blocks without waiting for the first track to finish.
   const activePhase = useTranscriptionStore((state) =>
-    state.activeTask?.libraryItemId === boundLibraryItemId ? state.activeTask.phase : null,
+    state.activeTask?.libraryItemId === boundLibraryItemId
+      ? state.activeTask.phase
+      : null,
   );
 
   // Guards against an out-of-order reply when a frontier advance (or a Switch)
@@ -192,18 +260,20 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
       getTranscriptFrontierMs(bookId),
       getBookTranscriptUiStatus(bookId),
     ])
-      .then(([transcript, segments, frontierMs, uiStatus]): TranscriptSnapshot => {
-        return {
-          libraryItemId: bookId,
-          bookTitle: transcript?.bookTitle ?? null,
-          sections: transcript?.sections ?? null,
-          segments,
-          frontierMs,
-          status: uiStatus.status,
-          localeIdentifier: uiStatus.localeIdentifier,
-          errorCode: uiStatus.errorCode,
-        };
-      })
+      .then(
+        ([transcript, segments, frontierMs, uiStatus]): TranscriptSnapshot => {
+          return {
+            libraryItemId: bookId,
+            bookTitle: transcript?.bookTitle ?? null,
+            sections: transcript?.sections ?? null,
+            segments,
+            frontierMs,
+            status: uiStatus.status,
+            localeIdentifier: uiStatus.localeIdentifier,
+            errorCode: uiStatus.errorCode,
+          };
+        },
+      )
       .catch(
         (): TranscriptSnapshot => ({
           // A read failure reads as "no transcript" — Phase 4's state screen —
@@ -250,19 +320,24 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
   );
 
   //~~ Highlight + follow -------------------------------------------------
-  const { activeSegmentIndex, activeSegment, activeSegmentWords, activeWordIndex, isBookMismatch } =
-    useReadAlongHighlight({
-      boundLibraryItemId,
-      segments: model.readableSegments,
-      isWordHighlightEnabled: wordHighlightStyle !== "none",
-    });
+  const {
+    activeSegmentIndex,
+    activeSegment,
+    activeSegmentWords,
+    activeWordIndex,
+    isBookMismatch,
+  } = useReadAlongHighlight({
+    boundLibraryItemId: isDocumentSurface ? null : boundLibraryItemId,
+    segments: model.readableSegments,
+    isWordHighlightEnabled: wordHighlightStyle !== "none",
+  });
 
   // Where Follow Mode should park the viewport. The active segment when there
   // is one; otherwise the nearest preceding row, so an ASR gap holds still and
   // a seek past the frontier lands on the pending block. Selecting the *index*
   // (not the position) keeps this a segment-rate re-render, not a 1 Hz one.
   const coarseListIndex = usePlaybackStore((state) =>
-    state.libraryItemId === boundLibraryItemId
+    !isDocumentSurface && state.libraryItemId === boundLibraryItemId
       ? findListIndexForPosition(model.items, state.positionMs)
       : -1,
   );
@@ -272,8 +347,12 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
       : coarseListIndex;
 
   const followViewPosition = getFollowViewPosition(followAlignment);
-  const { followEnabled, resumeFollowing, handleScrollBeginDrag, suspendFollowing } =
-    useFollowMode({ listRef, activeListIndex, alignment: followAlignment });
+  const {
+    followEnabled,
+    resumeFollowing,
+    handleScrollBeginDrag,
+    suspendFollowing,
+  } = useFollowMode({ listRef, activeListIndex, alignment: followAlignment });
 
   // FlashList v2 can leave its render window behind after a data swap (see
   // src/components/Library/LibraryContainer.tsx:116-124). A frontier advance is
@@ -303,7 +382,9 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
   //~~ Bookmark Gutter ----------------------------------------------------
   // Bookmarks belong to the *bound* book's listening owner, not the player's,
   // so the reader stays correct while another book is loaded.
-  const resolvedUserKey = useResolvedListeningOwnerKey(boundLibraryItemId ?? undefined);
+  const resolvedUserKey = useResolvedListeningOwnerKey(
+    boundLibraryItemId ?? undefined,
+  );
   const localBookmarksForUser = useDeviceBooksStore((state) =>
     resolvedUserKey ? state.localBookmarksByUser[resolvedUserKey] : undefined,
   );
@@ -318,7 +399,11 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
   // what makes each row's `markers` array a stable identity between renders —
   // the segment item compares it by reference (see its memoization contract).
   const markerMap = useMemo(
-    () => buildBookmarkMarkerMap({ bookmarks: bookmarksForBook, segments: model.readableSegments }),
+    () =>
+      buildBookmarkMarkerMap({
+        bookmarks: bookmarksForBook,
+        segments: model.readableSegments,
+      }),
     [bookmarksForBook, model.readableSegments],
   );
 
@@ -327,7 +412,10 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
       if (!boundLibraryItemId) return;
       router.push({
         pathname: "/book-bookmark-detail",
-        params: { libraryItemId: boundLibraryItemId, bookmarkId: marker.bookmarkId },
+        params: {
+          libraryItemId: boundLibraryItemId,
+          bookmarkId: marker.bookmarkId,
+        },
       });
     },
     [boundLibraryItemId],
@@ -339,7 +427,9 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
   // the book — ~5k on a long one — on each tap.
   const segmentIndexById = useMemo(() => {
     const index = new Map<number, number>();
-    model.readableSegments.forEach((segment, position) => index.set(segment.id, position));
+    model.readableSegments.forEach((segment, position) =>
+      index.set(segment.id, position),
+    );
     return index;
   }, [model.readableSegments]);
 
@@ -377,7 +467,10 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
   const selectionRange = useMemo(
     () =>
       selection
-        ? deriveClipSelectionRange({ segments: model.readableSegments, selection })
+        ? deriveClipSelectionRange({
+            segments: model.readableSegments,
+            selection,
+          })
         : null,
     [selection, model.readableSegments],
   );
@@ -431,7 +524,8 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
     useCallback(() => {
       const range = selectionRangeRef.current;
       if (!range || !boundLibraryItemId || !resolvedUserKey) return;
-      const records = deviceBooksStore.getState().localBookmarksByUser[resolvedUserKey] ?? {};
+      const records =
+        deviceBooksStore.getState().localBookmarksByUser[resolvedUserKey] ?? {};
       const wasSaved = Object.values(records).some(
         (bookmark) =>
           bookmark.libraryItemId === boundLibraryItemId &&
@@ -453,14 +547,21 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
       // Read-Along binds to the playing book, so there is no load-if-needed
       // here — a tap while another book is loaded does nothing but leave the
       // different-book notice on screen.
-      if (state.libraryItemId !== boundLibraryItemId || state.queue.length === 0) return;
+      if (
+        state.libraryItemId !== boundLibraryItemId ||
+        state.queue.length === 0
+      )
+        return;
 
       isSeekPendingRef.current = true;
       const wasPlaying = state.playbackState === "playing";
       void (async () => {
         try {
           await playerService.seekTo(row.startMs);
-          if (!wasPlaying && playbackStore.getState().playbackState === "playing") {
+          if (
+            !wasPlaying &&
+            playbackStore.getState().playbackState === "playing"
+          ) {
             await playerService.pause();
           }
         } finally {
@@ -525,7 +626,9 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
   // `isBookMismatch` is also true when nothing is loaded; the notice is only
   // honest when the player actually holds another book.
   const showDifferentBookNotice =
-    isBookMismatch && playingLibraryItemId !== null && playingLibraryItemId !== boundLibraryItemId;
+    isBookMismatch &&
+    playingLibraryItemId !== null &&
+    playingLibraryItemId !== boundLibraryItemId;
   const [switchTargetStatus, setSwitchTargetStatus] =
     useState<BookTranscriptionRuntimeStatus | null>(null);
 
@@ -670,39 +773,14 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
   );
 
   /**
-   * `enabled: false` — this instance never fetches anything. It is here purely
-   * for `hasMapOnServer`, which is a free read of item details the app already
-   * holds, and which decides whether the surface picker appears at all. The real
-   * ingest belongs to `EpubReadAlongSurface`, and only runs once that mounts.
-   */
-  const alignment = useAlignmentIngest(boundLibraryItemId, { enabled: false });
-  // iOS only: `plugins/with-readium.js` wires the iOS Podfile alone, and the
-  // decoration cost model is a WKWebView number (ADR-0039).
-  const canReadBook = Platform.OS === "ios" && alignment.hasMapOnServer;
-  const [surface, setSurface] = useState<ReadAlongSurface>(() =>
-    initialReadAlongSurface(initialSurface, canReadBook),
-  );
-  // The map's presence arrives with item details, a render or two after mount.
-  // Without this, a book that should open on its EPUB opens on the transcript
-  // and stays there.
-  const settledInitialSurfaceRef = useRef(false);
-  useEffect(() => {
-    if (settledInitialSurfaceRef.current || !alignment.hasMapOnServer) return;
-    settledInitialSurfaceRef.current = true;
-    setSurface(initialReadAlongSurface(initialSurface, canReadBook));
-  }, [alignment.hasMapOnServer, canReadBook, initialSurface]);
-
-  const isBookSurface = surface === "book" && canReadBook;
-
-  /**
-   * Bumped every time the reader returns from the Book surface, to remount the
+   * Bumped every time the reader returns from a document surface, to remount the
    * transcript list and re-anchor it.
    *
    * Coming back needs both halves. The list is remounted because recycled rows
    * can carry a stale tint (see the FlashList `key` below), and Follow Mode is
    * forced back on because the transcript's own follow state is untouched by
    * what happened on the other surface — the reader was following narration in
-   * the EPUB, so landing on a transcript parked wherever it was left reads as
+   * a document, so landing on a transcript parked wherever it was left reads as
    * the reader having lost their place.
    *
    * This deliberately overrides a manual scroll the reader made before
@@ -710,13 +788,13 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
    * narrated text in the other form, which is exactly what Follow Mode is for.
    */
   const [transcriptGeneration, setTranscriptGeneration] = useState(0);
-  const wasBookSurfaceRef = useRef(isBookSurface);
+  const wasBookSurfaceRef = useRef(isDocumentSurface);
   useEffect(() => {
     const wasBook = wasBookSurfaceRef.current;
-    wasBookSurfaceRef.current = isBookSurface;
-    if (isBookSurface || !wasBook) return;
+    wasBookSurfaceRef.current = isDocumentSurface;
+    if (isDocumentSurface || !wasBook) return;
     setTranscriptGeneration((generation) => generation + 1);
-  }, [isBookSurface]);
+  }, [isDocumentSurface]);
 
   useEffect(() => {
     if (transcriptGeneration === 0) return;
@@ -728,10 +806,15 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
     return () => cancelAnimationFrame(frame);
   }, [transcriptGeneration, resumeFollowing]);
 
-  const bookTitle = snapshot?.bookTitle ?? "Read Along";
+  const bookTitle =
+    snapshot?.bookTitle ??
+    pdfSources.details?.media?.metadata?.title ??
+    "Read Along";
   const hasReaderContent = model.items.length > 0;
-  const waitingForIngest = ingest.phase === "pending" || ingest.phase === "ingesting";
-  const showTranscriptLoading = isLoading || (waitingForIngest && !hasReaderContent);
+  const waitingForIngest =
+    ingest.phase === "pending" || ingest.phase === "ingesting";
+  const showTranscriptLoading =
+    isLoading || (waitingForIngest && !hasReaderContent);
   // The footer needs this too: its rate menu lifts to clear the pill rather
   // than covering it. The selection bar takes the pill's slot outright — both
   // float at the same offset, and resuming Follow Mode mid-selection would
@@ -740,7 +823,10 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
   // The transcript's own Follow Mode pill. EPUB Read-Along carries its own, so
   // showing this one over the reader would put two of them on screen.
   const isResumePillVisible =
-    !isBookSurface && !followEnabled && activeListIndex >= 0 && !isSelecting;
+    !isDocumentSurface &&
+    !followEnabled &&
+    activeListIndex >= 0 &&
+    !isSelecting;
   const floatingBottomOffset = Math.max(insets.bottom, 10) + 80;
 
   return (
@@ -752,6 +838,7 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
         wordHighlightCount={wordHighlightCount}
         wordHighlightStyle={wordHighlightStyle}
         isBookSurface={isBookSurface}
+        isPdfSurface={isPdfSurface}
         themeColors={themeColors}
         topInset={insets.top}
         onClose={() => router.back()}
@@ -795,7 +882,11 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
               })}
             >
               <Text
-                style={{ fontSize: 13, fontWeight: "600", color: themeColors.accentForeground }}
+                style={{
+                  fontSize: 13,
+                  fontWeight: "600",
+                  color: themeColors.accentForeground,
+                }}
               >
                 Switch
               </Text>
@@ -814,17 +905,28 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
               opacity: pressed ? 0.7 : 1,
             })}
           >
-            <Text style={{ fontSize: 13, fontWeight: "600", color: themeColors.textMuted }}>
+            <Text
+              style={{
+                fontSize: 13,
+                fontWeight: "600",
+                color: themeColors.textMuted,
+              }}
+            >
               Close
             </Text>
           </Pressable>
         </View>
       ) : null}
 
-      {canReadBook ? (
+      {availableSurfaces.length > 1 ? (
         <ReadAlongSurfacePicker
           surface={surface}
-          onChange={setSurface}
+          available={availableSurfaces}
+          onChange={(next) => {
+            chosenSurface.current = true;
+            setSurface(next);
+            handleCancelSelection();
+          }}
           themeColors={themeColors}
         />
       ) : null}
@@ -837,8 +939,21 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
           // mini-player to account for — only the reader's own footer.
           bottomInset={floatingBottomOffset}
         />
+      ) : isPdfSurface && boundLibraryItemId ? (
+        <PdfReadAlongSurface
+          key={boundLibraryItemId}
+          boundLibraryItemId={boundLibraryItemId}
+          bottomInset={floatingBottomOffset}
+        />
       ) : showTranscriptLoading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 8 }}>
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+          }}
+        >
           <ActivityIndicator color={themeColors.accent} />
         </View>
       ) : !hasReaderContent ? (
@@ -899,13 +1014,19 @@ const ReadAlongScreen = ({ libraryItemId, initialSurface }: ReadAlongScreenProps
             boxShadow: "0 10px 20px rgba(15, 23, 42, 0.22)",
           })}
         >
-          <Text style={{ fontSize: 13, fontWeight: "600", color: themeColors.accentForeground }}>
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: "600",
+              color: themeColors.accentForeground,
+            }}
+          >
             Resume following
           </Text>
         </Pressable>
       ) : null}
 
-      {isSelecting && selectionBounds ? (
+      {!isDocumentSurface && isSelecting && selectionBounds ? (
         <ReadAlongSelectionBar
           segmentCount={selectionBounds.segmentCount}
           range={selectionRange}

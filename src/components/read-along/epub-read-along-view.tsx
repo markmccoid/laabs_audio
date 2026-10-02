@@ -41,7 +41,8 @@ import {
   type AlignmentUnitRow,
 } from "@/data/sqlite/shadow-db-alignment";
 import { resolveTapUnit } from "@/alignment/alignment-tap-point";
-import { playbackStore, playerService } from "@/player";
+import { playbackStore } from "@/player/playback-store";
+import { useReadAlongSeek } from "@/read-along/use-read-along-seek";
 import {
   buildReaderPreferences,
   toDecorationStyleType,
@@ -193,8 +194,6 @@ export const EpubReadAlongView = ({
    * during the repaint it triggered.
    */
   const resourceUnitsRef = useRef<AlignmentUnitRow[]>([]);
-  /** One seek at a time; a double tap on two sentences would otherwise race. */
-  const isSeekPendingRef = useRef(false);
 
   /**
    * Follow Mode, on the same contract as Transcript Read-Along: the view scrolls
@@ -202,6 +201,8 @@ export const EpubReadAlongView = ({
    * scrolls by hand, and resumes only when asked.
    */
   const [isFollowing, setIsFollowing] = useState(true);
+  const resumeFollowing = useCallback(() => setIsFollowing(true), []);
+  const { seek } = useReadAlongSeek(boundLibraryItemId, resumeFollowing);
   const armRef = useRef<FollowArm>(null);
   /**
    * True once Readium has acknowledged a `goTo` of ours. Until then its own
@@ -412,8 +413,6 @@ export const EpubReadAlongView = ({
    */
   const handleTap = useCallback(
     (event: TapEvent) => {
-      if (isSeekPendingRef.current) return;
-
       const resolved = resolveTapUnit({
         units: resourceUnitsRef.current,
         charOffset: event.charOffset,
@@ -439,23 +438,9 @@ export const EpubReadAlongView = ({
       console.log(
         `[EpubReadAlong] tap seek -> unit=${resolved.unitIndex} at ${resolved.seekMs}ms (d=${resolved.distance.toFixed(4)})`,
       );
-      isSeekPendingRef.current = true;
-      const wasPlaying = state.playbackState === "playing";
-      void (async () => {
-        try {
-          await playerService.seekTo(resolved.seekMs);
-          // Seeking must not start playback that was paused — the reader tapped
-          // to move, not to play.
-          if (!wasPlaying && playbackStore.getState().playbackState === "playing") {
-            await playerService.pause();
-          }
-          setIsFollowing(true);
-        } finally {
-          isSeekPendingRef.current = false;
-        }
-      })();
+      void seek(resolved.seekMs);
     },
-    [boundLibraryItemId],
+    [boundLibraryItemId, seek],
   );
 
   const handleLocationChange = useCallback((locator: Locator) => {

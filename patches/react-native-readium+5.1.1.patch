@@ -1,8 +1,7 @@
 diff --git a/node_modules/react-native-readium/ios/HybridReadiumView.swift b/node_modules/react-native-readium/ios/HybridReadiumView.swift
-index 33b6589..640755f 100644
 --- a/node_modules/react-native-readium/ios/HybridReadiumView.swift
 +++ b/node_modules/react-native-readium/ios/HybridReadiumView.swift
-@@ -46,6 +46,7 @@ class HybridReadiumView: HybridReadiumViewSpec {
+@@ -46,6 +46,7 @@
    var onDecorationActivated: ((DecorationActivatedEvent) -> Void)? = nil
    var onSelectionChange: ((SelectionEvent) -> Void)? = nil
    var onSelectionAction: ((SelectionActionEvent) -> Void)? = nil
@@ -10,7 +9,7 @@ index 33b6589..640755f 100644
  
    // MARK: - Private state
  
-@@ -115,6 +116,9 @@ class HybridReadiumView: HybridReadiumViewSpec {
+@@ -115,6 +116,9 @@
  
          if let epubVC = vc as? EPUBViewController {
            epubVC.selectionActionDelegate = self
@@ -20,7 +19,18 @@ index 33b6589..640755f 100644
          }
  
          self.addViewControllerAsSubview(vc)
-@@ -178,6 +182,115 @@ class HybridReadiumView: HybridReadiumViewSpec {
+@@ -137,6 +141,10 @@
+ 
+   private func updateDecorations() {
+     guard readerViewController != nil else { return }
++    if let pdf = readerViewController as? PDFViewController {
++      pdf.paragraphDecorations = decorations ?? []
++      return
++    }
+     guard let navigator = readerViewController?.navigator as? DecorableNavigator else { return }
+     guard let groups = decorations else { return }
+ 
+@@ -178,6 +186,115 @@
      }
    }
  
@@ -136,7 +146,7 @@ index 33b6589..640755f 100644
    // MARK: - Selection Actions
  
    private func updateSelectionActions() {
-@@ -192,10 +305,15 @@ class HybridReadiumView: HybridReadiumViewSpec {
+@@ -192,10 +309,15 @@
        guard let self = self else { return }
        let nitroLocator = readiumLocatorToNitro(locator)
        self.onLocationChange?(nitroLocator)
@@ -1348,3 +1358,151 @@ index 6529185..2bdfac6 100644
  }
  
  export interface ReadiumViewMethods extends HybridViewMethods {
+diff --git a/node_modules/react-native-readium/ios/Reader/PDF/PDFViewController.swift b/node_modules/react-native-readium/ios/Reader/PDF/PDFViewController.swift
+--- a/node_modules/react-native-readium/ios/Reader/PDF/PDFViewController.swift
++++ b/node_modules/react-native-readium/ios/Reader/PDF/PDFViewController.swift
+@@ -1,4 +1,5 @@
+ import UIKit
++import PDFKit
+ import ReadiumShared
+ import ReadiumNavigator
+ 
+@@ -7,6 +8,10 @@
+     /// Retained because `UIGestureRecognizer.delegate` is a weak reference.
+     /// Replaced whenever the navigator recreates its `PDFDocumentView`.
+     private var scrollEdgeCoordinator: PDFScrollEdgeGestureCoordinator?
++    private var paragraphOverlay: PDFParagraphOverlayProvider?
++    var paragraphDecorations: [DecorationGroup] = [] {
++        didSet { paragraphOverlay?.apply(paragraphDecorations) }
++    }
+ 
+     init(
+         publication: Publication,
+@@ -61,6 +66,11 @@
+     /// Display mode, zoom and scale factors all come from those preferences, so
+     /// this only carries what has no preference equivalent.
+     func navigator(_ navigator: PDFNavigatorViewController, setupPDFView view: PDFDocumentView) {
++        // Install before the navigator associates the PDFDocument. The provider
++        // belongs to this view, and must be replaced if Readium recreates it.
++        paragraphOverlay = PDFParagraphOverlayProvider()
++        view.pageOverlayViewProvider = paragraphOverlay
++        paragraphOverlay?.apply(paragraphDecorations)
+         guard
+             let scrollView = view.subviews.first(where: { $0 is UIScrollView }) as? UIScrollView
+         else {
+@@ -86,3 +96,115 @@
+         )
+     }
+ }
++
++/// A single active paragraph, transported through the existing Nitro decoration
++/// payload. No Readium decoration or PDF annotation is created and no navigation
++/// is issued here. PDFKit owns page positioning, rotation and zoom of the overlay.
++private final class PDFParagraphOverlayProvider: NSObject, PDFPageOverlayViewProvider {
++    private var pageIndex: Int?
++    private var pageCount: Int?
++    private var rects: [CGRect] = []
++    private var visibleOverlays: [PDFPage: PDFParagraphOverlay] = [:]
++
++    func apply(_ groups: [DecorationGroup]) {
++        pageIndex = nil
++        pageCount = nil
++        rects = []
++        if let group = groups.first(where: { $0.name == "laabs-pdf-paragraph" }),
++           group.decorations.count == 1,
++           let extras = group.decorations.first?.extras,
++           let p = extras["pageIndex"].flatMap(Int.init), p >= 0,
++           let count = extras["pageCount"].flatMap(Int.init), count > p,
++           let data = extras["rects"]?.data(using: .utf8),
++           let lines = try? JSONDecoder().decode([[Double]].self, from: data),
++           !lines.isEmpty,
++           lines.allSatisfy({ $0.count == 4 && $0.allSatisfy(\.isFinite) && $0[2] > 0 && $0[3] > 0 }) {
++            pageIndex = p
++            pageCount = count
++            rects = lines.map {
++                CGRect(x: $0[0] / 1000, y: $0[1] / 1000,
++                       width: $0[2] / 1000, height: $0[3] / 1000)
++            }
++        }
++        for (page, overlay) in visibleOverlays {
++            update(overlay, for: page)
++        }
++    }
++
++    func pdfView(_ view: PDFView, overlayViewFor page: PDFPage) -> UIView? {
++        let overlay = visibleOverlays[page] ?? PDFParagraphOverlay(pdfView: view, page: page)
++        visibleOverlays[page] = overlay
++        update(overlay, for: page)
++        return overlay
++    }
++
++    func pdfView(_ pdfView: PDFView, willDisplayOverlayView overlayView: UIView, for page: PDFPage) {
++        // At this point PDFKit has attached the view to its page hierarchy.
++        overlayView.setNeedsLayout()
++    }
++
++    func pdfView(_ pdfView: PDFView, willEndDisplayingOverlayView overlayView: UIView, for page: PDFPage) {
++        visibleOverlays.removeValue(forKey: page)
++    }
++
++    private func update(_ overlay: PDFParagraphOverlay, for page: PDFPage) {
++        guard let document = page.document,
++              document.pageCount == pageCount,
++              document.index(for: page) == pageIndex else {
++            overlay.sourceLineRects = []
++            return
++        }
++        overlay.sourceLineRects = rects
++    }
++}
++
++private final class PDFParagraphOverlay: UIView {
++    private weak var pdfView: PDFView?
++    private weak var page: PDFPage?
++    private let highlight = CAShapeLayer()
++    var sourceLineRects: [CGRect] = [] {
++        didSet { setNeedsLayout() }
++    }
++
++    init(pdfView: PDFView, page: PDFPage) {
++        self.pdfView = pdfView
++        self.page = page
++        super.init(frame: .zero)
++        isUserInteractionEnabled = false
++        isAccessibilityElement = false
++        backgroundColor = .clear
++        clipsToBounds = true
++        highlight.fillColor = UIColor.systemYellow.withAlphaComponent(0.18).cgColor
++        layer.addSublayer(highlight)
++    }
++
++    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
++
++    override func layoutSubviews() {
++        super.layoutSubviews()
++        guard superview != nil, let pdfView, let page else { return }
++        let path = UIBezierPath()
++        if let bottom = sourceLineRects.map(\.minY).min(),
++           let top = sourceLineRects.map(\.maxY).max() {
++            let cropBox = page.bounds(for: .cropBox)
++            // Only the vertical extent comes from the sidecar. Spanning the
++            // visible page margins avoids depending on unreliable line widths
++            // and includes indentation and the gaps between paragraph lines.
++            let padding: CGFloat = 3
++            let paragraph = CGRect(
++                x: cropBox.minX, y: bottom - padding,
++                width: cropBox.width, height: top - bottom + 2 * padding
++            ).intersection(cropBox)
++            if !paragraph.isNull, !paragraph.isEmpty {
++                // PDFKit handles the crop origin, rotation and Y direction.
++                let viewRect = pdfView.convert(paragraph, from: page)
++                path.append(UIBezierPath(rect: convert(viewRect, from: pdfView)))
++            }
++        }
++        CATransaction.begin()
++        CATransaction.setDisableActions(true)
++        highlight.frame = bounds
++        highlight.path = path.cgPath
++        CATransaction.commit()
++    }
++}
