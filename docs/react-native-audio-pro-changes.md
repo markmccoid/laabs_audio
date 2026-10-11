@@ -679,3 +679,33 @@ subscribes to ambient events and clears the session on `AMBIENT_ERROR` / `AMBIEN
 **Verify.** Attach an ambient track, play a book past the end of the ambient file, and open the
 ambient sheet: `Position at open` must stay inside the track length and wrap to `00:00` at each
 loop. Regression coverage is in `src/ambient/ambient-position.test.ts`.
+
+---
+
+## Change 18 — Stale interruptions no longer block Play; media-services reset rebuilds in place (iOS)
+
+**File:** `ios/AudioPro.swift`
+**Date:** 2026-10-08
+
+**Problem.** After the requested-playback-state rework, an `AVAudioSession` interruption
+`.began` latched `interruptionActive` / `requestedPlayback.interrupted`, and only `.ended` cleared
+them. iOS does not guarantee `.ended` (app suspended with an active session, another app taking
+audio while LAABS is suspended). Every play path (`resume`, `resumeRequested`, `play` → initial
+seek) then silently no-oped until relaunch. Symptom: "come back later in the day, Play does
+nothing, must restart the app." Separately, `mediaServicesWereResetNotification` was only
+observed per item and tore the player down to ERROR, leaving a dead player.
+
+**Change.**
+- `.began` with reason `.appWasSuspended` (or the legacy was-suspended key) is ignored.
+- `resume()`, `resumeRequested()` and auto-playing `play()` call `clearStaleInterruption(_:)`
+  first. A still-real interruption now surfaces as an `activation-failed` error from
+  `setActive(true)` instead of a silent no-op.
+- `handleMediaServicesReset` is registered once at init. It drops the dead `AVPlayer` (without
+  capturing its invalid clock) and re-runs `play()` with the last prepared options at the last
+  committed position, carrying the current playback request so play/pause intent is preserved.
+- `interruptionActive` is included in snapshot/trace metadata; ledger traces
+  `interruption-ignored`, `interruption-cleared`, `media-services-reset`.
+
+**Verification.** Simulator: build + baseline play/pause + background/foreground resume pass.
+The interruption and media-reset paths cannot be triggered in the simulator — verify on device
+(Siri/phone-call interruption; Settings → Developer → Reset Media Services).

@@ -111,6 +111,8 @@ class AudioPro: RCTEventEmitter {
     private var initialSeekPending = false
     private var pendingSeekCommand: String?
     private var interruptionActive = false
+    // Options of the last prepared load, kept so a media-services reset can rebuild the dead AVPlayer in place.
+    private var lastLoadOptions: NSDictionary?
     private var transportReason = "idle"
     private var timeControlObservation: NSKeyValueObservation?
     private var itemNotificationTokens: [NSObjectProtocol] = []
@@ -190,6 +192,8 @@ class AudioPro: RCTEventEmitter {
         setupAudioSessionInterruptionObserver()
         NotificationCenter.default.addObserver(self, selector: #selector(handleAudioRouteChange(_:)),
             name: AVAudioSession.routeChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleMediaServicesReset(_:)),
+            name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
 		NotificationCenter.default.addObserver(
 			self,
 			selector: #selector(handleAudioWidgetPlaybackIntent(_:)),
@@ -212,6 +216,7 @@ class AudioPro: RCTEventEmitter {
         removeCarPlayObservers()
         removeAudioSessionInterruptionObserver()
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
 		NotificationCenter.default.removeObserver(
 			self,
 			name: AudioWidgetPlaybackIntentNotification.name,
@@ -397,6 +402,14 @@ class AudioPro: RCTEventEmitter {
                   let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
             switch type {
             case .began:
+                // iOS reports a suspension of an app with an active session as an interruption
+                // that never ends. Latching it would block every later Play until relaunch.
+                if self.isSuspensionInterruption(userInfo) {
+                    self.listeningWriter.async { [weak self] in
+                        self?.listeningLedger?.trace("interruption-ignored", ["reason": "app-was-suspended"])
+                    }
+                    return
+                }
                 if !self.interruptionActive {
                     self.interruptionActive = true
                     self.requestedPlayback.interrupted = true
@@ -425,6 +438,58 @@ class AudioPro: RCTEventEmitter {
         }
     }
 
+    private func isSuspensionInterruption(_ userInfo: [AnyHashable: Any]) -> Bool {
+        if #available(iOS 14.5, *),
+           let raw = userInfo[AVAudioSessionInterruptionReasonKey] as? UInt,
+           AVAudioSession.InterruptionReason(rawValue: raw) == .appWasSuspended { return true }
+        return (userInfo[AVAudioSessionInterruptionWasSuspendedKey] as? Bool) ?? false
+    }
+
+    /// An explicit Play ends any interruption whose `.ended` notice never arrived. If the
+    /// interruption is still real, session activation fails and reports it instead of a silent no-op.
+    private func clearStaleInterruption(_ source: String) {
+        guard interruptionActive || requestedPlayback.interrupted else { return }
+        interruptionActive = false
+        requestedPlayback.interrupted = false
+        wasPlayingBeforeInterruption = false
+        listeningWriter.async { [weak self] in
+            self?.listeningLedger?.trace("interruption-cleared", ["source": source])
+        }
+    }
+
+    /// After a media-services reset every AVPlayer and the session configuration are invalid.
+    /// Rebuild the current load in place at its last known position, preserving requested intent.
+    @objc private func handleMediaServicesReset(_ notification: Notification) {
+        runOnMain {
+            self.interruptionActive = false
+            self.requestedPlayback.interrupted = false
+            self.wasPlayingBeforeInterruption = false
+            let track = self.currentTrack
+            let wasActiveLoad = track != nil && self.player != nil
+            let receiptMs = self.listeningReceipt?["trackIdentity"] as? String == track?["id"] as? String
+                ? self.getDouble(self.listeningReceipt?["trackPositionMs"]) : nil
+            let positionMs = receiptMs ?? self.lastObservedPosition * 1000
+            // Drop the dead player before reloading so no capture reads its invalid clock.
+            self.listeningTimer?.invalidate(); self.listeningTimer = nil
+            self.prepareForNewPlayback()
+            self.player = nil
+            self.transportReason = "media-services-reset"
+            self.listeningWriter.async { [weak self] in
+                self?.listeningLedger?.trace("media-services-reset", ["rebuild": wasActiveLoad, "positionMs": positionMs])
+            }
+            guard wasActiveLoad, let track, let lastOptions = self.lastLoadOptions else { return }
+            let options = lastOptions.mutableCopy() as! NSMutableDictionary
+            options["startTimeMs"] = positionMs
+            options["positionIntent"] = "resume"
+            options.removeObject(forKey: "positionCommandId")
+            // Carry the current request so play() keeps user intent instead of resetting it.
+            options["playbackRequestCommandId"] = self.requestedPlayback.commandId ?? UUID().uuidString
+            options["playbackTargetId"] = self.requestedPlayback.loadedTargetId
+            options["autoPlay"] = self.requestedPlayback.playing
+            self.play(track: track, options: options)
+        }
+    }
+
     // MARK: Native listening position ledger
     private func ledgerOnWriter() throws -> ListeningPositionLedger {
         if let listeningLedger { return listeningLedger }
@@ -443,6 +508,7 @@ class AudioPro: RCTEventEmitter {
     private func metadata() -> [String: Any] {
         var fields: [String: Any] = ["loadId": loadId as Any? ?? NSNull(), "initialSeekPending": initialSeekPending || pendingSeekCommand != nil,
                                    "reason": transportReason, "shouldBePlaying": shouldBePlaying,
+                                   "interruptionActive": interruptionActive,
                                    "requestedPlaybackState": requestedPlayback.playing ? "playing" : "paused",
                                    "playbackRequestCommandId": requestedPlayback.commandId as Any? ?? NSNull(),
                                    "playbackRequestRevision": requestedPlayback.revision,
@@ -758,6 +824,7 @@ class AudioPro: RCTEventEmitter {
             let serial = self.loadSerial
             self.isPreparingLoad = true
             // Freeze initial intent before asynchronous disk work; a later pause must win.
+            if self.getBool(options["autoPlay"]) ?? true { self.clearStaleInterruption("load") }
             if options["playbackRequestCommandId"] == nil {
                 self.shouldBePlaying = self.getBool(options["autoPlay"]) ?? true
                 self.requestedPlayback.request(self.shouldBePlaying)
@@ -811,6 +878,7 @@ class AudioPro: RCTEventEmitter {
     }
     private func playPrepared(track: NSDictionary, options: NSDictionary) {
         isPreparingLoad = false
+        lastLoadOptions = options
 		// Reset error state when playing a new track
 		isInErrorState = false
 		// Reset last emitted state when playing a new track
@@ -1192,6 +1260,7 @@ class AudioPro: RCTEventEmitter {
     @objc(resumeRequested:)
     func resumeRequested(_ commandId: String) {
         runOnMain {
+            self.clearStaleInterruption("resume-requested")
             guard self.requestedPlayback.allowStart(commandId: commandId) else { return }
             self.applyRequestedPlayback()
         }
@@ -1219,6 +1288,7 @@ class AudioPro: RCTEventEmitter {
 	func resume() {
 		runOnMain { [weak self] in
 			guard let self = self else { return }
+            self.clearStaleInterruption("resume")
             self.requestedPlayback.request(true)
             self.shouldBePlaying = true
             self.requestedPlayback.startAllowed = true
@@ -1490,9 +1560,6 @@ class AudioPro: RCTEventEmitter {
         itemNotificationTokens.append(center.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] _ in
             guard let self, self.player?.currentItem === item else { return }
             self.transportReason = "item-failed"; self.onError("The audio stream failed")
-        })
-        itemNotificationTokens.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.transportReason = "media-services-reset"; self?.onError("Audio services were reset")
         })
     }
     private func publishTransport() {
