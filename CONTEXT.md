@@ -133,7 +133,7 @@ The access state where locally downloaded audiobooks remain available without a 
 _Avoid_: Offline mode
 
 **Signed-Out Required Sign-In**:
-The app state with no usable User Session where sign-in is required before any audiobook browsing or playback.
+The app state with no usable User Session and no chosen Imported-Only Mode, where the Welcome Choice must be made before any audiobook browsing or playback.
 _Avoid_: Downloaded-only mode, offline mode
 
 **Downloaded Audio Asset**:
@@ -145,7 +145,7 @@ The Audiobookshelf User Identity whose local listening state should change when 
 _Avoid_: download entitlement, sync server
 
 **Listening State Owner**:
-The Audiobookshelf User Identity whose local listening state (Bookmark, Progress Sync Intent, Listening Position, Playback Rate, Listening Interruption) applies to an audiobook right now: the signed-in or remembered User Session identity when present, otherwise the audiobook's Downloaded Audio Asset Owner.
+Whoever's local listening state (Bookmark, Progress Sync Intent, Listening Position, Playback Rate, Listening Interruption) applies to an audiobook right now. For an Audiobookshelf audiobook it is an Audiobookshelf User Identity: the signed-in or remembered User Session identity when present, otherwise the audiobook's Downloaded Audio Asset Owner. For an Imported Audiobook it is always the Device Listener.
 _Avoid_: current user, owner key
 
 **Legacy Downloaded Audio Asset**:
@@ -155,6 +155,38 @@ _Avoid_: Orphaned download
 **Local Data Reset Notice**:
 A user-facing explanation that LAABS Audio must discard old local user-scoped data because it cannot be trusted under the current identity model.
 _Avoid_: migration prompt, repair flow
+
+**Imported Audiobook**:
+An audiobook whose audio came from the user's own files (iCloud Drive or on-device storage) rather than from an Audiobookshelf Server. It has no Audiobook Identity, never syncs to any Audiobookshelf Server, and is usable regardless of Session State.
+_Avoid_: Local book, device book, sideloaded book, Downloaded Audio Asset (for imported audio)
+
+**Audio Import**:
+The user-initiated action that copies audio files from the user's own storage into LAABS Audio and creates an Imported Audiobook. The original file is never modified or removed.
+_Avoid_: Upload, download (for imported audio), add file
+
+**Imported Audiobook Metadata**:
+The title, author, cover, and chapters of an Imported Audiobook, read from the audio file's embedded tags (falling back to the file name) and editable by the user.
+_Avoid_: Library Item metadata (for imported audio)
+
+**Device Listener**:
+The Listening State Owner for every Imported Audiobook: one device-wide owner shared by all User Sessions and by no User Session at all.
+_Avoid_: Anonymous user, local user, guest
+
+**Imported-Only Mode**:
+The Access Mode where the user has chosen to use LAABS Audio without any User Session; only Imported Audiobooks and Audio Import are available.
+_Avoid_: Offline mode, Downloaded-Only Mode, guest mode
+
+**Welcome Choice**:
+The entry surface shown in Signed-Out Required Sign-In that offers two equal paths: start User Session Entry for an Audiobookshelf Server, or enter Imported-Only Mode.
+_Avoid_: Login screen, onboarding, first-run sign-in
+
+**Missing Imported Audio**:
+The state of an Imported Audiobook whose metadata and Device Listener state exist but whose imported audio is absent from the device, such as after restoring the device from a backup. Re-importing the same audio returns it to a playable state.
+_Avoid_: Broken import, orphaned import, Legacy Downloaded Audio Asset
+
+**Imported Shelf**:
+A Home shelf that lists Imported Audiobooks.
+_Avoid_: Local shelf, Downloaded shelf (for imported audio)
 
 **Download Availability**:
 The condition where a signed-in User Session may use a Downloaded Audio Asset because the User Session can access the same Audiobook Identity or Episode Identity on the Audiobookshelf Server.
@@ -572,6 +604,14 @@ _Avoid_: Siri response, dialog, snippet
 - Durable user-owned app state, including **Bookmark** state, **Shelf Membership**, **Listening Position**, and **Progress Sync Intent** state, belongs to the **Audiobookshelf User Identity**.
 - The **Listening State Owner** for an audiobook is the active **User Session**'s **Audiobookshelf User Identity** when signed in or remembered, otherwise the audiobook's **Downloaded Audio Asset Owner**.
 - The **Server Connection Endpoint** is used for API calls, not for durable user-owned app state identity.
+- An **Imported Audiobook**'s listening state belongs to the **Device Listener**, so it is the same across every **User Session** and without one.
+- An **Imported Audiobook** is never a **Downloaded Audio Asset** and is never subject to **Download Availability**.
+- **Imported Audiobooks** appear on the **Imported Shelf** and may also appear in Continue Listening; every surface marks them as not from Audiobookshelf.
+- An **Imported Audiobook** is a book with an ordered list of one or more audio files; without embedded chapters, each file is one chapter.
+- **Audio Import** of audio already imported offers to open the existing **Imported Audiobook** instead of creating a duplicate.
+- Removing an **Imported Audiobook** deletes its imported audio but keeps its **Device Listener** state unless the user explicitly chooses to delete that too; re-importing the same audio restores that state.
+- **Imported Audiobooks** support local **Bookmarks**, **Clip Bookmarks**, **Clip Export**, **Clip Transcription**, and **Book Transcripts**, but never **Server Bookmarks**, **Progress Sync Intents**, **Favorites**, **Collections**, **Playlist Shelves**, or **Read-Along**.
+- Explicit logout enters **Imported-Only Mode** rather than **Signed-Out Required Sign-In** when **Imported Audiobooks** exist and no owned **Downloaded Audio Assets** do.
 - Multiple **Remembered User Sessions** may belong to the same Audiobookshelf Server when they use different **Audiobookshelf User Identities**.
 - Switching from one signed-in User Session to another crosses a User Session boundary.
 - **Session Restoration** may use remembered tokens or remembered credentials for the same Remembered User Session.
@@ -696,6 +736,9 @@ _Avoid_: Siri response, dialog, snippet
 - **Signed-Out Required Sign-In** is an **Access Mode** where sign-in is required before app entry.
 - **Session Needs Sign-In** uses an **Access Mode** where only downloads for the remembered **User Session** and account recovery surfaces are available.
 - A first run with no **User Session** uses **Signed-Out Required Sign-In**.
+- Choosing Imported-Only Mode at the **Welcome Choice** is remembered; the **Welcome Choice** is not shown again while **Imported-Only Mode** remains available.
+- Explicit logout with no owned **Downloaded Audio Assets** and no **Imported Audiobooks** returns to the **Welcome Choice**.
+- Connecting an **Audiobookshelf Server** from **Imported-Only Mode** runs ordinary **User Session Entry**; **Imported Audiobooks** are unaffected.
 - A signed-in **User Session** with an **Active Library** uses an **Access Mode** where server browsing, streaming, search, and sync are available.
 - App entry is guarded by **Access Mode**, not by **Session State** alone.
 - Manual sign-in from **Session Needs Sign-In** is dismissible only when remembered downloaded content is available.
