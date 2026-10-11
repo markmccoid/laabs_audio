@@ -16,6 +16,7 @@ type SettingsRowProps = {
     | "/(tabs)/settings/progress-logs"
     | "/(tabs)/settings/siri-shortcuts"
     | "/(tabs)/settings/shadow-sqlite"
+    | "/(tabs)/settings/import-spike"
     | "/(tabs)/settings/playback"
     | "/(tabs)/settings/support"
     | "/(tabs)/settings/system"
@@ -186,6 +187,14 @@ export const SettingsHomeScreen = () => {
                 title="Siri & Shortcuts"
                 subtitle="Voice phrases and LAABS Audio actions"
                 icon="mic.badge.plus"
+              />
+            ) : null}
+            {__DEV__ ? (
+              <SettingsRow
+                href="/(tabs)/settings/import-spike"
+                title="Import Spike"
+                subtitle="Dev only: audio import metadata and backup checks"
+                icon="square.and.arrow.down"
               />
             ) : null}
             {/* <SettingsRow

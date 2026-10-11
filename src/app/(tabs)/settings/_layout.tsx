@@ -32,6 +32,10 @@ const SettingLayout = () => {
         options={{ title: "Progress Logs", headerTransparent: true }}
       />
       <Stack.Screen
+        name="import-spike"
+        options={{ title: "Import Spike", headerTransparent: true }}
+      />
+      <Stack.Screen
         name="shadow-sqlite"
         options={{ title: "Shadow SQLite", headerTransparent: true }}
       />
