@@ -62,14 +62,40 @@ Gotchas:
 
 - **Both modes copy into the sandbox.** iOS opens the picker in import mode, so we never hold a
   long-lived security-scoped URL. That fits the "copy the file" decision.
-- **Use `copyToCacheDirectory: true` + `moveAsync`.** It's one system copy plus an instant move,
-  and it leaves nothing behind. Take the display name from `asset.name`, not the URI.
+- ~~Use `copyToCacheDirectory: true` + `moveAsync`.~~ **Superseded:** expo copies twice, does
+  the second copy on the main thread, and leaves the first copy in the Inbox. See "Second-pick hang"
+  below.
 - **On device, a 233 MB m4b imported fine**: `moveAsync` took 4 ms. The picker reported
   `mimeType: application/octet-stream` for `.m4b`, so **validate by extension plus `isPlayable`,
   never by mimeType**.
 - **`audio/*` returns `.m4a`** as `audio/x-m4a`. The mp3 and m4b picker paths weren't exercised
   (simulator Files browsing was blank), but they read correctly from a path.
 - **Picker timings in the spike include tapping time and aren't meaningful.**
+
+### Second-pick hang with expo-document-picker (reported on device, 2026-10-10)
+
+What the user saw: after clearing the spike data, a second pick of the 250 MB m4b sometimes did
+nothing. The picker stayed on screen showing the file. The first pick returned in 1–2 s.
+
+The cause is in expo-document-picker 57.0.2's iOS code (`DocumentPickerModule.swift`):
+1. It opens the picker with `asCopy: true`, so iOS copies the file into
+   `tmp/<bundle>-Inbox/` before the app is told. **That copy is never deleted.** Simulator
+   confirmed it: each expo pick adds a file to the Inbox.
+2. With `copyToCacheDirectory`, it does a second, **synchronous `FileManager.copyItem` on the
+   main thread** inside `didPickDocumentsAt`. A 250 MB copy there freezes the UI with the picker
+   still on screen. The leftover Inbox copies fill storage and make later copies slower.
+
+Native alternative (`AudioImport.pickAndCopyAudio`): opens the picker with `asCopy: false`, then
+does one `NSFileCoordinator` copy on a background queue straight into the destination. The
+coordinated read also makes iOS download an iCloud-evicted file first, and reports how long that
+wait took as `coordinationWaitMs`.
+
+Simulator smoke test: all steps passed. The native pick is security-scoped. On a 1.6 MB file the
+coordination wait was 11 ms and the copy took 0.3 ms. It left no Inbox leftover. Swiping to
+dismiss resolves `canceled`, and the picker reopens afterwards. Clearing leftovers works.
+
+**Decision (pending device confirmation):** production import uses the native picker, not
+expo-document-picker.
 
 ## Backup exclusion
 
@@ -87,8 +113,9 @@ Gotchas:
    resolved `title / author / narrator / description / coverUri / chapters`, using the mapping
    rules above. Keep `raw` behind a debug flag only.
 2. **Phase 1:** set backup exclusion on the `laabs-imports` root at startup.
-3. **Phase 2:** the import uses `copyToCacheDirectory: true` and then `moveAsync`. Duplicate
-   fingerprint = `asset.name` + size + duration.
+3. **Phase 2:** the import uses the native `pickAndCopyAudio` picker: one copy, off the main
+   thread, no Inbox leftovers. Not expo-document-picker. Duplicate fingerprint = name + size +
+   duration.
 4. **Chapter fallback:** a single whole-file chapter counts as no chapters. Trim chapter titles.
 5. **Format validation:** by file extension plus `isPlayable`, not mimeType.
 

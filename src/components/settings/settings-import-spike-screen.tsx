@@ -1,6 +1,10 @@
 // Phase 0 spike for Imported Audiobooks — dev only, delete after the spike.
 // See docs/imported-audiobooks-implementation-plan.md and docs/imported-audiobooks-spike.md.
-import AudioImport, { type AudioImportMetadata } from "@/native/audio-import/AudioImportModule";
+import AudioImport, {
+  type AudioImportMetadata,
+  type AudioImportPickResult,
+  type PickerLeftoverReport,
+} from "@/native/audio-import/AudioImportModule";
 import { ensureAppDirectory, getDocumentDirectory } from "@/store/fileSystemAccess";
 import { useThemeColors } from "@/theme/use-app-theme";
 import * as DocumentPicker from "expo-document-picker";
@@ -13,6 +17,9 @@ const SPIKE_DIRECTORY = "laabs-imports-spike";
 
 type SpikeResult = {
   step: string;
+  picker?: "expo" | "native";
+  nativePick?: AudioImportPickResult;
+  leftoversAfter?: PickerLeftoverReport;
   pickerMs?: number;
   moveMs?: number;
   pickedUri?: string;
@@ -43,7 +50,7 @@ export const SettingsImportSpikeScreen = () => {
 
   const pickAndImport = async () => {
     setBusy(true);
-    const partial: SpikeResult = { step: "pick" };
+    const partial: SpikeResult = { step: "pick", picker: "expo" };
     try {
       const pickStarted = Date.now();
       const picked = await DocumentPicker.getDocumentAsync({
@@ -80,12 +87,43 @@ export const SettingsImportSpikeScreen = () => {
 
       partial.step = "metadata";
       partial.metadata = await AudioImport.readAudioMetadata(storedUri);
+      partial.leftoversAfter = await AudioImport.pickerLeftoverReport();
       finish({ ...partial, step: "done" });
     } catch (error) {
       finish({ ...partial, error: error instanceof Error ? error.message : String(error) });
     } finally {
       setBusy(false);
     }
+  };
+
+  const nativePickAndImport = async () => {
+    setBusy(true);
+    const partial: SpikeResult = { step: "pick", picker: "native" };
+    try {
+      const directoryUri = await ensureAppDirectory(`${SPIKE_DIRECTORY}/${Date.now()}`);
+      const picked = await AudioImport.pickAndCopyAudio(directoryUri);
+      partial.nativePick = picked;
+      if (picked.canceled) {
+        finish({ ...partial, step: "cancelled" });
+        return;
+      }
+      partial.storedUri = picked.uri;
+      partial.step = "backup";
+      const root = `${getDocumentDirectory()}${SPIKE_DIRECTORY}/`;
+      partial.dirExcludedFromBackup = await AudioImport.setExcludedFromBackup(root, true);
+      partial.step = "metadata";
+      partial.metadata = await AudioImport.readAudioMetadata(picked.uri);
+      partial.leftoversAfter = await AudioImport.pickerLeftoverReport();
+      finish({ ...partial, step: "done" });
+    } catch (error) {
+      finish({ ...partial, error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const showLeftovers = async () => {
+    finish({ step: "leftovers", leftoversAfter: await AudioImport.pickerLeftoverReport() });
   };
 
   const readFromPath = async () => {
@@ -107,7 +145,8 @@ export const SettingsImportSpikeScreen = () => {
   const clearSpikeFolder = async () => {
     const root = `${getDocumentDirectory()}${SPIKE_DIRECTORY}/`;
     await FileSystem.deleteAsync(root, { idempotent: true });
-    finish({ step: "cleared" });
+    await AudioImport.clearPickerLeftovers();
+    finish({ step: "cleared", leftoversAfter: await AudioImport.pickerLeftoverReport() });
   };
 
   const button = (title: string, onPress: () => void, testID: string) => (
@@ -136,7 +175,9 @@ export const SettingsImportSpikeScreen = () => {
         <Text style={{ color: themeColors.text }}>copyToCacheDirectory</Text>
         <Switch testID="import-spike-copy-toggle" value={copyToCache} onValueChange={setCopyToCache} />
       </View>
-      {button("Pick audio file and import", pickAndImport, "import-spike-pick")}
+      {button("Pick audio file and import (expo picker)", pickAndImport, "import-spike-pick")}
+      {button("Pick audio file and import (native picker)", nativePickAndImport, "import-spike-native-pick")}
+      {button("Show picker leftovers (tmp Inbox, cache)", showLeftovers, "import-spike-leftovers")}
       <TextInput
         testID="import-spike-path"
         value={pathInput}
@@ -148,7 +189,7 @@ export const SettingsImportSpikeScreen = () => {
         style={{ color: themeColors.text, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, padding: 10, fontSize: 15 }}
       />
       {button("Read metadata from path", readFromPath, "import-spike-read-path")}
-      {button("Clear spike folder", clearSpikeFolder, "import-spike-clear")}
+      {button("Clear spike folder and picker leftovers", clearSpikeFolder, "import-spike-clear")}
       {result?.metadata?.artworkUri ? (
         <Image source={{ uri: result.metadata.artworkUri }} style={{ width: 120, height: 120, borderRadius: 8 }} />
       ) : null}

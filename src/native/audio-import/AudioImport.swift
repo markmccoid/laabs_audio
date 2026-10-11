@@ -1,11 +1,72 @@
 internal import ExpoModulesCore
 import AVFoundation
+import UIKit
+import UniformTypeIdentifiers
 
 // Phase 0 spike for Imported Audiobooks (docs/imported-audiobooks-implementation-plan.md).
 // Reads what AVFoundation exposes for a local audio file and toggles iCloud backup exclusion.
 class AudioImport: Module {
+  private var pickerDelegate: AudioPickerDelegate?
+
   func definition() -> ModuleDefinition {
     Name("AudioImport")
+
+    // Native alternative to expo-document-picker: opens the picker in place (asCopy: false) and does
+    // one coordinated copy on a background queue, so a large file never blocks the main thread
+    // and nothing is left behind in tmp/<bundle>-Inbox.
+    AsyncFunction("pickAndCopyAudio") { (destinationDirectory: String, promise: Promise) in
+      if self.pickerDelegate != nil {
+        promise.reject("ERR_IN_PROGRESS", "A pick is already in progress")
+        return
+      }
+      guard let presenter = self.appContext?.utilities?.currentViewController(),
+            let destination = Self.resolveFileURL(destinationDirectory) else {
+        promise.reject("ERR_PRESENT", "Cannot present picker")
+        return
+      }
+      var types: [UTType] = [.audio]
+      if let m4b = UTType("com.apple.m4b-audio") { types.append(m4b) }
+      let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
+      picker.allowsMultipleSelection = false
+      let presentedAt = Date()
+      let delegate = AudioPickerDelegate { [weak self] url in
+        self?.pickerDelegate = nil
+        guard let url else {
+          promise.resolve(["canceled": true])
+          return
+        }
+        let pickedAt = Date()
+        DispatchQueue.global(qos: .userInitiated).async {
+          do {
+            let result = try Self.coordinatedCopy(from: url, into: destination)
+            var payload = result
+            payload["canceled"] = false
+            payload["pickerOpenMs"] = pickedAt.timeIntervalSince(presentedAt) * 1000
+            promise.resolve(payload)
+          } catch {
+            promise.reject("ERR_COPY", error.localizedDescription)
+          }
+        }
+      }
+      self.pickerDelegate = delegate
+      picker.delegate = delegate
+      picker.presentationController?.delegate = delegate
+      presenter.present(picker, animated: true)
+    }.runOnQueue(.main)
+
+    // Sizes of the places expo-document-picker leaves copies behind.
+    AsyncFunction("pickerLeftoverReport") { () -> [String: Any] in
+      return Self.leftoverDirectories().reduce(into: [String: Any]()) { report, entry in
+        report[entry.key] = ["bytes": NSNumber(value: Self.directorySize(entry.value)), "files": Self.fileCount(entry.value)]
+      }
+    }
+
+    AsyncFunction("clearPickerLeftovers") { () -> Bool in
+      for url in Self.leftoverDirectories().values {
+        try? FileManager.default.removeItem(at: url)
+      }
+      return true
+    }
 
     AsyncFunction("readAudioMetadata") { (fileUrl: String) async throws -> [String: Any] in
       guard let url = Self.resolveFileURL(fileUrl) else {
@@ -30,6 +91,68 @@ class AudioImport: Module {
       }
       return try Self.isExcludedFromBackup(url)
     }
+  }
+
+  private static func coordinatedCopy(from source: URL, into directory: URL) throws -> [String: Any] {
+    let accessing = source.startAccessingSecurityScopedResource()
+    defer { if accessing { source.stopAccessingSecurityScopedResource() } }
+
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let target = directory.appendingPathComponent(source.lastPathComponent)
+    try? FileManager.default.removeItem(at: target)
+
+    let coordinationStarted = Date()
+    var coordinationWaitMs: Double = 0
+    var copyMs: Double = 0
+    var copyError: Error?
+    var coordinatorError: NSError?
+    // Coordinated reading makes iOS download an iCloud-evicted file before the block runs.
+    NSFileCoordinator().coordinate(readingItemAt: source, options: [.withoutChanges], error: &coordinatorError) { readURL in
+      coordinationWaitMs = Date().timeIntervalSince(coordinationStarted) * 1000
+      let copyStarted = Date()
+      do {
+        try FileManager.default.copyItem(at: readURL, to: target)
+      } catch {
+        copyError = error
+      }
+      copyMs = Date().timeIntervalSince(copyStarted) * 1000
+    }
+    if let error = coordinatorError ?? copyError { throw error }
+
+    let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? NSNumber)?.int64Value ?? 0
+    return [
+      "uri": target.absoluteString,
+      "name": source.lastPathComponent,
+      "size": NSNumber(value: size),
+      "securityScoped": accessing,
+      "coordinationWaitMs": coordinationWaitMs,
+      "copyMs": copyMs,
+    ]
+  }
+
+  private static func leftoverDirectories() -> [String: URL] {
+    let fm = FileManager.default
+    let bundleId = Bundle.main.bundleIdentifier ?? ""
+    var result: [String: URL] = [
+      "inbox": fm.temporaryDirectory.appendingPathComponent("\(bundleId)-Inbox", isDirectory: true),
+    ]
+    if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
+      result["documentPickerCache"] = caches.appendingPathComponent("DocumentPicker", isDirectory: true)
+    }
+    return result
+  }
+
+  private static func directorySize(_ url: URL) -> Int64 {
+    guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
+    var total: Int64 = 0
+    for case let file as URL in enumerator {
+      total += Int64((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+    }
+    return total
+  }
+
+  private static func fileCount(_ url: URL) -> Int {
+    (try? FileManager.default.contentsOfDirectory(atPath: url.path).count) ?? 0
   }
 
   private static func isExcludedFromBackup(_ url: URL) throws -> Bool {
@@ -150,5 +273,31 @@ class AudioImport: Module {
       return URL(fileURLWithPath: value)
     }
     return URL(string: value)
+  }
+}
+
+private final class AudioPickerDelegate: NSObject, UIDocumentPickerDelegate, UIAdaptivePresentationControllerDelegate {
+  private var completion: ((URL?) -> Void)?
+
+  init(completion: @escaping (URL?) -> Void) {
+    self.completion = completion
+  }
+
+  func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    finish(urls.first)
+  }
+
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    finish(nil)
+  }
+
+  func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+    finish(nil)
+  }
+
+  private func finish(_ url: URL?) {
+    guard let completion else { return }
+    self.completion = nil
+    completion(url)
   }
 }
