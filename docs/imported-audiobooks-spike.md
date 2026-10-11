@@ -38,8 +38,15 @@ Gotchas:
 
 - m4b chapter groups load through `loadChapterMetadataGroups`. Both fixtures exposed one
   full-length "Chapter 01" from `chpl` (`chapterLocales: ["und"]`).
-- **Multi-chapter m4b is untested.** No fixture had more than one chapter, and no tool to make one
-  was available (no ffmpeg or mp4chaps).
+- **Multi-chapter m4b: ✅ verified on device** (2026-10-10, release build, 233 MB m4b, 7h50m,
+  18 chapters). Chapter starts are contiguous, and the last chapter's end equals the file
+  duration exactly. Reading took 57 ms.
+  - Titles come back padded (`" Chapter 2- Lists "`), so **trim chapter titles**.
+  - The chapters in that file are in *alphabetical* order ("Acknowledgments, Chapter 1…13, Ending
+    Credits, …, Introduction, Opening Credits"). The audio itself was assembled that way by
+    whatever tool built the m4b. We play chapters in time order and never re-sort them. This is
+    also real-world evidence for multi-file import: plain alphabetical sorting goes wrong, so
+    prefer track-number tags (`trkn` / `TRCK`) over filename order.
 - **mp3 ID3 `CHAP` chapters are untested.** AVFoundation is not known to expose ID3 `CHAP` frames.
   If it doesn't, mp3 chapters need a small ID3 parser in the native module, or we accept
   "one chapter per file" for mp3.
@@ -57,6 +64,9 @@ Gotchas:
   long-lived security-scoped URL. That fits the "copy the file" decision.
 - **Use `copyToCacheDirectory: true` + `moveAsync`.** It's one system copy plus an instant move,
   and it leaves nothing behind. Take the display name from `asset.name`, not the URI.
+- **On device, a 233 MB m4b imported fine**: `moveAsync` took 4 ms. The picker reported
+  `mimeType: application/octet-stream` for `.m4b`, so **validate by extension plus `isPlayable`,
+  never by mimeType**.
 - **`audio/*` returns `.m4a`** as `audio/x-m4a`. The mp3 and m4b picker paths weren't exercised
   (simulator Files browsing was blank), but they read correctly from a path.
 - **Picker timings in the spike include tapping time and aren't meaningful.**
@@ -79,11 +89,12 @@ Gotchas:
 2. **Phase 1:** set backup exclusion on the `laabs-imports` root at startup.
 3. **Phase 2:** the import uses `copyToCacheDirectory: true` and then `moveAsync`. Duplicate
    fingerprint = `asset.name` + size + duration.
-4. **Chapter fallback:** a single whole-file chapter counts as no chapters.
+4. **Chapter fallback:** a single whole-file chapter counts as no chapters. Trim chapter titles.
+5. **Format validation:** by file extension plus `isPlayable`, not mimeType.
 
 ## Still open: needs a physical device or better fixtures
 
-- [ ] **Multi-chapter m4b**: pick a real one on device and confirm the chapter titles and starts.
+- [x] **Multi-chapter m4b**: verified on device (18 chapters).
 - [ ] **mp3 with ID3 `CHAP` chapters**: confirm whether AVFoundation exposes them.
 - [ ] **iCloud-evicted files**: does the picker block while downloading, how long does it take,
       and what happens on failure or cancel?
