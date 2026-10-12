@@ -38,8 +38,19 @@ export type ImportedAudiobookRecord = {
    * tombstone so re-importing the same audio reuses this id and gets its listening state back.
    */
   removedAt: number | null;
+  listening: ImportedListeningSnapshot | null;
   importedAt: number;
   updatedAt: number;
+};
+
+/**
+ * Display projection of the Device Listener's Listening Position, for shelves and lists. The native
+ * Listening Position ledger stays authoritative for playback resume.
+ */
+export type ImportedListeningSnapshot = {
+  positionSeconds: number;
+  isFinished: boolean;
+  lastListenedAt: number;
 };
 
 export type ImportedAudiobookMetadataEdit = Partial<
@@ -62,6 +73,10 @@ export type ImportedBooksState = PersistedImportedBooksState & {
     ) => void;
     setImportedBookAudioPresent: (id: string, audioPresent: boolean) => void;
     markImportedBookRemoved: (id: string) => void;
+    recordImportedListening: (
+      id: string,
+      listening: { positionSeconds: number; isFinished: boolean } | null,
+    ) => void;
     removeImportedBook: (id: string) => void;
   };
 };
@@ -118,6 +133,21 @@ export const importedBooksStore = createStore<ImportedBooksState>()(
               removedAt: Date.now(),
             })),
           ),
+        recordImportedListening: (id, listening) =>
+          set((state) => {
+            const record = state.importedBooksById[id];
+            if (!record) return state;
+            return {
+              importedBooksById: {
+                ...state.importedBooksById,
+                // No updatedAt bump: listening is not a metadata change.
+                [id]: {
+                  ...record,
+                  listening: listening ? { ...listening, lastListenedAt: Date.now() } : null,
+                },
+              },
+            };
+          }),
         removeImportedBook: (id) =>
           set((state) => {
             if (!state.importedBooksById[id]) return state;
@@ -131,7 +161,17 @@ export const importedBooksStore = createStore<ImportedBooksState>()(
     }),
     {
       name: "laabs-imported-books",
-      version: 1,
+      version: 2,
+      migrate: (persisted, version) => {
+        const state = (persisted ?? getBasePersistedState()) as PersistedImportedBooksState;
+        if (version < 2) {
+          for (const record of Object.values(state.importedBooksById ?? {})) {
+            record.listening ??= null;
+            record.removedAt ??= null;
+          }
+        }
+        return state;
+      },
       storage: createJSONStorage(() => mmkvStorage),
       partialize: (state): PersistedImportedBooksState => ({
         importedBooksById: state.importedBooksById,

@@ -1,5 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isImportedAudiobookId } from "@/imported/imported-audiobook-identity";
+import { toImportedItemDetails } from "@/imported/imported-audiobook-presentation";
+import { resolveImportedCoverUri, useImportedBookRecord } from "@/imported/use-imported-books";
 import { useCallback, useEffect, useMemo } from "react";
 import { itemsApi, type ItemDetails } from "../api/items-api";
 import { librariesApi, type LibraryFilterData } from "../api/libraries-api";
@@ -392,6 +394,14 @@ export const useGetItemDetails = (itemId?: string) => {
     itemId ? state.downloadedBookData[itemId] : undefined,
   );
   const downloadedCoverLocalUri = resolveStoredDownloadCoverUri(downloadedBookData);
+  const importedRecord = useImportedBookRecord(isImportedAudiobookId(itemId) ? itemId : null);
+  const importedDetails = useMemo(
+    () =>
+      importedRecord
+        ? toImportedItemDetails(importedRecord, resolveImportedCoverUri(importedRecord))
+        : undefined,
+    [importedRecord],
+  );
 
   // Always call useQuery, but control when it's enabled
   const {
@@ -497,6 +507,18 @@ export const useGetItemDetails = (itemId?: string) => {
   const resolvedData = shouldUseDownloadedFallback ? downloadedFallback : data;
   // console.log("useGetItemDetails coveruri", data?.coverUri);
   // console.log("useGetItemDetails FULL", data?.coverFull);
+
+  // Imported Audiobooks come from the device in every auth state, never from Audiobookshelf.
+  if (isImportedAudiobookId(itemId)) {
+    return {
+      data: importedDetails,
+      isPending: false,
+      isError: !importedDetails,
+      isLoading: false,
+      error: importedDetails ? null : new Error("Imported audiobook not found"),
+      ...rest,
+    };
+  }
 
   // Return appropriate data based on authentication state — delegates to the
   // pure selectItemDetailsResult helper so it can be unit-tested without a

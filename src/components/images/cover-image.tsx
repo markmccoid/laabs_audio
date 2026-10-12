@@ -3,6 +3,8 @@ import { useAuthStore } from "@/auth/auth-store";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
+import { ImportedCoverBadge } from "@/components/imported/imported-badge";
+import { isImportedAudiobookId } from "@/imported/imported-audiobook-identity";
 import { Image, type ImageProps } from "expo-image";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useMemo, useState } from "react";
@@ -63,6 +65,11 @@ export const resolveCoverImageCandidates = ({
       tokenlessRemoteUri: null,
       tokenedRemoteUri: null,
     };
+  }
+
+  // Imported Audiobooks have no server cover: local art or the default cover only.
+  if (isImportedAudiobookId(libraryItemId)) {
+    return { localUri: null, tokenlessRemoteUri: null, tokenedRemoteUri: null };
   }
 
   if (libraryItemId && serverUrl) {
@@ -199,7 +206,8 @@ export const CoverImage = ({
   });
   const shouldShowFavoriteIndicator = showFavoriteIndicator && showFavoriteBadgeOnCovers;
   const shouldShowFinishedIndicator = showFinishedIndicator && showFinishedBadgeOnCovers;
-  const shouldShowDownloadedIndicator = showDownloadedIndicator;
+  const shouldShowImportedIndicator = isImportedAudiobookId(libraryItemId);
+  const shouldShowDownloadedIndicator = showDownloadedIndicator && !shouldShowImportedIndicator;
 
   const handleError: NonNullable<ImageProps["onError"]> = (event) => {
     resolved.onError(event);
@@ -209,7 +217,8 @@ export const CoverImage = ({
   if (
     !shouldShowFinishedIndicator &&
     !shouldShowFavoriteIndicator &&
-    !shouldShowDownloadedIndicator
+    !shouldShowDownloadedIndicator &&
+    !shouldShowImportedIndicator
   ) {
     return <Image {...props} style={style} source={resolved.source} onError={handleError} />;
   }
@@ -291,6 +300,7 @@ export const CoverImage = ({
           <SymbolView name="icloud.fill" size={indicatorSize} tintColor={themeColors.accent} />
         </View>
       ) : null}
+      {shouldShowImportedIndicator ? <ImportedCoverBadge size={indicatorSize} inset={indicatorInset} /> : null}
     </View>
   );
 };

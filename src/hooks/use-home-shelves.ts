@@ -21,6 +21,8 @@ import {
   type PlaylistShelfSyncState,
 } from "../store/device-books-store";
 import { toDownloadedBookSummary } from "../store/downloaded-book-helpers";
+import { mergeContinueListening } from "../imported/imported-audiobook-presentation";
+import { useImportedBookListData } from "../imported/use-imported-books";
 import {
   DEFAULT_HOME_SHELF_ITEM_COUNT,
   type HomeShelfSettings,
@@ -402,16 +404,30 @@ export const useHomeShelves = () => {
     [homeProjection?.favoriteByBookId],
   );
 
+  const importedBookListData = useImportedBookListData();
   const continueListening = useMemo(() => {
     return measureStartupSync(
       "home continue listening projection",
-      () => homeProjection?.continueListening ?? EMPTY_CATALOG,
+      // Imported Audiobooks join Continue Listening by when they were last listened to.
+      () =>
+        mergeContinueListening(
+          homeProjection?.continueListening ?? EMPTY_CATALOG,
+          progressByBookId,
+          importedBookListData.continueListening,
+        ),
       (books) => ({
         progressCount: Object.keys(progressByBookId).length,
         bookCount: books.length,
       }),
     );
-  }, [homeProjection?.continueListening, progressByBookId]);
+  }, [homeProjection?.continueListening, importedBookListData.continueListening, progressByBookId]);
+  const progressByBookIdWithImported = useMemo(
+    () =>
+      Object.keys(importedBookListData.progressByBookId).length
+        ? { ...progressByBookId, ...importedBookListData.progressByBookId }
+        : progressByBookId,
+    [importedBookListData.progressByBookId, progressByBookId],
+  );
 
   const recentlyAdded = useMemo(() => {
     return measureStartupSync(
@@ -920,7 +936,8 @@ export const useHomeShelves = () => {
     playlistShelves,
     suppressedPlaylistShelves,
     favoriteByBookId,
-    progressByBookId,
+    progressByBookId: progressByBookIdWithImported,
+    importedBooks: importedBookListData.books,
     refreshDiscover,
   };
 };

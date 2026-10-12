@@ -11,10 +11,15 @@ class AudioImport: Module {
   func definition() -> ModuleDefinition {
     Name("AudioImport")
 
+    // Fired once the user has chosen a file and the coordinated copy (which may first download it
+    // from iCloud) begins, so the UI can switch from "picker open" to "importing".
+    Events("onImportCopyStarted")
+
     // Native alternative to expo-document-picker: opens the picker in place (asCopy: false) and does
     // one coordinated copy on a background queue, so a large file never blocks the main thread
     // and nothing is left behind in tmp/<bundle>-Inbox.
-    AsyncFunction("pickAndCopyAudio") { (destinationDirectory: String, promise: Promise) in
+    // `kind` is "audio" (default) or "image" (cover art).
+    AsyncFunction("pickAndCopyAudio") { (destinationDirectory: String, kind: String?, promise: Promise) in
       if self.pickerDelegate != nil {
         promise.reject("ERR_IN_PROGRESS", "A pick is already in progress")
         return
@@ -24,18 +29,20 @@ class AudioImport: Module {
         promise.reject("ERR_PRESENT", "Cannot present picker")
         return
       }
-      var types: [UTType] = [.audio]
-      if let m4b = UTType("com.apple.m4b-audio") { types.append(m4b) }
+      var types: [UTType] = kind == "image" ? [.image] : [.audio]
+      if kind != "image", let m4b = UTType("com.apple.m4b-audio") { types.append(m4b) }
       let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
       picker.allowsMultipleSelection = false
       let presentedAt = Date()
-      let delegate = AudioPickerDelegate { [weak self] url in
-        self?.pickerDelegate = nil
+      // Strong capture is fine: the delegate is released when the pick finishes.
+      let delegate = AudioPickerDelegate { url in
+        self.pickerDelegate = nil
         guard let url else {
           promise.resolve(["canceled": true])
           return
         }
         let pickedAt = Date()
+        self.sendEvent("onImportCopyStarted", ["name": url.lastPathComponent])
         DispatchQueue.global(qos: .userInitiated).async {
           do {
             let result = try Self.coordinatedCopy(from: url, into: destination)

@@ -1,4 +1,4 @@
-import { Host, Picker, Text as SwiftText } from "@expo/ui/swift-ui";
+import { Host, Image as SwiftImage, Picker, Text as SwiftText } from "@expo/ui/swift-ui";
 import { lineLimit, minimumScaleFactor, pickerStyle, tag } from "@expo/ui/swift-ui/modifiers";
 import { useActiveLibraryExperience } from "@/auth/active-library-experience";
 import { PodcastShowsBrowser } from "@/components/podcast/podcast-shows-browser";
@@ -11,14 +11,21 @@ import {
 } from "@/library/lists-preferences-store";
 import { usePodcastSeriesByTitle } from "@/podcast/use-podcast-series";
 import { SERIES_SORT_OPTIONS } from "@/sort/series-sort";
-import { Stack } from "expo-router";
-import { useMemo, useState } from "react";
+import {
+  AudioImportProgressOverlay,
+  useAudioImportFlow,
+} from "@/components/imported/use-audio-import-flow";
+import { ImportedBooksSegment } from "@/components/imported/imported-books-segment";
+import { Stack, router, useLocalSearchParams } from "expo-router";
+import { useEffect, useMemo, useState } from "react";
 import { View } from "react-native";
 import { CollectionsSegment } from "./collections-segment";
 import { PlaylistsSegment } from "./playlists-segment";
 import { SeriesSegment } from "./series-segment";
 
+// The fourth segment, Imported, is an icon so four segments fit beside the toolbar.
 const LIBRARY_SEGMENTS = ["Series", "Collections", "Playlists"] as const;
+const IMPORTED_SEGMENT_INDEX = 3;
 
 const PodcastListsBrowser = () => {
   const viewMode = useListsViewMode("series");
@@ -86,6 +93,14 @@ const PodcastListsBrowser = () => {
 
 const BookLibraryTabScreen = () => {
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const { segment } = useLocalSearchParams<{ segment?: string }>();
+  const importFlow = useAudioImportFlow();
+  // The Home Imported shelf links here with ?segment=imported.
+  useEffect(() => {
+    if (segment !== "imported") return;
+    setSelectedIndex(IMPORTED_SEGMENT_INDEX);
+    router.setParams({ segment: "" });
+  }, [segment]);
   const [seriesSearchText, setSeriesSearchText] = useState("");
   const seriesViewMode = useListsViewMode("series");
   const collectionsViewMode = useListsViewMode("collections");
@@ -122,7 +137,7 @@ const BookLibraryTabScreen = () => {
         }}
       />
       <Stack.Title asChild>
-        <Host style={{ width: 304, height: 34 }}>
+        <Host style={{ width: 320, height: 34 }}>
           <Picker
             label="Library Sections"
             selection={selectedIndex}
@@ -137,11 +152,21 @@ const BookLibraryTabScreen = () => {
                 {segment}
               </SwiftText>
             ))}
+            <SwiftImage systemName="folder.fill" modifiers={[tag(IMPORTED_SEGMENT_INDEX)]} />
           </Picker>
         </Host>
       </Stack.Title>
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Menu icon="ellipsis">
+          <Stack.Toolbar.MenuAction
+            icon="plus"
+            onPress={() => {
+              setSelectedIndex(IMPORTED_SEGMENT_INDEX);
+              void importFlow.startImport();
+            }}
+          >
+            Import Audio…
+          </Stack.Toolbar.MenuAction>
           <Stack.Toolbar.Menu inline>
             <Stack.Toolbar.MenuAction
               icon="list.bullet"
@@ -201,7 +226,11 @@ const BookLibraryTabScreen = () => {
         ) : null}
         {selectedIndex === 1 ? <CollectionsSegment viewMode={collectionsViewMode} /> : null}
         {selectedIndex === 2 ? <PlaylistsSegment viewMode={playlistsViewMode} /> : null}
+        {selectedIndex === IMPORTED_SEGMENT_INDEX ? (
+          <ImportedBooksSegment onImport={() => void importFlow.startImport()} />
+        ) : null}
       </View>
+      <AudioImportProgressOverlay progress={importFlow.progress} />
     </>
   );
 };

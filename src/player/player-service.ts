@@ -5017,8 +5017,15 @@ class PlayerService {
       isFinished: promotedProgress.isFinished,
       updatedAt: Date.now(),
     });
-    // Imported Audiobook position is durable in the native Listening Position ledger and never syncs.
-    if (isImportedAudiobookId(state.libraryItemId)) return;
+    // Imported Audiobook position is durable in the native Listening Position ledger and never syncs;
+    // only the display snapshot for shelves and lists is updated.
+    if (isImportedAudiobookId(state.libraryItemId)) {
+      importedBooksStore.getState().actions.recordImportedListening(state.libraryItemId, {
+        positionSeconds: promotedProgress.currentTimeSeconds,
+        isFinished: promotedProgress.isFinished,
+      });
+      return;
+    }
 
     if (promotedProgress.preventedRegression && __DEV__) {
       console.warn("[player-service] progress:prevented-transient-regression", {

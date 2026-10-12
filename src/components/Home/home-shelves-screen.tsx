@@ -1,3 +1,4 @@
+import type { LibraryItemSummary } from "@/api/library-items-api";
 import { playlistsApi } from "@/api/playlists-api";
 import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
 import { useLibraryActivationStore } from "@/auth/library-activation-store";
@@ -36,6 +37,7 @@ import { useHomeSignInSwitcher } from "./home-sign-in-switcher";
 type HomeShelvesListItem =
   | { type: "refresh-message"; id: "refresh-message"; message: string }
   | { type: "shelf"; id: string; shelf: HomeShelf; isFirstShelf: boolean }
+  | { type: "imported-shelf"; id: "imported-shelf"; books: LibraryItemSummary[] }
   | { type: "footer"; id: "footer" };
 
 // Change this value to test how much larger the first visible shelf's books are.
@@ -80,6 +82,7 @@ const HomeShelvesScreen = () => {
     visibleBookCount,
     favoriteByBookId,
     progressByBookId,
+    importedBooks,
     refreshDiscover,
   } = useHomeShelves();
   useEffect(() => {
@@ -132,9 +135,13 @@ const HomeShelvesScreen = () => {
           ]
         : []),
       ...shelfItems,
+      // Imported Audiobooks get their own shelf whenever there are any, in every access mode.
+      ...(importedBooks.length
+        ? [{ type: "imported-shelf" as const, id: "imported-shelf" as const, books: importedBooks }]
+        : []),
       { type: "footer", id: "footer" },
     ];
-  }, [activeLibraryId, refreshMessage, visibleShelves]);
+  }, [activeLibraryId, importedBooks, refreshMessage, visibleShelves]);
   const homeListOrderKey = useMemo(
     () => `${homeScopeKey ?? "no-scope"}:${JSON.stringify(shelfOrder)}`,
     [homeScopeKey, shelfOrder],
@@ -284,6 +291,24 @@ const HomeShelvesScreen = () => {
           >
             Shelf creation and book assignment are managed in Settings.
           </Text>
+        );
+      }
+
+      if (item.type === "imported-shelf") {
+        return (
+          <HomeShelfSection
+            shelfId={item.id}
+            title="Imported"
+            books={item.books}
+            favoriteByBookId={favoriteByBookId}
+            progressByBookId={progressByBookId}
+            isOffline={false}
+            emptyMessage="No imported audiobooks yet."
+            headerHeight={headerHeight}
+            shelfHref={{ pathname: "/(tabs)/library", params: { segment: "imported" } }}
+            renderCardMenus={false}
+            scrollY={scrollY}
+          />
         );
       }
 

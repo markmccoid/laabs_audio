@@ -26,6 +26,7 @@ const record = (overrides: Partial<ImportedAudiobookRecord> = {}): ImportedAudio
   fingerprints: [],
   audioPresent: true,
   removedAt: null,
+  listening: null,
   importedAt: 1,
   updatedAt: 1,
   ...overrides,

@@ -1,5 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
 import AudioImport from "@/native/audio-import/AudioImportModule";
+import { playerService } from "@/player/player-service";
+import { commitListeningStateCommand } from "@/progress/commit-listening-state-command";
 import type { DownloadTrack } from "@/store/device-books-store";
 import {
   ensureAppDirectory,
@@ -186,6 +188,7 @@ export const commitPendingAudioImport = async (pending: PendingAudioImport) => {
     fingerprints: [pending.fingerprint],
     audioPresent: true,
     removedAt: null,
+    listening: null,
     importedAt: now,
     updatedAt: now,
   };
@@ -196,6 +199,13 @@ export const commitPendingAudioImport = async (pending: PendingAudioImport) => {
 export const discardPendingAudioImport = (pending: PendingAudioImport) =>
   deleteImportedBookDirectory(pending.id);
 
+const sameFingerprint = (left: ImportedAudiobookFingerprint, right: ImportedAudiobookFingerprint) =>
+  left.fileName === right.fileName && left.sizeBytes === right.sizeBytes;
+
+/** True when re-imported audio is plausibly the same recording (durations within 2%, at least 5 s). */
+const durationsMatch = (existingSeconds: number, pendingSeconds: number) =>
+  Math.abs(existingSeconds - pendingSeconds) <= Math.max(5, existingSeconds * 0.02);
+
 /** Gives a removed or Missing Imported Audio book its audio back, keeping its id and edited metadata. */
 const restoreImportedAudio = async (existing: ImportedAudiobookRecord, pending: PendingAudioImport) => {
   const { track, coverRelativePath } = await placePendingAudio(pending, existing.id);
@@ -203,6 +213,12 @@ const restoreImportedAudio = async (existing: ImportedAudiobookRecord, pending: 
   actions.addImportedBook({
     ...existing,
     tracks: [track],
+    // The audio file is the truth for timing; edited title/author/narrator/description are kept.
+    durationSeconds: pending.metadata.durationSeconds,
+    chapters: pending.metadata.chapters,
+    fingerprints: existing.fingerprints.some((candidate) => sameFingerprint(candidate, pending.fingerprint))
+      ? existing.fingerprints
+      : [...existing.fingerprints, pending.fingerprint],
     coverRelativePath: existing.coverRelativePath ?? coverRelativePath,
     audioPresent: true,
     removedAt: null,
@@ -232,22 +248,96 @@ export const importCopiedAudio = async (
   return { status: "imported", record: await commitPendingAudioImport(pending) };
 };
 
-/** Presents the native picker, copies the chosen file into the app, and imports it. */
-export const pickAndImportAudio = async (): Promise<AudioImportResult> => {
+/** Fires when the user has chosen a file and copying (possibly downloading from iCloud first) begins. */
+export const subscribeToImportCopyStarted = (listener: (event: { name: string }) => void) => {
+  const subscription = AudioImport.addListener("onImportCopyStarted", listener);
+  return () => subscription.remove();
+};
+
+/** Presents the native picker and copies the chosen file into a fresh `laabs-imports/<id>/`. */
+const pickIntoNewImportDirectory = async () => {
   const id = createImportedAudiobookId();
   const directory = await ensureAppDirectory(importedBookDirectory(id));
-  let picked: Awaited<ReturnType<typeof AudioImport.pickAndCopyAudio>>;
   try {
-    picked = await AudioImport.pickAndCopyAudio(directory);
+    const picked = await AudioImport.pickAndCopyAudio(directory, "audio");
+    if (picked.canceled) {
+      await deleteImportedBookDirectory(id);
+      return null;
+    }
+    return { id, picked };
   } catch (error) {
     await deleteImportedBookDirectory(id);
     throw error;
   }
-  if (picked.canceled) {
-    await deleteImportedBookDirectory(id);
-    return { status: "canceled" };
+};
+
+/** Presents the native picker, copies the chosen file into the app, and imports it. */
+export const pickAndImportAudio = async (): Promise<AudioImportResult> => {
+  const pick = await pickIntoNewImportDirectory();
+  if (!pick) return { status: "canceled" };
+  return importCopiedAudio(pick.id, pick.picked);
+};
+
+export type ReimportResult =
+  | { status: "canceled" }
+  | { status: "restored"; record: ImportedAudiobookRecord }
+  /** The picked file's length differs from the book's; confirm or discard `pending` after asking. */
+  | { status: "mismatch"; existing: ImportedAudiobookRecord; pending: PendingAudioImport };
+
+/**
+ * Re-import for one specific book (Missing Imported Audio): the picked file becomes that book's
+ * audio, keeping its id, edited metadata, and listening state. A file whose length does not match
+ * is returned as a mismatch so the user can confirm it.
+ */
+export const pickAndReimportAudio = async (id: string): Promise<ReimportResult> => {
+  const existing = importedBooksStore.getState().importedBooksById[id];
+  if (!existing) throw new Error("Imported audiobook not found.");
+  const pick = await pickIntoNewImportDirectory();
+  if (!pick) return { status: "canceled" };
+  let pending: PendingAudioImport;
+  try {
+    pending = await inspectCopiedAudio(pick.id, pick.picked);
+  } catch (error) {
+    await deleteImportedBookDirectory(pick.id);
+    throw error;
   }
-  return importCopiedAudio(id, picked);
+  if (!durationsMatch(existing.durationSeconds, pending.metadata.durationSeconds)) {
+    return { status: "mismatch", existing, pending };
+  }
+  return { status: "restored", record: await restoreImportedAudio(existing, pending) };
+};
+
+/** Uses a mismatched file anyway (the user confirmed it). */
+export const confirmMismatchedReimport = async (id: string, pending: PendingAudioImport) => {
+  const existing = importedBooksStore.getState().importedBooksById[id];
+  if (!existing) {
+    await discardPendingAudioImport(pending);
+    throw new Error("Imported audiobook not found.");
+  }
+  return restoreImportedAudio(existing, pending);
+};
+
+/** Lets the user pick an image file as the book's cover. */
+export const pickImportedBookCover = async (id: string) => {
+  const directory = await ensureAppDirectory(importedBookDirectory(id));
+  const staging = await ensureAppDirectory(`${importedBookDirectory(id)}/cover-staging`);
+  try {
+    const picked = await AudioImport.pickAndCopyAudio(staging, "image");
+    if (picked.canceled) return false;
+    const target = `${directory}cover-${Date.now()}.${getFileExtension(picked.name) || "jpg"}`;
+    await FileSystem.moveAsync({ from: picked.uri, to: target });
+    const relativePath = toDocumentRelativePath(target);
+    if (!relativePath) return false;
+    const previous = importedBooksStore.getState().importedBooksById[id]?.coverRelativePath;
+    importedBooksStore.getState().actions.updateImportedBookMetadata(id, {
+      coverRelativePath: relativePath,
+    });
+    const previousUri = resolveDocumentRelativePath(previous);
+    if (previousUri) await FileSystem.deleteAsync(previousUri, { idempotent: true }).catch(() => undefined);
+    return true;
+  } finally {
+    await FileSystem.deleteAsync(staging, { idempotent: true }).catch(() => undefined);
+  }
 };
 
 /**
@@ -258,10 +348,25 @@ export const removeImportedAudiobook = async (
   id: string,
   options: { deleteListeningState?: boolean } = {},
 ) => {
+  // Unloads the book first if it is the one playing, so its files can be deleted.
+  await playerService.prepareForDownloadedBookDeletion(id);
+  const record = importedBooksStore.getState().importedBooksById[id];
   await deleteImportedBookDirectory(id);
   const { actions } = importedBooksStore.getState();
   if (options.deleteListeningState) {
-    // TODO(Phase 2): also clear Device Listener bookmarks, rate, and native Listening Position for `id`.
+    // Bookmarks for Imported Audiobooks arrive in Phase 4; until then the Listening Position is the
+    // only Device Listener state to clear.
+    if (record) {
+      await commitListeningStateCommand({
+        libraryItemId: id,
+        positionMs: 0,
+        durationMs: Math.round(record.durationSeconds * 1000),
+        isFinished: false,
+        reason: "mark_unread",
+      }).catch((error) => {
+        if (__DEV__) console.warn("[imported-audiobooks] reset-position-failed", error);
+      });
+    }
     actions.removeImportedBook(id);
   } else {
     actions.markImportedBookRemoved(id);

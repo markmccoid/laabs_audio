@@ -1,6 +1,7 @@
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
 import { CoverImage } from "@/components/images/cover-image";
+import { isImportedAudiobookId } from "@/imported/imported-audiobook-identity";
 import {
   resolveStoredDownloadCoverUri,
   selectHasPlayableBookDownload,
@@ -323,7 +324,7 @@ export const ShelfBookCard = ({
               ) : null}
             </Pressable>
           </Link>
-          {renderMenu ? (
+          {renderMenu && !isImportedAudiobookId(book.id) ? (
             <CardMenuOverlay
               book={book}
               headerHeight={headerHeight}

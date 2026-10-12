@@ -42,8 +42,15 @@ export type AudioImportPickResult =
 
 export type PickerLeftoverReport = Record<string, { bytes: number; files: number }>;
 
-declare class AudioImportModule extends NativeModule {
-  pickAndCopyAudio(destinationDirectory: string): Promise<AudioImportPickResult>;
+type AudioImportEvents = {
+  onImportCopyStarted: (event: { name: string }) => void;
+};
+
+declare class AudioImportModule extends NativeModule<AudioImportEvents> {
+  pickAndCopyAudio(
+    destinationDirectory: string,
+    kind?: "audio" | "image",
+  ): Promise<AudioImportPickResult>;
   pickerLeftoverReport(): Promise<PickerLeftoverReport>;
   clearPickerLeftovers(): Promise<boolean>;
   readAudioMetadata(fileUrl: string): Promise<AudioImportMetadata>;

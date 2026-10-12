@@ -18,6 +18,7 @@ const BOOK_UTILITY_SHEETS = new Set([
   "book-addbookmark",
   "book-series",
   "book-filter-results",
+  "imported-book-edit",
 ]);
 
 const EPISODE_UTILITY_SHEETS = new Set([

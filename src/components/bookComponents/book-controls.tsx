@@ -6,6 +6,8 @@ import { showPlaybackError } from "@/player/show-playback-error";
 import { useAuthStore } from "@/auth/auth-store";
 import { canUseAudiobookshelfServer } from "@/auth/server-connection";
 import { selectHasPlayableBookDownload, useDeviceBooksStore } from "@/store/device-books-store";
+import { useImportedBooksStore } from "@/store/imported-books-store";
+import { isImportedAudiobookId } from "@/imported/imported-audiobook-identity";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router } from "expo-router";
@@ -117,11 +119,19 @@ const BookControls = ({
     if (!libraryItemId) return false;
     return selectHasPlayableBookDownload(state, libraryItemId);
   });
+  // An Imported Audiobook plays from the device whenever its audio is present.
+  const isImportedPlayable = useImportedBooksStore((state) =>
+    isImportedAudiobookId(libraryItemId)
+      ? Boolean(state.importedBooksById[libraryItemId]?.audioPresent)
+      : false,
+  );
   const canUseServer = canUseAudiobookshelfServer({ isOnline, serverConnectionStatus });
   const hasBookId = Boolean(libraryItemId);
   const isBookActive = hasBookId && currentLibraryItemId === libraryItemId && !currentEpisodeId;
   const isBookLoaded = isBookActive && queueLength > 0;
-  const canStart = canUseServer || isDownloaded || Boolean(isBookActive && playbackError);
+  const canStart = isImportedAudiobookId(libraryItemId)
+    ? isImportedPlayable
+    : canUseServer || isDownloaded || Boolean(isBookActive && playbackError);
   const { canToggle, action, isPreparing } = usePlaybackControls({ libraryItemId }, canStart);
   const isPlayOnly = variant === "play-only";
   const canControl = isBookLoaded && !isPreparing &&

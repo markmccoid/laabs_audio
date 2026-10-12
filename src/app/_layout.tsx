@@ -849,6 +849,13 @@ export default function RootLayout() {
                 }}
               />
               <Stack.Screen
+                name="imported-book-edit"
+                options={sheetScreenOptions(themeColors.surface, {
+                  sheetAllowedDetents: [0.9],
+                  headerShown: false,
+                })}
+              />
+              <Stack.Screen
                 name="book-bookmarks"
                 options={sheetScreenOptions(themeColors.surface, {
                   headerShown: false,
