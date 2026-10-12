@@ -1,5 +1,6 @@
 import { authStore } from "@/auth/auth-store";
 import { resolveListeningOwnerKey } from "@/auth/listening-owner";
+import { isImportedAudiobookId } from "@/imported/imported-audiobook-identity";
 import {
   deviceBooksStore,
   type PendingProgressSync,
@@ -68,6 +69,8 @@ export const recordProgressSyncIntent = (payload: {
   serverUrl?: string | null;
   username?: string | null;
 }) => {
+  // Imported Audiobooks never sync to Audiobookshelf; their position lives only on the device.
+  if (isImportedAudiobookId(payload.libraryItemId)) return null;
   const userKey = resolveProgressSyncUserKey(payload.libraryItemId, payload.userKey);
   if (!userKey) return null;
 

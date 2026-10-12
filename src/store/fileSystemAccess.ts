@@ -2,6 +2,7 @@ import * as FileSystem from "expo-file-system/legacy";
 
 export const AMBIENT_DOWNLOAD_DIRECTORY = "laabs-ambient";
 export const BOOK_DOWNLOADS_DIRECTORY = "laabs-downloads";
+export const IMPORTED_BOOKS_DIRECTORY = "laabs-imports";
 
 export type DownloadFileResult = {
   task: Promise<FileSystem.FileSystemDownloadResult | undefined>;

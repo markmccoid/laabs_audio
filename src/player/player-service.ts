@@ -15,6 +15,13 @@ import {
   recordCarPlayResumeSnapshot,
 } from "../carplay/carplay-resume-snapshot";
 import { resolveListeningOwnerKey } from "../auth/listening-owner";
+import { isImportedAudiobookId } from "../imported/imported-audiobook-identity";
+import {
+  buildImportedAudiobookSession,
+  ImportedAudioUnavailableError,
+} from "../imported/imported-audiobook-session";
+import { resolveDocumentRelativePath } from "../store/fileSystemAccess";
+import { importedBooksStore } from "../store/imported-books-store";
 import { queryClient } from "../query/query-client";
 import { queryKeys } from "../query/query-keys";
 import { invalidateSqliteOverlayProjections } from "../query/sqlite-invalidation";
@@ -1114,6 +1121,10 @@ class PlayerService {
 
       // Preflight (current playback untouched): fetch the streamed session
       // BEFORE closing the active book so a failure keeps it playing.
+      // Imported Audiobooks never stream: no local audio means nothing can play.
+      if (!downloadedSession && isImportedAudiobookId(libraryItemId)) {
+        throw new ImportedAudioUnavailableError();
+      }
       if (!downloadedSession && !this.canUseServer()) {
         throw new StreamedPlaybackStartFailureError(
           "Audiobookshelf is unreachable. Only downloaded audiobooks can play.",
@@ -1301,7 +1312,7 @@ class PlayerService {
         this.playbackTrace(
           `loadBook:play-result ${resolvedLibraryItemId} state=${playbackStore.getState().playbackState}`,
         );
-        if (shouldUseDownloadedAudio) {
+        if (shouldUseDownloadedAudio && !isImportedAudiobookId(libraryItemId)) {
           const postPlayState = playbackStore.getState();
           if (postPlayState.playbackState !== "playing") {
             this.playbackTrace(
@@ -1329,7 +1340,7 @@ class PlayerService {
         if (suppressErrorState) return;
         throw error;
       }
-      if (preferDownloaded && attemptedDownloadedAudio && this.canUseServer() && isStreamedPlaybackStartFailure(this.classifyPlaybackFailure(error))) {
+      if (preferDownloaded && attemptedDownloadedAudio && !isImportedAudiobookId(libraryItemId) && this.canUseServer() && isStreamedPlaybackStartFailure(this.classifyPlaybackFailure(error))) {
         await this.loadBook(libraryItemId, options, { preferDownloaded: false, preserveRequestedState: true });
         return;
       }
@@ -2035,7 +2046,7 @@ class PlayerService {
     bookTitle: string | null;
     sessionKind: ProgressLogSessionKind;
   }) {
-    if (!this.shouldFetchFreshServerProgressForLoad()) {
+    if (isImportedAudiobookId(payload.libraryItemId) || !this.shouldFetchFreshServerProgressForLoad()) {
       return null;
     }
 
@@ -2618,6 +2629,7 @@ class PlayerService {
     durationMs: number;
     chapterIndex: ReturnType<typeof buildChapterIndex>;
   } | null {
+    if (isImportedAudiobookId(libraryItemId)) return this.resolveImportedSession(libraryItemId);
     const state = deviceBooksStore.getState();
     const details = state.downloadedDetailsById[libraryItemId];
     const downloadInfo = state.downloadedBookData[libraryItemId];
@@ -2726,6 +2738,16 @@ class PlayerService {
     };
   }
 
+  private resolveImportedSession(libraryItemId: string) {
+    const record = importedBooksStore.getState().importedBooksById[libraryItemId];
+    if (!record || record.removedAt) return null;
+    return buildImportedAudiobookSession(record, {
+      sessionId: LOCAL_SESSION_ID,
+      resolveTrackUri: (track) => resolveDocumentRelativePath(track.relativePath),
+      artworkUri: resolveDocumentRelativePath(record.coverRelativePath) ?? undefined,
+    });
+  }
+
   private toDownloadedQueueItem(payload: {
     libraryItemId: string;
     author: string;
@@ -2768,7 +2790,7 @@ class PlayerService {
   }
 
   private classifyPlaybackFailure(error: unknown): Error {
-    if (error instanceof PlaybackStorageFailureError) return error;
+    if (error instanceof PlaybackStorageFailureError || error instanceof ImportedAudioUnavailableError) return error;
     if (error instanceof Error && /storage|sqlite|checkpoint/i.test(error.name + " " + error.message)) return new PlaybackStorageFailureError();
     if (error instanceof Error && (/auth|login|required|storage|sqlite|listening.position|native.build/i.test(error.name + " " + error.message))) return error;
     return isStreamedPlaybackStartFailure(error) ? error : new StreamedPlaybackStartFailureError();
@@ -4995,6 +5017,8 @@ class PlayerService {
       isFinished: promotedProgress.isFinished,
       updatedAt: Date.now(),
     });
+    // Imported Audiobook position is durable in the native Listening Position ledger and never syncs.
+    if (isImportedAudiobookId(state.libraryItemId)) return;
 
     if (promotedProgress.preventedRegression && __DEV__) {
       console.warn("[player-service] progress:prevented-transient-regression", {
@@ -5140,6 +5164,8 @@ class PlayerService {
       updatedAt: Date.now(),
     });
 
+    // The user server state cache mirrors Audiobookshelf; Imported Audiobooks are never in it.
+    if (isImportedAudiobookId(payload.libraryItemId)) return;
     const activeLibraryUserKey = authStore.getState().activeLibraryUserKey;
     if (!activeLibraryUserKey) {
       return;

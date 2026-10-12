@@ -5,12 +5,20 @@ import AudioImport, {
   type AudioImportPickResult,
   type PickerLeftoverReport,
 } from "@/native/audio-import/AudioImportModule";
+import {
+  discardPendingAudioImport,
+  pickAndImportAudio,
+  removeImportedAudiobook,
+} from "@/imported/imported-audiobook-library";
+import { playerService } from "@/player/player-service";
+import { usePlaybackStore } from "@/player/playback-store";
 import { ensureAppDirectory, getDocumentDirectory } from "@/store/fileSystemAccess";
+import { useImportedBooksStore } from "@/store/imported-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { Image } from "expo-image";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 
 const SPIKE_DIRECTORY = "laabs-imports-spike";
@@ -42,6 +50,42 @@ export const SettingsImportSpikeScreen = () => {
   const [pathInput, setPathInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SpikeResult | null>(null);
+  const importedBooksById = useImportedBooksStore((state) => state.importedBooksById);
+  const importedBookOrder = useImportedBooksStore((state) => state.importedBookOrder);
+  const importedBooks = useMemo(
+    () => importedBookOrder.map((id) => importedBooksById[id]).filter(Boolean),
+    [importedBookOrder, importedBooksById],
+  );
+  const playingId = usePlaybackStore((state) => state.libraryItemId);
+  const playingOwner = usePlaybackStore((state) => state.ownerId);
+  const playingPositionMs = usePlaybackStore((state) => state.positionMs);
+  const playingState = usePlaybackStore((state) => state.playbackState);
+
+  // Phase 1 harness: the real import pipeline and player, without the Phase 2 UI.
+  const phase1Import = async () => {
+    setBusy(true);
+    try {
+      const outcome = await pickAndImportAudio();
+      if (outcome.status === "duplicate") await discardPendingAudioImport(outcome.pending);
+      finish({
+        step: `phase1-${outcome.status}`,
+        storedUri: "record" in outcome ? outcome.record.id : "existing" in outcome ? outcome.existing.id : undefined,
+      });
+      console.log("[import-spike] phase1-import", JSON.stringify(outcome));
+    } catch (error) {
+      finish({ step: "phase1-import", error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const phase1Play = async (id: string) => {
+    try {
+      await playerService.loadBook(id, { autoPlay: true });
+    } catch (error) {
+      finish({ step: "phase1-play", error: error instanceof Error ? error.message : String(error) });
+    }
+  };
 
   const finish = (next: SpikeResult) => {
     log(next);
@@ -190,6 +234,26 @@ export const SettingsImportSpikeScreen = () => {
       />
       {button("Read metadata from path", readFromPath, "import-spike-read-path")}
       {button("Clear spike folder and picker leftovers", clearSpikeFolder, "import-spike-clear")}
+      <Text style={{ color: themeColors.text, fontWeight: "700", marginTop: 8 }}>Phase 1: Imported Audiobooks</Text>
+      {button("Import as Imported Audiobook", phase1Import, "phase1-import")}
+      <Text testID="phase1-playback" selectable style={{ color: themeColors.textMuted, fontFamily: "Menlo", fontSize: 11 }}>
+        {`playing=${playingId ?? "-"} owner=${playingOwner ?? "-"} state=${playingState} positionMs=${Math.round(playingPositionMs)}`}
+      </Text>
+      {importedBooks.map((book) => (
+        <View key={book.id} testID={`phase1-book-${book.id}`} style={{ gap: 6, borderWidth: 1, borderColor: themeColors.border, borderRadius: 8, padding: 10 }}>
+          <Text selectable style={{ color: themeColors.text, fontWeight: "600" }}>
+            {`${book.title}${book.removedAt ? " (removed)" : book.audioPresent ? "" : " (audio missing)"}`}
+          </Text>
+          <Text selectable style={{ color: themeColors.textMuted, fontSize: 11 }}>
+            {`${book.id} · ${book.author ?? "-"} · narrator ${book.narrator ?? "-"} · ${Math.round(book.durationSeconds)}s · ${book.chapters.length} chapters`}
+          </Text>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {button("Play", () => void phase1Play(book.id), `phase1-play-${book.id}`)}
+            {button("Pause", () => void playerService.pause(), `phase1-pause-${book.id}`)}
+            {button("Remove", () => void removeImportedAudiobook(book.id), `phase1-remove-${book.id}`)}
+          </View>
+        </View>
+      ))}
       {result?.metadata?.artworkUri ? (
         <Image source={{ uri: result.metadata.artworkUri }} style={{ width: 120, height: 120, borderRadius: 8 }} />
       ) : null}

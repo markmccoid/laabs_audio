@@ -1,3 +1,4 @@
+import { DEVICE_LISTENER_KEY, isImportedAudiobookId } from "../imported/imported-audiobook-identity";
 import {
   deviceBooksStore,
   selectDownloadOwnerUserId,
@@ -10,12 +11,14 @@ import { authStore, useAuthStore } from "./auth-store";
  * Progress Sync Intents, Listening Position, Playback Rate — for an audiobook:
  *   1. the signed-in / remembered User Session identity, when present, else
  *   2. the Downloaded Audio Asset Owner for that item (used in Downloaded-Only Mode).
+ * An Imported Audiobook is always owned by the Device Listener, whoever is signed in (ADR-0044).
  *
  * This is the single home for the `activeLibraryUserKey ?? storedUserId ?? downloadOwner`
  * chain that was previously recomputed at every bookmark/player surface. See CONTEXT.md
  * (Downloaded Audio Asset Owner) and ADR-0015.
  */
 export const resolveListeningOwnerKey = (libraryItemId?: string | null): string | null => {
+  if (isImportedAudiobookId(libraryItemId)) return DEVICE_LISTENER_KEY;
   const auth = authStore.getState();
   return (
     auth.activeLibraryUserKey ??
@@ -31,5 +34,6 @@ export const useResolvedListeningOwnerKey = (libraryItemId?: string | null): str
   const downloadOwnerUserId = useDeviceBooksStore((state) =>
     selectDownloadOwnerUserId(state, libraryItemId),
   );
+  if (isImportedAudiobookId(libraryItemId)) return DEVICE_LISTENER_KEY;
   return activeLibraryUserKey ?? storedUserId ?? downloadOwnerUserId;
 };

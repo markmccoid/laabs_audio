@@ -1,3 +1,7 @@
+import {
+  ImportedAudiobookServerRequestError,
+  referencesImportedAudiobookId,
+} from "@/imported/imported-audiobook-identity";
 import { AuthUnavailableError, authFetch } from "./auth-fetch";
 
 let authErrorHandler: ((message: string) => void) | null = null;
@@ -89,6 +93,14 @@ export const absClient = {
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     let response: Response;
     const method = (options.method ?? "GET").toUpperCase();
+    // Last-resort guard: callers filter Imported Audiobooks out before reaching the server.
+    if (
+      referencesImportedAudiobookId(path) ||
+      (typeof options.body === "string" && referencesImportedAudiobookId(options.body))
+    ) {
+      if (__DEV__) console.error("[abs-client] blocked Imported Audiobook request", { method, path });
+      throw new ImportedAudiobookServerRequestError(path);
+    }
     try {
       response = await authFetch(path, options);
     } catch (error) {

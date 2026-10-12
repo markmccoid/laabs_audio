@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { isImportedAudiobookId } from "@/imported/imported-audiobook-identity";
 import { useCallback, useEffect, useMemo } from "react";
 import { itemsApi, type ItemDetails } from "../api/items-api";
 import { librariesApi, type LibraryFilterData } from "../api/libraries-api";
@@ -407,7 +408,9 @@ export const useGetItemDetails = (itemId?: string) => {
       if (!activeLibraryUserKey) throw new Error("No user session provided");
       return itemsApi.getItemDetails(itemId);
     },
-    enabled: status === "authenticated" && !!activeLibraryUserKey && !!itemId,
+    // Imported Audiobooks have no Audiobookshelf item to fetch.
+    enabled:
+      status === "authenticated" && !!activeLibraryUserKey && !!itemId && !isImportedAudiobookId(itemId),
     staleTime: 10000,
   });
 

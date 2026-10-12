@@ -20,6 +20,7 @@ import { AmbientCoordinator } from "../ambient/ambient-coordinator";
 import { selectAccessMode, useAuthStore } from "../auth/auth-store";
 import { CarPlayShelfPublisher } from "../carplay/carplay-shelf-publisher";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
+import { prepareImportedAudiobooks } from "../imported/imported-audiobook-library";
 import { PlaybackLoadingToastCoordinator } from "../player/playback-loading-toast-coordinator";
 import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
 import { useSqliteActiveLibraryRefresh } from "../data/sqlite/use-sqlite-active-library-refresh";
@@ -509,6 +510,9 @@ export default function RootLayout() {
     // calling it here is the explicit, idempotent wiring so the subscription
     // exists even before any transcription UI mounts.
     initializeTranscribeAfterDownloadWatcher();
+    void prepareImportedAudiobooks().catch((error) => {
+      if (__DEV__) console.warn("[imported-audiobooks] prepare-failed", error);
+    });
     const stopWidgetCoordinator = startActiveAudiobookWidgetCoordinator();
     return () => {
       stopAssistantRuntimeContext();

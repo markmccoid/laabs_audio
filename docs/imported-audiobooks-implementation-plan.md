@@ -23,14 +23,15 @@ none, are visibly marked as not from ABS, and never touch an ABS server.
 | Storage of audio | **Copy** into the app sandbox (`Documents/laabs-imports/<id>/`). The original file is never modified. Audio is **excluded from iCloud backup**; metadata, cover and state are backed up. |
 | Store shape | **Sibling store** (`imported-books-store`), not a type field in `device-books-store`. Reuses the `DownloadTrack` / `DownloadInfo` track shape. The two sources meet only where lists and playback sources are assembled. |
 | Id | `imp_<uuid>`, usable anywhere a `libraryItemId` goes. `isImportedAudiobookId()` routes it; server-only calls refuse it. |
-| Metadata | Read embedded tags (ID3 / iTunes atoms / m4b chapter markers), fall back to the file name, user can edit afterwards. No chapters → one chapter per file. |
+| Metadata | Read embedded tags (ID3 / iTunes atoms / m4b chapter markers), fall back to the file name, user can edit afterwards. No chapters → one chapter per file. **mp3 chapters (ID3 CHAP) are not supported** (decided 2026-10-11): an mp3 is always one chapter per file. |
 | Formats | m4b, m4a, mp3, aac, wav, flac. Reject others (ogg/opus) with a clear message. |
+| Picker | A native `UIDocumentPickerViewController` (`asCopy: false`) with one coordinated copy off the main thread, **not expo-document-picker**, which copies twice on the main thread and leaks Inbox copies (Phase 0, confirmed on device). |
 | Entry point | "+ Import audio" button in the Library tab header, plus the empty states in Imported-Only Mode. Share-sheet "Open in LAABS" comes later. |
 | Import flow | Pick → copy starts immediately with progress (same surface as ABS download progress, "Importing" stage) → book created → land on its detail screen with "Edit details". |
 | Editable fields | Title, author, narrator, cover (from Photos/Files or the embedded image), description. Form sheet from the detail screen. No chapter editing in v1. |
 | Display | Dedicated **Imported Shelf** on Home + "Imported" Library segment, and Imported Audiobooks also appear in Continue Listening. Badge on every cover; detail screen shows "Imported · not from Audiobookshelf" and hides ABS-only actions. |
 | Duplicates | Match on size + duration + name; offer "Already imported — open it" or "Import as new copy". The same match drives re-import. |
-| Removal | Deletes the copied audio. Keeps Device Listener state by default (re-import restores bookmarks/position); the delete screen has an explicit "Also delete bookmarks and progress" option. |
+| Removal | Deletes the copied audio. Keeps Device Listener state by default (re-import restores bookmarks/position); the delete screen has an explicit "Also delete bookmarks and progress" option. Because listening state is keyed by the `imp_` id, a removed book stays as a hidden **tombstone record** (`removedAt`), and re-importing matching audio reuses that id. |
 | Missing audio | After a device restore (audio not backed up), the book shows **Missing Imported Audio** with a "Re-import" action that matches the picked file and restores playability. |
 | Account switch | v1 keeps the existing teardown of Active Playback on User Session boundaries (ADR-0021); imported state survives. Exempting imported books is a possible later change. |
 | No-ABS use | **Welcome Choice** replaces the forced sign-in gate: "Connect to Audiobookshelf" or "Use my own audio files". The choice is remembered. |
