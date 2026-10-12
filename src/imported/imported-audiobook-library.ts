@@ -68,7 +68,25 @@ export const prepareImportedAudiobooks = async () => {
         return uri ? (await FileSystem.getInfoAsync(uri)).exists : false;
       }),
     );
-    actions.setImportedBookAudioPresent(record.id, checks.every(Boolean));
+    const audioPresent = checks.every(Boolean);
+    actions.setImportedBookAudioPresent(record.id, audioPresent);
+    if (audioPresent && !record.coverRelativePath) await backfillEmbeddedCover(record);
+  }
+};
+
+/** Books imported before covers were saved correctly get their embedded cover now, if they have one. */
+const backfillEmbeddedCover = async (record: ImportedAudiobookRecord) => {
+  const trackUri = resolveDocumentRelativePath(record.tracks[0]?.relativePath);
+  if (!trackUri) return;
+  try {
+    const directory = await ensureAppDirectory(importedBookDirectory(record.id));
+    const metadata = await AudioImport.readAudioMetadata(trackUri, directory);
+    const coverRelativePath = metadata.artworkUri ? toDocumentRelativePath(metadata.artworkUri) : null;
+    if (coverRelativePath) {
+      importedBooksStore.getState().actions.updateImportedBookMetadata(record.id, { coverRelativePath });
+    }
+  } catch (error) {
+    if (__DEV__) console.warn("[imported-audiobooks] cover-backfill-failed", { id: record.id, error });
   }
 };
 
@@ -102,16 +120,20 @@ export class UnsupportedAudioImportError extends Error {
   }
 }
 
-const moveArtwork = async (artworkUri: string | null, id: string) => {
+/**
+ * Puts the pending import's embedded cover (written by the native reader into the pending folder)
+ * under the book's folder and returns its Document-relative path.
+ */
+const placeArtwork = async (artworkUri: string | null, id: string) => {
   if (!artworkUri) return null;
-  const extension = getFileExtension(artworkUri) || "jpg";
   const directory = await ensureAppDirectory(importedBookDirectory(id));
-  const target = `${directory}cover.${extension}`;
+  if (artworkUri.startsWith(directory)) return toDocumentRelativePath(artworkUri);
+  const target = `${directory}cover-${Date.now()}.${getFileExtension(artworkUri) || "jpg"}`;
   try {
-    await FileSystem.deleteAsync(target, { idempotent: true });
     await FileSystem.moveAsync({ from: artworkUri, to: target });
     return toDocumentRelativePath(target);
-  } catch {
+  } catch (error) {
+    if (__DEV__) console.warn("[imported-audiobooks] cover-move-failed", { artworkUri, error });
     return null;
   }
 };
@@ -123,7 +145,9 @@ const inspectCopiedAudio = async (
   if (!isSupportedImportFileName(copied.name)) {
     throw new UnsupportedAudioImportError(copied.name, "format");
   }
-  const raw = await AudioImport.readAudioMetadata(copied.uri);
+  // The cover is written next to the audio: expo-file-system can't move files out of tmp/.
+  const directory = await ensureAppDirectory(importedBookDirectory(id));
+  const raw = await AudioImport.readAudioMetadata(copied.uri, directory);
   if (!raw.isPlayable || !raw.durationMs) {
     throw new UnsupportedAudioImportError(copied.name, "unplayable");
   }
@@ -156,9 +180,15 @@ const buildTrack = (id: string, pending: PendingAudioImport, relativePath: strin
  * Moves pending audio under `id` (its own id for a new book, or a removed book's id when restoring)
  * and returns the track and cover paths.
  */
-const placePendingAudio = async (pending: PendingAudioImport, id: string) => {
+const placePendingAudio = async (
+  pending: PendingAudioImport,
+  id: string,
+  options: { keepCover?: boolean } = {},
+) => {
   const directory = await ensureAppDirectory(importedBookDirectory(id));
   let fileUri = pending.fileUri;
+  // Cover first: when restoring into another id, the pending folder is deleted below.
+  const coverRelativePath = options.keepCover ? null : await placeArtwork(pending.artworkUri, id);
   if (id !== pending.id) {
     fileUri = `${directory}${encodeURIComponent(pending.fileName)}`;
     await FileSystem.deleteAsync(fileUri, { idempotent: true });
@@ -167,7 +197,6 @@ const placePendingAudio = async (pending: PendingAudioImport, id: string) => {
   }
   const relativePath = toDocumentRelativePath(fileUri);
   if (!relativePath) throw new Error("Unable to persist the imported audio path.");
-  const coverRelativePath = await moveArtwork(pending.artworkUri, id);
   return { track: buildTrack(id, pending, relativePath), coverRelativePath };
 };
 
@@ -208,7 +237,9 @@ const durationsMatch = (existingSeconds: number, pendingSeconds: number) =>
 
 /** Gives a removed or Missing Imported Audio book its audio back, keeping its id and edited metadata. */
 const restoreImportedAudio = async (existing: ImportedAudiobookRecord, pending: PendingAudioImport) => {
-  const { track, coverRelativePath } = await placePendingAudio(pending, existing.id);
+  const { track, coverRelativePath } = await placePendingAudio(pending, existing.id, {
+    keepCover: Boolean(existing.coverRelativePath),
+  });
   const { actions } = importedBooksStore.getState();
   actions.addImportedBook({
     ...existing,

@@ -53,7 +53,8 @@ declare class AudioImportModule extends NativeModule<AudioImportEvents> {
   ): Promise<AudioImportPickResult>;
   pickerLeftoverReport(): Promise<PickerLeftoverReport>;
   clearPickerLeftovers(): Promise<boolean>;
-  readAudioMetadata(fileUrl: string): Promise<AudioImportMetadata>;
+  /** Writes the embedded cover into `artworkDirectory` (Documents/Caches only) when given. */
+  readAudioMetadata(fileUrl: string, artworkDirectory?: string): Promise<AudioImportMetadata>;
   setExcludedFromBackup(fileUrl: string, excluded: boolean): Promise<boolean>;
   isExcludedFromBackup(fileUrl: string): Promise<boolean>;
 }

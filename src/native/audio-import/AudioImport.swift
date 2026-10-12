@@ -75,11 +75,14 @@ class AudioImport: Module {
       return true
     }
 
-    AsyncFunction("readAudioMetadata") { (fileUrl: String) async throws -> [String: Any] in
+    // `artworkDirectory`, when given, receives the embedded cover as cover.jpg/png. It must be a
+    // folder JS may read (Documents or Caches): expo-file-system cannot touch tmp/.
+    AsyncFunction("readAudioMetadata") { (fileUrl: String, artworkDirectory: String?) async throws -> [String: Any] in
       guard let url = Self.resolveFileURL(fileUrl) else {
         throw Exception(name: "ERR_URL", description: "Invalid file URL provided")
       }
-      return try await Self.readMetadata(url: url)
+      let artworkURL = artworkDirectory.flatMap { Self.resolveFileURL($0) }
+      return try await Self.readMetadata(url: url, artworkDirectory: artworkURL)
     }
 
     AsyncFunction("setExcludedFromBackup") { (fileUrl: String, excluded: Bool) throws -> Bool in
@@ -168,7 +171,7 @@ class AudioImport: Module {
     return try fresh.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup ?? false
   }
 
-  private static func readMetadata(url: URL) async throws -> [String: Any] {
+  private static func readMetadata(url: URL, artworkDirectory: URL?) async throws -> [String: Any] {
     let started = Date()
     let asset = AVURLAsset(url: url)
     let (duration, isPlayable, commonMetadata, allMetadata, formats, chapterLocales) = try await asset.load(
@@ -181,7 +184,7 @@ class AudioImport: Module {
       guard let key = item.commonKey?.rawValue else { continue }
       if item.commonKey == .commonKeyArtwork {
         if artworkUri == nil, let data = try? await item.load(.dataValue) {
-          artworkUri = writeArtwork(data)
+          artworkUri = writeArtwork(data, into: artworkDirectory)
         }
         continue
       }
@@ -254,12 +257,14 @@ class AudioImport: Module {
     ]
   }
 
-  private static func writeArtwork(_ data: Data) -> String? {
+  private static func writeArtwork(_ data: Data, into directory: URL?) -> String? {
     let isPng = data.starts(with: [0x89, 0x50, 0x4E, 0x47])
-    let url = FileManager.default.temporaryDirectory
-      .appendingPathComponent("import-artwork-\(UUID().uuidString).\(isPng ? "png" : "jpg")")
+    let fileName = directory == nil ? "import-artwork-\(UUID().uuidString)" : "cover"
+    let folder = directory ?? FileManager.default.temporaryDirectory
+    let url = folder.appendingPathComponent("\(fileName).\(isPng ? "png" : "jpg")")
     do {
-      try data.write(to: url)
+      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+      try data.write(to: url, options: .atomic)
       return url.absoluteString
     } catch {
       return nil
