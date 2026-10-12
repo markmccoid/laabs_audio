@@ -94,8 +94,8 @@ Simulator smoke test: all steps passed. The native pick is security-scoped. On a
 coordination wait was 11 ms and the copy took 0.3 ms. It left no Inbox leftover. Swiping to
 dismiss resolves `canceled`, and the picker reopens afterwards. Clearing leftovers works.
 
-**Decision (pending device confirmation):** production import uses the native picker, not
-expo-document-picker.
+**Decision (confirmed on device, 2026-10-11):** production import uses the native picker, not
+expo-document-picker. Repeated 250 MB imports on device with the native picker never hung.
 
 ## Backup exclusion
 
