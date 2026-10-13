@@ -1,7 +1,10 @@
 import { QueryClient } from "@tanstack/react-query";
 import { getAssistantDownloadedBooks } from "@/assistant/assistant-downloaded-books";
 import { invalidateAllSqliteProjections } from "@/query/sqlite-invalidation";
-import { rebuildAssistantCatalog } from "./assistant-catalog-writes";
+import {
+  holdAssistantCatalogRebuilds,
+  requestAssistantCatalogRebuild,
+} from "./assistant-catalog-rebuild-scheduler";
 import { refreshShadowLibraryCatalog, type ShadowCatalogRefreshResult } from "./catalog-refresh";
 import { refreshShadowUserOverlays, type ShadowOverlayRefreshResult } from "./overlay-writes";
 import { getShadowLibraryReadiness, type ShadowLibraryReadiness } from "./shadow-status";
@@ -25,7 +28,6 @@ type RefreshResult = {
   readiness: ShadowLibraryReadiness;
   catalog?: ShadowCatalogRefreshResult;
   overlay?: ShadowOverlayRefreshResult;
-  assistantCatalog?: { rowCount: number };
 };
 
 type SqliteRefreshCoordinatorRuntimeState = {
@@ -65,6 +67,9 @@ export const sqliteRefreshCoordinator = {
     if (existing) return existing;
 
     const startedAt = Date.now();
+    // Hold background Assistant Catalog rebuilds until this refresh has written, so a session
+    // switch builds the catalog once, from fresh rows, without blocking these writes.
+    const releaseAssistantRebuilds = holdAssistantCatalogRebuilds();
     const task = (async () => {
       const readiness = await getShadowLibraryReadiness({
         catalogMs: SQLITE_CATALOG_STALE_MS,
@@ -103,35 +108,14 @@ export const sqliteRefreshCoordinator = {
         });
       }
 
+      // Rebuild the Assistant Catalog from the refreshed rows in the background; Home's queries
+      // are invalidated now rather than after a multi-second rebuild.
       if (shouldRefreshCatalog || shouldRefreshOverlay) {
-        const assistantCatalogStart = Date.now();
-        try {
-          result.assistantCatalog = await rebuildAssistantCatalog({
-            userId,
-            downloadedBooks: getAssistantDownloadedBooks(userId, libraryId),
-          });
-          void recordTimingLog(
-            "library_switch",
-            "sqlite_refresh_assistant_catalog",
-            assistantCatalogStart,
-            {
-              userId,
-              libraryId,
-              rowCount: result.assistantCatalog.rowCount,
-            },
-          );
-        } catch (error) {
-          void recordTimingLog(
-            "library_switch",
-            "sqlite_refresh_assistant_catalog",
-            assistantCatalogStart,
-            {
-              userId,
-              libraryId,
-              error: error instanceof Error ? error.message : "Assistant Catalog rebuild failed",
-            },
-          );
-        }
+        requestAssistantCatalogRebuild({
+          userId,
+          downloadedBooks: getAssistantDownloadedBooks(userId, libraryId),
+          source: "sqlite_refresh",
+        });
       }
 
       invalidateSqliteQueries(options.queryClient);
@@ -146,6 +130,7 @@ export const sqliteRefreshCoordinator = {
       return result;
     })().finally(() => {
       refreshCoordinatorRuntimeState.inFlightByScope.delete(key);
+      releaseAssistantRebuilds();
     });
 
     refreshCoordinatorRuntimeState.inFlightByScope.set(key, task);

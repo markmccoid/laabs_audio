@@ -1,6 +1,23 @@
 # Library / Session Switch Performance — To Do
 
-Status: diagnosed from device timing logs (2026-10-12), not started. Do this on its own branch after
+Status: steps 1–2 done on `perf/library-switch` (2026-10-13). Remaining: steps 3–5.
+
+## Progress (2026-10-13)
+
+- **Step 1 — gates instrumented.** `src/utils/switch-trace.ts` logs `switch_gate` rows (dev builds)
+  per switch: `entry_resolved`, `active_library_ready`, `readiness_resolved`,
+  `home_projection_resolved`, cover cleared, `home_ready`. `recordTimingLog` now reads the clock
+  before waiting on the shared connection, so durations no longer include write-queue waits.
+- **Finding (device, user switch to "mark"):** Home's data was ready at 2.35 s, but the cover held
+  until 10.7 s — `enterUserSession` awaited a full Assistant Catalog rebuild (~8.3 s), which also
+  blocked the post-switch overlay refresh ~7 s on the write guard; a second rebuild followed.
+- **Step 2 — done.** `assistant-catalog-rebuild-scheduler.ts`: entry schedules the rebuild in the
+  background; the SQLite refresh holds rebuilds while writing and requests one after, so one
+  rebuild runs per switch; requests for a user who is no longer active are dropped and a boundary
+  clear cancels pending ones. Device result: user switch **10.7 s → 1.7–2.9 s** to `home_ready`.
+- **What remains in a switch:** `restore_remembered_session` 0.8–1.8 s (token refresh, step 5),
+  then ~0.3 s to readiness/projection. Cold (uncached) library first visits are still slow
+  (sim: 17 s, projection waits for the catalog download) — step 4. Do this on its own branch after
 Imported Audiobooks ships. Touches User Session Entry and SQLite refresh, the fragile area
 (ADR-0008, 0011, 0015, 0021), so it needs QA of login, logout, account switch and library switch.
 

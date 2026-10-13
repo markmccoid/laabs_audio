@@ -1,3 +1,4 @@
+import { cancelAssistantCatalogRebuilds } from "@/data/sqlite/assistant-catalog-rebuild-scheduler";
 import { clearAssistantCatalog } from "@/data/sqlite/assistant-catalog-writes";
 import { Platform } from "react-native";
 import { subscribeAssistantCatalogChanged } from "./assistant-catalog-events";
@@ -9,6 +10,8 @@ const getNativeBridge = async () => {
 };
 
 export const clearAssistantSurfaceContent = async (): Promise<void> => {
+  // A pending rebuild for the previous user must not repopulate the catalog after this clear.
+  cancelAssistantCatalogRebuilds();
   await clearAssistantCatalog();
   try {
     await (await getNativeBridge())?.clearSpotlightIndex();

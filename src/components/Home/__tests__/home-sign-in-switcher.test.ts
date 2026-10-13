@@ -44,7 +44,7 @@ jest.mock("@/auth/auth-storage", () => ({
   getSessionDisplayName: (session: { label: string }) => session.label,
   authStorage: { getSessionSecrets: (...args: unknown[]) => mockGetSessionSecrets(...args) },
 }));
-jest.mock("@/auth/session-boundary", () => ({ replaceAssistantSurfaceContent: jest.fn() }));
+jest.mock("@/auth/session-boundary", () => ({ scheduleAssistantSurfaceContent: jest.fn() }));
 jest.mock("@/auth/library-activation-store", () => ({
   libraryActivationStore: { getState: () => mockActivationState },
 }));

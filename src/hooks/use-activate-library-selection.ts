@@ -4,6 +4,7 @@ import { authStore, type AuthState } from "@/auth/auth-store";
 import { queryClient } from "@/query/query-client";
 import { sqliteSearchRepository } from "@/data/sqlite/search-repository";
 import { recordTimingLog } from "@/data/sqlite/timing-logger";
+import { beginSwitchTrace, markSwitchGate } from "@/utils/switch-trace";
 import { getBookDetailHref } from "@/navigation/book-links";
 import { playerService } from "@/player/player-service";
 import type { Library } from "@/types/absTypes";
@@ -64,6 +65,7 @@ export const runLibraryActivationSelection = async (
   }
 
   const startedAt = Date.now();
+  beginSwitchTrace("library", { libraryId: library.id, libraryName: library.name });
   activationState.actions.start(library);
   if (!options.stayOnHome) router.replace("/(tabs)/(home)");
   await waitForNextFrame();
@@ -105,6 +107,7 @@ export const runLibraryActivationSelection = async (
       router.replace(getBookDetailHref(returnToLibraryItemId));
       await waitForNextFrame();
       activationState.actions.clear();
+      markSwitchGate("library_cover_cleared", { libraryId: library.id });
       void recordTimingLog("library_switch", "activation_selection", startedAt, {
         libraryId: library.id,
         libraryName: library.name,
@@ -117,6 +120,7 @@ export const runLibraryActivationSelection = async (
 
     await waitForNextFrame();
     activationState.actions.clear();
+    markSwitchGate("library_cover_cleared", { libraryId: library.id });
     void recordTimingLog("library_switch", "activation_selection", startedAt, {
       libraryId: library.id,
       libraryName: library.name,

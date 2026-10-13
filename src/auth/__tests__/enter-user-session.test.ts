@@ -40,7 +40,7 @@ jest.mock("../library-resolution", () => ({
 
 jest.mock("../session-boundary", () => ({
   prepareForSignInChange: jest.fn(),
-  replaceAssistantSurfaceContent: jest.fn(),
+  scheduleAssistantSurfaceContent: jest.fn(),
 }));
 
 import { authService } from "../auth-service";

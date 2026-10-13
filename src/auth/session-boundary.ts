@@ -1,6 +1,9 @@
 import { clearAssistantSurfaceContent } from "../assistant/assistant-surface-lifecycle";
 import { getAssistantDownloadedBooks } from "../assistant/assistant-downloaded-books";
-import { rebuildAssistantCatalog } from "../data/sqlite/assistant-catalog-writes";
+import {
+  requestAssistantCatalogRebuild,
+  setAssistantRebuildCurrentUser,
+} from "../data/sqlite/assistant-catalog-rebuild-scheduler";
 import { playerService } from "../player/player-service";
 import { playbackStore } from "../player/playback-store";
 import { queryClient } from "../query/query-client";
@@ -12,21 +15,31 @@ import { resolveListeningOwnerKey } from "./listening-owner";
 const LOCAL_SESSION_ID = "local";
 const RETAINED_DOWNLOAD_LIBRARY_FALLBACK = "assistant-retained-downloads";
 
-export const replaceAssistantSurfaceContent = async (
+// Wait briefly so the post-entry SQLite refresh can take over this request (it holds rebuilds
+// while writing, then requests one); with nothing to refresh, this request runs on its own.
+const ENTRY_ASSISTANT_REBUILD_DELAY_MS = 1_500;
+
+setAssistantRebuildCurrentUser(() => authStore.getState().storedUserId);
+
+/**
+ * Schedules the Assistant Catalog rebuild for a newly entered User Session in the background.
+ * Entry never waits for it: a full rebuild takes seconds and used to hold Home's cover.
+ */
+export const scheduleAssistantSurfaceContent = (
   userId: string,
   fallbackLibraryId?: string | null,
 ) => {
-  try {
-    await rebuildAssistantCatalog({
+  requestAssistantCatalogRebuild(
+    {
       userId,
       downloadedBooks: getAssistantDownloadedBooks(
         userId,
         fallbackLibraryId?.trim() || RETAINED_DOWNLOAD_LIBRARY_FALLBACK,
       ),
-    });
-  } catch (error) {
-    if (__DEV__) console.warn("[session-boundary] assistant-surface-rebuild-failed", { error });
-  }
+      source: "session_entry",
+    },
+    { delayMs: ENTRY_ASSISTANT_REBUILD_DELAY_MS },
+  );
 };
 
 export const prepareForUserSessionBoundary = async () => {

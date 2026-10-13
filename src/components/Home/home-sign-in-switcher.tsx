@@ -4,7 +4,7 @@ import { authStorage, getSessionDisplayName, type RememberedSessionRecord } from
 import { libraryActivationStore } from "@/auth/library-activation-store";
 import { selectActiveLibraryExperience } from "@/auth/active-library-experience";
 import { authStore, useAuthStore } from "@/auth/auth-store";
-import { replaceAssistantSurfaceContent } from "@/auth/session-boundary";
+import { scheduleAssistantSurfaceContent } from "@/auth/session-boundary";
 import { useApplySessionEntryResolution } from "@/auth/use-apply-session-entry-resolution";
 import { resolveSessionColor } from "@/auth/session-color";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -12,6 +12,7 @@ import { router } from "expo-router";
 import { useCallback, useMemo, useRef } from "react";
 import { Alert } from "react-native";
 import { useUniwind } from "uniwind";
+import { beginSwitchTrace } from "@/utils/switch-trace";
 import { homeSessionSwitchStore, useHomeSessionSwitch } from "./home-session-switch-store";
 
 const BUTTON_LABEL_MAX_CHARS = 22;
@@ -71,6 +72,7 @@ export const useHomeSignInSwitcher = () => {
       pendingRef.current = true;
       const previous = authStore.getState();
       const previousExperience = selectActiveLibraryExperience(previous);
+      beginSwitchTrace("session", { sessionKey: session.key });
       homeSessionSwitchStore.getState().actions.start(
         session.key,
         previousExperience === "unresolved" ? null : previousExperience,
@@ -91,7 +93,7 @@ export const useHomeSignInSwitcher = () => {
         });
         authStore.getState().actions.setServerConnectionStatus(previous.serverConnectionStatus);
         if (previous.storedUserId) {
-          await replaceAssistantSurfaceContent(previous.storedUserId, previous.activeLibraryId);
+          scheduleAssistantSurfaceContent(previous.storedUserId, previous.activeLibraryId);
         }
       };
       let waitingForHomeContent = false;

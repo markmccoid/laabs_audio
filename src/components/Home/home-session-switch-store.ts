@@ -1,5 +1,6 @@
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
+import { markSwitchGate } from "../../utils/switch-trace";
 
 type HomeSessionSwitchState = {
   pendingSessionKey: string | null;
@@ -19,8 +20,14 @@ export const homeSessionSwitchStore = createStore<HomeSessionSwitchState>()((set
   actions: {
     start: (pendingSessionKey, previousExperience) =>
       set({ pendingSessionKey, previousExperience, entryResolved: false }),
-    resolveEntry: () => set({ entryResolved: true }),
-    clear: () => set({ pendingSessionKey: null, previousExperience: null, entryResolved: false }),
+    resolveEntry: () => {
+      markSwitchGate("entry_resolved");
+      set({ entryResolved: true });
+    },
+    clear: () => {
+      markSwitchGate("session_cover_cleared");
+      set({ pendingSessionKey: null, previousExperience: null, entryResolved: false });
+    },
   },
 }));
 

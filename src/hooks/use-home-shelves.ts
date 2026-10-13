@@ -26,6 +26,7 @@ import { mergeContinueListening } from "../imported/imported-audiobook-presentat
 import { useImportedBookListData } from "../imported/use-imported-books";
 import { useHomeShelfScopeKey } from "./use-home-shelf-scope-key";
 import { useLocalDownloadProgress } from "./use-local-download-progress";
+import { markSwitchGate } from "../utils/switch-trace";
 import {
   DEFAULT_HOME_SHELF_ITEM_COUNT,
   type HomeShelfSettings,
@@ -336,6 +337,19 @@ export const useHomeShelves = () => {
     },
   });
   const homeProjection = homeProjectionQuery.data;
+  useEffect(() => {
+    if (!readiness) return;
+    markSwitchGate("readiness_resolved", {
+      libraryId: activeLibraryId,
+      hasCatalogRows: readiness.hasCatalogRows,
+      hasOverlayRefresh: Boolean(readiness.lastOverlayRefreshAt),
+    });
+  }, [activeLibraryId, readiness]);
+  useEffect(() => {
+    if (homeProjection && !homeProjectionQuery.isPlaceholderData) {
+      markSwitchGate("home_projection_resolved", { libraryId: activeLibraryId });
+    }
+  }, [activeLibraryId, homeProjection, homeProjectionQuery.isPlaceholderData]);
 
   const localDownloadProgress = useLocalDownloadProgress();
 

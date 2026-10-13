@@ -16,10 +16,12 @@ export const recordTimingLog = async (
   startedAt: number,
   metadata?: Record<string, any>,
 ) => {
+  // Read the clock before awaiting the shared connection: a busy DB would otherwise add its
+  // queue wait to every duration.
+  const nowMs = Date.now();
   try {
     const db = await getDb();
     await initializeShadowDatabaseInternal();
-    const nowMs = Date.now();
     const durationMs = nowMs - startedAt;
     const id = `timing_${nowMs}_${Math.random().toString(36).slice(2, 10)}`;
     const metadataStr = metadata ? JSON.stringify(metadata) : null;
