@@ -1,6 +1,7 @@
 import { recordTimingLog } from "../data/sqlite/timing-logger";
 import type { Library } from "../types/absTypes";
 import { AuthError, authService } from "./auth-service";
+import { getJwtExpiry, isTokenExpired } from "./auth-token";
 import { authStore } from "./auth-store";
 import {
   authStorage,
@@ -81,10 +82,26 @@ const toMessage = (error: unknown, fallback: string) =>
 // password as a fallback. A NETWORK_ERROR propagates so the caller reports offline; any
 // other failure resolves to null so the entry surfaces as "needs attention". Returns null
 // when neither path yields tokens.
+// A stored access token with at least this much life left is reused instead of refreshed.
+const RESTORE_MIN_TOKEN_LIFETIME_MS = 5 * 60 * 1000;
+
 const authenticateRestore = async (
   session: RememberedSessionRecord,
   secrets: SessionSecrets,
 ): Promise<{ accessToken: string; refreshToken: string } | null> => {
+  // Skip the network round trip when the remembered access token is still comfortably valid
+  // (it cost 0.8–1.8 s per session switch). If the server has revoked it anyway, authFetch
+  // answers the first 401 with a forced refresh and a retry.
+  const storedExpiresAt = getJwtExpiry(secrets.accessToken);
+  if (
+    secrets.accessToken &&
+    secrets.refreshToken &&
+    storedExpiresAt &&
+    !isTokenExpired(storedExpiresAt, RESTORE_MIN_TOKEN_LIFETIME_MS)
+  ) {
+    return { accessToken: secrets.accessToken, refreshToken: secrets.refreshToken };
+  }
+
   let tokens: { accessToken: string; refreshToken: string } | null = null;
 
   if (secrets.refreshToken) {

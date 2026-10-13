@@ -1,6 +1,6 @@
 # Library / Session Switch Performance — To Do
 
-Status: steps 1–2 done on `perf/library-switch` (2026-10-13). Remaining: steps 3–5.
+Status: steps 1–2 and the token-refresh part of step 5 done on `perf/library-switch` (2026-10-13). Remaining: steps 3, 4 and the cheaper catalog-change check from step 5.
 
 ## Progress (2026-10-13)
 
@@ -15,7 +15,11 @@ Status: steps 1–2 done on `perf/library-switch` (2026-10-13). Remaining: steps
   background; the SQLite refresh holds rebuilds while writing and requests one after, so one
   rebuild runs per switch; requests for a user who is no longer active are dropped and a boundary
   clear cancels pending ones. Device result: user switch **10.7 s → 1.7–2.9 s** to `home_ready`.
-- **What remains in a switch:** `restore_remembered_session` 0.8–1.8 s (token refresh, step 5),
+- **Step 5 (part) — done.** Restore reuses a remembered access token with >5 min left instead of
+  refreshing it; `authFetch` answers a 401 with a forced refresh and retry. Sim QA: valid token
+  restore 19 ms (no refresh), expired token refreshes, tampered-signature token recovers via
+  401 → refresh → retry with no needs-attention state.
+- **What remained in a switch before that:** `restore_remembered_session` 0.8–1.8 s (token refresh),
   then ~0.3 s to readiness/projection. Cold (uncached) library first visits are still slow
   (sim: 17 s, projection waits for the catalog download) — step 4. Do this on its own branch after
 Imported Audiobooks ships. Touches User Session Entry and SQLite refresh, the fragile area

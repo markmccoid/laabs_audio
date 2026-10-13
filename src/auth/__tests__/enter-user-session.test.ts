@@ -184,6 +184,33 @@ describe("restore entry", () => {
     });
   });
 
+  const jwtExpiringIn = (ms: number) =>
+    `h.${Buffer.from(JSON.stringify({ exp: Math.floor((Date.now() + ms) / 1000) }))
+      .toString("base64")
+      .replace(/=+$/, "")}.sig`;
+
+  it("reuses a stored access token that is still valid instead of refreshing", async () => {
+    const accessToken = jwtExpiringIn(60 * 60 * 1000);
+    mockGetSecrets.mockResolvedValue({ password: "pw", accessToken, refreshToken: "refresh-tok" });
+
+    const result = await enterUserSession({ via: "restore", sessionKey: REMEMBERED.key });
+
+    expect(result.outcome).toBe("activate");
+    expect(mockRefresh).not.toHaveBeenCalled();
+    expect(mockLogin).not.toHaveBeenCalled();
+  });
+
+  it("refreshes a stored access token that is about to expire", async () => {
+    const accessToken = jwtExpiringIn(60 * 1000);
+    mockGetSecrets.mockResolvedValue({ password: "pw", accessToken, refreshToken: "refresh-tok" });
+    mockRefresh.mockResolvedValue({ accessToken: "a2", refreshToken: "r2" });
+
+    const result = await enterUserSession({ via: "restore", sessionKey: REMEMBERED.key });
+
+    expect(result.outcome).toBe("activate");
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it("returns offline without any network call when the device is offline", async () => {
     setAuthState({ isOnline: false });
 
