@@ -26,6 +26,7 @@ import { mergeContinueListening } from "../imported/imported-audiobook-presentat
 import { useImportedBookListData } from "../imported/use-imported-books";
 import { useHomeShelfScopeKey } from "./use-home-shelf-scope-key";
 import { useLocalDownloadProgress } from "./use-local-download-progress";
+import { markSwitchGate } from "../utils/switch-trace";
 import {
   DEFAULT_HOME_SHELF_ITEM_COUNT,
   type HomeShelfSettings,
@@ -301,6 +302,9 @@ export const useHomeShelves = () => {
   // resolution, custom shelves, and Discover can all render even when the
   // user-overlay refresh has never completed (or ABS is currently unavailable).
   const hasReadySqliteHome = readiness?.hasCatalogRows === true;
+  // A first catalog download renders Home after its first page; until the download completes,
+  // Recently Added and Discover would be built from a partial (progress-ordered) catalog.
+  const isCatalogFilling = hasReadySqliteHome && !readiness?.lastCatalogRefreshAt;
 
   const homeProjectionQuery = useQuery({
     queryKey: queryKeys.sqliteHomeProjection(
@@ -336,6 +340,29 @@ export const useHomeShelves = () => {
     },
   });
   const homeProjection = homeProjectionQuery.data;
+  useEffect(() => {
+    if (!readiness) return;
+    markSwitchGate(
+      "readiness_resolved",
+      {
+        userId: activeLibraryUserKey,
+        libraryId: activeLibraryId,
+        hasCatalogRows: readiness.hasCatalogRows,
+        hasOverlayRefresh: Boolean(readiness.lastOverlayRefreshAt),
+        catalogComplete: Boolean(readiness.lastCatalogRefreshAt),
+      },
+      `${activeLibraryUserKey}:${activeLibraryId}:${readiness.hasCatalogRows}:${Boolean(readiness.lastCatalogRefreshAt)}`,
+    );
+  }, [activeLibraryId, activeLibraryUserKey, readiness]);
+  useEffect(() => {
+    if (homeProjection && !homeProjectionQuery.isPlaceholderData) {
+      markSwitchGate(
+        "home_projection_resolved",
+        { userId: activeLibraryUserKey, libraryId: activeLibraryId },
+        `${activeLibraryUserKey}:${activeLibraryId}`,
+      );
+    }
+  }, [activeLibraryId, activeLibraryUserKey, homeProjection, homeProjectionQuery.isPlaceholderData]);
 
   const localDownloadProgress = useLocalDownloadProgress();
 
@@ -347,8 +374,7 @@ export const useHomeShelves = () => {
       (homeProjectionQuery.isFetching ||
         readinessQuery.isFetching ||
         !readiness ||
-        !readiness.hasCatalogRows ||
-        !readiness.lastOverlayRefreshAt) &&
+        !readiness.hasCatalogRows) &&
       !homeProjectionQuery.error &&
       !readinessQuery.error,
   );
@@ -580,7 +606,8 @@ export const useHomeShelves = () => {
     if (
       authStatus !== "authenticated" ||
       activeLibraryExperience !== "book" ||
-      !hasReadySqliteHome
+      !hasReadySqliteHome ||
+      isCatalogFilling
     ) {
       return;
     }
@@ -616,6 +643,7 @@ export const useHomeShelves = () => {
     discoverHomeItemCount,
     hasReadySqliteHome,
     homeScopeKey,
+    isCatalogFilling,
     setDailyDiscoverShelf,
   ]);
 
@@ -720,20 +748,22 @@ export const useHomeShelves = () => {
             kind: "derived",
             id: "recentlyAdded",
             title: "Recently Added",
-            books: recentlyAdded,
+            books: isCatalogFilling ? EMPTY_CATALOG : recentlyAdded,
             homeItemCount:
               shelfSettingsById.recentlyAdded?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
             isVisible: shelfSettingsById.recentlyAdded?.isVisible ?? true,
-            emptyMessage: "No books found in this library.",
+            emptyMessage: isCatalogFilling
+              ? "Loading library…"
+              : "No books found in this library.",
           },
           {
             kind: "derived",
             id: "discover",
             title: "Discover",
-            books: discover,
+            books: isCatalogFilling ? EMPTY_CATALOG : discover,
             homeItemCount: shelfSettingsById.discover?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
             isVisible: shelfSettingsById.discover?.isVisible ?? true,
-            emptyMessage: "No unread books available.",
+            emptyMessage: isCatalogFilling ? "Loading library…" : "No unread books available.",
           },
           {
             kind: "derived",
@@ -811,6 +841,7 @@ export const useHomeShelves = () => {
     discover,
     importedBookById,
     importedShelf,
+    isCatalogFilling,
     offlineDownloadedById,
     playlistShelvesRaw,
     recentlyAdded,

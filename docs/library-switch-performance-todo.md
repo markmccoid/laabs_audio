@@ -1,6 +1,44 @@
 # Library / Session Switch Performance — To Do
 
-Status: diagnosed from device timing logs (2026-10-12), not started. Do this on its own branch after
+Status: steps 1–2 and the token-refresh part of step 5 done on `perf/library-switch` (2026-10-13). Remaining: step 3 (likely unnecessary) and the cheaper catalog-change check from step 5.
+
+## Progress (2026-10-13)
+
+- **Step 1 — gates instrumented.** `src/utils/switch-trace.ts` logs `switch_gate` rows (dev builds)
+  per switch: `entry_resolved`, `active_library_ready`, `readiness_resolved`,
+  `home_projection_resolved`, cover cleared, `home_ready`. `recordTimingLog` now reads the clock
+  before waiting on the shared connection, so durations no longer include write-queue waits.
+- **Finding (device, user switch to "mark"):** Home's data was ready at 2.35 s, but the cover held
+  until 10.7 s — `enterUserSession` awaited a full Assistant Catalog rebuild (~8.3 s), which also
+  blocked the post-switch overlay refresh ~7 s on the write guard; a second rebuild followed.
+- **Step 2 — done.** `assistant-catalog-rebuild-scheduler.ts`: entry schedules the rebuild in the
+  background; the SQLite refresh holds rebuilds while writing and requests one after, so one
+  rebuild runs per switch; requests for a user who is no longer active are dropped and a boundary
+  clear cancels pending ones. Device result: user switch **10.7 s → 1.7–2.9 s** to `home_ready`.
+- **Step 5 (part) — done.** Restore reuses a remembered access token with >5 min left instead of
+  refreshing it; `authFetch` answers a 401 with a forced refresh and retry. Sim QA: valid token
+  restore 19 ms (no refresh), expired token refreshes, tampered-signature token recovers via
+  401 → refresh → retry with no needs-attention state.
+- **Step 4 — done (progressive cold load).** On a cold first visit the refresh fetches progress
+  first, then invalidates Home after the first catalog page (pages arrive in descending listening
+  progress, so page one holds every in-progress book). Home no longer waits for an overlay
+  refresh; Recently Added and Discover show "Loading library…" and the daily Discover pick is not
+  saved until the catalog completes. The post-refresh Assistant rebuild starts 2 s late so Home's
+  re-reads go first. Sim, cold user switch (3,024 books): Home with Continue Listening at
+  **3.4–3.7 s** (was 8–9 s; 17 s before step 2); Recently Added/Discover ~1.5–2 s after the
+  download ends (~8.5 s). Dev tool: Settings → Shadow SQLite → "Evict Other Sign-Ins' Catalogs".
+- **Rapid switching — fixed.** Switching every ~10 s took 5.7–6.6 s on device (sim: up to 12.8 s):
+  the boundary's Assistant Catalog clear waited on the previous user's in-flight rebuild through
+  the write guard. Now the clear is queued, not awaited; a rebuild for a user who is no longer
+  active (or after a boundary clear) stops at its next checkpoint; the rebuild commits per
+  500-row chunk and swaps in at the end (a rolled-back transaction also discarded unrelated
+  statements on the shared connection — timing rows vanished); and the row-building loop yields
+  every 250 rows (it blocked the JS thread: account-menu taps took 4.8–7.4 s to register).
+  Sim, switching mid-rebuild: tap→switch 78–317 ms, home_ready 1.3–2.0 s, stale rebuilds stop
+  1.6–3.4 s into the next switch.
+- **What remained in a switch before that:** `restore_remembered_session` 0.8–1.8 s (token refresh),
+  then ~0.3 s to readiness/projection. Cold (uncached) library first visits are still slow
+  (sim: 17 s, projection waits for the catalog download) — step 4. Do this on its own branch after
 Imported Audiobooks ships. Touches User Session Entry and SQLite refresh, the fragile area
 (ADR-0008, 0011, 0015, 0021), so it needs QA of login, logout, account switch and library switch.
 

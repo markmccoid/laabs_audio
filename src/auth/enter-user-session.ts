@@ -1,6 +1,8 @@
 import { recordTimingLog } from "../data/sqlite/timing-logger";
+import { markSwitchGate } from "../utils/switch-trace";
 import type { Library } from "../types/absTypes";
 import { AuthError, authService } from "./auth-service";
+import { getJwtExpiry, isTokenExpired } from "./auth-token";
 import { authStore } from "./auth-store";
 import {
   authStorage,
@@ -10,7 +12,7 @@ import {
   type SessionSecrets,
 } from "./auth-storage";
 import { fetchLibrariesForResolution, resolveLibrarySelection } from "./library-resolution";
-import { prepareForSignInChange, replaceAssistantSurfaceContent } from "./session-boundary";
+import { prepareForSignInChange, scheduleAssistantSurfaceContent } from "./session-boundary";
 
 /**
  * User Session Entry (ADR-0020). Establishes the signed-in User Session from either
@@ -81,10 +83,26 @@ const toMessage = (error: unknown, fallback: string) =>
 // password as a fallback. A NETWORK_ERROR propagates so the caller reports offline; any
 // other failure resolves to null so the entry surfaces as "needs attention". Returns null
 // when neither path yields tokens.
+// A stored access token with at least this much life left is reused instead of refreshed.
+const RESTORE_MIN_TOKEN_LIFETIME_MS = 5 * 60 * 1000;
+
 const authenticateRestore = async (
   session: RememberedSessionRecord,
   secrets: SessionSecrets,
 ): Promise<{ accessToken: string; refreshToken: string } | null> => {
+  // Skip the network round trip when the remembered access token is still comfortably valid
+  // (it cost 0.8–1.8 s per session switch). If the server has revoked it anyway, authFetch
+  // answers the first 401 with a forced refresh and a retry.
+  const storedExpiresAt = getJwtExpiry(secrets.accessToken);
+  if (
+    secrets.accessToken &&
+    secrets.refreshToken &&
+    storedExpiresAt &&
+    !isTokenExpired(storedExpiresAt, RESTORE_MIN_TOKEN_LIFETIME_MS)
+  ) {
+    return { accessToken: secrets.accessToken, refreshToken: secrets.refreshToken };
+  }
+
   let tokens: { accessToken: string; refreshToken: string } | null = null;
 
   if (secrets.refreshToken) {
@@ -166,7 +184,9 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
       }
 
       const secrets = await authStorage.getSessionSecrets(session.key);
+      markSwitchGate("restore_secrets_read");
       const restored = await authenticateRestore(session, secrets);
+      markSwitchGate("restore_tokens_ready", { reusedStoredToken: restored?.accessToken === secrets.accessToken });
       if (!restored) {
         authStore.getState().actions.setSessionNeedsAttention(session.key, "Sign in needed");
         return {
@@ -259,10 +279,12 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
       });
     }
 
+    markSwitchGate("restore_secrets_persisted");
     await prepareForSignInChange({
       userId: identity.confirmedUserId,
       sessionKey: identity.sessionKey,
     });
+    markSwitchGate("boundary_prepared");
 
     authStore.getState().actions.commitActiveSession(identity.sessionKey, {
       accessToken: identity.tokens.accessToken,
@@ -270,7 +292,7 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
       hasPassword: identity.hasPassword,
     });
     authStore.getState().actions.setServerConnectionStatus("reachable");
-    await replaceAssistantSurfaceContent(identity.confirmedUserId, identity.libraryHint);
+    scheduleAssistantSurfaceContent(identity.confirmedUserId, identity.libraryHint);
   } catch (error) {
     const message = toMessage(error, "Sign in failed");
     void recordTimingLog("login", timingLabel, startedAt, {
@@ -295,6 +317,7 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
   try {
     const userKey = authStore.getState().activeLibraryUserKey;
     const response = await fetchLibrariesForResolution(userKey);
+    markSwitchGate("libraries_fetched");
     const resolution = resolveLibrarySelection(response.libraries, identity.libraryHint);
 
     if (resolution.status === "noLibraries") {

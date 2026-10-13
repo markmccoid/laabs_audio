@@ -35,6 +35,7 @@ import {
   useAudioImportFlow,
 } from "@/components/imported/use-audio-import-flow";
 import { HomeShelfSection } from "./home-shelf-section";
+import { endSwitchTrace, markSwitchGate } from "@/utils/switch-trace";
 import { homeSessionSwitchStore, useHomeSessionSwitch } from "./home-session-switch-store";
 import { useHomeSignInSwitcher } from "./home-sign-in-switcher";
 
@@ -100,6 +101,16 @@ const HomeShelvesScreen = () => {
       homeSessionSwitchStore.getState().actions.clear();
     }
   }, [activeLibraryId, activeLibraryReady, activeLibraryUserKey, activeSessionKey, entryResolved, isCatalogLoading, pendingSessionKey]);
+  useEffect(() => {
+    if (activeLibraryReady && activeLibraryId) {
+      markSwitchGate("active_library_ready", { libraryId: activeLibraryId });
+    }
+  }, [activeLibraryId, activeLibraryReady]);
+  useEffect(() => {
+    if (!pendingSessionKey && activeLibraryReady && activeLibraryId && !isCatalogLoading) {
+      endSwitchTrace("home_ready", { libraryId: activeLibraryId });
+    }
+  }, [activeLibraryId, activeLibraryReady, isCatalogLoading, pendingSessionKey]);
   const shelfOrder = useSettingsStore((state) => selectHomeShelfOrder(state, homeScopeKey));
   const activationProgress = useLibraryActivationStore((state) => state.progress);
   const activateLibrarySelection = useActivateLibrarySelection();

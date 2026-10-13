@@ -15,6 +15,9 @@ import { boolToInt, now } from "./shadow-shared";
 
 const ASSISTANT_CATALOG_CONTRACT_VERSION = 1;
 const INSERT_CHUNK_SIZE = 500;
+const BUILD_YIELD_EVERY_ROWS = 250;
+
+const yieldToEventLoop = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 export type AssistantDownloadedBookInput = {
   libraryItemId: string;
@@ -165,7 +168,7 @@ const insertAssistantCatalogRow = async (
 ) => {
   const search = toSearchFields(row);
   await db.runAsync(
-    `INSERT INTO assistant_catalog (
+    `INSERT OR REPLACE INTO assistant_catalog (
       user_id, library_item_id, library_id, title, subtitle, author, narrator,
       series_name, series_sequence, duration_seconds, cover_path, cover_url,
       search_text, title_normalized, author_normalized, series_normalized,
@@ -281,20 +284,42 @@ const readDownloadedOverlays = async (db: Db, userId: string) => {
   };
 };
 
+/** Thrown when a rebuild stops because `shouldContinue` turned false; its writes roll back. */
+export class AssistantCatalogRebuildCancelledError extends Error {
+  constructor() {
+    super("Assistant Catalog rebuild cancelled");
+    this.name = "AssistantCatalogRebuildCancelledError";
+  }
+}
+
 export const rebuildAssistantCatalog = (input: {
   userId: string;
   downloadedBooks: readonly AssistantDownloadedBookInput[];
+  /**
+   * Checked between phases and insert chunks; when it turns false the rebuild stops and releases
+   * the write guard. Chunks are committed as they go (never rolled back: a rollback would also
+   * discard unrelated statements run on the shared connection meanwhile), and an interrupted
+   * build leaves only valid rows, which the next rebuild or a boundary clear replaces.
+   */
+  shouldContinue?: () => boolean;
 }): Promise<{ rowCount: number }> =>
   withWriteGuard(async () => {
     const userId = input.userId.trim();
     if (!userId) throw new Error("Assistant Catalog rebuild requires an Audiobookshelf User Identity.");
 
+    const throwIfCancelled = () => {
+      if (input.shouldContinue && !input.shouldContinue()) {
+        throw new AssistantCatalogRebuildCancelledError();
+      }
+    };
+    throwIfCancelled();
     await initializeShadowDatabaseInternal();
     const db = await getDb();
     const [sourceRows, downloadedOverlays] = await Promise.all([
       readSourceCatalog(db, userId),
       readDownloadedOverlays(db, userId),
     ]);
+    throwIfCancelled();
     const downloadedById = new Map(
       input.downloadedBooks
         .filter((book) => book.libraryItemId.trim() && book.libraryId.trim())
@@ -302,7 +327,15 @@ export const rebuildAssistantCatalog = (input: {
     );
     const rowsById = new Map<string, AssistantCatalogInsert>();
 
+    let builtSinceYield = 0;
     for (const source of sourceRows) {
+      // Building thousands of rows synchronously blocks the JS thread (taps on the account menu
+      // waited seconds); yield regularly, which is also where a cancel can take effect.
+      if (++builtSinceYield >= BUILD_YIELD_EVERY_ROWS) {
+        builtSinceYield = 0;
+        await yieldToEventLoop();
+        throwIfCancelled();
+      }
       if (rowsById.has(source.library_item_id)) continue;
       const summary = parseSummary(source.summary_json);
       const downloaded = downloadedById.get(source.library_item_id);
@@ -366,13 +399,21 @@ export const rebuildAssistantCatalog = (input: {
 
     const rows = [...rowsById.values()];
     const builtAt = now();
-    await runInTransaction(db, async () => {
-      await db.runAsync(`DELETE FROM assistant_catalog`);
-      await db.runAsync(`DELETE FROM assistant_catalog_meta`);
-      for (let offset = 0; offset < rows.length; offset += INSERT_CHUNK_SIZE) {
-        const chunk = rows.slice(offset, offset + INSERT_CHUNK_SIZE);
+    for (let offset = 0; offset < rows.length; offset += INSERT_CHUNK_SIZE) {
+      throwIfCancelled();
+      const chunk = rows.slice(offset, offset + INSERT_CHUNK_SIZE);
+      await runInTransaction(db, async () => {
         for (const row of chunk) await insertAssistantCatalogRow(db, row, builtAt);
-      }
+      });
+    }
+    throwIfCancelled();
+    // Swap in this build: drop every row it did not write (other users and stale rows).
+    await runInTransaction(db, async () => {
+      await db.runAsync(
+        `DELETE FROM assistant_catalog WHERE NOT (user_id = ? AND updated_at = ?)`,
+        [userId, builtAt],
+      );
+      await db.runAsync(`DELETE FROM assistant_catalog_meta`);
       await db.runAsync(
         `INSERT INTO assistant_catalog_meta (
           user_id, built_at, row_count, contract_version
