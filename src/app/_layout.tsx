@@ -29,6 +29,7 @@ import { useSqliteActiveLibraryRefresh } from "../data/sqlite/use-sqlite-active-
 import { LibraryActivationOverlay } from "../components/library-activation-overlay";
 import { LibrarySelectionGate } from "../components/library-selection-gate";
 import { OfflineConnectionBanner } from "../components/offline-connection-banner";
+import { SessionSignInBanner } from "../components/session-sign-in-banner";
 import "../global.css";
 import { resolveAssistantOpenHoldId } from "../navigation/assistant-open-destination";
 import { extractBookDetailIdFromUrl } from "../navigation/book-links";
@@ -701,6 +702,7 @@ export default function RootLayout() {
           <ActiveDownloadToastCoordinator />
           <PlaybackLoadingToastCoordinator />
           <OfflineConnectionBanner />
+          <SessionSignInBanner />
           <SleepTimerCoordinator />
           <AmbientCoordinator />
           <CarPlayShelfPublisher />

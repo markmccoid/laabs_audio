@@ -178,7 +178,11 @@ export const HomeShelfSection = ({
             keyExtractor={(book) => book.id}
             itemLayoutAnimation={enteringEnabled ? LinearTransition.duration(220) : undefined}
             renderItem={({ item, index }) => {
-              const isNewArrival = enteringEnabled && !seenBookIdsRef.current.has(item.id);
+              // A wholesale swap (no book on screen was seen before, e.g. an Access Mode change)
+              // is a fresh load, not arrivals; animating it can leave cards stuck invisible.
+              const seen = seenBookIdsRef.current;
+              const isWholesaleSwap = !books.some((book) => seen.has(book.id));
+              const isNewArrival = enteringEnabled && !isWholesaleSwap && !seen.has(item.id);
               return (
                 <Animated.View
                   entering={

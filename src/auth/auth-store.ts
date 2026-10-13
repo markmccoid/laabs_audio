@@ -241,7 +241,10 @@ export const authStore = createStore<AuthState>()(
               accessTokenExpiresAt,
               serverConnectionStatus: "unknown",
               status: computeEntryStatus(hasStoredSession, offlineContent),
-              loginRequired: hasStoredSession ? false : state.loginRequired,
+              // A rejected session is remembered as needsAttention, so it survives a restart.
+              loginRequired: hasStoredSession
+                ? false
+                : state.loginRequired || Boolean(activeSession?.needsAttention),
               lastAuthError: hasStoredSession ? null : state.lastAuthError,
               activeLibraryId: hydratedActiveLibraryId,
               activeLibraryName: hydratedActiveLibraryName,
@@ -764,12 +767,13 @@ export const selectAccessMode = (state: AuthState): AccessMode => {
     return state.activeLibraryId && state.activeLibraryReady ? "serverBrowsing" : "serverSetup";
   }
 
-  if (state.status === "offlineOnly") {
-    if (state.loginRequired && Boolean(state.storedUserId && state.serverUrl)) {
-      return "downloadedSessionOnly";
-    }
-    if (state.hasOfflineContent) return "downloadedOnly";
+  // Session Needs Sign-In: the server rejected a known user's session. Stay that user (their
+  // shelves, downloads and imported books) until they sign in again, with or without downloads.
+  if (state.loginRequired && Boolean(state.storedUserId && state.serverUrl)) {
+    return "downloadedSessionOnly";
   }
+
+  if (state.status === "offlineOnly" && state.hasOfflineContent) return "downloadedOnly";
 
   // No User Session and no owned downloads: Imported-Only Mode once chosen at the Welcome Choice,
   // or whenever Imported Audiobooks exist (e.g. after logout); otherwise the Welcome Choice.

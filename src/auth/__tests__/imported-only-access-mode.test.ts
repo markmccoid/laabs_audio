@@ -99,6 +99,19 @@ describe("Imported-Only Mode access", () => {
     ).toBe("downloadedSessionOnly");
   });
 
+  it("keeps Session Needs Sign-In for a rejected session with no downloads", () => {
+    expect(
+      selectAccessMode(
+        signedOut({
+          status: "anonymous",
+          loginRequired: true,
+          storedUserId: "user-1",
+          serverUrl: "https://abs.example.com",
+        }),
+      ),
+    ).toBe("downloadedSessionOnly");
+  });
+
   it("never overrides a signed-in User Session", () => {
     expect(selectAccessMode(signedOut({ status: "authenticated", importedOnlyChosen: true }))).toBe(
       "serverSetup",

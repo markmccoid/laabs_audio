@@ -103,6 +103,22 @@ never produces a network call.
 - Logout routing: Downloaded-Only → Imported-Only → Welcome Choice.
 - Assistant and CarPlay behavior in Imported-Only Mode: no ABS surfaces, imported list only.
 
+Delivered with Phase 3 (2026-10-13), covering every signed-out Access Mode, not only Imported-Only:
+- **Signed-out Continue Listening**: owned downloads' progress is rebuilt from the Downloaded Audio
+  Asset Owner's SQLite `effective_progress` plus the native Listening Position, using the player's
+  `resolveNativeResumePosition` rule (`src/progress/local-continue-listening.ts`,
+  `src/hooks/use-local-download-progress.ts`), merged with Imported Audiobooks.
+- **Signed-out custom shelves**: `selectHomeShelfScopeKey` (`src/store/device-books-store.ts`) uses
+  the user+library scope whenever both are known (including Session Needs Sign-In) and one
+  device-wide `local::device` scope after logout. Custom shelves hold any book; signed-out shelves
+  show only while signed out. Settings → Bookshelves, shelf membership, order and visibility work
+  signed out; Playlist Shelves still require a User Session.
+- **Signed-out book detail**: downloaded books render from stored details; series, author/narrator
+  and genre/tag filters are disabled.
+- **Session Needs Sign-In without downloads**: a rejected session for a known user stays
+  `downloadedSessionOnly` (it used to fall through to the Welcome Choice), survives restart via the
+  session's `needsAttention`, and shows a "Sign in again" banner (`session-sign-in-banner.tsx`).
+
 ### Phase 4 — Everywhere else
 - CarPlay "Imported" list.
 - Local search over imported title/author, merged into Search results with the badge.

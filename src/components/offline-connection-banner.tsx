@@ -7,7 +7,7 @@ import { Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { librariesApi } from "../api/libraries-api";
 import { useActiveLibraryExperience } from "../auth/active-library-experience";
-import { useAuthActions, useAuthStore } from "../auth/auth-store";
+import { selectAccessMode, useAuthActions, useAuthStore } from "../auth/auth-store";
 import { sqliteRefreshCoordinator } from "../data/sqlite/refresh-coordinator";
 import { queryKeys } from "../query/query-keys";
 import { fetchReconciledUserServerState } from "../query/user-server-state-reconcile";
@@ -23,6 +23,7 @@ export const OfflineConnectionBanner = () => {
   const serverConnectionStatus = useAuthStore((state) => state.serverConnectionStatus);
   const status = useAuthStore((state) => state.status);
   const loginRequired = useAuthStore((state) => state.loginRequired);
+  const needsSignIn = useAuthStore((state) => selectAccessMode(state) === "downloadedSessionOnly");
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
   const activeLibraryExperience = useActiveLibraryExperience();
@@ -100,7 +101,9 @@ export const OfflineConnectionBanner = () => {
 
   const isDeviceOffline = isOnline === false;
   const isServerUnavailable = isOnline !== false && serverConnectionStatus === "unreachable";
-  if ((!isDeviceOffline && !isServerUnavailable) || rootSegment === "main-player") return null;
+  if ((!isDeviceOffline && !isServerUnavailable) || rootSegment === "main-player" || needsSignIn) {
+    return null;
+  }
 
   return (
     <View
