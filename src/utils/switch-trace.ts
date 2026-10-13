@@ -23,11 +23,20 @@ const currentTrace = () => {
   return activeTrace;
 };
 
-export const markSwitchGate = (gate: string, metadata?: Record<string, unknown>) => {
+/**
+ * `scope` (e.g. user:library) lets a gate log once per scope: Home's queries can resolve for the
+ * previous user before the switch commits, and the new user's result is the one that matters.
+ */
+export const markSwitchGate = (
+  gate: string,
+  metadata?: Record<string, unknown>,
+  scope?: string | null,
+) => {
   if (!__DEV__) return;
   const trace = currentTrace();
-  if (!trace || trace.marked.has(gate)) return;
-  trace.marked.add(gate);
+  const markKey = scope ? `${gate}:${scope}` : gate;
+  if (!trace || trace.marked.has(markKey)) return;
+  trace.marked.add(markKey);
   void recordTimingLog("switch_gate", gate, trace.startedAt, {
     traceId: trace.id,
     kind: trace.kind,

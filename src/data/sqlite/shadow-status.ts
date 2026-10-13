@@ -2,6 +2,7 @@ import { itemsApi } from "@/api/items-api";
 import {
   getDb,
   initializeShadowDatabaseInternal,
+  runInTransaction,
   shadowSqliteRuntimeState,
   withWriteGuard,
 } from "./shadow-db-core";
@@ -296,6 +297,38 @@ export const getFirstShadowSearchResultId = async () => {
   );
   return rows[0]?.id ?? null;
 };
+
+/**
+ * Dev diagnostics: forgets OTHER users' cached catalog and refresh markers for the Active
+ * Library, so switching to one of those sign-ins is a cold first visit. The active user's cache
+ * is kept (evicting it would just trigger an immediate background re-download). Progress,
+ * bookmarks and pending intents are kept.
+ */
+export const evictLibraryCatalogForOtherUsers = () =>
+  withWriteGuard(async () => {
+    const context = requireActiveLibraryContext();
+    const db = await getDb();
+    await initializeShadowDatabaseInternal();
+    const scope = [context.libraryId, context.userId];
+    await runInTransaction(db, async () => {
+      for (const table of [
+        "library_catalog_items",
+        "library_catalog_fts",
+        "catalog_item_genres",
+        "catalog_item_tags",
+        "library_refresh_runs",
+        "overlay_refresh_runs",
+      ]) {
+        await db.runAsync(`DELETE FROM ${table} WHERE library_id = ? AND user_id <> ?`, scope);
+      }
+      await db.runAsync(
+        `UPDATE libraries
+         SET last_catalog_refresh_at = NULL, last_overlay_refresh_at = NULL
+         WHERE library_id = ? AND user_id <> ?`,
+        scope,
+      );
+    });
+  });
 
 export const clearShadowDatabase = () =>
   withWriteGuard(async () => {

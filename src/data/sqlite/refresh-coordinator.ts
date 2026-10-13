@@ -12,6 +12,7 @@ import { recordTimingLog } from "./timing-logger";
 
 export const SQLITE_CATALOG_STALE_MS = 15 * 60 * 1000;
 export const SQLITE_OVERLAY_STALE_MS = 2 * 60 * 1000;
+const ASSISTANT_REBUILD_AFTER_REFRESH_DELAY_MS = 2_000;
 
 type RefreshScope = {
   userId: string | null | undefined;
@@ -79,9 +80,34 @@ export const sqliteRefreshCoordinator = {
       const shouldRefreshOverlay = options.forceOverlay || readiness.isOverlayStale;
       const result: RefreshResult = { readiness };
 
+      const refreshOverlay = async () => {
+        const overlayStart = Date.now();
+        result.overlay = await refreshShadowUserOverlays({ scope: refreshScope });
+        void recordTimingLog("library_switch", "sqlite_refresh_overlay", overlayStart, {
+          userId: scope.userId,
+          libraryId: scope.libraryId,
+          status: result.overlay.status,
+          serverProgressRows: result.overlay.serverProgressRows,
+          pendingProgressRows: result.overlay.pendingProgressRows,
+          favoriteRows: result.overlay.favoriteRows,
+          error: result.overlay.error,
+        });
+      };
+
+      // Cold first visit (no cached catalog): fetch progress first — it is small and does not
+      // need catalog rows — then let Home render after the first catalog page. Pages arrive in
+      // descending listening progress, so page one already holds every in-progress book.
+      const isColdCatalog = !readiness.hasCatalogRows;
+      if (shouldRefreshOverlay && isColdCatalog) await refreshOverlay();
+
       if (shouldRefreshCatalog) {
         const catalogStart = Date.now();
-        result.catalog = await refreshShadowLibraryCatalog({ scope: refreshScope });
+        result.catalog = await refreshShadowLibraryCatalog({
+          scope: refreshScope,
+          onPageCommitted: ({ index }) => {
+            if (isColdCatalog && index === 0) invalidateSqliteQueries(options.queryClient);
+          },
+        });
         void recordTimingLog("library_switch", "sqlite_refresh_catalog", catalogStart, {
           userId: scope.userId,
           libraryId: scope.libraryId,
@@ -94,28 +120,19 @@ export const sqliteRefreshCoordinator = {
           error: result.catalog.error,
         });
       }
-      if (shouldRefreshOverlay) {
-        const overlayStart = Date.now();
-        result.overlay = await refreshShadowUserOverlays({ scope: refreshScope });
-        void recordTimingLog("library_switch", "sqlite_refresh_overlay", overlayStart, {
-          userId: scope.userId,
-          libraryId: scope.libraryId,
-          status: result.overlay.status,
-          serverProgressRows: result.overlay.serverProgressRows,
-          pendingProgressRows: result.overlay.pendingProgressRows,
-          favoriteRows: result.overlay.favoriteRows,
-          error: result.overlay.error,
-        });
-      }
+      if (shouldRefreshOverlay && !isColdCatalog) await refreshOverlay();
 
-      // Rebuild the Assistant Catalog from the refreshed rows in the background; Home's queries
-      // are invalidated now rather than after a multi-second rebuild.
+      // Rebuild the Assistant Catalog from the refreshed rows in the background, after a short
+      // delay so Home's re-reads (invalidated just below) aren't queued behind its writes.
       if (shouldRefreshCatalog || shouldRefreshOverlay) {
-        requestAssistantCatalogRebuild({
-          userId,
-          downloadedBooks: getAssistantDownloadedBooks(userId, libraryId),
-          source: "sqlite_refresh",
-        });
+        requestAssistantCatalogRebuild(
+          {
+            userId,
+            downloadedBooks: getAssistantDownloadedBooks(userId, libraryId),
+            source: "sqlite_refresh",
+          },
+          { delayMs: ASSISTANT_REBUILD_AFTER_REFRESH_DELAY_MS },
+        );
       }
 
       invalidateSqliteQueries(options.queryClient);

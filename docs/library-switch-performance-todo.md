@@ -1,6 +1,6 @@
 # Library / Session Switch Performance — To Do
 
-Status: steps 1–2 and the token-refresh part of step 5 done on `perf/library-switch` (2026-10-13). Remaining: steps 3, 4 and the cheaper catalog-change check from step 5.
+Status: steps 1–2 and the token-refresh part of step 5 done on `perf/library-switch` (2026-10-13). Remaining: step 3 (likely unnecessary) and the cheaper catalog-change check from step 5.
 
 ## Progress (2026-10-13)
 
@@ -19,6 +19,14 @@ Status: steps 1–2 and the token-refresh part of step 5 done on `perf/library-s
   refreshing it; `authFetch` answers a 401 with a forced refresh and retry. Sim QA: valid token
   restore 19 ms (no refresh), expired token refreshes, tampered-signature token recovers via
   401 → refresh → retry with no needs-attention state.
+- **Step 4 — done (progressive cold load).** On a cold first visit the refresh fetches progress
+  first, then invalidates Home after the first catalog page (pages arrive in descending listening
+  progress, so page one holds every in-progress book). Home no longer waits for an overlay
+  refresh; Recently Added and Discover show "Loading library…" and the daily Discover pick is not
+  saved until the catalog completes. The post-refresh Assistant rebuild starts 2 s late so Home's
+  re-reads go first. Sim, cold user switch (3,024 books): Home with Continue Listening at
+  **3.4–3.7 s** (was 8–9 s; 17 s before step 2); Recently Added/Discover ~1.5–2 s after the
+  download ends (~8.5 s). Dev tool: Settings → Shadow SQLite → "Evict Other Sign-Ins' Catalogs".
 - **What remained in a switch before that:** `restore_remembered_session` 0.8–1.8 s (token refresh),
   then ~0.3 s to readiness/projection. Cold (uncached) library first visits are still slow
   (sim: 17 s, projection waits for the catalog download) — step 4. Do this on its own branch after

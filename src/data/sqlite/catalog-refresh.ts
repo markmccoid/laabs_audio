@@ -58,6 +58,8 @@ export type ShadowCatalogRefreshResult = {
 export type CatalogRefreshOptions = {
   pageSize?: number;
   scope?: SqliteLibraryScope;
+  /** Called after each page is committed (pages arrive in descending listening progress). */
+  onPageCommitted?: (page: { index: number; totalSeen: number; totalExpected: number }) => void;
 };
 
 const bulkUpsertCatalogItems = async (
@@ -303,6 +305,7 @@ export const refreshShadowLibraryCatalog = (options: CatalogRefreshOptions = {})
 
         // Dispatch progress so the UI can show loading state
         libraryActivationStore.getState().actions.updateProgress?.(totalSeen, totalExpected);
+        options.onPageCommitted?.({ index: page, totalSeen, totalExpected });
 
         page += 1;
       } while (totalSeen < totalExpected);

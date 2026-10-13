@@ -1,9 +1,11 @@
 import { useAuthStore } from "@/auth/auth-store";
+import { queryClient } from "@/query/query-client";
 import { refreshShadowLibraryCatalog, type ShadowCatalogRefreshResult } from "@/data/sqlite/catalog-refresh";
 import { refreshShadowUserOverlays, type ShadowOverlayRefreshResult } from "@/data/sqlite/overlay-writes";
 import { runShadowSearchTest, type ShadowSearchResult } from "@/data/sqlite/search-reads";
 import {
   clearShadowDatabase,
+  evictLibraryCatalogForOtherUsers,
   fetchShadowDetailSnapshot,
   getFirstShadowSearchResultId,
   getShadowDatabaseSummary,
@@ -28,6 +30,7 @@ type ActionName =
   | "detail"
   | "summary"
   | "clear"
+  | "evict"
   | "timing_logs_clear"
   | "timing_logs_load";
 
@@ -556,6 +559,33 @@ export const SettingsShadowSqliteScreen = () => {
                 return "Summary loaded";
               })
             }
+          />
+          <ActionButton
+            title={busyAction === "evict" ? "Evicting..." : "Evict Other Sign-Ins' Catalogs"}
+            icon="arrow.uturn.backward"
+            disabled={isBusy}
+            onPress={() => {
+              Alert.alert(
+                "Evict other sign-ins' catalogs?",
+                "Forgets this library's cached catalog for every other sign-in, so switching to one is a cold first visit. Progress and bookmarks are kept.",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Evict",
+                    style: "destructive",
+                    onPress: () =>
+                      runAction("evict", async () => {
+                        await evictLibraryCatalogForOtherUsers();
+                        // Cached readiness/projection results would otherwise make the next
+                        // visit look warm.
+                        queryClient.removeQueries({ queryKey: ["sqlite"] });
+                        setSummary(null);
+                        return `Other sign-ins' catalogs evicted at ${new Date().toLocaleTimeString()}`;
+                      }),
+                  },
+                ],
+              );
+            }}
           />
           <ActionButton
             title={busyAction === "clear" ? "Clearing..." : "Clear Shadow DB"}
