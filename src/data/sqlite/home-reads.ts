@@ -1,6 +1,7 @@
 import { versionCoverUrl } from "@/api/cover-urls";
 import type { LibraryItemSummary, LibraryItemsSummary } from "@/api/library-items-api";
 import type { UserBookProgress } from "@/api/me-api";
+import type { StoredLocalProgress } from "@/progress/local-continue-listening";
 import { type Db, getDb, initializeShadowDatabaseInternal } from "./shadow-db-core";
 import { type ActiveLibraryContext, requireActiveLibraryContext } from "./shadow-scope";
 import { type SummaryRow, getCount, now, sqliteBool } from "./shadow-shared";
@@ -273,4 +274,67 @@ export const getShadowDiscoverCandidates = async (
   );
 
   return addSummaryRows(rows, new Map<string, LibraryItemSummary>());
+};
+
+export type OwnerProgressRequest = { userId: string; libraryItemIds: string[] };
+
+type OwnerProgressRow = EffectiveProgressRow & {
+  pendingIntentKind: string | null;
+  pendingUpdatedAt: number | null;
+};
+
+/**
+ * Stored progress for owned downloads without an Active Library (Downloaded-Only / Imported-Only
+ * Mode): each book is read under its Downloaded Audio Asset Owner, across that owner's libraries.
+ */
+export const getShadowOwnerProgressByIds = async (
+  requests: OwnerProgressRequest[],
+): Promise<Record<string, StoredLocalProgress>> => {
+  const db = await getDb();
+  await initializeShadowDatabaseInternal();
+
+  const progressById: Record<string, StoredLocalProgress> = {};
+  for (const request of requests) {
+    const uniqueIds = toUniqueIds(request.libraryItemIds);
+    if (uniqueIds.length === 0) continue;
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    const rows = await db.getAllAsync<OwnerProgressRow>(
+      `SELECT
+         progress.library_item_id AS libraryItemId,
+         progress.progress_id AS progressId,
+         progress.media_item_id AS mediaItemId,
+         progress.duration,
+         progress.progress_percent AS progressPercent,
+         progress.current_time AS currentTime,
+         progress.is_finished AS isFinished,
+         progress.hide_from_continue_listening AS hideFromContinueListening,
+         progress.started_at AS startedAt,
+         progress.finished_at AS finishedAt,
+         progress.last_update AS lastUpdate,
+         pending.intent_kind AS pendingIntentKind,
+         pending.updated_at AS pendingUpdatedAt
+       FROM effective_progress progress
+       LEFT JOIN pending_progress_sync_intents pending
+         ON pending.user_id = progress.user_id
+        AND pending.library_item_id = progress.library_item_id
+       WHERE progress.user_id = ?
+         AND progress.library_item_id IN (${placeholders})`,
+      [request.userId, ...uniqueIds],
+    );
+    for (const row of rows) {
+      const progress = toProgressRecord(row);
+      progressById[row.libraryItemId] = {
+        currentTime: progress.currentTime,
+        duration: progress.duration,
+        isFinished: progress.isFinished,
+        hideFromContinueListening: progress.hideFromContinueListening,
+        startedAt: progress.startedAt,
+        finishedAt: progress.finishedAt,
+        lastUpdate: progress.lastUpdate,
+        pendingIntentKind: row.pendingIntentKind ?? null,
+        pendingUpdatedAt: row.pendingUpdatedAt ?? null,
+      };
+    }
+  }
+  return progressById;
 };

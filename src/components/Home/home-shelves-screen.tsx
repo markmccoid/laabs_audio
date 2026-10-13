@@ -1,4 +1,3 @@
-import type { LibraryItemSummary } from "@/api/library-items-api";
 import { playlistsApi } from "@/api/playlists-api";
 import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
 import { useLibraryActivationStore } from "@/auth/library-activation-store";
@@ -30,6 +29,11 @@ import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, InteractionManager, RefreshControl, Text, View } from "react-native";
 import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
+import { ImportAudioEmptyState } from "@/components/imported/imported-books-segment";
+import {
+  AudioImportProgressOverlay,
+  useAudioImportFlow,
+} from "@/components/imported/use-audio-import-flow";
 import { HomeShelfSection } from "./home-shelf-section";
 import { homeSessionSwitchStore, useHomeSessionSwitch } from "./home-session-switch-store";
 import { useHomeSignInSwitcher } from "./home-sign-in-switcher";
@@ -37,7 +41,7 @@ import { useHomeSignInSwitcher } from "./home-sign-in-switcher";
 type HomeShelvesListItem =
   | { type: "refresh-message"; id: "refresh-message"; message: string }
   | { type: "shelf"; id: string; shelf: HomeShelf; isFirstShelf: boolean }
-  | { type: "imported-shelf"; id: "imported-shelf"; books: LibraryItemSummary[] }
+  | { type: "imported-empty"; id: "imported-empty" }
   | { type: "footer"; id: "footer" };
 
 // Change this value to test how much larger the first visible shelf's books are.
@@ -72,7 +76,10 @@ const HomeShelvesScreen = () => {
   const hasHomeScope =
     Boolean(activeLibraryId) ||
     accessMode === "downloadedOnly" ||
-    accessMode === "downloadedSessionOnly";
+    accessMode === "downloadedSessionOnly" ||
+    accessMode === "importedOnly";
+  const isImportedOnly = accessMode === "importedOnly";
+  const { progress: importProgress, startImport } = useAudioImportFlow();
   const {
     homeScopeKey,
     catalogCount,
@@ -117,6 +124,10 @@ const HomeShelvesScreen = () => {
   const didMarkHomeShelfDisplayRef = useRef(false);
   const renderStartedAtMs = useMemo(() => markStartup("home-shelves-screen-render-start"), []);
   const homeListData = useMemo<HomeShelvesListItem[]>(() => {
+    // Imported-Only Mode with nothing imported yet: offer Audio Import instead of empty shelves.
+    if (isImportedOnly && !importedBooks.length) {
+      return [{ type: "imported-empty", id: "imported-empty" }];
+    }
     const shelfItems = visibleShelves.map((shelf, index) => ({
       type: "shelf" as const,
       id: `${activeLibraryId ?? "no-library"}:${shelf.id}`,
@@ -135,13 +146,9 @@ const HomeShelvesScreen = () => {
           ]
         : []),
       ...shelfItems,
-      // Imported Audiobooks get their own shelf whenever there are any, in every access mode.
-      ...(importedBooks.length
-        ? [{ type: "imported-shelf" as const, id: "imported-shelf" as const, books: importedBooks }]
-        : []),
-      { type: "footer", id: "footer" },
+      ...(isImportedOnly ? [] : [{ type: "footer" as const, id: "footer" as const }]),
     ];
-  }, [activeLibraryId, importedBooks, refreshMessage, visibleShelves]);
+  }, [activeLibraryId, importedBooks, isImportedOnly, refreshMessage, visibleShelves]);
   const homeListOrderKey = useMemo(
     () => `${homeScopeKey ?? "no-scope"}:${JSON.stringify(shelfOrder)}`,
     [homeScopeKey, shelfOrder],
@@ -294,21 +301,11 @@ const HomeShelvesScreen = () => {
         );
       }
 
-      if (item.type === "imported-shelf") {
+      if (item.type === "imported-empty") {
         return (
-          <HomeShelfSection
-            shelfId={item.id}
-            title="Imported"
-            books={item.books}
-            favoriteByBookId={favoriteByBookId}
-            progressByBookId={progressByBookId}
-            isOffline={false}
-            emptyMessage="No imported audiobooks yet."
-            headerHeight={headerHeight}
-            shelfHref={{ pathname: "/(tabs)/library", params: { segment: "imported" } }}
-            renderCardMenus={false}
-            scrollY={scrollY}
-          />
+          <View style={{ paddingTop: 80 }}>
+            <ImportAudioEmptyState onImport={() => void startImport()} />
+          </View>
         );
       }
 
@@ -339,6 +336,7 @@ const HomeShelvesScreen = () => {
     [
       favoriteByBookId,
       headerHeight,
+      startImport,
       isOnline,
       progressByBookId,
       refreshDiscover,
@@ -520,7 +518,8 @@ const HomeShelvesScreen = () => {
           contentContainerStyle={{ paddingTop: 16, paddingBottom: 24 }}
           ItemSeparatorComponent={HomeShelvesItemSeparator}
           refreshControl={
-            <RefreshControl
+            // Nothing to refresh from a server in Imported-Only Mode.
+            isImportedOnly ? undefined : <RefreshControl
               refreshing={isRefreshing}
               onRefresh={() => {
                 void handleRefresh();
@@ -530,6 +529,7 @@ const HomeShelvesScreen = () => {
           }
         />
       )}
+      <AudioImportProgressOverlay progress={importProgress} />
     </View>
   );
 };

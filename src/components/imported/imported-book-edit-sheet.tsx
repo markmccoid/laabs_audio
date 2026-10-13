@@ -1,5 +1,5 @@
 import { CoverImage } from "@/components/images/cover-image";
-import { pickImportedBookCover } from "@/imported/imported-audiobook-library";
+import { pickImportedBookCover, type ImportedCoverSource } from "@/imported/imported-audiobook-library";
 import { resolveImportedCoverUri, useImportedBookRecord } from "@/imported/use-imported-books";
 import { importedBooksStore } from "@/store/imported-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -52,9 +52,15 @@ export const ImportedBookEditSheet = ({ libraryItemId }: { libraryItemId: string
   };
 
   const changeCover = () => {
-    void pickImportedBookCover(record.id).catch((error) =>
-      Alert.alert("Cover not changed", error instanceof Error ? error.message : "Try another image."),
-    );
+    const pick = (source: ImportedCoverSource) =>
+      void pickImportedBookCover(record.id, source).catch((error) =>
+        Alert.alert("Cover not changed", error instanceof Error ? error.message : "Try another image."),
+      );
+    Alert.alert("Choose Cover Image", undefined, [
+      { text: "Photo Library", onPress: () => pick("photos") },
+      { text: "Files", onPress: () => pick("files") },
+      { text: "Cancel", style: "cancel" },
+    ]);
   };
 
   return (

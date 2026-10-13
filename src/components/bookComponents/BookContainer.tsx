@@ -2,7 +2,9 @@ import { AbsApiError } from "@/api/abs-client";
 import { favoritesApi } from "@/api/favorites-api";
 import type { LibraryItemSummary } from "@/api/library-items-api";
 import { normalizeUserProgressByLibraryItemId, type UserBookProgress } from "@/api/me-api";
-import { useAuthStore } from "@/auth/auth-store";
+import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
+import { isLocalOnlyAccessMode } from "@/auth/local-only-access-mode";
+import { useLocalDownloadProgress } from "@/hooks/use-local-download-progress";
 import { useCoverImageSource } from "@/components/images/cover-image";
 import { DEFAULT_BOOK_COVER } from "@/constants/default-book-cover";
 import {
@@ -108,6 +110,9 @@ const BookContainer = ({ libraryItemId }: Props) => {
     (localTranscript?.libraryItemId === libraryItemId && localTranscript?.isComplete === true);
   const { data: userServerState } = useGetUserServerState();
   const isOffline = useAuthStore((state) => state.isOnline === false);
+  // Signed out: show what is stored on the device; library-backed actions are unavailable.
+  const isLocalOnly = useAuthStore((state) => isLocalOnlyAccessMode(selectAccessMode(state)));
+  const localDownloadProgress = useLocalDownloadProgress();
   const activeLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const currentTrackIndex = usePlaybackStore((state) => state.currentTrackIndex);
   const queue = usePlaybackStore((state) => state.queue);
@@ -181,6 +186,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
   const durationSeconds = bookData?.media?.duration ?? bookData?.duration ?? 0;
   const progressByBookId = useMemo(
     () =>
+      localDownloadProgress ??
       normalizeUserProgressByLibraryItemId<UserBookProgress>(
         userServerState as
           | (typeof userServerState & {
@@ -188,7 +194,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
             })
           | undefined,
       ),
-    [userServerState],
+    [localDownloadProgress, userServerState],
   );
   const matchedProgress = (libraryItemId ? progressByBookId[libraryItemId] : null) ?? null;
   const fallbackProgress = bookData?.userMediaProgress;
@@ -235,7 +241,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
     return Math.max(180, Math.min(320, availableWidth - reservedActionRailWidth));
   }, [viewportWidth]);
   const playbackSourceLabel = useMemo(() => {
-    if (isOffline && !hasPlayableLocalDownload) {
+    if ((isOffline || isLocalOnly) && !hasPlayableLocalDownload) {
       return "Offline";
     }
     if (isViewedBookActive) {
@@ -245,7 +251,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
       }
     }
     return hasPlayableLocalDownload ? "Local" : "Stream";
-  }, [currentTrackIndex, hasPlayableLocalDownload, isOffline, isViewedBookActive, queue]);
+  }, [currentTrackIndex, hasPlayableLocalDownload, isLocalOnly, isOffline, isViewedBookActive, queue]);
   const sourceTab = useMemo<BookDetailRouteSource>(
     () =>
       segments.some((segment) => segment === "search")
@@ -449,7 +455,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
             </Text>
           ) : null}
         </View>
-        {isOffline ? (
+        {isOffline || isLocalOnly ? (
           <View
             style={{
               marginTop: 10,
@@ -466,9 +472,15 @@ const BookContainer = ({ libraryItemId }: Props) => {
               gap: 8,
             }}
           >
-            <SymbolView name="wifi.slash" size={14} tintColor={themeColors.textMuted} />
+            <SymbolView
+              name={isLocalOnly ? "person.crop.circle.badge.xmark" : "wifi.slash"}
+              size={14}
+              tintColor={themeColors.textMuted}
+            />
             <Text style={{ color: themeColors.textMuted, fontSize: 12, flexShrink: 1 }}>
-              {hasPlayableLocalDownload
+              {isLocalOnly
+                ? "Signed out. Showing details saved with this download; library features are unavailable."
+                : hasPlayableLocalDownload
                 ? "Offline. Downloaded audio can still play."
                 : "Offline. Streaming is unavailable until connection returns."}
             </Text>
@@ -610,9 +622,15 @@ const BookContainer = ({ libraryItemId }: Props) => {
                   isInProgress={isInProgress}
                   defaultProgressTimeDisplay={defaultProgressTimeDisplay}
                   progressResetKey={libraryItemId}
-                  onAuthorPress={(authorName) => openFilterResultsSheet("author", authorName)}
-                  onNarratorPress={(narratorName) =>
-                    openFilterResultsSheet("narrator", narratorName)
+                  onAuthorPress={
+                    isLocalOnly
+                      ? undefined
+                      : (authorName) => openFilterResultsSheet("author", authorName)
+                  }
+                  onNarratorPress={
+                    isLocalOnly
+                      ? undefined
+                      : (narratorName) => openFilterResultsSheet("narrator", narratorName)
                   }
                 />
               </View>
@@ -655,6 +673,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
                       <Pressable
                         key={`${seriesEntry.id}:${seriesEntry.sequence ?? "none"}`}
                         onPress={() => openSeriesSheet(seriesEntry.id, seriesEntry.name)}
+                        disabled={isLocalOnly}
                         accessibilityRole="button"
                         accessibilityLabel={`Open ${seriesEntry.name} series`}
                         style={({ pressed }) => ({
@@ -665,7 +684,7 @@ const BookContainer = ({ libraryItemId }: Props) => {
                           backgroundColor: themeColors.surface,
                           paddingHorizontal: 12,
                           paddingVertical: 7,
-                          opacity: pressed ? 0.82 : 1,
+                          opacity: isLocalOnly ? 0.45 : pressed ? 0.82 : 1,
                         })}
                       >
                         <Text
@@ -686,8 +705,10 @@ const BookContainer = ({ libraryItemId }: Props) => {
               description={description}
               genres={genres}
               tags={tags}
-              onGenrePress={(genre) => openFilterResultsSheet("genre", genre)}
-              onTagPress={(tag) => openFilterResultsSheet("tag", tag)}
+              onGenrePress={
+                isLocalOnly ? undefined : (genre) => openFilterResultsSheet("genre", genre)
+              }
+              onTagPress={isLocalOnly ? undefined : (tag) => openFilterResultsSheet("tag", tag)}
             />
 
             {/* <DownloadControls

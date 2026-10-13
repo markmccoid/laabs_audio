@@ -1,6 +1,7 @@
 import { useStore } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
+import { importedBooksStore, selectVisibleImportedBooks } from "../store/imported-books-store";
 import { mmkvStorage } from "../store/mmkv-storage";
 import { logStartupDuration, logStartupEvent, markStartup } from "../utils/dev-startup-tracing";
 import { AuthError, authService } from "./auth-service";
@@ -26,6 +27,7 @@ export type AccessMode =
   | "firstRunSignInRequired"
   | "downloadedOnly"
   | "downloadedSessionOnly"
+  | "importedOnly"
   | "serverSetup"
   | "serverBrowsing";
 
@@ -33,6 +35,10 @@ export type AuthState = {
   status: AuthStatus;
   hasStoredCredentials: boolean;
   hasOfflineContent: boolean;
+  /** True while any visible Imported Audiobook exists (mirrors the imported-books store). */
+  hasImportedAudiobooks: boolean;
+  /** Persisted: the user picked "Use my own audio files" at the Welcome Choice. */
+  importedOnlyChosen: boolean;
   isOnline: boolean | null;
   serverConnectionStatus: ServerConnectionStatus;
   storedUsername: string | null;
@@ -60,6 +66,8 @@ export type AuthState = {
     setOnlineStatus: (isOnline: boolean) => void;
     setServerConnectionStatus: (status: ServerConnectionStatus) => void;
     setHasOfflineContent: (hasOfflineContent: boolean) => void;
+    setHasImportedAudiobooks: (hasImportedAudiobooks: boolean) => void;
+    chooseImportedOnly: () => void;
     setLoginRequired: (required: boolean, message?: string | null) => void;
     setActiveLibrary: (library: {
       id: string;
@@ -110,6 +118,8 @@ export const authStore = createStore<AuthState>()(
       status: "hydrating",
       hasStoredCredentials: false,
       hasOfflineContent: false,
+      hasImportedAudiobooks: false,
+      importedOnlyChosen: false,
       isOnline: null,
       serverConnectionStatus: "unknown",
       storedUsername: null,
@@ -313,6 +323,13 @@ export const authStore = createStore<AuthState>()(
           set({ serverConnectionStatus });
         },
 
+        setHasImportedAudiobooks: (hasImportedAudiobooks) => {
+          if (get().hasImportedAudiobooks === hasImportedAudiobooks) return;
+          set({ hasImportedAudiobooks });
+        },
+        chooseImportedOnly: () => {
+          set({ importedOnlyChosen: true });
+        },
         setHasOfflineContent: (hasOfflineContent) => {
           log("setHasOfflineContent:call", { hasOfflineContent });
           set((state) => {
@@ -684,6 +701,9 @@ export const authStore = createStore<AuthState>()(
             status: computeEntryStatus(false, current.hasOfflineContent),
             lastAuthError: null,
             loginRequired: false,
+            // Logout lands in Imported-Only Mode only while Imported Audiobooks exist; otherwise
+            // the Welcome Choice is offered again.
+            importedOnlyChosen: false,
           }));
           log("logout:done");
         },
@@ -698,10 +718,20 @@ export const authStore = createStore<AuthState>()(
         activeLibraryUserKey: state.activeLibraryUserKey,
         activeLibraryMediaType: state.activeLibraryMediaType,
         storedUserId: state.storedUserId,
+        importedOnlyChosen: state.importedOnlyChosen,
       }),
     },
   ),
 );
+
+// Mirror Imported Audiobook presence so selectAccessMode stays a pure function of auth state. This
+// lives at module scope (not in a hook) so the headless CarPlay bootstrap sees it too.
+const hasVisibleImportedAudiobooks = () =>
+  selectVisibleImportedBooks(importedBooksStore.getState()).length > 0;
+authStore.getState().actions.setHasImportedAudiobooks(hasVisibleImportedAudiobooks());
+importedBooksStore.subscribe(() => {
+  authStore.getState().actions.setHasImportedAudiobooks(hasVisibleImportedAudiobooks());
+});
 
 setAuthErrorHandler((message) => {
   authStore.getState().actions.setLoginRequired(true, message);
@@ -735,12 +765,15 @@ export const selectAccessMode = (state: AuthState): AccessMode => {
   }
 
   if (state.status === "offlineOnly") {
-    return state.loginRequired && Boolean(state.storedUserId && state.serverUrl)
-      ? "downloadedSessionOnly"
-      : state.hasOfflineContent
-        ? "downloadedOnly"
-        : "firstRunSignInRequired";
+    if (state.loginRequired && Boolean(state.storedUserId && state.serverUrl)) {
+      return "downloadedSessionOnly";
+    }
+    if (state.hasOfflineContent) return "downloadedOnly";
   }
 
-  return "firstRunSignInRequired";
+  // No User Session and no owned downloads: Imported-Only Mode once chosen at the Welcome Choice,
+  // or whenever Imported Audiobooks exist (e.g. after logout); otherwise the Welcome Choice.
+  return state.importedOnlyChosen || state.hasImportedAudiobooks
+    ? "importedOnly"
+    : "firstRunSignInRequired";
 };

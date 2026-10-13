@@ -5,17 +5,18 @@ import { type UserBookProgress } from "../api/me-api";
 import { playlistsApi } from "../api/playlists-api";
 import { useActiveLibraryExperience } from "../auth/active-library-experience";
 import { selectAccessMode, useAuthStore } from "../auth/auth-store";
+import { isLocalOnlyAccessMode } from "../auth/local-only-access-mode";
 import { sqliteHomeRepository } from "../data/sqlite/home-repository";
 import { sqliteRefreshCoordinator } from "../data/sqlite/refresh-coordinator";
 import { sqliteSearchRepository } from "../data/sqlite/search-repository";
 import { useDisplayedListeningPositionRecord } from "../progress/displayed-listening-position";
+import { selectLocalContinueListeningIds } from "../progress/local-continue-listening";
 import { usePlaybackStore } from "../player/playback-store";
 import { queryKeys } from "../query/query-keys";
 import {
   resolveStoredDownloadCoverUri,
   selectPlaylistShelvesByScope,
   selectSuppressedPlaylistIdsByScope,
-  toHomeShelfScopeKey,
   useDeviceBooksStore,
   type HomeDerivedShelfId,
   type PlaylistShelfSyncState,
@@ -23,6 +24,8 @@ import {
 import { toDownloadedBookSummary } from "../store/downloaded-book-helpers";
 import { mergeContinueListening } from "../imported/imported-audiobook-presentation";
 import { useImportedBookListData } from "../imported/use-imported-books";
+import { useHomeShelfScopeKey } from "./use-home-shelf-scope-key";
+import { useLocalDownloadProgress } from "./use-local-download-progress";
 import {
   DEFAULT_HOME_SHELF_ITEM_COUNT,
   type HomeShelfSettings,
@@ -180,7 +183,7 @@ export const useHomeShelves = () => {
   const authStatus = useAuthStore((state) => state.status);
   const accessMode = useAuthStore(selectAccessMode);
   const isOnline = useAuthStore((state) => state.isOnline);
-  const homeScopeKey = toHomeShelfScopeKey(activeLibraryUserKey, activeLibraryId);
+  const homeScopeKey = useHomeShelfScopeKey();
   const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const displayedListeningPosition = useDisplayedListeningPositionRecord(
     playbackLibraryItemId,
@@ -334,6 +337,8 @@ export const useHomeShelves = () => {
   });
   const homeProjection = homeProjectionQuery.data;
 
+  const localDownloadProgress = useLocalDownloadProgress();
+
   const isCatalogLoading = Boolean(
     authStatus === "authenticated" &&
       activeLibraryId &&
@@ -358,7 +363,10 @@ export const useHomeShelves = () => {
     return measureStartupSync(
       "home progress projection",
       () => {
-        const normalizedProgress = { ...(homeProjection?.progressByBookId ?? EMPTY_PROGRESS_BY_BOOK) };
+        const normalizedProgress = {
+          ...(homeProjection?.progressByBookId ?? EMPTY_PROGRESS_BY_BOOK),
+          ...localDownloadProgress,
+        };
 
         if (playbackLibraryItemId && displayedListeningPosition) {
           const displayedCurrentTime = msToSeconds(displayedListeningPosition.positionMs);
@@ -396,6 +404,7 @@ export const useHomeShelves = () => {
     catalogById,
     displayedListeningPosition,
     homeProjection?.progressByBookId,
+    localDownloadProgress,
     playbackLibraryItemId,
   ]);
 
@@ -421,6 +430,24 @@ export const useHomeShelves = () => {
       }),
     );
   }, [homeProjection?.continueListening, importedBookListData.continueListening, progressByBookId]);
+  // The Imported Shelf is a derived shelf like Downloaded; its order is device-wide (imported-books
+  // store) because Imported Audiobooks belong to the Device Listener, not a library scope.
+  const importedShelf = useMemo<HomeDerivedShelf>(
+    () => ({
+      kind: "derived",
+      id: "imported",
+      title: "Imported",
+      books: importedBookListData.books,
+      homeItemCount: shelfSettingsById.imported?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+      isVisible: shelfSettingsById.imported?.isVisible ?? true,
+      emptyMessage: "No imported audiobooks yet.",
+    }),
+    [importedBookListData.books, shelfSettingsById.imported],
+  );
+  const importedBookById = useMemo(
+    () => new Map(importedBookListData.books.map((book) => [book.id, book])),
+    [importedBookListData.books],
+  );
   const progressByBookIdWithImported = useMemo(
     () =>
       Object.keys(importedBookListData.progressByBookId).length
@@ -482,6 +509,25 @@ export const useHomeShelves = () => {
       }),
     );
   }, [downloadedBookData, downloadedDetailsById, downloadedOwnerUserIdsById, downloadedShelfOrder]);
+
+  const offlineDownloadedById = useMemo(
+    () => new Map(offlineDownloaded.map((book) => [book.id, book])),
+    [offlineDownloaded],
+  );
+
+  // Signed-out Continue Listening: in-progress owned downloads and Imported Audiobooks.
+  const localContinueListening = useMemo(() => {
+    const downloadedIds = selectLocalContinueListeningIds(
+      Object.fromEntries(
+        Object.entries(progressByBookId).filter(([bookId]) => offlineDownloadedById.has(bookId)),
+      ),
+    );
+    return mergeContinueListening(
+      downloadedIds.flatMap((bookId) => offlineDownloadedById.get(bookId) ?? []),
+      progressByBookId,
+      importedBookListData.continueListening,
+    );
+  }, [importedBookListData.continueListening, offlineDownloadedById, progressByBookId]);
 
   const discover = useMemo(() => {
     return measureStartupSync(
@@ -699,14 +745,21 @@ export const useHomeShelves = () => {
             isVisible: shelfSettingsById.downloaded?.isVisible ?? true,
             emptyMessage: "No downloaded books yet.",
           },
+          importedShelf,
         ];
 
         const customShelves: HomeCustomShelf[] = customShelvesRaw.map((shelf) => ({
           kind: "custom",
           id: shelf.id,
           title: shelf.name,
+          // Custom shelves may hold Imported Audiobooks, which are not in the server catalog.
           books: shelf.bookIds
-            .map((bookId) => catalogById.get(bookId))
+            .map(
+              (bookId) =>
+                catalogById.get(bookId) ??
+                importedBookById.get(bookId) ??
+                offlineDownloadedById.get(bookId),
+            )
             .filter((book): book is LibraryItemSummary => Boolean(book)),
           bookIds: shelf.bookIds,
           createdAt: shelf.createdAt,
@@ -756,6 +809,9 @@ export const useHomeShelves = () => {
     customShelvesRaw,
     downloaded,
     discover,
+    importedBookById,
+    importedShelf,
+    offlineDownloadedById,
     playlistShelvesRaw,
     recentlyAdded,
     shelfSettingsById,
@@ -773,35 +829,66 @@ export const useHomeShelves = () => {
     );
   }, [shelves, storedShelfOrder]);
 
-  const visibleShelves = useMemo<HomeShelf[]>(() => {
-    return measureStartupSync(
-      "home visible shelves projection",
-      () => {
-        if (authStatus !== "authenticated") {
-          if (accessMode !== "downloadedOnly" && accessMode !== "downloadedSessionOnly") {
-            return [];
-          }
-
-          return [
+  // Shelves for the signed-out modes: Continue Listening, the device shelves, and custom shelves
+  // in the signed-out (or rejected-session user's) scope. Recently Added, Discover and Playlist
+  // Shelves need an Active Library.
+  const isLocalOnly = isLocalOnlyAccessMode(accessMode);
+  const localShelves = useMemo<HomeShelf[]>(() => {
+    if (authStatus === "authenticated" || !isLocalOnly) return [];
+    const derivedShelves: HomeDerivedShelf[] = [
+      {
+        kind: "derived",
+        id: "continueListening",
+        title: "Continue Listening",
+        books: localContinueListening,
+        homeItemCount:
+          shelfSettingsById.continueListening?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
+        isVisible: shelfSettingsById.continueListening?.isVisible ?? true,
+        emptyMessage: "No active progress yet.",
+      },
+      ...(accessMode === "importedOnly"
+        ? []
+        : [
             {
-              kind: "derived",
-              id: "downloaded",
+              kind: "derived" as const,
+              id: "downloaded" as const,
               title: "Downloaded",
-              books: offlineDownloaded.slice(
-                0,
-                shelfSettingsById.downloaded?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
-              ),
+              books: offlineDownloaded,
               homeItemCount:
                 shelfSettingsById.downloaded?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
               isVisible: shelfSettingsById.downloaded?.isVisible ?? true,
               emptyMessage: "No downloaded books yet.",
             },
-          ];
-        }
+          ]),
+      importedShelf,
+    ];
+    const customShelves = shelves.filter(
+      (shelf): shelf is HomeCustomShelf => shelf.kind === "custom",
+    );
+    return reorderByIds([...derivedShelves, ...customShelves], storedShelfOrder);
+  }, [
+    accessMode,
+    authStatus,
+    importedShelf,
+    isLocalOnly,
+    localContinueListening,
+    offlineDownloaded,
+    shelfSettingsById.continueListening,
+    shelfSettingsById.downloaded,
+    shelves,
+    storedShelfOrder,
+  ]);
+  const modeShelves = authStatus === "authenticated" ? orderedShelves : localShelves;
 
-        return orderedShelves
+  const visibleShelves = useMemo<HomeShelf[]>(() => {
+    return measureStartupSync(
+      "home visible shelves projection",
+      () =>
+        modeShelves
           .filter((shelf) => {
             if (!shelf.isVisible) return false;
+            // The Imported Shelf only appears once something has been imported.
+            if (shelf.kind === "derived" && shelf.id === "imported") return shelf.books.length > 0;
             if (shelf.kind !== "playlist") return true;
             if (shelf.isSuppressed) return false;
             return true;
@@ -809,8 +896,7 @@ export const useHomeShelves = () => {
           .map((shelf) => ({
             ...shelf,
             books: shelf.books.slice(0, shelf.homeItemCount),
-          }));
-      },
+          })),
       (visible) => ({
         accessMode,
         authStatus,
@@ -818,20 +904,20 @@ export const useHomeShelves = () => {
         visibleBookCount: visible.reduce((sum, shelf) => sum + shelf.books.length, 0),
       }),
     );
-  }, [accessMode, authStatus, offlineDownloaded, orderedShelves, shelfSettingsById.downloaded]);
+  }, [accessMode, authStatus, modeShelves]);
 
   const customShelves = useMemo<HomeCustomShelf[]>(
     () =>
       measureStartupSync(
         "home custom shelves projection",
         () => [
-          ...orderedShelves.filter((shelf): shelf is HomeCustomShelf => shelf.kind === "custom"),
+          ...modeShelves.filter((shelf): shelf is HomeCustomShelf => shelf.kind === "custom"),
         ],
         (projectedShelves) => ({
           shelfCount: projectedShelves.length,
         }),
       ),
-    [orderedShelves],
+    [modeShelves],
   );
 
   const playlistShelves = useMemo<HomePlaylistShelf[]>(
@@ -913,23 +999,7 @@ export const useHomeShelves = () => {
     catalogCount: homeProjection?.activeCatalogRows ?? catalog.length,
     isCatalogLoading,
     progressCount,
-    shelves:
-      authStatus === "authenticated"
-        ? orderedShelves
-        : accessMode !== "downloadedOnly" && accessMode !== "downloadedSessionOnly"
-          ? []
-        : [
-            {
-              kind: "derived" as const,
-              id: "downloaded" as const,
-              title: "Downloaded",
-              books: offlineDownloaded,
-              homeItemCount:
-                shelfSettingsById.downloaded?.homeItemCount ?? DEFAULT_HOME_SHELF_ITEM_COUNT,
-              isVisible: shelfSettingsById.downloaded?.isVisible ?? true,
-              emptyMessage: "No downloaded books yet.",
-            },
-          ],
+    shelves: modeShelves,
     visibleShelves,
     visibleBookCount,
     customShelves,

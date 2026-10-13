@@ -4,11 +4,11 @@ import {
   selectCustomShelvesByScope,
   selectPlaylistShelvesByScope,
   selectSuppressedPlaylistIdsByScope,
-  toHomeShelfScopeKey,
   useDeviceBooksStore,
   type PlaylistShelfSyncState,
 } from "../store/device-books-store";
 import { type HomeShelfSettings, useSettingsStore } from "../store/settings-store";
+import { useHomeShelfScopeKey } from "./use-home-shelf-scope-key";
 
 export type ShelfMembershipKind = "custom" | "playlist";
 
@@ -40,13 +40,13 @@ const isVisiblePlaylistShelf = (
 export const useShelfMembershipContext = () => {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const scopeKey = toHomeShelfScopeKey(activeLibraryUserKey, activeLibraryId);
+  const scopeKey = useHomeShelfScopeKey();
 
   return {
     activeLibraryId,
     activeLibraryUserKey,
     scopeKey,
-    canMutate: Boolean(activeLibraryId && activeLibraryUserKey),
+    canMutate: Boolean(scopeKey),
   };
 };
 

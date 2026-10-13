@@ -1,8 +1,10 @@
 import { useAuthStore } from "@/auth/auth-store";
+import { useHomeShelfScopeKey } from "@/hooks/use-home-shelf-scope-key";
 import {
   useBookShelfManagementOptions,
   type ShelfMembershipOption,
 } from "@/hooks/use-shelf-membership-options";
+import { isImportedAudiobookId } from "@/imported/imported-audiobook-identity";
 import { useDeviceBooksActions } from "@/store/device-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { router, Stack, useLocalSearchParams } from "expo-router";
@@ -34,11 +36,15 @@ export const BookBookshelvesSheet = () => {
     addBooksToPlaylistShelfOptimistic,
     removeBooksFromPlaylistShelfOptimistic,
   } = useDeviceBooksActions();
-  const canMutate = Boolean(libraryItemId && activeLibraryId && activeLibraryUserKey);
-  const shelves = useMemo(
-    () => (libraryItemId ? shelfMembershipOptions : []),
-    [libraryItemId, shelfMembershipOptions],
-  );
+  const shelfScopeKey = useHomeShelfScopeKey();
+  const canMutate = Boolean(libraryItemId && shelfScopeKey);
+  const shelves = useMemo(() => {
+    if (!libraryItemId) return [];
+    // Playlist Shelves are Audiobookshelf playlists, which can't hold Imported Audiobooks.
+    return isImportedAudiobookId(libraryItemId)
+      ? shelfMembershipOptions.filter((option) => option.kind === "custom")
+      : shelfMembershipOptions;
+  }, [libraryItemId, shelfMembershipOptions]);
   const optimisticSelectionByShelfId =
     optimisticSelectionState.libraryItemId === libraryItemId
       ? optimisticSelectionState.byShelfId

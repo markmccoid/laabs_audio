@@ -18,8 +18,10 @@ import { Toaster } from "react-native-sonner";
 import { Uniwind } from "uniwind";
 import { AmbientCoordinator } from "../ambient/ambient-coordinator";
 import { selectAccessMode, useAuthStore } from "../auth/auth-store";
+import { isLocalOnlyAccessMode } from "../auth/local-only-access-mode";
 import { CarPlayShelfPublisher } from "../carplay/carplay-shelf-publisher";
 import { useAuthBootstrap } from "../auth/use-auth-bootstrap";
+import { isImportedAudiobookId } from "../imported/imported-audiobook-identity";
 import { prepareImportedAudiobooks } from "../imported/imported-audiobook-library";
 import { PlaybackLoadingToastCoordinator } from "../player/playback-loading-toast-coordinator";
 import { ActiveDownloadToastCoordinator } from "../components/bookComponents/active-download-toast-coordinator";
@@ -119,8 +121,6 @@ const getReturnToLibraryItemId = (
     ? resolveParam(globalParams.libraryItemId)
     : undefined;
 
-const isDownloadedAccessMode = (accessMode: string) =>
-  accessMode === "downloadedOnly" || accessMode === "downloadedSessionOnly";
 
 const isActivePlaybackState = (playbackState: string) =>
   playbackState === "loading" ||
@@ -158,7 +158,6 @@ export default function RootLayout() {
   const accessMode = useAuthStore(selectAccessMode);
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const activeLibraryUserKey = useAuthStore((state) => state.activeLibraryUserKey);
-  const rememberedSessionCount = useAuthStore((state) => state.rememberedSessions.length);
   const playbackState = usePlaybackStore((state) => state.playbackState);
   const playbackLibraryItemId = usePlaybackStore((state) => state.libraryItemId);
   const playbackQueueLength = usePlaybackStore((state) => state.queue.length);
@@ -433,15 +432,12 @@ export default function RootLayout() {
       !hasActivePlayback &&
       !routeState.inLogin
     ) {
-      logStartupDebug("routeGate:redirect-login-required", {
+      logStartupDebug("routeGate:redirect-welcome-choice", {
         startupBookLinkId,
       });
       router.replace({
-        pathname: rememberedSessionCount > 0 ? "/login" : "/login/add",
-        params: {
-          mode: "required",
-          returnToLibraryItemId: startupBookLinkId,
-        },
+        pathname: "/login/welcome",
+        params: startupBookLinkId ? { returnToLibraryItemId: startupBookLinkId } : {},
       } as never);
       return;
     }
@@ -451,6 +447,7 @@ export default function RootLayout() {
       !hasActivePlayback &&
       accessMode !== "firstRunSignInRequired" &&
       accessMode !== "downloadedSessionOnly" &&
+      accessMode !== "importedOnly" &&
       !routeState.inLogin
     ) {
       logStartupDebug("routeGate:push-login-sheet");
@@ -458,8 +455,8 @@ export default function RootLayout() {
       return;
     }
 
-    if (isDownloadedAccessMode(accessMode) && routeState.inLibraryPicker) {
-      logStartupDebug("routeGate:redirect-downloaded-access-home");
+    if (isLocalOnlyAccessMode(accessMode) && routeState.inLibraryPicker) {
+      logStartupDebug("routeGate:redirect-local-access-home");
       router.replace("/(tabs)/(home)");
       return;
     }
@@ -481,7 +478,6 @@ export default function RootLayout() {
     hasActivePlayback,
     initialDeepLinkBookId,
     loginRequired,
-    rememberedSessionCount,
     routeState,
     startupBookLinkId,
     status,
@@ -575,6 +571,8 @@ export default function RootLayout() {
 
     const state = playbackStore.getState();
     if (!state.libraryItemId) return;
+    // Imported-Only Mode has no User Session, so only an Imported Audiobook can be restored.
+    if (accessMode === "importedOnly" && !isImportedAudiobookId(state.libraryItemId)) return;
     if (state.ownerId && state.ownerId !== resolveListeningOwnerKey(state.libraryItemId)) return;
     if (state.queue.length > 0 || state.playbackControlIntent) return;
     if (!isRestorableIdlePlaybackState(state.playbackState)) return;

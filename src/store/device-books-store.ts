@@ -13,7 +13,7 @@ import {
   type UserServerState,
 } from "../api/me-api";
 import { playlistsApi, type PlaylistSummary } from "../api/playlists-api";
-import { authStore } from "../auth/auth-store";
+import { authStore, type AuthState } from "../auth/auth-store";
 import { deleteLocalBookTranscript } from "../data/sqlite/shadow-db-transcripts";
 import { patchAssistantCatalogDownloaded } from "../data/sqlite/assistant-catalog-writes";
 import { queryClient } from "../query/query-client";
@@ -361,7 +361,12 @@ export type ListeningInterruptionRecord = {
   startedAtMs: number;
 };
 
-export type HomeDerivedShelfId = "continueListening" | "recentlyAdded" | "discover" | "downloaded";
+export type HomeDerivedShelfId =
+  | "continueListening"
+  | "recentlyAdded"
+  | "discover"
+  | "downloaded"
+  | "imported";
 
 export type HomeShelfVisibility = Record<HomeDerivedShelfId, boolean>;
 
@@ -415,6 +420,7 @@ export const DEFAULT_HOME_SHELF_VISIBILITY: HomeShelfVisibility = {
   recentlyAdded: true,
   discover: true,
   downloaded: true,
+  imported: true,
 };
 
 const EMPTY_HOME_CUSTOM_SHELVES: HomeCustomShelf[] = [];
@@ -690,10 +696,35 @@ const buildHomeScopeKey = (userKey: string | null, libraryId: string | null) => 
   return `${userKey}::${trimmedLibraryId}`;
 };
 
+/**
+ * Home shelf scope used while no User Session is active and no user/library is known (after an
+ * explicit logout, or a user who never signed in). One device-wide scope, shown only signed out.
+ */
+export const LOCAL_HOME_SHELF_SCOPE_KEY = "local::device";
+
+type HomeShelfScopeAuthState = Pick<
+  AuthState,
+  "status" | "activeLibraryUserKey" | "storedUserId" | "activeLibraryId"
+>;
+
+const isSignedOutStatus = (status: AuthState["status"]) =>
+  status === "anonymous" || status === "offlineOnly";
+
+/**
+ * The user+library scope whenever a user identity and library are known, including a User
+ * Session whose token was rejected; otherwise the signed-out scope (null while signing in).
+ */
+export const selectHomeShelfScopeKey = (auth: HomeShelfScopeAuthState) =>
+  buildHomeScopeKey(auth.activeLibraryUserKey ?? auth.storedUserId, auth.activeLibraryId) ??
+  (isSignedOutStatus(auth.status) ? LOCAL_HOME_SHELF_SCOPE_KEY : null);
+
 const resolveHomeScopeKey = (options?: HomeShelfScopeOptions) => {
   const userKey = resolveUserKey(options?.userKey);
   const libraryId = resolveLibraryId(options?.libraryId);
-  return buildHomeScopeKey(userKey, libraryId);
+  return (
+    buildHomeScopeKey(userKey, libraryId) ??
+    (isSignedOutStatus(authStore.getState().status) ? LOCAL_HOME_SHELF_SCOPE_KEY : null)
+  );
 };
 
 const resolveScopeContext = (options?: HomeShelfScopeOptions) => {

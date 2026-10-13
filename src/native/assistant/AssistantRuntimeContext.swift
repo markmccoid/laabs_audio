@@ -5,6 +5,7 @@ enum AssistantAccessMode: String, Codable, Sendable {
   case firstRunSignInRequired
   case downloadedOnly
   case downloadedSessionOnly
+  case importedOnly
   case serverSetup
   case serverBrowsing
 }

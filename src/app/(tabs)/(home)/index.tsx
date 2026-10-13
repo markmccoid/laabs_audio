@@ -1,5 +1,6 @@
 import { useActiveLibraryExperience } from "@/auth/active-library-experience";
-import { useAuthStore } from "@/auth/auth-store";
+import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
+import { isLocalOnlyAccessMode } from "@/auth/local-only-access-mode";
 import HomeShelvesScreen from "@/components/Home/home-shelves-screen";
 import { homeSessionSwitchStore, useHomeSessionSwitch } from "@/components/Home/home-session-switch-store";
 import { PodcastHomeShelvesScreen } from "@/components/podcast/podcast-home-shelves-screen";
@@ -16,6 +17,7 @@ export default function HomeIndex() {
   const activeLibraryId = useAuthStore((state) => state.activeLibraryId);
   const homeScopeKey = `${activeSessionKey}:${activeLibraryId}`;
   const activeLibraryReady = useAuthStore((state) => state.activeLibraryReady);
+  const isLocalOnly = useAuthStore((state) => isLocalOnlyAccessMode(selectAccessMode(state)));
   const themeColors = useThemeColors();
   const [overlayOpacity] = useState(() => new Animated.Value(0));
 
@@ -55,7 +57,8 @@ export default function HomeIndex() {
     <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
       {visibleExperience === "podcast" ? (
         <PodcastHomeShelvesScreen key={homeScopeKey} />
-      ) : visibleExperience === "book" ? (
+      ) : visibleExperience === "book" || isLocalOnly ? (
+        // Signed-out modes have no Active Library but still show downloaded/imported shelves.
         <HomeShelvesScreen key={homeScopeKey} />
       ) : null}
       <Animated.View

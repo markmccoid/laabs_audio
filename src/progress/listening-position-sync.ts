@@ -2,6 +2,7 @@ import { AbsApiError } from "@/api/abs-client";
 import { meApi } from "@/api/me-api";
 import { sessionsApi } from "@/api/sessions-api";
 import { authStore } from "@/auth/auth-store";
+import { isImportedAudiobookId } from "@/imported/imported-audiobook-identity";
 import type { PlaybackStoreState } from "@/player/playback-store";
 import {
   clearEpisodeProgressSyncIntent,
@@ -67,6 +68,8 @@ export const syncListeningPosition = async (
 ): Promise<ListeningPositionSyncResult | null> => {
   const state = { ...input.state };
   if (!state.libraryItemId || !state.sessionId) return null;
+  // Imported Audiobook listening state belongs to the Device Listener and never syncs.
+  if (isImportedAudiobookId(state.libraryItemId)) return null;
   const auth = authStore.getState();
   const ownerId =
     state.ownerId ?? auth.activeLibraryUserKey ?? auth.storedUserId;

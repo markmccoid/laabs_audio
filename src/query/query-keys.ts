@@ -36,6 +36,9 @@ export const queryKeys = {
     params: unknown,
   ) =>
     ["sqlite", "overlay", "user", userKey ?? null, "library", libraryId ?? null, "homeProjection", params] as const,
+  // Signed-out modes: owned downloads' progress, read per Downloaded Audio Asset Owner.
+  sqliteLocalDownloadProgress: (params: unknown) =>
+    ["sqlite", "overlay", "local", "downloadProgress", params] as const,
   sqliteItemSummaries: (
     userKey: string | null | undefined,
     libraryId: string | null | undefined,

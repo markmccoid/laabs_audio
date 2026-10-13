@@ -61,6 +61,8 @@ export function SignInFormScreen() {
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const storedServerUrl = useAuthStore((state) => state.serverUrl);
   const accessMode = useAuthStore(selectAccessMode);
+  // First-run sign-in is reached from the Welcome Choice, so it can go back there.
+  const canLeaveSignIn = accessMode !== "firstRunSignInRequired" || router.canGoBack();
   const lastAuthError = useAuthStore((state) => state.lastAuthError);
   const { setLoginRequired } = useAuthActions();
   const applyResolution = useApplySessionEntryResolution();
@@ -368,7 +370,7 @@ export function SignInFormScreen() {
         )}
       </Pressable>
 
-      {!isSheet && accessMode !== "firstRunSignInRequired" ? (
+      {!isSheet && canLeaveSignIn ? (
         <Pressable
           onPress={handleCancel}
           className="mt-3 rounded-xl border border-border bg-surface px-4 py-3"
@@ -392,7 +394,7 @@ export function SignInFormScreen() {
             headerTransparent: true,
             title: "Add Sign-In",
             headerLeft: () =>
-              accessMode !== "firstRunSignInRequired" ? (
+              canLeaveSignIn ? (
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Back"

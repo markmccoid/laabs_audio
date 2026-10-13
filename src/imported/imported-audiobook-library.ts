@@ -1,5 +1,7 @@
 import * as FileSystem from "expo-file-system/legacy";
+import * as ImagePicker from "expo-image-picker";
 import AudioImport from "@/native/audio-import/AudioImportModule";
+import { playbackStore } from "@/player/playback-store";
 import { playerService } from "@/player/player-service";
 import { commitListeningStateCommand } from "@/progress/commit-listening-state-command";
 import type { DownloadTrack } from "@/store/device-books-store";
@@ -348,24 +350,78 @@ export const confirmMismatchedReimport = async (id: string, pending: PendingAudi
   return restoreImportedAudio(existing, pending);
 };
 
-/** Lets the user pick an image file as the book's cover. */
-export const pickImportedBookCover = async (id: string) => {
+/**
+ * Marks an Imported Audiobook finished (position at the end) or unfinished (back to the start) in
+ * the Device Listener's Listening Position, and updates the shelf display snapshot to match.
+ */
+export const setImportedBookFinished = async (id: string, finished: boolean) => {
+  const record = importedBooksStore.getState().importedBooksById[id];
+  if (!record) throw new Error("Imported audiobook not found.");
+  const durationMs = Math.round(record.durationSeconds * 1000);
+  const playback = playbackStore.getState();
+  if (playback.libraryItemId === id && !playback.episodeId && playback.queue.length > 0) {
+    // The loaded book's position is owned by the player: let it pause, commit, and unload, as
+    // the Audiobookshelf "Mark as Read" does, so a later progress save can't undo the change.
+    const payload = { libraryItemId: id, durationSeconds: record.durationSeconds };
+    await (finished ? playerService.finishActiveBook(payload) : playerService.resetActiveBook(payload));
+  } else {
+    await commitListeningStateCommand({
+      libraryItemId: id,
+      positionMs: finished ? durationMs : 0,
+      durationMs,
+      isFinished: finished,
+      reason: finished ? "mark_read" : "mark_unread",
+    });
+  }
+  // Unfinished means unstarted: clear the snapshot so the book leaves Continue Listening.
+  importedBooksStore
+    .getState()
+    .actions.recordImportedListening(
+      id,
+      finished ? { positionSeconds: record.durationSeconds, isFinished: true } : null,
+    );
+};
+
+/** Points the record at a new cover file and deletes the one it replaces. */
+const applyImportedBookCover = async (id: string, target: string) => {
+  const relativePath = toDocumentRelativePath(target);
+  if (!relativePath) return false;
+  const previous = importedBooksStore.getState().importedBooksById[id]?.coverRelativePath;
+  importedBooksStore.getState().actions.updateImportedBookMetadata(id, {
+    coverRelativePath: relativePath,
+  });
+  const previousUri = resolveDocumentRelativePath(previous);
+  if (previousUri) await FileSystem.deleteAsync(previousUri, { idempotent: true }).catch(() => undefined);
+  return true;
+};
+
+export type ImportedCoverSource = "photos" | "files";
+
+/** Lets the user pick the book's cover from Photos or from an image file. */
+export const pickImportedBookCover = async (id: string, source: ImportedCoverSource = "files") => {
   const directory = await ensureAppDirectory(importedBookDirectory(id));
+  if (source === "photos") {
+    // PHPicker runs out of process, so no photo-library permission prompt is needed.
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.9,
+    });
+    const asset = result.canceled ? undefined : result.assets[0];
+    if (!asset) return false;
+    const extension = getFileExtension(asset.fileName ?? asset.uri) || "jpg";
+    const target = `${directory}cover-${Date.now()}.${extension}`;
+    await FileSystem.copyAsync({ from: asset.uri, to: target });
+    return applyImportedBookCover(id, target);
+  }
   const staging = await ensureAppDirectory(`${importedBookDirectory(id)}/cover-staging`);
   try {
     const picked = await AudioImport.pickAndCopyAudio(staging, "image");
     if (picked.canceled) return false;
     const target = `${directory}cover-${Date.now()}.${getFileExtension(picked.name) || "jpg"}`;
     await FileSystem.moveAsync({ from: picked.uri, to: target });
-    const relativePath = toDocumentRelativePath(target);
-    if (!relativePath) return false;
-    const previous = importedBooksStore.getState().importedBooksById[id]?.coverRelativePath;
-    importedBooksStore.getState().actions.updateImportedBookMetadata(id, {
-      coverRelativePath: relativePath,
-    });
-    const previousUri = resolveDocumentRelativePath(previous);
-    if (previousUri) await FileSystem.deleteAsync(previousUri, { idempotent: true }).catch(() => undefined);
-    return true;
+    return applyImportedBookCover(id, target);
   } finally {
     await FileSystem.deleteAsync(staging, { idempotent: true }).catch(() => undefined);
   }

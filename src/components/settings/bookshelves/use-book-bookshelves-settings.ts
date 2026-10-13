@@ -1,4 +1,5 @@
-import { useAuthStore } from "@/auth/auth-store";
+import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
+import { isLocalOnlyAccessMode } from "@/auth/local-only-access-mode";
 import { useHomeShelves } from "@/hooks/use-home-shelves";
 import { useDeviceBooksActions } from "@/store/device-books-store";
 import { useSettingsActions } from "@/store/settings-store";
@@ -56,7 +57,14 @@ export const useBookBookshelvesSettings = (): BookshelvesSettingsController => {
     if (shelfId) openEditor(shelfId, "create");
   };
 
+  const isLocalOnly = useAuthStore((state) => isLocalOnlyAccessMode(selectAccessMode(state)));
+
   const createShelf = () => {
+    // Signed out there is no server for Playlist Shelves.
+    if (isLocalOnly) {
+      createDeviceShelf();
+      return;
+    }
     Alert.alert("New Shelf", "Choose the shelf type.", [
       {
         text: "Playlist Shelf",

@@ -403,7 +403,7 @@ export const usePodcastBookshelfEditor = (): BookshelfEditorController => {
   return {
     status: isReady ? "ready" : "missing",
     title: shelfTitle ?? name,
-    name: name || shelfTitle || "New Shelf",
+    name,
     canRename: Boolean(isPlaylistDraft || deviceShelf || (playlistShelf && !isMissing)),
     isVisible,
     homeItemCount,

@@ -7,7 +7,7 @@ import { playerService } from "../player/player-service";
 import {
 	deviceBooksStore,
 	selectHasPlayableBookDownload,
-	toHomeShelfScopeKey,
+	selectHomeShelfScopeKey,
 } from "../store/device-books-store";
 import { toDownloadedBookSummary } from "../store/downloaded-book-helpers";
 import { mmkvStorage } from "../store/mmkv-storage";
@@ -178,8 +178,7 @@ const persistShelvesSnapshot = () => {
 };
 
 const getContinueListeningShelfSettings = () => {
-	const { activeLibraryUserKey, activeLibraryId } = authStore.getState();
-	const scopeKey = toHomeShelfScopeKey(activeLibraryUserKey, activeLibraryId);
+	const scopeKey = selectHomeShelfScopeKey(authStore.getState());
 	return selectHomeShelfSettings(settingsStore.getState(), scopeKey, "continueListening");
 };
 

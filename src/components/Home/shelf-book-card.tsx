@@ -30,6 +30,7 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { useUniwind } from "uniwind";
+import { ImportedBookCardMenu } from "@/components/imported/imported-book-card-menu";
 import { ShelfBookCardMenu } from "./shelf-book-card-menu";
 
 // ============================================================
@@ -163,7 +164,11 @@ const CardMenuOverlay = ({
         menuAnimatedStyle,
       ]}
     >
-      <ShelfBookCardMenu book={book} isFavorite={isFavorite} progress={progress} />
+      {isImportedAudiobookId(book.id) ? (
+        <ImportedBookCardMenu book={book} progress={progress} />
+      ) : (
+        <ShelfBookCardMenu book={book} isFavorite={isFavorite} progress={progress} />
+      )}
     </Animated.View>
   );
 };
@@ -324,7 +329,7 @@ export const ShelfBookCard = ({
               ) : null}
             </Pressable>
           </Link>
-          {renderMenu && !isImportedAudiobookId(book.id) ? (
+          {renderMenu ? (
             <CardMenuOverlay
               book={book}
               headerHeight={headerHeight}

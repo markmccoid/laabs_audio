@@ -1,6 +1,8 @@
 import { Host, Image as SwiftImage, Picker, Text as SwiftText } from "@expo/ui/swift-ui";
 import { lineLimit, minimumScaleFactor, pickerStyle, tag } from "@expo/ui/swift-ui/modifiers";
 import { useActiveLibraryExperience } from "@/auth/active-library-experience";
+import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
+import { isLocalOnlyAccessMode } from "@/auth/local-only-access-mode";
 import { PodcastShowsBrowser } from "@/components/podcast/podcast-shows-browser";
 import {
   useListsPreferencesActions,
@@ -235,12 +237,35 @@ const BookLibraryTabScreen = () => {
   );
 };
 
+/** Signed-out modes have no Audiobookshelf lists, so the tab is just the Imported segment. */
+const LocalLibraryScreen = () => {
+  const importFlow = useAudioImportFlow();
+
+  return (
+    <>
+      <Stack.Screen.Title>Imported</Stack.Screen.Title>
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button icon="plus" onPress={() => void importFlow.startImport()}>
+          Import Audio
+        </Stack.Toolbar.Button>
+      </Stack.Toolbar>
+      <View style={{ flex: 1 }}>
+        <ImportedBooksSegment onImport={() => void importFlow.startImport()} />
+      </View>
+      <AudioImportProgressOverlay progress={importFlow.progress} />
+    </>
+  );
+};
+
 export const LibraryTabScreen = () => {
   const experience = useActiveLibraryExperience();
+  const accessMode = useAuthStore(selectAccessMode);
 
   if (experience === "podcast") {
     return <PodcastListsBrowser />;
   }
 
-  return experience === "book" ? <BookLibraryTabScreen /> : null;
+  if (experience === "book") return <BookLibraryTabScreen />;
+
+  return isLocalOnlyAccessMode(accessMode) ? <LocalLibraryScreen /> : null;
 };

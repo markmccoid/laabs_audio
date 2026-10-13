@@ -78,6 +78,8 @@ export type ImportedBooksState = PersistedImportedBooksState & {
       listening: { positionSeconds: number; isFinished: boolean } | null,
     ) => void;
     removeImportedBook: (id: string) => void;
+    /** Sets the Imported Shelf order; ids not listed (e.g. removed tombstones) keep their place after. */
+    reorderImportedBooks: (orderedIds: string[]) => void;
   };
 };
 
@@ -146,6 +148,17 @@ export const importedBooksStore = createStore<ImportedBooksState>()(
                   listening: listening ? { ...listening, lastListenedAt: Date.now() } : null,
                 },
               },
+            };
+          }),
+        reorderImportedBooks: (orderedIds) =>
+          set((state) => {
+            const known = orderedIds.filter((id) => state.importedBooksById[id]);
+            const listed = new Set(known);
+            return {
+              importedBookOrder: [
+                ...known,
+                ...state.importedBookOrder.filter((id) => !listed.has(id)),
+              ],
             };
           }),
         removeImportedBook: (id) =>

@@ -35,6 +35,8 @@ export function SignInEditScreen() {
   const sessions = useAuthStore((state) => state.rememberedSessions);
   const activeSessionKey = useAuthStore((state) => state.activeSessionKey);
   const accessMode = useAuthStore(selectAccessMode);
+  // First-run sign-in is reached from the Welcome Choice, so it can go back there.
+  const canLeaveSignIn = accessMode !== "firstRunSignInRequired" || router.canGoBack();
   const { updateRememberedSession } = useAuthActions();
   const applyResolution = useApplySessionEntryResolution();
   const params = useLocalSearchParams<{
@@ -134,7 +136,7 @@ export function SignInEditScreen() {
           headerTransparent: true,
           title: "Add Sign-In",
           headerLeft: () =>
-            accessMode !== "firstRunSignInRequired" ? (
+            canLeaveSignIn ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Back"

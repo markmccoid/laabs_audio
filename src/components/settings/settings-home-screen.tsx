@@ -1,4 +1,5 @@
-import { useAuthStore } from "@/auth/auth-store";
+import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
+import { isLocalOnlyAccessMode } from "@/auth/local-only-access-mode";
 import { COMPACT_TEXT_MAX_FONT_SIZE_MULTIPLIER } from "@/theme/text-scaling";
 import { useThemeColors } from "@/theme/use-app-theme";
 import Constants from "expo-constants";
@@ -10,6 +11,7 @@ import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 type SettingsRowProps = {
   href:
     | "/login"
+    | "/login/add"
     | "/(tabs)/settings/ambient-audio"
     | "/(tabs)/settings/authentication"
     | "/(tabs)/settings/bookshelves"
@@ -119,6 +121,9 @@ export const SettingsHomeScreen = () => {
   const themeColors = useThemeColors();
   const status = useAuthStore((state) => state.status);
   const isAuthenticated = status === "authenticated";
+  const isImportedOnly = useAuthStore((state) => selectAccessMode(state) === "importedOnly");
+  const isLocalOnly = useAuthStore((state) => isLocalOnlyAccessMode(selectAccessMode(state)));
+  const hasRememberedSessions = useAuthStore((state) => state.rememberedSessions.length > 0);
   const storedUsername = useAuthStore((state) => state.storedUsername);
   const serverUrl = useAuthStore((state) => state.serverUrl);
 
@@ -146,23 +151,36 @@ export const SettingsHomeScreen = () => {
         </Text>
 
         <SettingsGroup title="Account">
-          <SettingsRow
-            href="/login"
-            title="Sign-Ins"
-            subtitle={signInsSubtitle}
-            icon="person.crop.circle"
-            isLast
-          />
+          {isImportedOnly ? (
+            // Ordinary User Session Entry; Imported Audiobooks are unaffected.
+            <SettingsRow
+              href={hasRememberedSessions ? "/login" : "/login/add"}
+              title="Connect to Audiobookshelf"
+              subtitle="Sign in to stream and download from your Audiobookshelf server"
+              icon="server.rack"
+              isLast
+            />
+          ) : (
+            <SettingsRow
+              href="/login"
+              title="Sign-Ins"
+              subtitle={signInsSubtitle}
+              icon="person.crop.circle"
+              isLast
+            />
+          )}
         </SettingsGroup>
 
-        {isAuthenticated ? (
+        {isAuthenticated || isLocalOnly ? (
           <SettingsGroup title="Library">
-            <SettingsRow
-              href="/(tabs)/settings/bookshelves"
-              title="Bookshelves"
-              subtitle="Visibility, order, names, and home item counts"
-              icon="books.vertical"
-            />
+            {isAuthenticated || isLocalOnly ? (
+              <SettingsRow
+                href="/(tabs)/settings/bookshelves"
+                title="Bookshelves"
+                subtitle="Visibility, order, names, and home item counts"
+                icon="books.vertical"
+              />
+            ) : null}
             <SettingsRow
               href="/(tabs)/settings/playback"
               title="Playback"
@@ -181,12 +199,20 @@ export const SettingsHomeScreen = () => {
               subtitle="App-level behavior for images and cover handling"
               icon="gearshape.2"
             />
-            {Platform.OS === "ios" ? (
+            {Platform.OS === "ios" && isAuthenticated ? (
               <SettingsRow
                 href="/(tabs)/settings/siri-shortcuts"
                 title="Siri & Shortcuts"
                 subtitle="Voice phrases and LAABS Audio actions"
                 icon="mic.badge.plus"
+              />
+            ) : null}
+            {__DEV__ ? (
+              <SettingsRow
+                href="/(tabs)/settings/shadow-sqlite"
+                title="Shadow SQLite"
+                subtitle="Dev only: library storage status and timing logs"
+                icon="cylinder.split.1x2"
               />
             ) : null}
             {__DEV__ ? (

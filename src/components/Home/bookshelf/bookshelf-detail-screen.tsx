@@ -2,6 +2,7 @@ import type { LibraryItemSummary } from "@/api/library-items-api";
 import { useAuthStore } from "@/auth/auth-store";
 import { useHomeShelves } from "@/hooks/use-home-shelves";
 import { useDeviceBooksActions } from "@/store/device-books-store";
+import { importedBooksStore } from "@/store/imported-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { FlashListRef } from "@shopify/flash-list";
 import { Stack } from "expo-router";
@@ -53,9 +54,11 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
   const isPlaylistShelf = shelf?.kind === "playlist";
   const isDiscoverShelf = shelf?.kind === "derived" && shelf.id === "discover";
   const isDownloadedShelf = shelf?.kind === "derived" && shelf.id === "downloaded";
-  const isSortableGridShelf = isCustomShelf || isDownloadedShelf || isPlaylistShelf;
+  const isImportedShelf = shelf?.kind === "derived" && shelf.id === "imported";
+  const isSortableGridShelf =
+    isCustomShelf || isDownloadedShelf || isImportedShelf || isPlaylistShelf;
   const supportsHeaderSearch =
-    process.env.EXPO_OS === "ios" && shelf?.kind === "derived" && shelf.id !== "downloaded";
+    process.env.EXPO_OS === "ios" && shelf?.kind === "derived" && !isSortableGridShelf;
   const contentTopPadding = Math.max(84, insets.top + 56);
 
   useEffect(() => {
@@ -89,6 +92,11 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
         return;
       }
 
+      if (isImportedShelf) {
+        importedBooksStore.getState().actions.reorderImportedBooks(orderedBookIds);
+        return;
+      }
+
       if (isPlaylistShelf) {
         void reorderPlaylistShelfBooksOptimistic(shelf.id, orderedBookIds, scopeOptions);
       }
@@ -98,6 +106,7 @@ export const BookshelfDetailScreen = ({ shelfId }: BookshelfDetailScreenProps) =
       activeLibraryUserKey,
       isCustomShelf,
       isDownloadedShelf,
+      isImportedShelf,
       isPlaylistShelf,
       isSortableGridShelf,
       reorderCustomShelfBooks,

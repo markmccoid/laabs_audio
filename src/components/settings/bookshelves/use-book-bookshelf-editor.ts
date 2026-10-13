@@ -1,9 +1,9 @@
+import { useHomeShelfScopeKey } from "@/hooks/use-home-shelf-scope-key";
 import { useAuthStore } from "@/auth/auth-store";
 import {
   selectCustomShelvesByScope,
   selectPlaylistShelvesByScope,
   selectSuppressedPlaylistIdsByScope,
-  toHomeShelfScopeKey,
   useDeviceBooksActions,
   useDeviceBooksStore,
   type HomeDerivedShelfId,
@@ -65,6 +65,7 @@ const DERIVED_SHELF_TITLES: Record<HomeDerivedShelfId, string> = {
   recentlyAdded: "Recently Added",
   discover: "Discover",
   downloaded: "Downloaded",
+  imported: "Imported",
 };
 
 const resolveParam = (value: string | string[] | undefined) =>
@@ -116,7 +117,7 @@ export const useBookBookshelfEditor = (): BookshelfEditorController => {
   } = useDeviceBooksActions();
   const { setHomeShelfVisibility, setHomeShelfItemCount, setHomeShelfOrder, clearHomeShelf } =
     useSettingsActions();
-  const homeScopeKey = toHomeShelfScopeKey(activeLibraryUserKey, activeLibraryId);
+  const homeScopeKey = useHomeShelfScopeKey();
   const customShelves = useDeviceBooksStore((state) =>
     selectCustomShelvesByScope(state, homeScopeKey),
   );
@@ -515,7 +516,8 @@ export const useBookBookshelfEditor = (): BookshelfEditorController => {
   return {
     status: shelf || isPlaylistCreateDraft ? "ready" : "missing",
     title: shelf?.title ?? nameDraft,
-    name: nameDraft || shelf?.title || "New Shelf",
+    // nameDraft already falls back to the shelf title until edited; an empty edit stays empty.
+    name: nameDraft,
     canRename:
       isPlaylistCreateDraft || isCustomShelf(shelf) || isPlaylistShelf(shelf),
     isVisible: shelf ? shelf.isVisible : draftIsVisible,

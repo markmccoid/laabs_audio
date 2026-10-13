@@ -18,6 +18,7 @@ import type {
 import { upsertShadowServerProgressProjection } from "@/data/sqlite/overlay-writes";
 import type { SqliteHomeProjection } from "@/data/sqlite/home-repository";
 import { useFavoriteBookAction } from "@/hooks/use-favorite-book-action";
+import { useHomeShelfScopeKey } from "@/hooks/use-home-shelf-scope-key";
 import type { ShelfMembershipOption } from "@/hooks/use-shelf-membership-options";
 import {
   resolveStoredDownloadCoverUri,
@@ -280,7 +281,8 @@ export const useBookActionController = ({
   const controls = usePlaybackControls({ libraryItemId: book.id }, canStart);
   const canPlay = controls.canToggle;
   const isBookPlaying = controls.action === "pause";
-  const canMutateShelves = Boolean(activeLibraryId && activeLibraryUserKey);
+  const shelfScopeKey = useHomeShelfScopeKey();
+  const canMutateShelves = Boolean(shelfScopeKey);
   const hasStartedContinueListening =
     Math.max(0, Math.floor(progress?.currentTime ?? 0)) > 0 ||
     (progress?.progressPercent ?? 0) > 0;

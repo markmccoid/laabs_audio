@@ -11,6 +11,7 @@ export default function LoginLayout() {
         contentStyle: { backgroundColor: themeColors.bg },
       }}
     >
+      <Stack.Screen name="welcome" />
       <Stack.Screen name="index" />
       <Stack.Screen name="add" />
       <Stack.Screen name="edit" />

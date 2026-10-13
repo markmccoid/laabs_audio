@@ -1,4 +1,6 @@
-import { useAuthStore } from "@/auth/auth-store";
+import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
+import { isLocalOnlyAccessMode } from "@/auth/local-only-access-mode";
+import { LocalSearchScreen } from "@/components/search/local-search-screen";
 import { useActiveLibraryExperience } from "@/auth/active-library-experience";
 import LibraryContainer from "@/components/Library/LibraryContainer";
 import { SearchFilterRail } from "@/components/Library/search-filter-rail";
@@ -12,6 +14,7 @@ const SEARCH_COMMIT_DELAY_MS = 300;
 
 export default function SearchIndex() {
   const status = useAuthStore((state) => state.status);
+  const isLocalOnly = useAuthStore((state) => isLocalOnlyAccessMode(selectAccessMode(state)));
   const experience = useActiveLibraryExperience();
   const searchActions = useSearchSessionActions();
   const searchText = useSearchText();
@@ -21,9 +24,9 @@ export default function SearchIndex() {
   const [isSearchActive, setIsSearchActive] = useState(false);
 
   useEffect(() => {
-    if (status === "authenticated") return;
+    if (status === "authenticated" || isLocalOnly) return;
     router.replace("/(tabs)/(home)");
-  }, [status]);
+  }, [isLocalOnly, status]);
 
   useEffect(
     () => () => {
@@ -62,7 +65,7 @@ export default function SearchIndex() {
   };
 
   if (status !== "authenticated") {
-    return null;
+    return isLocalOnly ? <LocalSearchScreen /> : null;
   }
   if (experience === "unresolved") return null;
 

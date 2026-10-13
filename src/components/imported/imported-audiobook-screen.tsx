@@ -3,6 +3,7 @@ import { CoverImage } from "@/components/images/cover-image";
 import { toImportedBookProgress } from "@/imported/imported-audiobook-presentation";
 import { removeImportedAudiobook } from "@/imported/imported-audiobook-library";
 import { resolveImportedCoverUri, useImportedBookRecord } from "@/imported/use-imported-books";
+import { useAuthStore } from "@/auth/auth-store";
 import { useSettingsStore } from "@/store/settings-store";
 import { useThemeColors } from "@/theme/use-app-theme";
 import { Stack, router } from "expo-router";
@@ -13,7 +14,12 @@ import { IMPORTED_TINT, ImportedSourceLabel } from "./imported-badge";
 import { describeImportedProgress, formatImportedDuration } from "./imported-books-segment";
 import { AudioImportProgressOverlay, useAudioImportFlow } from "./use-audio-import-flow";
 
-const confirmRemove = (id: string, title: string) => {
+/** Confirms removing an Imported Audiobook; `onRemoving` runs first (e.g. to leave its screen). */
+export const confirmRemoveImportedAudiobook = (
+  id: string,
+  title: string,
+  onRemoving?: () => void,
+) => {
   Alert.alert(
     "Remove Imported Audiobook",
     `Remove “${title}” from this device? The original file in Files is not affected.`,
@@ -21,7 +27,7 @@ const confirmRemove = (id: string, title: string) => {
       {
         text: "Remove, Keep Progress",
         onPress: () => {
-          router.back();
+          onRemoving?.();
           void removeImportedAudiobook(id);
         },
       },
@@ -29,7 +35,7 @@ const confirmRemove = (id: string, title: string) => {
         text: "Remove and Delete Progress",
         style: "destructive",
         onPress: () => {
-          router.back();
+          onRemoving?.();
           void removeImportedAudiobook(id, { deleteListeningState: true });
         },
       },
@@ -45,7 +51,7 @@ const ActionButton = ({
   onPress,
 }: {
   title: string;
-  icon: "pencil" | "trash" | "arrow.down.doc";
+  icon: "pencil" | "trash" | "arrow.down.doc" | "books.vertical";
   destructive?: boolean;
   onPress: () => void;
 }) => {
@@ -82,6 +88,10 @@ export const ImportedAudiobookScreen = ({ libraryItemId }: { libraryItemId: stri
   const record = useImportedBookRecord(libraryItemId);
   const openMainPlayerOnStart = useSettingsStore((state) => state.openPlayerOnPlaybackStart);
   const importFlow = useAudioImportFlow();
+  // Custom Shelves are scoped to a signed-in library, so the button needs one.
+  const canUseBookshelves = useAuthStore((state) =>
+    Boolean(state.activeLibraryId && state.activeLibraryUserKey),
+  );
   const progress = useMemo(() => (record ? toImportedBookProgress(record) : undefined), [record]);
 
   if (!record || record.removedAt) {
@@ -173,6 +183,16 @@ export const ImportedAudiobookScreen = ({ libraryItemId }: { libraryItemId: stri
           </View>
         )}
 
+        {canUseBookshelves ? (
+          <ActionButton
+            title="Bookshelves"
+            icon="books.vertical"
+            onPress={() =>
+              router.push({ pathname: "/book-bookshelves", params: { libraryItemId: record.id } })
+            }
+          />
+        ) : null}
+
         <View style={{ flexDirection: "row", gap: 10 }}>
           <ActionButton
             title="Edit Details"
@@ -183,7 +203,7 @@ export const ImportedAudiobookScreen = ({ libraryItemId }: { libraryItemId: stri
             title="Remove"
             icon="trash"
             destructive
-            onPress={() => confirmRemove(record.id, record.title)}
+            onPress={() => confirmRemoveImportedAudiobook(record.id, record.title, router.back)}
           />
         </View>
 

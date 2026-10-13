@@ -107,43 +107,47 @@ const ImportedBookRow = memo(function ImportedBookRow({
   );
 });
 
-export const ImportedBooksSegment = ({ onImport }: { onImport: () => void }) => {
+/** Empty state offering Audio Import; shared by the Imported segment and Imported-Only Home. */
+export const ImportAudioEmptyState = ({ onImport }: { onImport: () => void }) => {
   const themeColors = useThemeColors();
+
+  return (
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 32 }}>
+      <SymbolView name="folder.badge.plus" size={44} tintColor={IMPORTED_TINT} />
+      <Text style={{ color: themeColors.text, fontSize: 17, fontWeight: "600", textAlign: "center" }}>
+        No imported audiobooks
+      </Text>
+      <Text style={{ color: themeColors.textMuted, textAlign: "center" }}>
+        Import an audiobook file from iCloud Drive or your iPhone. Imported audiobooks stay on this
+        device and work with any Audiobookshelf account, or none.
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onImport}
+        style={({ pressed }) => ({
+          marginTop: 4,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 6,
+          paddingHorizontal: 16,
+          paddingVertical: 10,
+          borderRadius: 999,
+          borderCurve: "continuous",
+          backgroundColor: themeColors.accent,
+          opacity: pressed ? 0.8 : 1,
+        })}
+      >
+        <SymbolView name="plus" size={14} tintColor="#fff" />
+        <Text style={{ color: "#fff", fontWeight: "600" }}>Import Audio</Text>
+      </Pressable>
+    </View>
+  );
+};
+
+export const ImportedBooksSegment = ({ onImport }: { onImport: () => void }) => {
   const { records, books, progressByBookId } = useImportedBookListData();
 
-  if (!records.length) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 32 }}>
-        <SymbolView name="folder.badge.plus" size={44} tintColor={IMPORTED_TINT} />
-        <Text style={{ color: themeColors.text, fontSize: 17, fontWeight: "600", textAlign: "center" }}>
-          No imported audiobooks
-        </Text>
-        <Text style={{ color: themeColors.textMuted, textAlign: "center" }}>
-          Import an audiobook file from iCloud Drive or your iPhone. Imported audiobooks stay on this
-          device and work with any Audiobookshelf account, or none.
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onImport}
-          style={({ pressed }) => ({
-            marginTop: 4,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 6,
-            paddingHorizontal: 16,
-            paddingVertical: 10,
-            borderRadius: 999,
-            borderCurve: "continuous",
-            backgroundColor: themeColors.accent,
-            opacity: pressed ? 0.8 : 1,
-          })}
-        >
-          <SymbolView name="plus" size={14} tintColor="#fff" />
-          <Text style={{ color: "#fff", fontWeight: "600" }}>Import Audio</Text>
-        </Pressable>
-      </View>
-    );
-  }
+  if (!records.length) return <ImportAudioEmptyState onImport={onImport} />;
 
   return (
     <FlashList

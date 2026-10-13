@@ -63,6 +63,8 @@ export function SignInListScreen() {
   const sessions = useAuthStore((state) => state.rememberedSessions);
   const activeSessionKey = useAuthStore((state) => state.activeSessionKey);
   const accessMode = useAuthStore(selectAccessMode);
+  // First-run sign-in is reached from the Welcome Choice, so it can go back there.
+  const canLeaveSignIn = accessMode !== "firstRunSignInRequired" || router.canGoBack();
   const { removeRememberedSession } = useAuthActions();
   const explicitLogout = useExplicitLogout();
   const applyResolution = useApplySessionEntryResolution();
@@ -195,7 +197,7 @@ export function SignInListScreen() {
             headerTransparent: true,
             title: "Sign-Ins",
             headerLeft: () =>
-              accessMode !== "firstRunSignInRequired" ? (
+              canLeaveSignIn ? (
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Back"
