@@ -1,5 +1,8 @@
 import type { AssistantDownloadedBookInput } from "./assistant-catalog-writes";
-import { rebuildAssistantCatalog } from "./assistant-catalog-writes";
+import {
+  AssistantCatalogRebuildCancelledError,
+  rebuildAssistantCatalog,
+} from "./assistant-catalog-writes";
 import { recordTimingLog } from "./timing-logger";
 
 /**
@@ -23,6 +26,8 @@ type SchedulerState = {
   running: boolean;
   holds: number;
   currentUserId: (() => string | null) | null;
+  /** Bumped by cancel; a running rebuild from an older generation stops at its next chunk. */
+  generation: number;
 };
 
 const state: SchedulerState = ((globalThis as typeof globalThis & {
@@ -33,6 +38,7 @@ const state: SchedulerState = ((globalThis as typeof globalThis & {
   running: false,
   holds: 0,
   currentUserId: null,
+  generation: 0,
 });
 
 /**
@@ -55,8 +61,12 @@ const drain = async () => {
 
   state.running = true;
   const startedAt = Date.now();
+  const generation = state.generation;
+  const isStillWanted = () =>
+    state.generation === generation &&
+    (!state.currentUserId || state.currentUserId() === request.userId);
   try {
-    const result = await rebuildAssistantCatalog(request);
+    const result = await rebuildAssistantCatalog({ ...request, shouldContinue: isStillWanted });
     void recordTimingLog("library_switch", "sqlite_refresh_assistant_catalog", startedAt, {
       userId: request.userId,
       rowCount: result.rowCount,
@@ -66,6 +76,7 @@ const drain = async () => {
     void recordTimingLog("library_switch", "sqlite_refresh_assistant_catalog", startedAt, {
       userId: request.userId,
       source: request.source,
+      cancelled: error instanceof AssistantCatalogRebuildCancelledError,
       error: error instanceof Error ? error.message : "Assistant Catalog rebuild failed",
     });
   } finally {
@@ -99,8 +110,12 @@ export const holdAssistantCatalogRebuilds = () => {
   };
 };
 
-/** Drops a pending rebuild; called when crossing a User Session boundary. */
+/**
+ * Drops a pending rebuild and stops a running one at its next chunk (its writes roll back);
+ * called when crossing a User Session boundary, so the boundary is not stuck behind it.
+ */
 export const cancelAssistantCatalogRebuilds = () => {
+  state.generation += 1;
   state.pending = null;
   if (state.timer) clearTimeout(state.timer);
   state.timer = null;

@@ -27,6 +27,15 @@ Status: steps 1–2 and the token-refresh part of step 5 done on `perf/library-s
   re-reads go first. Sim, cold user switch (3,024 books): Home with Continue Listening at
   **3.4–3.7 s** (was 8–9 s; 17 s before step 2); Recently Added/Discover ~1.5–2 s after the
   download ends (~8.5 s). Dev tool: Settings → Shadow SQLite → "Evict Other Sign-Ins' Catalogs".
+- **Rapid switching — fixed.** Switching every ~10 s took 5.7–6.6 s on device (sim: up to 12.8 s):
+  the boundary's Assistant Catalog clear waited on the previous user's in-flight rebuild through
+  the write guard. Now the clear is queued, not awaited; a rebuild for a user who is no longer
+  active (or after a boundary clear) stops at its next checkpoint; the rebuild commits per
+  500-row chunk and swaps in at the end (a rolled-back transaction also discarded unrelated
+  statements on the shared connection — timing rows vanished); and the row-building loop yields
+  every 250 rows (it blocked the JS thread: account-menu taps took 4.8–7.4 s to register).
+  Sim, switching mid-rebuild: tap→switch 78–317 ms, home_ready 1.3–2.0 s, stale rebuilds stop
+  1.6–3.4 s into the next switch.
 - **What remained in a switch before that:** `restore_remembered_session` 0.8–1.8 s (token refresh),
   then ~0.3 s to readiness/projection. Cold (uncached) library first visits are still slow
   (sim: 17 s, projection waits for the catalog download) — step 4. Do this on its own branch after

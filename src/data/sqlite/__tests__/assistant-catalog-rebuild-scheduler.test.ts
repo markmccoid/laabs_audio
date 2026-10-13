@@ -5,10 +5,12 @@ import {
   setAssistantRebuildCurrentUser,
 } from "../assistant-catalog-rebuild-scheduler";
 
-const mockRebuildAssistantCatalog = jest.fn(async (_input: { userId: string }) => ({ rowCount: 1 }));
+type MockRebuildInput = { userId: string; shouldContinue?: () => boolean };
+const mockRebuildAssistantCatalog = jest.fn(async (_input: MockRebuildInput) => ({ rowCount: 1 }));
 
 jest.mock("../assistant-catalog-writes", () => ({
-  rebuildAssistantCatalog: (input: { userId: string }) => mockRebuildAssistantCatalog(input),
+  AssistantCatalogRebuildCancelledError: class extends Error {},
+  rebuildAssistantCatalog: (input: MockRebuildInput) => mockRebuildAssistantCatalog(input),
 }));
 jest.mock("../timing-logger", () => ({ recordTimingLog: jest.fn() }));
 
@@ -81,5 +83,36 @@ describe("assistant catalog rebuild scheduler", () => {
       "user-a",
       "user-c",
     ]);
+  });
+
+  it("tells a running rebuild to stop when the surface is cleared or the user switches", async () => {
+    let finishFirst: () => void = () => {};
+    mockRebuildAssistantCatalog.mockImplementationOnce(
+      () => new Promise((resolve) => (finishFirst = () => resolve({ rowCount: 1 }))),
+    );
+    requestAssistantCatalogRebuild(request("user-a"));
+    await jest.advanceTimersByTimeAsync(0);
+    const { shouldContinue } = mockRebuildAssistantCatalog.mock.calls[0][0];
+    expect(shouldContinue?.()).toBe(true);
+
+    cancelAssistantCatalogRebuilds();
+    expect(shouldContinue?.()).toBe(false);
+    finishFirst();
+    await flush();
+  });
+
+  it("stops a running rebuild once its user is no longer active", async () => {
+    let finishFirst: () => void = () => {};
+    mockRebuildAssistantCatalog.mockImplementationOnce(
+      () => new Promise((resolve) => (finishFirst = () => resolve({ rowCount: 1 }))),
+    );
+    requestAssistantCatalogRebuild(request("user-a"));
+    await jest.advanceTimersByTimeAsync(0);
+    const { shouldContinue } = mockRebuildAssistantCatalog.mock.calls[0][0];
+
+    currentUserId = "user-b";
+    expect(shouldContinue?.()).toBe(false);
+    finishFirst();
+    await flush();
   });
 });

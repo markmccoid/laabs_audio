@@ -12,7 +12,7 @@ import { router } from "expo-router";
 import { useCallback, useMemo, useRef } from "react";
 import { Alert } from "react-native";
 import { useUniwind } from "uniwind";
-import { beginSwitchTrace } from "@/utils/switch-trace";
+import { beginSwitchTrace, markSwitchGate } from "@/utils/switch-trace";
 import { homeSessionSwitchStore, useHomeSessionSwitch } from "./home-session-switch-store";
 
 const BUTTON_LABEL_MAX_CHARS = 22;
@@ -99,6 +99,7 @@ export const useHomeSignInSwitcher = () => {
       let waitingForHomeContent = false;
       try {
         const resolution = await enterUserSession({ via: "restore", sessionKey: session.key });
+        markSwitchGate("entry_returned", { outcome: resolution.outcome });
         // Authentication can succeed while library resolution fails. Restore the
         // previous session in that case so Home returns to its prior library.
         if (
@@ -128,6 +129,7 @@ export const useHomeSignInSwitcher = () => {
             } as never);
           },
         });
+        markSwitchGate("resolution_applied");
         if (
           resolution.outcome === "activate" &&
           libraryActivationStore.getState().status === "failed"

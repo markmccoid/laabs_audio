@@ -434,4 +434,39 @@ describe("Assistant Catalog SQLite writer", () => {
     ).toBeUndefined();
     expect(readAssistantRows().find((row) => row.library_item_id === "book-1")).toBeDefined();
   });
+
+  it("replaces the previous user's rows when rebuilding for another user", async () => {
+    const { catalog, core } = loadModules();
+    await core.initializeShadowDatabaseInternal();
+    addLibrary("user-a", "books", "book");
+    addLibrary("user-b", "books", "book");
+    addCatalogItem({ userId: "user-a", libraryId: "books", itemId: "a-1", title: "A One" });
+    addCatalogItem({ userId: "user-b", libraryId: "books", itemId: "b-1", title: "B One" });
+
+    await catalog.rebuildAssistantCatalog({ userId: "user-a", downloadedBooks: [] });
+    const result = await catalog.rebuildAssistantCatalog({ userId: "user-b", downloadedBooks: [] });
+
+    expect(result.rowCount).toBe(1);
+    expect(readAssistantRows().map((row) => `${row.user_id}:${row.library_item_id}`)).toEqual([
+      "user-b:b-1",
+    ]);
+  });
+
+  it("stops a cancelled rebuild without touching the existing catalog", async () => {
+    const { catalog, core } = loadModules();
+    await core.initializeShadowDatabaseInternal();
+    addLibrary("user-a", "books", "book");
+    addCatalogItem({ userId: "user-a", libraryId: "books", itemId: "a-1", title: "A One" });
+    await catalog.rebuildAssistantCatalog({ userId: "user-a", downloadedBooks: [] });
+    addCatalogItem({ userId: "user-a", libraryId: "books", itemId: "a-2", title: "A Two" });
+
+    await expect(
+      catalog.rebuildAssistantCatalog({
+        userId: "user-a",
+        downloadedBooks: [],
+        shouldContinue: () => false,
+      }),
+    ).rejects.toBeInstanceOf(catalog.AssistantCatalogRebuildCancelledError);
+    expect(readAssistantRows().map((row) => row.library_item_id)).toEqual(["a-1"]);
+  });
 });

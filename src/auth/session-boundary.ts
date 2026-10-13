@@ -8,6 +8,7 @@ import { playerService } from "../player/player-service";
 import { playbackStore } from "../player/playback-store";
 import { queryClient } from "../query/query-client";
 import { clearSessionQueryCache } from "../query/session-query-cache";
+import { markSwitchGate } from "../utils/switch-trace";
 import { authStore } from "./auth-store";
 import { libraryActivationStore } from "./library-activation-store";
 import { resolveListeningOwnerKey } from "./listening-owner";
@@ -42,17 +43,28 @@ export const scheduleAssistantSurfaceContent = (
   );
 };
 
+// The clear goes through the shared write guard, which may be busy with the previous user's
+// refresh. It is queued (FIFO, so still ahead of the next user's rebuild) but not awaited: the
+// switch must not wait seconds for another user's background writes.
+const queueAssistantSurfaceClear = () => {
+  void clearAssistantSurfaceContent()
+    .then(() => markSwitchGate("boundary_assistant_cleared"))
+    .catch((error) => {
+      if (__DEV__) console.warn("[session-boundary] assistant-surface-clear-failed", { error });
+    });
+};
+
 export const prepareForUserSessionBoundary = async () => {
-  await clearAssistantSurfaceContent().catch((error) => {
-    if (__DEV__) console.warn("[session-boundary] assistant-surface-clear-failed", { error });
-  });
+  queueAssistantSurfaceClear();
   await playerService.endActivePlaybackForLogout().catch((error) => {
     if (__DEV__) {
       console.warn("[session-boundary] player-teardown-failed", { error });
     }
   });
+  markSwitchGate("boundary_playback_ended");
   libraryActivationStore.getState().actions.clear();
   await clearSessionQueryCache(queryClient);
+  markSwitchGate("boundary_query_cache_cleared");
 };
 
 const resolveActivePlaybackOwnerUserId = () =>
@@ -75,9 +87,7 @@ export const prepareForSignInChange = async (target: {
     return;
   }
 
-  await clearAssistantSurfaceContent().catch((error) => {
-    if (__DEV__) console.warn("[session-boundary] assistant-surface-clear-failed", { error });
-  });
+  queueAssistantSurfaceClear();
 
   const playbackState = playbackStore.getState();
   const isStreamingPlayback =

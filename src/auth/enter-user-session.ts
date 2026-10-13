@@ -1,4 +1,5 @@
 import { recordTimingLog } from "../data/sqlite/timing-logger";
+import { markSwitchGate } from "../utils/switch-trace";
 import type { Library } from "../types/absTypes";
 import { AuthError, authService } from "./auth-service";
 import { getJwtExpiry, isTokenExpired } from "./auth-token";
@@ -183,7 +184,9 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
       }
 
       const secrets = await authStorage.getSessionSecrets(session.key);
+      markSwitchGate("restore_secrets_read");
       const restored = await authenticateRestore(session, secrets);
+      markSwitchGate("restore_tokens_ready", { reusedStoredToken: restored?.accessToken === secrets.accessToken });
       if (!restored) {
         authStore.getState().actions.setSessionNeedsAttention(session.key, "Sign in needed");
         return {
@@ -276,10 +279,12 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
       });
     }
 
+    markSwitchGate("restore_secrets_persisted");
     await prepareForSignInChange({
       userId: identity.confirmedUserId,
       sessionKey: identity.sessionKey,
     });
+    markSwitchGate("boundary_prepared");
 
     authStore.getState().actions.commitActiveSession(identity.sessionKey, {
       accessToken: identity.tokens.accessToken,
@@ -312,6 +317,7 @@ const runEntry = async (req: UserSessionEntryRequest): Promise<SessionEntryResol
   try {
     const userKey = authStore.getState().activeLibraryUserKey;
     const response = await fetchLibrariesForResolution(userKey);
+    markSwitchGate("libraries_fetched");
     const resolution = resolveLibrarySelection(response.libraries, identity.libraryHint);
 
     if (resolution.status === "noLibraries") {
