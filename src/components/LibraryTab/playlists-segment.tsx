@@ -20,6 +20,7 @@ import {
   View,
 } from "react-native";
 import { LibraryGroupGridItem } from "./library-group-grid-item";
+import { useSearchBarPullToRefresh } from "./use-search-bar-pull-to-refresh";
 
 const playlistCountLabel = (count: number) => `${count} ${count === 1 ? "book" : "books"}`;
 const MAX_PLAYLIST_COVER_BOOKS = 4;
@@ -107,7 +108,8 @@ const PlaylistGridItem = memo(function PlaylistGridItem({
 export const PlaylistsSegment = ({ viewMode }: { viewMode: LibraryViewMode }) => {
   const themeColors = useThemeColors();
   const { width } = useWindowDimensions();
-  const { data: playlists = [], error, isLoading, isRefetching, refetch } = useLibraryPlaylists();
+  const { data: playlists = [], error, isLoading, refetch } = useLibraryPlaylists();
+  const { refreshing, onRefresh } = useSearchBarPullToRefresh(refetch);
   const gridCoverSize = Math.max(72, Math.min(116, Math.floor((width - 48) / 3)));
   const playlistCoverBookIds = useMemo(() => {
     const bookIdsByPlaylistId = new Map<string, readonly string[]>();
@@ -221,8 +223,8 @@ export const PlaylistsSegment = ({ viewMode }: { viewMode: LibraryViewMode }) =>
       data={playlists}
       keyExtractor={(playlist) => playlist.id}
       numColumns={viewMode === "grid" ? 3 : 1}
-      refreshing={isRefetching}
-      onRefresh={() => void refetch()}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
       onViewableItemsChanged={onViewableItemsChanged}
       renderItem={viewMode === "grid" ? renderPlaylistGridItem : renderPlaylistRow}
       ListEmptyComponent={

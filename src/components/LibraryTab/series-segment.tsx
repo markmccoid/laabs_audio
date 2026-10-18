@@ -23,6 +23,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { useSearchBarPullToRefresh } from "./use-search-bar-pull-to-refresh";
 
 const MAX_SERIES_COVER_BOOKS = 3;
 const SERIES_COVER_SIZE = 105;
@@ -137,8 +138,8 @@ export const SeriesSegment = ({
 }: SeriesSegmentProps) => {
   const themeColors = useThemeColors();
   const { width } = useWindowDimensions();
-  const { series, bookIdsBySeriesId, error, isLoading, isRefetching, refreshError, refetch } =
-    useLibrarySeries();
+  const { series, bookIdsBySeriesId, error, isLoading, refreshError, refetch } = useLibrarySeries();
+  const { refreshing, onRefresh } = useSearchBarPullToRefresh(refetch);
   const visibleSeries = useMemo(() => {
     const normalizedSearch = searchText.trim().toLocaleLowerCase();
     const filteredSeries = normalizedSearch
@@ -264,8 +265,8 @@ export const SeriesSegment = ({
         data={visibleSeries}
         keyExtractor={(entry) => entry.id}
         numColumns={viewMode === "grid" ? 3 : 1}
-        refreshing={isRefetching}
-        onRefresh={() => void refetch()}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
         onViewableItemsChanged={onViewableItemsChanged}
         renderItem={viewMode === "grid" ? renderSeriesGridItem : renderSeriesRow}
         ListEmptyComponent={

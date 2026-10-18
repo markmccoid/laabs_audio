@@ -20,6 +20,7 @@ import {
   View,
 } from "react-native";
 import { LibraryGroupGridItem } from "./library-group-grid-item";
+import { useSearchBarPullToRefresh } from "./use-search-bar-pull-to-refresh";
 
 const MAX_COLLECTION_COVER_BOOKS = 4;
 const COLLECTION_COVER_SIZE = 78;
@@ -113,10 +114,10 @@ export const CollectionsSegment = ({ viewMode }: { viewMode: LibraryViewMode }) 
     bookIdsByCollectionId,
     error,
     isLoading,
-    isRefetching,
     refreshError,
     refetch,
   } = useLibraryCollections();
+  const { refreshing, onRefresh } = useSearchBarPullToRefresh(refetch);
   const gridCoverSize = Math.max(72, Math.min(116, Math.floor((width - 48) / 3)));
   const coverBookIds = useMemo(() => {
     const coverBookIdsByCollectionId = new Map<string, readonly string[]>();
@@ -236,8 +237,8 @@ export const CollectionsSegment = ({ viewMode }: { viewMode: LibraryViewMode }) 
         data={collections}
         keyExtractor={(collection) => collection.id}
         numColumns={viewMode === "grid" ? 3 : 1}
-        refreshing={isRefetching}
-        onRefresh={() => void refetch()}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
         onViewableItemsChanged={onViewableItemsChanged}
         renderItem={viewMode === "grid" ? renderCollectionGridItem : renderCollectionRow}
         ListEmptyComponent={
