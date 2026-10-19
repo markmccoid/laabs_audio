@@ -63,7 +63,14 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Icon sf="gear" md="settings" />
         <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="search" role="search">
+      {/* expo-router's `role` only sets screens' `systemItem` (the magnifier icon). The native
+          UISearchTab needs screens' own `ios.role`, and iOS 27 only gives it the detached
+          trailing slot + tab-bar search field while `automaticallyActivatesSearch` is on. */}
+      <NativeTabs.Trigger
+        name="search"
+        role="search"
+        unstable_nativeProps={{ ios: { role: "search", automaticallyActivatesSearch: true } }}
+      >
         <NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 

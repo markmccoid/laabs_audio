@@ -56,14 +56,20 @@ jest.mock("expo-linking", () => ({
   },
   parse: () => ({}),
 }));
-jest.mock("react-native", () => ({
-  AppState: {
-    addEventListener: (_name: string, listener: (state: string) => void) => {
-      mockListeners.set("active", () => listener("active"));
-      return { remove: () => mockListeners.delete("active") };
-    },
+const mockAppState = {
+  addEventListener: (_name: string, listener: (state: string) => void) => {
+    mockListeners.set("active", () => listener("active"));
+    return { remove: () => mockListeners.delete("active") };
   },
-}));
+};
+// jest-expo's setup reads Platform from the real module. A Proxy keeps react-native's lazy
+// getters lazy; spreading would evaluate ones that have no native module under Jest.
+jest.mock("react-native", () => {
+  const actual = jest.requireActual("react-native");
+  return new Proxy(actual, {
+    get: (target, property) => (property === "AppState" ? mockAppState : target[property]),
+  });
+});
 
 function Harness({ canNavigate = true }: { canNavigate?: boolean }) {
   useAssistantOpenNavigation({ canNavigate });

@@ -630,6 +630,14 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 		_ templateApplicationScene: CPTemplateApplicationScene,
 		didConnect interfaceController: CPInterfaceController
 	) {
+		// On a car cold launch no phone scene connects, so React Native would never start and the
+		// templates would wait forever for shelf data. LAABSReactRuntime lives in the app target
+		// (plugins/carplay/SceneDelegate.swift); it no-ops when the phone scene already started JS.
+		if let runtime = NSClassFromString("LAABSReactRuntime") as? NSObject.Type {
+			runtime.perform(NSSelectorFromString("startWithoutWindowIfNeeded"))
+		} else {
+			carPlayDebugLog("[CarPlay] LAABSReactRuntime missing; JS may not start on car cold launch")
+		}
 		CarPlayCoordinator.shared.connect(interfaceController)
 	}
 

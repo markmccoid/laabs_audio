@@ -1,0 +1,20 @@
+diff --git a/node_modules/react-native/React/CoreModules/RCTDevMenu.mm b/node_modules/react-native/React/CoreModules/RCTDevMenu.mm
+index 883b4ba..3024d3e 100644
+--- a/node_modules/react-native/React/CoreModules/RCTDevMenu.mm
++++ b/node_modules/react-native/React/CoreModules/RCTDevMenu.mm
+@@ -235,8 +235,13 @@ RCT_EXPORT_MODULE()
+ {
+   if ([((RCTDevSettings *)[_moduleRegistry moduleForName:"DevSettings"]) isShakeToShowDevMenuEnabled]) {
+     NSMutableArray<UIWindow *> *windows = [NSMutableArray new];
+-    for (UIWindowScene *scene in RCTSharedApplication().connectedScenes) {
+-      [windows addObjectsFromArray:scene.windows];
++    for (UIScene *scene in RCTSharedApplication().connectedScenes) {
++      // Non-window scenes (e.g. CarPlay's CPTemplateApplicationScene) do not
++      // respond to -windows; blind-casting crashes on shake with CarPlay connected.
++      if (![scene isKindOfClass:[UIWindowScene class]]) {
++        continue;
++      }
++      [windows addObjectsFromArray:((UIWindowScene *)scene).windows];
+     }
+     for (UIWindow *window in windows) {
+       NSString *recursiveDescription = [window valueForKey:@"recursiveDescription"];

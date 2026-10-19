@@ -1,6 +1,6 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
-import { InteractionManager } from "react-native";
+import { runAfterInteractions } from "@/utils/run-after-interactions";
 
 const SPURIOUS_REFRESH_WINDOW_MS = 400;
 
@@ -24,7 +24,7 @@ export const useSearchBarPullToRefresh = (refetch: () => unknown) => {
     useCallback(() => {
       let frame = 0;
       let cancelled = false;
-      const task = InteractionManager.runAfterInteractions(() => {
+      const task = runAfterInteractions(() => {
         frame = requestAnimationFrame(() => {
           if (cancelled) return;
           attachedAtRef.current = Date.now();

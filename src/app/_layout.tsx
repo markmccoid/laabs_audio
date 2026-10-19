@@ -12,7 +12,8 @@ import {
 import { ThemeProvider } from "expo-router/react-navigation";
 import * as SplashScreen from "expo-splash-screen";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, InteractionManager, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
+import { runAfterInteractions, type DeferredTask } from "@/utils/run-after-interactions";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Toaster } from "react-native-sonner";
 import { Uniwind } from "uniwind";
@@ -358,7 +359,7 @@ export default function RootLayout() {
       initialDeepLinkBookId,
       routeState,
     });
-    const task = InteractionManager.runAfterInteractions(() => {
+    const task = runAfterInteractions(() => {
       setInitialDeepLinkBookId(null);
     });
     return () => task.cancel();
@@ -584,7 +585,7 @@ export default function RootLayout() {
       libraryItemId: restoreLibraryItemId,
       episodeId: restoreEpisodeId,
     });
-    const interactionTask = InteractionManager.runAfterInteractions(() => {
+    const interactionTask = runAfterInteractions(() => {
       const restorePromise = restoreEpisodeId
         ? playerService.loadEpisode(restoreLibraryItemId, restoreEpisodeId, {
             autoPlay: false,
@@ -601,7 +602,7 @@ export default function RootLayout() {
         .catch(() => logStartupEvent("startup restore failed"));
     });
 
-    return () => interactionTask.cancel?.();
+    return () => interactionTask.cancel();
   }, [accessMode, assistantRuntimeSettled, startupBookLinkId, warmupEligible]);
 
   useEffect(() => {
@@ -609,10 +610,10 @@ export default function RootLayout() {
     if (!warmupEligible) return;
 
     let isCancelled = false;
-    let interactionTask: { cancel?: () => void } | null = null;
+    let interactionTask: DeferredTask | null = null;
 
     const frameId = requestAnimationFrame(() => {
-      interactionTask = InteractionManager.runAfterInteractions(() => {
+      interactionTask = runAfterInteractions(() => {
         if (isCancelled) return;
 
         const warmupStartedAtMs = markStartup("startup-warmup-start");
@@ -686,7 +687,7 @@ export default function RootLayout() {
     return () => {
       isCancelled = true;
       cancelAnimationFrame(frameId);
-      interactionTask?.cancel?.();
+      interactionTask?.cancel();
     };
   }, [activeLibraryId, activeLibraryUserKey, status, warmupEligible]);
 

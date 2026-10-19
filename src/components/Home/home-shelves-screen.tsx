@@ -27,7 +27,8 @@ import { Stack } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, InteractionManager, RefreshControl, Text, View } from "react-native";
+import { ActivityIndicator, RefreshControl, Text, View } from "react-native";
+import { runAfterInteractions } from "@/utils/run-after-interactions";
 import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
 import { ImportAudioEmptyState } from "@/components/imported/imported-books-segment";
 import {
@@ -221,12 +222,12 @@ const HomeShelvesScreen = () => {
   useEffect(() => {
     if (!hasHomeScope || shouldRenderCardMenus) return;
 
-    const interactionTask = InteractionManager.runAfterInteractions(() => {
+    const interactionTask = runAfterInteractions(() => {
       setShouldRenderCardMenus(true);
     });
 
     return () => {
-      interactionTask.cancel?.();
+      interactionTask.cancel();
     };
   }, [hasHomeScope, shouldRenderCardMenus]);
 

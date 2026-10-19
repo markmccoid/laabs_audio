@@ -709,3 +709,21 @@ observed per item and tore the player down to ERROR, leaving a dead player.
 **Verification.** Simulator: build + baseline play/pause + background/foreground resume pass.
 The interruption and media-reset paths cannot be triggered in the simulator — verify on device
 (Siri/phone-call interruption; Settings → Developer → Reset Media Services).
+
+---
+
+## Change 19 — SDK 58 scene life cycle: `PhoneSceneDelegate` removed (iOS)
+
+**Files:** `ios/PhoneSceneDelegate.swift` (deleted), `ios/CarPlaySceneDelegate.swift`
+**Date:** 2026-10-18
+
+Expo SDK 58 generates its own phone `SceneDelegate` that creates the window and starts React
+Native, so the window-adopting `PhoneSceneDelegate` (Change 3) is gone. `plugins/with-carplay.js`
+now only adds the CarPlay role to Expo's scene manifest and replaces the generated
+`SceneDelegate.swift` with `plugins/carplay/SceneDelegate.swift`.
+`CarPlaySceneDelegate.templateApplicationScene(_:didConnect:)` calls the app target's
+`LAABSReactRuntime.startWithoutWindowIfNeeded` (by ObjC name) so a car cold launch, where no phone
+scene connects, still boots JS; the phone scene adopts that running root when the app is opened.
+
+**Upgrade check.** Keep the `LAABSReactRuntime` call in `didConnect`; do not restore
+`PhoneSceneDelegate`.

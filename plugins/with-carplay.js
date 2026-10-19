@@ -1,36 +1,43 @@
-const { withEntitlementsPlist, withInfoPlist } = require("expo/config-plugins");
+const fs = require("fs");
+const path = require("path");
+const { withDangerousMod, withEntitlementsPlist, withInfoPlist } = require("expo/config-plugins");
 
 /**
  * CarPlay (audio) support — see docs/carplay-integration-plan.md.
  *
- * Adds a UIApplicationSceneManifest with two scene roles:
- * - the CarPlay template scene (CarPlaySceneDelegate), and
- * - a phone window scene (PhoneSceneDelegate).
+ * SDK 58 already puts the app on the UIScene life cycle: Expo's template declares a
+ * UIApplicationSceneManifest whose phone role uses the generated `SceneDelegate`, which creates
+ * the window and starts React Native. This plugin:
  *
- * Declaring the manifest opts the app into the UIScene lifecycle, so the phone
- * UI needs a scene too — a CarPlay-only manifest leaves the RN window detached
- * (black screen; verified on iOS 26, Phase 0 spike). PhoneSceneDelegate is
- * deliberately minimal: Expo/RN startup still runs through the classic
- * AppDelegate; the scene delegate only adopts the already-created window and
- * forwards deep links.
- *
- * Both delegate classes ship inside the vendored react-native-audio-pro pod
- * and are referenced by plain ObjC runtime name, so no source files need to be
- * injected into the Xcode project.
+ * - adds the CarPlay template scene role (CarPlaySceneDelegate, shipped inside the vendored
+ *   react-native-audio-pro pod and referenced by plain ObjC runtime name) next to Expo's phone
+ *   role, leaving the phone role as Expo generates it;
+ * - replaces the generated SceneDelegate.swift with plugins/carplay/SceneDelegate.swift, which
+ *   lets a CarPlay cold launch (no phone scene) start JS and hands that running root to the phone
+ *   scene when the user opens the app.
  */
-const withCarPlay = (config) => {
-  config = withInfoPlist(config, (config) => {
+const SCENE_DELEGATE_SOURCE = path.join(__dirname, "carplay", "SceneDelegate.swift");
+
+const CARPLAY_SCENE_ROLE = "CPTemplateApplicationSceneSessionRoleApplication";
+
+const withCarPlaySceneManifest = (config) =>
+  withInfoPlist(config, (config) => {
+    const manifest = config.modResults.UIApplicationSceneManifest;
+    const phoneRole = manifest?.UISceneConfigurations?.UIWindowSceneSessionRoleApplication;
+    if (!Array.isArray(phoneRole) || phoneRole.length === 0) {
+      throw new Error(
+        "with-carplay expected Expo's UIApplicationSceneManifest phone scene in Info.plist. " +
+          "Check the SDK's iOS template before changing this plugin.",
+      );
+    }
+
     config.modResults.UIApplicationSceneManifest = {
+      ...manifest,
+      // Kept from the pre-SDK 58 CarPlay setup, which shipped with this value.
       UIApplicationSupportsMultipleScenes: true,
       UISceneConfigurations: {
-        UIWindowSceneSessionRoleApplication: [
-          {
-            UISceneClassName: "UIWindowScene",
-            UISceneConfigurationName: "Phone",
-            UISceneDelegateClassName: "PhoneSceneDelegate",
-          },
-        ],
-        CPTemplateApplicationSceneSessionRoleApplication: [
+        ...manifest.UISceneConfigurations,
+        [CARPLAY_SCENE_ROLE]: [
           {
             UISceneClassName: "CPTemplateApplicationScene",
             UISceneConfigurationName: "CarPlay",
@@ -41,6 +48,26 @@ const withCarPlay = (config) => {
     };
     return config;
   });
+
+const withCarPlaySceneDelegate = (config) =>
+  withDangerousMod(config, [
+    "ios",
+    async (config) => {
+      const { platformProjectRoot, projectName } = config.modRequest;
+      const target = path.join(platformProjectRoot, projectName, "SceneDelegate.swift");
+      if (!fs.existsSync(target)) {
+        throw new Error(
+          `with-carplay could not find Expo's generated SceneDelegate.swift at ${target}.`,
+        );
+      }
+      fs.copyFileSync(SCENE_DELEGATE_SOURCE, target);
+      return config;
+    },
+  ]);
+
+const withCarPlay = (config) => {
+  config = withCarPlaySceneManifest(config);
+  config = withCarPlaySceneDelegate(config);
 
   config = withEntitlementsPlist(config, (config) => {
     config.modResults["com.apple.developer.carplay-audio"] = true;

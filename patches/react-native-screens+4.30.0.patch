@@ -1,5 +1,5 @@
 diff --git a/node_modules/react-native-screens/lib/commonjs/components/tabs/host/TabsHost.ios.js b/node_modules/react-native-screens/lib/commonjs/components/tabs/host/TabsHost.ios.js
-index 6c4674f..cb05a91 100644
+index d2fea58..55640cb 100644
 --- a/node_modules/react-native-screens/lib/commonjs/components/tabs/host/TabsHost.ios.js
 +++ b/node_modules/react-native-screens/lib/commonjs/components/tabs/host/TabsHost.ios.js
 @@ -10,13 +10,13 @@ var _reactNative = require("react-native");
@@ -17,9 +17,9 @@ index 6c4674f..cb05a91 100644
  
    // android props are safely dropped
    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-@@ -56,11 +56,11 @@ function TabsHost(props) {
-     tabBarTintColor: ios?.tabBarTintColor,
+@@ -59,11 +59,11 @@ function TabsHost(props) {
      bottomAccessoryHidden: ios?.bottomAccessoryHidden,
+     prominentScreenKey: ios?.prominentScreenKey,
      onMoreTabSelected: ios?.onMoreTabSelected
 -  }), children, ios?.bottomAccessory && _PlatformUtils.isIOS26OrHigher && /*#__PURE__*/_react.default.createElement(_TabsBottomAccessory.default, null, /*#__PURE__*/_react.default.createElement(_TabsBottomAccessoryContent.default, {
 -    environment: "regular"
@@ -35,7 +35,7 @@ index 6c4674f..cb05a91 100644
  var _default = exports.default = TabsHost;
  const styles = _reactNative.StyleSheet.create({
 diff --git a/node_modules/react-native-screens/lib/module/components/tabs/host/TabsHost.ios.js b/node_modules/react-native-screens/lib/module/components/tabs/host/TabsHost.ios.js
-index a7ec083..0bc2c0f 100644
+index 33e2d19..6be8e6b 100644
 --- a/node_modules/react-native-screens/lib/module/components/tabs/host/TabsHost.ios.js
 +++ b/node_modules/react-native-screens/lib/module/components/tabs/host/TabsHost.ios.js
 @@ -6,11 +6,11 @@ import { StyleSheet } from 'react-native';
@@ -51,9 +51,9 @@ index a7ec083..0bc2c0f 100644
  
    // android props are safely dropped
    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-@@ -50,11 +50,11 @@ function TabsHost(props) {
-     tabBarTintColor: ios?.tabBarTintColor,
+@@ -53,11 +53,11 @@ function TabsHost(props) {
      bottomAccessoryHidden: ios?.bottomAccessoryHidden,
+     prominentScreenKey: ios?.prominentScreenKey,
      onMoreTabSelected: ios?.onMoreTabSelected
 -  }), children, ios?.bottomAccessory && isIOS26OrHigher && /*#__PURE__*/React.createElement(TabsBottomAccessory, null, /*#__PURE__*/React.createElement(TabsBottomAccessoryContent, {
 -    environment: "regular"
@@ -69,7 +69,7 @@ index a7ec083..0bc2c0f 100644
  export default TabsHost;
  const styles = StyleSheet.create({
 diff --git a/node_modules/react-native-screens/src/components/tabs/host/TabsHost.ios.tsx b/node_modules/react-native-screens/src/components/tabs/host/TabsHost.ios.tsx
-index 72e3ff5..a604c18 100644
+index 6992dcb..b68683b 100644
 --- a/node_modules/react-native-screens/src/components/tabs/host/TabsHost.ios.tsx
 +++ b/node_modules/react-native-screens/src/components/tabs/host/TabsHost.ios.tsx
 @@ -8,12 +8,14 @@ import TabsHostIOSNativeComponent, {
@@ -88,8 +88,8 @@ index 72e3ff5..a604c18 100644
  
    // android props are safely dropped
    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-@@ -54,14 +56,15 @@ function TabsHost(props: TabsHostProps) {
-       bottomAccessoryHidden={ios?.bottomAccessoryHidden}
+@@ -57,14 +59,15 @@ function TabsHost(props: TabsHostProps) {
+       prominentScreenKey={ios?.prominentScreenKey}
        onMoreTabSelected={ios?.onMoreTabSelected}>
        {children}
 +      {/* LOCAL PATCH (laabs_audio): use a single bottom-accessory content tree.
