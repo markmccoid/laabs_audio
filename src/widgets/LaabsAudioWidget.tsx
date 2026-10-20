@@ -34,12 +34,15 @@ import {
 } from "./widget-snapshot";
 
 const LaabsAudioWidget = (
-  props: AudioWidgetSnapshot,
+  props: AudioWidgetSnapshot | undefined,
   environment: WidgetEnvironment,
 ) => {
   "widget";
 
-  const media = props.status === "active" ? props.media : null;
+  // Expo widgets 58 passes undefined props when no timeline is stored (and
+  // for placeholder renders). Throwing here leaves the widget without a
+  // container background, so iOS shows "Please adopt containerBackground API".
+  const media = props?.status === "active" ? props.media : null;
 
   if (!media) {
     return (

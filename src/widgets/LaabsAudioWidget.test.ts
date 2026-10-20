@@ -70,7 +70,7 @@ const modifierMocks = jest.requireMock("@expo/ui/swift-ui/modifiers") as Record<
 >;
 
 const evaluateWidget = (
-  props: object,
+  props: object | undefined,
   widgetFamily: "systemSmall" | "systemMedium",
 ): WidgetNode => {
   const componentNames = [
@@ -144,6 +144,15 @@ describe("LAABS audio widget registration", () => {
         status: "empty",
         media: null,
       }),
+    );
+  });
+
+  it("renders the empty state with a container background when props are missing", () => {
+    // expo-widgets 58 passes undefined props when no timeline is stored.
+    const widget = evaluateWidget(undefined, "systemSmall");
+
+    expect(widget.props.modifiers).toContainEqual(
+      expect.objectContaining({ $type: "containerBackground", container: "widget" }),
     );
   });
 
