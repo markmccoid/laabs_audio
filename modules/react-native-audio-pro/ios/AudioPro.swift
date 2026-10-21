@@ -25,6 +25,7 @@ class AudioPro: RCTEventEmitter {
 	private let EVENT_NAME = "AudioProEvent"
 	private let AMBIENT_EVENT_NAME = "AudioProAmbientEvent"
 	private let CARPLAY_EVENT_NAME = "AudioProCarPlayEvent"
+	private let WIDGET_EVENT_NAME = "AudioProWidgetEvent"
 
 	private var ambientPlayer: AVPlayer?
 	private var ambientPlayerItem: AVPlayerItem?
@@ -156,7 +157,7 @@ class AudioPro: RCTEventEmitter {
 	////////////////////////////////////////////////////////////
 
 	override func supportedEvents() -> [String]! {
-		return [EVENT_NAME, AMBIENT_EVENT_NAME, CARPLAY_EVENT_NAME]
+		return [EVENT_NAME, AMBIENT_EVENT_NAME, CARPLAY_EVENT_NAME, WIDGET_EVENT_NAME]
 	}
 
 	override static func requiresMainQueueSetup() -> Bool {
@@ -206,6 +207,16 @@ class AudioPro: RCTEventEmitter {
 		// though the JS-side subscription persists. One permanent native-side
 		// registration keeps the pipe open for CarPlay control events.
 		addListener(CARPLAY_EVENT_NAME)
+		addListener(WIDGET_EVENT_NAME)
+		NotificationCenter.default.addObserver(
+			self,
+			selector: #selector(handleWillTerminate),
+			name: UIApplication.willTerminateNotification,
+			object: nil
+		)
+		// Nothing plays yet at module creation. Clear a "playing" widget state
+		// left by a process that stopped without publishing a pause.
+		AudioWidgetBridge.markWidgetPaused()
 	}
 
     deinit {
@@ -222,23 +233,47 @@ class AudioPro: RCTEventEmitter {
 			name: AudioWidgetPlaybackIntentNotification.name,
 			object: nil
 		)
+		NotificationCenter.default.removeObserver(
+			self,
+			name: UIApplication.willTerminateNotification,
+			object: nil
+		)
+	}
+
+	@objc private func handleWillTerminate() {
+		AudioWidgetBridge.markWidgetPaused()
 	}
 
 	@objc private func handleAudioWidgetPlaybackIntent(_ notification: Notification) {
 		guard
 			let target = notification.userInfo?[AudioWidgetPlaybackIntentNotification.targetKey]
-				as? String,
-            (currentTrack != nil || requestedPlayback.targetId != nil)
+				as? String
 		else {
 			return
 		}
+		let hasLoadedTrack = currentTrack != nil || requestedPlayback.targetId != nil
 
 		switch target {
-		case AudioWidgetPlaybackIntentNotification.playTarget:
-            resume()
 		case AudioWidgetPlaybackIntentNotification.pauseTarget:
-            pause()
+			AudioWidgetBridge.clearPendingPlay()
+			if hasLoadedTrack {
+				pause()
+			} else {
+				// Nothing is playing; the widget only shows a stale "playing" state.
+				AudioWidgetBridge.markWidgetPaused()
+			}
+		case AudioWidgetPlaybackIntentNotification.playTarget:
+			if hasLoadedTrack {
+				AudioWidgetBridge.clearPendingPlay()
+				resume()
+			} else {
+				// No track loaded: JS must load the last book. The intent left the
+				// request in UserDefaults; tell a running JS runtime to consume it.
+				sendEvent(withName: WIDGET_EVENT_NAME, body: ["type": "PLAY_REQUEST"])
+			}
 		case AudioWidgetPlaybackIntentNotification.toggleTarget:
+			guard hasLoadedTrack else { return }
+			AudioWidgetBridge.clearPendingPlay()
 			if requestedPlayback.playing {
 				pause()
 			} else {
@@ -247,6 +282,14 @@ class AudioPro: RCTEventEmitter {
 		default:
 			break
 		}
+	}
+
+	@objc(consumePendingWidgetPlayRequest:withRejecter:)
+	func consumePendingWidgetPlayRequest(
+		_ resolve: @escaping RCTPromiseResolveBlock,
+		withRejecter reject: RCTPromiseRejectBlock
+	) {
+		resolve(AudioWidgetBridge.consumePendingPlay())
 	}
 
 	private func addCarPlayObservers() {
@@ -1571,6 +1614,10 @@ class AudioPro: RCTEventEmitter {
         sendStateEvent(state: state, track: currentTrack)
         updateNowPlayingInfo(rate: state == STATE_PLAYING ? player.rate : 0, playbackState: state == STATE_PLAYING ? .playing : .paused)
         if state == STATE_PLAYING { startProgressTimer() } else { stopTimer() }
+        if state == STATE_PLAYING {
+            AudioWidgetBridge.clearPendingPlay()
+            NotificationCenter.default.post(name: AudioWidgetBridge.playbackDidStart, object: nil)
+        }
     }
 
 	@objc(seekTo:)

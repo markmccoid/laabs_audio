@@ -1,5 +1,5 @@
 diff --git a/node_modules/expo-widgets/ios/Widgets/AppIntent.swift b/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
-index 1730fff..d28ea57 100644
+index 1730fff..bebb801 100644
 --- a/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
 +++ b/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
 @@ -23,7 +23,10 @@ struct WidgetReload: AppIntent {
@@ -14,20 +14,97 @@ index 1730fff..d28ea57 100644
    // title is not used for non-discoverable intents, but it is required
    static var title: LocalizedStringResource = "User Interaction"
    static var isDiscoverable: Bool = false
-@@ -89,6 +92,16 @@ struct WidgetUserInteraction: AppIntent {
+@@ -68,13 +71,20 @@ struct WidgetUserInteraction: AppIntent {
+     }
+     environment["target"] = target
+ 
++    // LAABS: flip play/pause natively. Evaluating the layout's onPress spins up
++    // a JSContext first, and iOS holds the widget redraw until perform() returns.
++    let laabsProps = laabsOptimisticPlaybackProps(props: props, target: target)
+     let newProps: [String: Any]?
+-    switch evaluateWidgetButtonPress(layout: layout, props: props, environment: environment) {
+-    case .success(let result):
+-      newProps = result
+-    case .failure(let error):
+-      print("[ExpoWidgets] Button press evaluation failed: \(error.message)")
+-      newProps = nil
++    if let laabsProps {
++      newProps = laabsProps
++    } else {
++      switch evaluateWidgetButtonPress(layout: layout, props: props, environment: environment) {
++      case .success(let result):
++        newProps = result
++      case .failure(let error):
++        print("[ExpoWidgets] Button press evaluation failed: \(error.message)")
++        newProps = nil
++      }
+     }
+ 
+     if let newProps {
+@@ -86,9 +96,41 @@ struct WidgetUserInteraction: AppIntent {
+         return .result()
+       }
+       newTimeline[entryIndex] = newEntry
++      if laabsProps != nil, target == "laabs.audio.pause" {
++        // Later entries are per-minute "playing" projections; drop them so the
++        // widget does not flip back to Pause at the next minute.
++        newTimeline = Array(newTimeline.prefix(entryIndex + 1))
++      }
        WidgetsStorage.set(newTimeline, forKey: "__expo_widgets_\(source)_timeline")
      }
  
 +    if let target, target.hasPrefix("laabs.audio.") {
++      // A play request is stored first so it survives a cold background launch,
++      // where AudioPro and JS do not exist yet. AudioPro clears it when it can
++      // resume natively; otherwise JS consumes it after loading the last book.
++      let isPlay = target == "laabs.audio.play"
 +      await MainActor.run {
++        if isPlay {
++          UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: laabsPendingPlayKey)
++        }
 +        NotificationCenter.default.post(
 +          name: Notification.Name("LAABSAudioWidgetPlaybackIntent"),
 +          object: nil,
 +          userInfo: ["target": target]
 +        )
++        guard isPlay, UserDefaults.standard.object(forKey: laabsPendingPlayKey) != nil else {
++          return
++        }
++        // Not handled natively: start React Native without a window (it no-ops when JS
++        // already runs) and let the app hold a background task until audio starts, so
++        // perform() returns now and iOS redraws the widget immediately. The class only
++        // exists in the app, not the widget extension.
++        if let runtime = NSClassFromString("LAABSReactRuntime") as? NSObject.Type {
++          runtime.perform(NSSelectorFromString("startForWidgetPlayRequest"))
++        }
 +      }
 +    }
 +
      WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
        "source": source as Any,
        "target": target as Any,
+@@ -128,3 +170,24 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+     return .result()
+   }
+ }
++
++// LAABS: see WidgetUserInteraction.perform().
++private let laabsPendingPlayKey = "LAABSPendingWidgetPlayRequestAt"
++
++/// Returns the props change for a LAABS play/pause tap, or nil for any other button.
++private func laabsOptimisticPlaybackProps(props: [String: Any], target: String?) -> [String: Any]? {
++  let state: String
++  switch target {
++  case "laabs.audio.play": state = "playing"
++  case "laabs.audio.pause": state = "paused"
++  default: return nil
++  }
++  guard var media = props["media"] as? [String: Any],
++        var playback = media["playback"] as? [String: Any] else {
++    return nil
++  }
++  playback["state"] = state
++  playback["anchorTimestampMs"] = Date().timeIntervalSince1970 * 1000
++  media["playback"] = playback
++  return ["media": media]
++}

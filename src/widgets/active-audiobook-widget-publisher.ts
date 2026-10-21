@@ -33,6 +33,7 @@ type ActiveAudiobookPlaybackState = Pick<
   | "positionMs"
   | "queue"
   | "rate"
+  | "requestedPlaybackState"
 >;
 
 type WidgetAuthState = Pick<AuthState, "activeLibraryId" | "activeLibraryUserKey">;
@@ -118,7 +119,12 @@ export const createActiveAudiobookWidgetSnapshot = (
       artworkUri,
       detailUrl: (options.createDetailUrl ?? createSharedBookLink)(libraryItemId),
       playback: {
-        state: playback.playbackState === "playing" ? "playing" : "paused",
+        // Show what was asked for while the engine catches up (ready, buffering
+        // after a widget Play tap); publishing "paused" there undoes the widget's
+        // optimistic flip until audio actually starts.
+        state:
+          playback.requestedPlaybackState ??
+          (playback.playbackState === "playing" ? "playing" : "paused"),
         positionMs: playback.positionMs,
         durationMs: playback.durationMs,
         rate: playback.rate,
@@ -167,6 +173,17 @@ export const startActiveAudiobookWidgetPublisher = (
       playbackState.playbackState === "loading" &&
       lastPublishedLibraryItemId !== null &&
       nonEmpty(playbackState.libraryItemId) === lastPublishedLibraryItemId
+    ) {
+      return;
+    }
+    // After a cold launch the store remembers the last book but has no queue
+    // until it is loaded again (idle, then loading). Leave the stored widget
+    // timeline (the last book, or the widget's optimistic Play state) in place
+    // instead of replacing it with the empty state.
+    if (
+      lastPublicationSignature === null &&
+      nonEmpty(playbackState.libraryItemId) &&
+      (playbackState.playbackState === "idle" || playbackState.playbackState === "loading")
     ) {
       return;
     }

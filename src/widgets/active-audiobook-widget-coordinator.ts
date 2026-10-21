@@ -27,7 +27,12 @@ const activeArtworkInput = () => {
   };
 };
 
+let stopActiveCoordinator: (() => void) | null = null;
+
+// Idempotent: started once at bundle load, which can run without a window.
 export const startActiveAudiobookWidgetCoordinator = () => {
+  if (stopActiveCoordinator) return stopActiveCoordinator;
+
   const publisher = startActiveAudiobookWidgetPublisher({
     widget: {
       updateTimeline: (entries) =>
@@ -37,6 +42,11 @@ export const startActiveAudiobookWidgetCoordinator = () => {
     },
     playback: playbackStore,
     auth: authStore,
+    // WidgetKit renders every timeline entry ahead of time, so an hour of
+    // per-minute entries took ~2.5 s to appear after a widget Play tap. While
+    // audio plays the app stays alive and republishes each minute (reloads are
+    // not budgeted during an active audio session), so one spare minute is enough.
+    minuteCount: 1,
     resolveArtworkUri: ({ artworkUri, libraryItemId }) =>
       resolveCachedWidgetArtworkUri({
         sourceUri: artworkUri,
@@ -80,10 +90,12 @@ export const startActiveAudiobookWidgetCoordinator = () => {
   const unsubscribeArtwork = playbackStore.subscribe(prepareArtwork);
   prepareArtwork();
 
-  return () => {
+  stopActiveCoordinator = () => {
     stopped = true;
     artworkRequestGeneration += 1;
     unsubscribeArtwork();
     publisher.stop();
+    stopActiveCoordinator = null;
   };
+  return stopActiveCoordinator;
 };

@@ -30,17 +30,57 @@ final class LAABSReactRuntime: NSObject {
     hasStarted = true
 
     // Same steps as RCTReactNativeFactory.startReactNative(withModuleName:in:), minus the window.
+    // Use the overload without bundle/dev-menu configurations: Expo's root view factory routes
+    // every overload through its React delegate, which ignores them. Passing
+    // `RCTDevMenuConfiguration.default()` crashed Release builds, where it returns nil.
     let rootView = factory.rootViewFactory.view(
       withModuleName: provider.reactNativeFactoryModuleName,
       initialProperties: nil,
-      launchOptions: nil,
-      bundleConfiguration: factory.bundleConfiguration,
-      devMenuConfiguration: factory.devMenuConfiguration ?? RCTDevMenuConfiguration.default()
+      launchOptions: nil
     )
     let rootViewController = delegate.createRootViewController()
     delegate.setRootView(rootView, toRootViewController: rootViewController)
     detachedRootViewController = rootViewController
     NSLog("[CarPlay] LAABSReactRuntime: started React Native without a phone window")
+  }
+
+  private static var widgetPlayTask: UIBackgroundTaskIdentifier = .invalid
+  private static var widgetPlayObserver: NSObjectProtocol?
+  private static var widgetPlayGeneration = 0
+
+  /// Called by the widget's play intent (patches/expo-widgets+58.0.20.patch) by ObjC name, on the
+  /// main thread, when no loaded track could resume natively. Starts JS if needed and keeps a
+  /// background-launched app alive until audio starts, so the intent can return at once and the
+  /// widget redraws right away instead of after playback begins.
+  @objc static func startForWidgetPlayRequest() {
+    startWithoutWindowIfNeeded()
+    endWidgetPlayTask()
+    widgetPlayGeneration += 1
+    let generation = widgetPlayGeneration
+    widgetPlayTask = UIApplication.shared.beginBackgroundTask(withName: "LAABSWidgetPlay") {
+      endWidgetPlayTask()
+    }
+    widgetPlayObserver = NotificationCenter.default.addObserver(
+      forName: Notification.Name("LAABSAudioPlaybackDidStart"),
+      object: nil,
+      queue: .main
+    ) { _ in
+      endWidgetPlayTask()
+    }
+    // Background tasks get about 30 s; give up a little earlier if audio never starts.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 25) {
+      if generation == widgetPlayGeneration { endWidgetPlayTask() }
+    }
+  }
+
+  private static func endWidgetPlayTask() {
+    if let observer = widgetPlayObserver {
+      NotificationCenter.default.removeObserver(observer)
+      widgetPlayObserver = nil
+    }
+    guard widgetPlayTask != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(widgetPlayTask)
+    widgetPlayTask = .invalid
   }
 
   fileprivate static func markStarted() {

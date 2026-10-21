@@ -182,7 +182,7 @@ describe("LAABS audio widget registration", () => {
     );
     expect(findAll(widget, "Button")[0].props).toEqual(
       expect.objectContaining({
-        target: "laabs.audio.toggle",
+        target: "laabs.audio.pause",
         onPress: expect.any(Function),
       }),
     );
@@ -236,7 +236,7 @@ describe("LAABS audio widget registration", () => {
       expect.arrayContaining(["A Very Good Book", "Ada Author", "1 hr 32 min"]),
     );
     expect(findAll(widget, "Button")[0].props.target).toBe(
-      "laabs.audio.toggle",
+      "laabs.audio.play",
     );
     expect(
       findAll(widget, "Image").some(

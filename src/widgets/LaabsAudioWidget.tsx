@@ -94,7 +94,9 @@ const LaabsAudioWidget = (
 
   const playbackButton = (
     <Button
-      target="laabs.audio.toggle"
+      // Separate targets let native act on a cold launch without knowing the
+      // current state: play loads the last book, pause clears a stale state.
+      target={isPlaying ? "laabs.audio.pause" : "laabs.audio.play"}
       onPress={() => ({
         media: {
           ...media,

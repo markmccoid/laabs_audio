@@ -285,4 +285,109 @@ describe("active audiobook widget publisher", () => {
     expect(updateTimeline).toHaveBeenCalledTimes(2);
     expect(updateTimeline.mock.calls[1][0][0].props).toMatchObject({ status: "empty" });
   });
+  it("keeps the stored widget book on a cold launch before the book reloads", () => {
+    const playback = createTestStore(
+      playbackState({ playbackState: "idle", queue: [] }),
+    );
+    const auth = createTestStore(authState());
+    const updateTimeline = jest.fn();
+
+    startActiveAudiobookWidgetPublisher({
+      widget: { updateTimeline },
+      playback,
+      auth,
+      ...snapshotOptions,
+    });
+    expect(updateTimeline).not.toHaveBeenCalled();
+
+    playback.setState(playbackState({ playbackState: "playing" }));
+    expect(updateTimeline).toHaveBeenCalledTimes(1);
+    expect(updateTimeline.mock.calls[0][0][0].props.status).toBe("active");
+  });
+
+  it("publishes empty on a cold launch with no remembered book", () => {
+    const playback = createTestStore(
+      playbackState({ playbackState: "idle", queue: [], libraryItemId: null }),
+    );
+    const auth = createTestStore(authState());
+    const updateTimeline = jest.fn();
+
+    startActiveAudiobookWidgetPublisher({
+      widget: { updateTimeline },
+      playback,
+      auth,
+      ...snapshotOptions,
+    });
+    expect(updateTimeline).toHaveBeenCalledTimes(1);
+    expect(updateTimeline.mock.calls[0][0][0].props.status).toBe("empty");
+  });
+  it("shows the requested Play state while the engine is still starting", () => {
+    const playback = createTestStore(
+      playbackState({ playbackState: "paused", requestedPlaybackState: "paused" }),
+    );
+    const auth = createTestStore(authState());
+    const updateTimeline = jest.fn();
+
+    startActiveAudiobookWidgetPublisher({
+      widget: { updateTimeline },
+      playback,
+      auth,
+      ...snapshotOptions,
+    });
+
+    playback.setState(
+      playbackState({ playbackState: "ready", requestedPlaybackState: "playing" }),
+    );
+    expect(updateTimeline).toHaveBeenCalledTimes(2);
+    expect(updateTimeline.mock.calls[1][0][0].props.media.playback.state).toBe("playing");
+
+    // Reaching "playing" changes nothing the widget shows, so it does not republish.
+    playback.setState(
+      playbackState({ playbackState: "playing", requestedPlaybackState: "playing" }),
+    );
+    expect(updateTimeline).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows Play as soon as a pause is requested", () => {
+    const playback = createTestStore(
+      playbackState({ playbackState: "playing", requestedPlaybackState: "playing" }),
+    );
+    const auth = createTestStore(authState());
+    const updateTimeline = jest.fn();
+
+    startActiveAudiobookWidgetPublisher({
+      widget: { updateTimeline },
+      playback,
+      auth,
+      ...snapshotOptions,
+    });
+
+    playback.setState(
+      playbackState({ playbackState: "playing", requestedPlaybackState: "paused" }),
+    );
+    expect(updateTimeline).toHaveBeenCalledTimes(2);
+    expect(updateTimeline.mock.calls[1][0][0].props.media.playback.state).toBe("paused");
+  });
+  it("keeps the stored widget book while a cold launch loads it", () => {
+    const playback = createTestStore(
+      playbackState({ playbackState: "idle", queue: [] }),
+    );
+    const auth = createTestStore(authState());
+    const updateTimeline = jest.fn();
+
+    startActiveAudiobookWidgetPublisher({
+      widget: { updateTimeline },
+      playback,
+      auth,
+      ...snapshotOptions,
+    });
+
+    // The queue arrives before the engine finishes loading.
+    playback.setState(playbackState({ playbackState: "loading" }));
+    expect(updateTimeline).not.toHaveBeenCalled();
+
+    playback.setState(playbackState({ playbackState: "playing" }));
+    expect(updateTimeline).toHaveBeenCalledTimes(1);
+    expect(updateTimeline.mock.calls[0][0][0].props.status).toBe("active");
+  });
 });

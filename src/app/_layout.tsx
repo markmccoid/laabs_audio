@@ -71,7 +71,6 @@ import {
   getStartupPresentationState,
   subscribeStartupPresentation,
 } from "../utils/startup-presentation";
-import { startActiveAudiobookWidgetCoordinator } from "../widgets/active-audiobook-widget-coordinator";
 import { startAssistantCatalogNativeSync } from "../assistant/assistant-surface-lifecycle";
 import { AssistantBridgeModule } from "../native/assistant";
 
@@ -511,11 +510,11 @@ export default function RootLayout() {
     void prepareImportedAudiobooks().catch((error) => {
       if (__DEV__) console.warn("[imported-audiobooks] prepare-failed", error);
     });
-    const stopWidgetCoordinator = startActiveAudiobookWidgetCoordinator();
+    // The widget coordinator starts at bundle load (src/widgets/widget-runtime-init.ts)
+    // so it also runs when a widget tap launches the app without a window.
     return () => {
       stopAssistantRuntimeContext();
       stopAssistantCatalogSync();
-      stopWidgetCoordinator();
     };
   }, []);
 
