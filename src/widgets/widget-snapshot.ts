@@ -160,3 +160,20 @@ export const buildAudioWidgetMinuteTimeline = (
     };
   });
 };
+
+// Expo widgets 58 rejects null anywhere in widget props (native `[String: Any]`
+// conversion throws), and UserDefaults cannot store NSNull. Omit null fields
+// before handing props to the native widget; the layout treats absent as null.
+export const omitNullWidgetProps = <T>(value: T): T => {
+  if (Array.isArray(value)) {
+    return value.filter((item) => item !== null).map(omitNullWidgetProps) as T;
+  }
+  if (value && typeof value === "object" && !(value instanceof Date)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, item]) => item !== null && item !== undefined)
+        .map(([key, item]) => [key, omitNullWidgetProps(item)]),
+    ) as T;
+  }
+  return value;
+};

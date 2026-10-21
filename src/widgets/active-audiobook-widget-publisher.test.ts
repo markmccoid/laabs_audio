@@ -246,4 +246,43 @@ describe("active audiobook widget publisher", () => {
       scope: null,
     });
   });
+  it("keeps the published book while the same book is loading", () => {
+    const playback = createTestStore(playbackState({ playbackState: "paused" }));
+    const auth = createTestStore(authState());
+    const updateTimeline = jest.fn();
+
+    startActiveAudiobookWidgetPublisher({
+      widget: { updateTimeline },
+      playback,
+      auth,
+      ...snapshotOptions,
+    });
+    expect(updateTimeline).toHaveBeenCalledTimes(1);
+
+    playback.setState(playbackState({ playbackState: "loading" }));
+    expect(updateTimeline).toHaveBeenCalledTimes(1);
+
+    playback.setState(playbackState({ playbackState: "playing" }));
+    expect(updateTimeline).toHaveBeenCalledTimes(2);
+    expect(updateTimeline.mock.calls[1][0][0].props.media.playback.state).toBe("playing");
+  });
+
+  it("publishes empty while loading a different book", () => {
+    const playback = createTestStore(playbackState({ playbackState: "paused" }));
+    const auth = createTestStore(authState());
+    const updateTimeline = jest.fn();
+
+    startActiveAudiobookWidgetPublisher({
+      widget: { updateTimeline },
+      playback,
+      auth,
+      ...snapshotOptions,
+    });
+
+    playback.setState(
+      playbackState({ playbackState: "loading", libraryItemId: "book-2" }),
+    );
+    expect(updateTimeline).toHaveBeenCalledTimes(2);
+    expect(updateTimeline.mock.calls[1][0][0].props).toMatchObject({ status: "empty" });
+  });
 });

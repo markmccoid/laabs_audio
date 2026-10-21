@@ -2,6 +2,7 @@ import { authStore } from "../auth/auth-store";
 import { playbackStore } from "../player/playback-store";
 import audioWidget from "./LaabsAudioWidget";
 import { startActiveAudiobookWidgetPublisher } from "./active-audiobook-widget-publisher";
+import { omitNullWidgetProps } from "./widget-snapshot";
 import {
   prepareWidgetArtwork,
   resolveCachedWidgetArtworkUri,
@@ -28,7 +29,12 @@ const activeArtworkInput = () => {
 
 export const startActiveAudiobookWidgetCoordinator = () => {
   const publisher = startActiveAudiobookWidgetPublisher({
-    widget: audioWidget,
+    widget: {
+      updateTimeline: (entries) =>
+        audioWidget.updateTimeline(
+          entries.map((entry) => ({ ...entry, props: omitNullWidgetProps(entry.props) })),
+        ),
+    },
     playback: playbackStore,
     auth: authStore,
     resolveArtworkUri: ({ artworkUri, libraryItemId }) =>

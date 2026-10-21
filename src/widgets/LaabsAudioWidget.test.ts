@@ -32,6 +32,7 @@ jest.mock("@expo/ui/swift-ui/modifiers", () => ({
     $type: "containerRelativeFrame",
     ...params,
   }),
+  controlSize: (size: string) => ({ $type: "controlSize", size }),
   font: (params: object) => ({ $type: "font", ...params }),
   foregroundStyle: (color: string) => ({ $type: "foregroundStyle", color }),
   frame: (params: object) => ({ $type: "frame", ...params }),
@@ -142,9 +143,10 @@ describe("LAABS audio widget registration", () => {
       expect.objectContaining({
         version: 1,
         status: "empty",
-        media: null,
       }),
     );
+    // Native widget props reject null, so empty fields are omitted.
+    expect(JSON.stringify(mockUpdateSnapshot.mock.calls[0][0])).not.toContain("null");
   });
 
   it("renders the empty state with a container background when props are missing", () => {

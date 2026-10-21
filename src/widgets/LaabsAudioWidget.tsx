@@ -17,6 +17,7 @@ import {
   clipped,
   containerBackground,
   containerRelativeFrame,
+  controlSize,
   font,
   foregroundStyle,
   frame,
@@ -30,6 +31,7 @@ import { createWidget, type WidgetEnvironment } from "expo-widgets";
 
 import {
   createEmptyAudioWidgetSnapshot,
+  omitNullWidgetProps,
   type AudioWidgetSnapshot,
 } from "./widget-snapshot";
 
@@ -105,11 +107,12 @@ const LaabsAudioWidget = (
       modifiers={[
         buttonStyle("borderedProminent"),
         buttonBorderShape("circle"),
+        controlSize("large"),
         tint("#1F7665"),
         accessibilityLabel(playbackLabel),
       ]}
     >
-      <Image systemName={playbackSymbol} size={16} />
+      <Image systemName={playbackSymbol} size={24} />
     </Button>
   );
 
@@ -210,7 +213,7 @@ const LaabsAudioWidget = (
 const audioWidget = createWidget<AudioWidgetSnapshot>("LAABSAudioWidget", LaabsAudioWidget);
 
 try {
-  audioWidget.updateSnapshot(createEmptyAudioWidgetSnapshot());
+  audioWidget.updateSnapshot(omitNullWidgetProps(createEmptyAudioWidgetSnapshot()));
 } catch {
   // Widget timeline storage can be unavailable in the iOS simulator.
   // Widget publication must not prevent the app's root route from loading.

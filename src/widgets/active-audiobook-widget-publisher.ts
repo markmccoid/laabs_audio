@@ -156,10 +156,23 @@ export const startActiveAudiobookWidgetPublisher = (
 ): ActiveAudiobookWidgetPublisher => {
   const { playback, auth } = options;
   let lastPublicationSignature: string | null = null;
+  let lastPublishedLibraryItemId: string | null = null;
 
   const publish = () => {
+    const playbackState = playback.getState();
+    // The engine reports "loading" while it resumes or re-prepares the same
+    // book (for example after a widget play tap). Keep the published book
+    // instead of flashing the empty state until it settles.
+    if (
+      playbackState.playbackState === "loading" &&
+      lastPublishedLibraryItemId !== null &&
+      nonEmpty(playbackState.libraryItemId) === lastPublishedLibraryItemId
+    ) {
+      return;
+    }
+
     const snapshot = createActiveAudiobookWidgetSnapshot(
-      playback.getState(),
+      playbackState,
       auth.getState(),
       options,
     );
@@ -174,6 +187,7 @@ export const startActiveAudiobookWidgetPublisher = (
         }),
       );
       lastPublicationSignature = signature;
+      lastPublishedLibraryItemId = snapshot.media?.libraryItemId ?? null;
     } catch {
       // Timeline publication is optional app integration. Leave the signature
       // uncommitted so a later state change or artwork refresh can retry.

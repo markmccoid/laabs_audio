@@ -2,6 +2,7 @@ import {
   AUDIO_WIDGET_SNAPSHOT_VERSION,
   buildAudioWidgetMinuteTimeline,
   createEmptyAudioWidgetSnapshot,
+  omitNullWidgetProps,
   projectAudioWidgetPosition,
   projectAudioWidgetSnapshot,
   type AudioWidgetSnapshot,
@@ -105,5 +106,27 @@ describe("audio widget snapshot", () => {
         minuteCount: 60,
       }),
     ).toHaveLength(1);
+  });
+});
+
+describe("omitNullWidgetProps", () => {
+  it("removes null fields at every depth so native widget conversion accepts them", () => {
+    const props = omitNullWidgetProps(activeSnapshot());
+
+    expect(JSON.stringify(props)).not.toContain("null");
+    expect(props.media).toEqual(
+      expect.objectContaining({ title: "Book One", playback: expect.any(Object) }),
+    );
+    expect(props.media).not.toHaveProperty("episodeId");
+    expect(props).not.toHaveProperty("warning");
+  });
+
+  it("keeps the empty snapshot's status while dropping null media", () => {
+    const props = omitNullWidgetProps(createEmptyAudioWidgetSnapshot(1_000));
+
+    expect(props).toEqual(
+      expect.objectContaining({ status: "empty", publishedAtMs: 1_000, candidates: [] }),
+    );
+    expect(props).not.toHaveProperty("media");
   });
 });
