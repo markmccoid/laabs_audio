@@ -1,6 +1,7 @@
 import type { TranscriptSegmentWordTiming } from "@/data/sqlite/shadow-db-transcripts";
 import {
   findActiveSegmentIndex,
+  findActiveSegmentIndexHoldingGaps,
   findActiveWordIndex,
   interpolatePosition,
   NO_ACTIVE_INDEX,
@@ -116,6 +117,39 @@ describe("findActiveSegmentIndex", () => {
     const segments = [range(0, 1_000)];
     expect(findActiveSegmentIndex(segments, Number.NaN)).toBe(NO_ACTIVE_INDEX);
     expect(findActiveSegmentIndex(segments, Number.POSITIVE_INFINITY)).toBe(NO_ACTIVE_INDEX);
+  });
+});
+
+describe("findActiveSegmentIndexHoldingGaps", () => {
+  const segments = [range(1_000, 2_000), range(3_000, 4_000)];
+  const always = () => true;
+  const never = () => false;
+
+  it("still has nothing active before the first start", () => {
+    expect(findActiveSegmentIndexHoldingGaps(segments, 999, always)).toBe(NO_ACTIVE_INDEX);
+  });
+
+  it("resolves inside a range exactly like the plain resolver", () => {
+    expect(findActiveSegmentIndexHoldingGaps(segments, 1_500, never)).toBe(0);
+    expect(findActiveSegmentIndexHoldingGaps(segments, 3_000, never)).toBe(1);
+  });
+
+  it("holds the previous range through a gap the policy accepts", () => {
+    expect(findActiveSegmentIndexHoldingGaps(segments, 2_000, always)).toBe(0);
+    expect(findActiveSegmentIndexHoldingGaps(segments, 2_999, always)).toBe(0);
+    expect(findActiveSegmentIndexHoldingGaps(segments, 9_000, always)).toBe(1);
+  });
+
+  it("clears in a gap the policy rejects", () => {
+    expect(findActiveSegmentIndexHoldingGaps(segments, 2_500, never)).toBe(NO_ACTIVE_INDEX);
+  });
+
+  it("hands the policy the ranges on both sides and the position", () => {
+    const shouldHold = jest.fn(() => true);
+    findActiveSegmentIndexHoldingGaps(segments, 2_500, shouldHold);
+    expect(shouldHold).toHaveBeenCalledWith(segments[0], segments[1], 2_500);
+    findActiveSegmentIndexHoldingGaps(segments, 5_000, shouldHold);
+    expect(shouldHold).toHaveBeenLastCalledWith(segments[1], undefined, 5_000);
   });
 });
 

@@ -109,6 +109,40 @@ export const findActiveSegmentIndex = (
 ): number => findActiveRangeIndex(segments, positionMs);
 
 /**
+ * Decides whether a gap keeps the previous range active. `next` is the range
+ * after the gap, or `undefined` past the last range. `positionMs` is the
+ * position being resolved, for policies that need to bound a trailing gap.
+ */
+export type ReadAlongGapHold<T extends ReadAlongTimedRange> = (
+  previous: T,
+  next: T | undefined,
+  positionMs: number,
+) => boolean;
+
+/**
+ * {@link findActiveSegmentIndex}, except that a gap the `shouldHold` policy
+ * accepts resolves to the range before it instead of {@link NO_ACTIVE_INDEX}.
+ *
+ * Before the first range is still no active range — nothing has been read yet,
+ * so there is nothing to hold.
+ */
+export const findActiveSegmentIndexHoldingGaps = <T extends ReadAlongTimedRange>(
+  segments: readonly T[],
+  positionMs: number,
+  shouldHold: ReadAlongGapHold<T>,
+): number => {
+  if (!Number.isFinite(positionMs) || segments.length === 0) return NO_ACTIVE_INDEX;
+
+  const candidate = findLastStartedIndex(segments, positionMs);
+  if (candidate < 0) return NO_ACTIVE_INDEX;
+  if (positionMs < segments[candidate].endMs) return candidate;
+
+  return shouldHold(segments[candidate], segments[candidate + 1], positionMs)
+    ? candidate
+    : NO_ACTIVE_INDEX;
+};
+
+/**
  * Index of the word covering `positionMs` within one segment's word timings, or
  * {@link NO_ACTIVE_INDEX} in the same three no-active cases as
  * {@link findActiveSegmentIndex}. Word timings are book-absolute, so a position

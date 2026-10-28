@@ -26,9 +26,11 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   findActiveSegmentIndex,
+  findActiveSegmentIndexHoldingGaps,
   findActiveWordIndex,
   interpolatePosition,
   NO_ACTIVE_INDEX,
+  type ReadAlongGapHold,
   type ReadAlongPositionAnchor,
   type ReadAlongTimedRange,
 } from "./read-along-sync";
@@ -38,7 +40,7 @@ export const READ_ALONG_TICK_MS = 150;
 /** Finer transcript word sampling reduces late transitions at faster playback. */
 export const READ_ALONG_WORD_TICK_MS = 40;
 
-export type UseReadAlongPositionArgs = {
+export type UseReadAlongPositionArgs<T extends ReadAlongTimedRange = ReadAlongTimedRange> = {
   /**
    * The book this Read-Along view is bound to. When the player is on a
    * different book (or nothing is loaded) highlighting stops entirely.
@@ -49,7 +51,7 @@ export type UseReadAlongPositionArgs = {
    * identity stable (state / `useMemo`); a fresh array each render only costs a
    * redundant recompute, never a re-render (the state is change-only).
    */
-  segments: readonly ReadAlongTimedRange[];
+  segments: readonly T[];
   /**
    * Word timings for the **currently active** segment, or `null` while they are
    * loading / absent. The caller owns the lazy `getSegmentWords` fetch + LRU;
@@ -72,6 +74,13 @@ export type UseReadAlongPositionArgs = {
    * the listener actually is.
    */
   leadMs?: number;
+  /**
+   * When given, a gap this policy accepts keeps the previous segment active
+   * instead of clearing it. Absent for Transcript Read-Along, where a gap
+   * clears the highlight. EPUB Read-Along holds the sentence through a pause
+   * so the highlight does not blink off between sentences.
+   */
+  holdThroughGap?: ReadAlongGapHold<T>;
 };
 
 export type UseReadAlongPositionResult = {
@@ -106,13 +115,14 @@ const NO_ACTIVE_INDEXES: ActiveIndexes = {
   activeWordIndex: NO_ACTIVE_INDEX,
 };
 
-export const useReadAlongPosition = ({
+export const useReadAlongPosition = <T extends ReadAlongTimedRange>({
   boundLibraryItemId,
   segments,
   activeSegmentWords = null,
   tickIntervalMs = READ_ALONG_TICK_MS,
   leadMs = 0,
-}: UseReadAlongPositionArgs): UseReadAlongPositionResult => {
+  holdThroughGap,
+}: UseReadAlongPositionArgs<T>): UseReadAlongPositionResult => {
   const positionMs = usePlaybackStore((state) => state.positionMs);
   const positionUpdatedAtMs = usePlaybackStore((state) => state.positionUpdatedAtMs);
   const rate = usePlaybackStore((state) => state.rate);
@@ -143,6 +153,7 @@ export const useReadAlongPosition = ({
   const wordsRef = useRef(activeSegmentWords);
   const mismatchRef = useRef(isBookMismatch);
   const leadMsRef = useRef(leadMs);
+  const holdThroughGapRef = useRef(holdThroughGap);
 
   const [indexes, setIndexes] = useState<ActiveIndexes>(NO_ACTIVE_INDEXES);
 
@@ -158,8 +169,11 @@ export const useReadAlongPosition = ({
       : (() => {
           const currentMs = interpolatePosition(anchorRef.current, Date.now() + leadMsRef.current);
           const words = wordsRef.current;
+          const shouldHold = holdThroughGapRef.current;
           return {
-            activeSegmentIndex: findActiveSegmentIndex(segmentsRef.current, currentMs),
+            activeSegmentIndex: shouldHold
+              ? findActiveSegmentIndexHoldingGaps(segmentsRef.current, currentMs, shouldHold)
+              : findActiveSegmentIndex(segmentsRef.current, currentMs),
             activeWordIndex: words ? findActiveWordIndex(words, currentMs) : NO_ACTIVE_INDEX,
           };
         })();
@@ -226,6 +240,7 @@ export const useReadAlongPosition = ({
     wordsRef.current = activeSegmentWords;
     mismatchRef.current = isBookMismatch;
     leadMsRef.current = leadMs;
+    holdThroughGapRef.current = holdThroughGap;
     syncIndexes();
   }, [anchor, segments, activeSegmentWords, isBookMismatch, leadMs, playbackState, syncIndexes]);
 

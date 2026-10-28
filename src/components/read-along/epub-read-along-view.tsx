@@ -26,6 +26,7 @@ import {
   DEFAULT_ACTIVE_LEAD_MS,
   needsResourceTurn,
   resolveReaderTarget,
+  shouldHoldActiveAcrossGap,
   toFollowLocator,
   toResourceLocator,
   type FollowArm,
@@ -259,6 +260,9 @@ export const EpubReadAlongView = ({
     boundLibraryItemId,
     segments: timedUnits,
     leadMs,
+    // Keep the sentence lit through a pause instead of blinking off before the
+    // next one lands.
+    holdThroughGap: shouldHoldActiveAcrossGap,
   });
 
   const target = useMemo(

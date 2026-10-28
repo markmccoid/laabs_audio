@@ -12,8 +12,10 @@ import {
   FOLLOW_ACK_WINDOW_MS,
   TURN_ACK_WINDOW_MS,
   FOLLOW_DUPLICATE_GRACE_MS,
+  MAX_HELD_GAP_MS,
   needsResourceTurn,
   resolveReaderTarget,
+  shouldHoldActiveAcrossGap,
   toActiveDecoration,
   toFollowLocator,
   toResourceLocator,
@@ -75,6 +77,36 @@ describe("resolveReaderTarget", () => {
   it("carries the resource's own type through rather than assuming xhtml", () => {
     const svg = [{ ...resources[1], type: "image/svg+xml" }];
     expect(resolveReaderTarget(timedUnits, svg, 0)?.type).toBe("image/svg+xml");
+  });
+});
+
+describe("shouldHoldActiveAcrossGap", () => {
+  const timed = (unitIndex: number, startMs: number, endMs: number): AlignmentTimedUnitRow => ({
+    unitIndex,
+    resourceIndex: 1,
+    startMs,
+    endMs,
+    progression: 0,
+  });
+
+  it("holds any pause before the very next sentence", () => {
+    expect(shouldHoldActiveAcrossGap(timed(2, 0, 1000), timed(3, 60_000, 61_000), 30_000)).toBe(true);
+  });
+
+  it("holds a short gap before a non-adjacent unit", () => {
+    const next = timed(5, 1000 + MAX_HELD_GAP_MS, 9000);
+    expect(shouldHoldActiveAcrossGap(timed(2, 0, 1000), next, 1500)).toBe(true);
+  });
+
+  it("clears a long gap before a non-adjacent unit, from its first moment", () => {
+    const next = timed(5, 1001 + MAX_HELD_GAP_MS, 9000);
+    expect(shouldHoldActiveAcrossGap(timed(2, 0, 1000), next, 1001)).toBe(false);
+  });
+
+  it("holds past the last unit only until the cap runs out", () => {
+    const last = timed(9, 0, 1000);
+    expect(shouldHoldActiveAcrossGap(last, undefined, 1000 + MAX_HELD_GAP_MS)).toBe(true);
+    expect(shouldHoldActiveAcrossGap(last, undefined, 1001 + MAX_HELD_GAP_MS)).toBe(false);
   });
 });
 

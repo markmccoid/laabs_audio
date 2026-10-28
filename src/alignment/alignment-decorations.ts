@@ -54,6 +54,39 @@ export const ACTIVE_DECORATION_GROUP = "laabs-active";
  */
 export const DEFAULT_ACTIVE_LEAD_MS = 400;
 
+/**
+ * The longest pause the active highlight is held through when the sentence
+ * after it is *not* the next one in the book.
+ *
+ * Timed units skip sentences the aligner could not match, so a gap between two
+ * non-adjacent units may be narration of unaligned text rather than silence.
+ * Holding the old sentence lit through that would mark text the narrator has
+ * already left. A short gap is a pause either way; a long one clears, which is
+ * how an unaligned stretch has always looked.
+ */
+export const MAX_HELD_GAP_MS = 3000;
+
+/**
+ * Whether the highlight stays on `previous` through the gap before `next`.
+ *
+ * - The next timed unit is the very next sentence: always hold. Nothing was
+ *   skipped, so the gap can only be the narrator pausing.
+ * - Otherwise hold only a gap of at most {@link MAX_HELD_GAP_MS}. The gap is
+ *   measured start-to-end rather than by elapsed time, so the decision is the
+ *   same for the whole gap and the highlight never drops off partway through.
+ * - Past the last unit there is no next start, so hold until the position is
+ *   {@link MAX_HELD_GAP_MS} past the last end.
+ */
+export const shouldHoldActiveAcrossGap = (
+  previous: AlignmentTimedUnitRow,
+  next: AlignmentTimedUnitRow | undefined,
+  positionMs: number,
+): boolean => {
+  if (next && next.unitIndex === previous.unitIndex + 1) return true;
+  const gapEndMs = next ? next.startMs : positionMs;
+  return gapEndMs - previous.endMs <= MAX_HELD_GAP_MS;
+};
+
 /** Where the reader should be, given the active unit. */
 export type ReaderTarget = {
   unitIndex: number;
