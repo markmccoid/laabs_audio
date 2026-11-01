@@ -1031,8 +1031,12 @@ class AudioPro: RCTEventEmitter {
 			self.setupRemoteTransportControls()
 		}
 
-		// Create new player item with custom headers if provided
-		let item: AVPlayerItem
+		// Precise timing makes seeks land where the clock says they did. Without it,
+		// AVFoundation seeks a VBR MP3 that lacks a Xing table by its average
+		// bitrate, and on a book with long silences that lands many seconds past
+		// the reported time — so everything keyed to position (Read-Along,
+		// bookmarks, clips) trails the audio after any seek or resume.
+		var assetOptions: [String: Any] = [AVURLAssetPreferPreciseDurationAndTimingKey: true]
 
 		// Check if audio headers are provided
 		if let headers = options["headers"] as? NSDictionary, let audioHeaders = headers["audio"] as? NSDictionary {
@@ -1043,14 +1047,10 @@ class AudioPro: RCTEventEmitter {
 					headerFields[headerField] = headerValue
 				}
 			}
-
-			// Create an AVAsset with the headers
-			let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headerFields])
-			item = AVPlayerItem(asset: asset)
-		} else {
-			// No headers, use simple URL initialization
-			item = AVPlayerItem(url: url)
+			assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = headerFields
 		}
+
+		let item = AVPlayerItem(asset: AVURLAsset(url: url, options: assetOptions))
 
 		// Pin the time-pitch algorithm so rates above 2.0 keep producing audio.
 		// The pre-iOS-15 linkage default (LowQualityZeroLatency) snaps rates to a
