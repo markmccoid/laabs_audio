@@ -1,5 +1,9 @@
 import { CoverImage } from "@/components/images/cover-image";
-import { pickImportedBookCover, type ImportedCoverSource } from "@/imported/imported-audiobook-library";
+import {
+  clipboardHasImage,
+  pickImportedBookCover,
+  type ImportedCoverSource,
+} from "@/imported/imported-audiobook-library";
 import { resolveImportedCoverUri, useImportedBookRecord } from "@/imported/use-imported-books";
 import { importedBooksStore } from "@/store/imported-books-store";
 import { useThemeColors } from "@/theme/use-app-theme";
@@ -51,7 +55,8 @@ export const ImportedBookEditSheet = ({ libraryItemId }: { libraryItemId: string
     router.back();
   };
 
-  const changeCover = () => {
+  const changeCover = async () => {
+    const canPaste = await clipboardHasImage();
     const pick = (source: ImportedCoverSource) =>
       void pickImportedBookCover(record.id, source).catch((error) =>
         Alert.alert("Cover not changed", error instanceof Error ? error.message : "Try another image."),
@@ -59,6 +64,7 @@ export const ImportedBookEditSheet = ({ libraryItemId }: { libraryItemId: string
     Alert.alert("Choose Cover Image", undefined, [
       { text: "Photo Library", onPress: () => pick("photos") },
       { text: "Files", onPress: () => pick("files") },
+      ...(canPaste ? [{ text: "Paste Image", onPress: () => pick("clipboard") }] : []),
       { text: "Cancel", style: "cancel" },
     ]);
   };
@@ -105,7 +111,7 @@ export const ImportedBookEditSheet = ({ libraryItemId }: { libraryItemId: string
           />
           <Pressable
             accessibilityRole="button"
-            onPress={changeCover}
+            onPress={() => void changeCover()}
             style={({ pressed }) => ({
               paddingHorizontal: 14,
               paddingVertical: 9,

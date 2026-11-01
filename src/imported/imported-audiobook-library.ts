@@ -1,3 +1,4 @@
+import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import AudioImport from "@/native/audio-import/AudioImportModule";
@@ -395,11 +396,23 @@ const applyImportedBookCover = async (id: string, target: string) => {
   return true;
 };
 
-export type ImportedCoverSource = "photos" | "files";
+export type ImportedCoverSource = "photos" | "files" | "clipboard";
 
-/** Lets the user pick the book's cover from Photos or from an image file. */
+/** Whether the clipboard holds an image. Only checks, so iOS shows no paste prompt. */
+export const clipboardHasImage = () => Clipboard.hasImageAsync().catch(() => false);
+
+/** Lets the user pick the book's cover from Photos, an image file, or the clipboard. */
 export const pickImportedBookCover = async (id: string, source: ImportedCoverSource = "files") => {
   const directory = await ensureAppDirectory(importedBookDirectory(id));
+  if (source === "clipboard") {
+    // Reading the image is what triggers iOS's "Allow Paste" prompt; a denial resolves to null.
+    const image = await Clipboard.getImageAsync({ format: "png" });
+    const base64 = image?.data.replace(/^data:image\/\w+;base64,/, "");
+    if (!base64) throw new Error("There's no image on the clipboard.");
+    const target = `${directory}cover-${Date.now()}.png`;
+    await FileSystem.writeAsStringAsync(target, base64, { encoding: FileSystem.EncodingType.Base64 });
+    return applyImportedBookCover(id, target);
+  }
   if (source === "photos") {
     // PHPicker runs out of process, so no photo-library permission prompt is needed.
     const result = await ImagePicker.launchImageLibraryAsync({
