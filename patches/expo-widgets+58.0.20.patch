@@ -1,8 +1,13 @@
 diff --git a/node_modules/expo-widgets/ios/Widgets/AppIntent.swift b/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
-index 1730fff..bebb801 100644
+index 1730fff..6f427d6 100644
 --- a/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
 +++ b/node_modules/expo-widgets/ios/Widgets/AppIntent.swift
-@@ -23,7 +23,10 @@ struct WidgetReload: AppIntent {
+@@ -1,3 +1,4 @@
++import AVFoundation
+ import AppIntents
+ import WidgetKit
+ 
+@@ -23,7 +24,10 @@ struct WidgetReload: AppIntent {
    }
  }
  
@@ -14,7 +19,7 @@ index 1730fff..bebb801 100644
    // title is not used for non-discoverable intents, but it is required
    static var title: LocalizedStringResource = "User Interaction"
    static var isDiscoverable: Bool = false
-@@ -68,13 +71,20 @@ struct WidgetUserInteraction: AppIntent {
+@@ -68,13 +72,20 @@ struct WidgetUserInteraction: AppIntent {
      }
      environment["target"] = target
  
@@ -41,7 +46,7 @@ index 1730fff..bebb801 100644
      }
  
      if let newProps {
-@@ -86,9 +96,41 @@ struct WidgetUserInteraction: AppIntent {
+@@ -86,9 +97,48 @@ struct WidgetUserInteraction: AppIntent {
          return .result()
        }
        newTimeline[entryIndex] = newEntry
@@ -75,6 +80,13 @@ index 1730fff..bebb801 100644
 +        // perform() returns now and iOS redraws the widget immediately. The class only
 +        // exists in the app, not the widget extension.
 +        if let runtime = NSClassFromString("LAABSReactRuntime") as? NSObject.Type {
++          // Activate the audio session while this intent still holds iOS's grant to
++          // start audio from the background. Audio starts only after JS loads the book,
++          // when activating from the background can fail, so nothing would play until
++          // the app is opened.
++          let session = AVAudioSession.sharedInstance()
++          try? session.setCategory(.playback, mode: .spokenAudio)
++          try? session.setActive(true)
 +          runtime.perform(NSSelectorFromString("startForWidgetPlayRequest"))
 +        }
 +      }
@@ -83,7 +95,7 @@ index 1730fff..bebb801 100644
      WidgetsEvents.shared.sendNotification(type: .userEvent, data: [
        "source": source as Any,
        "target": target as Any,
-@@ -128,3 +170,24 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
+@@ -128,3 +178,24 @@ struct LiveActivityUserInteraction: LiveActivityIntent {
      return .result()
    }
  }

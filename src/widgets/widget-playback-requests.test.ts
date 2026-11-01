@@ -1,3 +1,4 @@
+import type { PlaybackState } from "../player/types";
 import { startWidgetPlaybackRequests } from "./widget-playback-requests";
 
 type Listener<T> = (state: T, previousState: T) => void;
@@ -32,11 +33,13 @@ const setup = ({
   const requestStart = jest
     .fn()
     .mockResolvedValue({ status: "accepted", intentId: "intent-1" });
-  const playback = createStore({ libraryItemId, episodeId });
+  const abandonPlayRequest = jest.fn();
+  const playback = createStore({ libraryItemId, episodeId, playbackState: "idle" as PlaybackState });
   const auth = createStore({ status: authStatus });
 
   startWidgetPlaybackRequests({
     consumePendingPlayRequest,
+    abandonPlayRequest,
     addWidgetEventListener: (listener) => {
       widgetListener = listener;
       return () => {
@@ -50,6 +53,7 @@ const setup = ({
 
   return {
     consumePendingPlayRequest,
+    abandonPlayRequest,
     requestStart,
     playback,
     auth,
@@ -86,26 +90,37 @@ describe("widget playback requests", () => {
     expect(requestStart).toHaveBeenCalledWith("book-1");
   });
 
-  it("does nothing without a remembered audiobook", async () => {
+  it("abandons the request without a remembered audiobook", async () => {
     const noBook = setup({ libraryItemId: null });
     const episode = setup({ episodeId: "episode-1" });
     await flush();
 
     expect(noBook.requestStart).not.toHaveBeenCalled();
     expect(episode.requestStart).not.toHaveBeenCalled();
+    expect(noBook.abandonPlayRequest).toHaveBeenCalledTimes(1);
+    expect(episode.abandonPlayRequest).toHaveBeenCalledTimes(1);
   });
 
-  it("retries an ignored start on the next store update", async () => {
-    const { requestStart, playback } = setup();
-    requestStart.mockReset();
-    requestStart
-      .mockResolvedValueOnce({ status: "ignored", reason: "intent_active", activeIntentKind: "start" })
-      .mockResolvedValue({ status: "accepted", intentId: "intent-2" });
+  it("does not abandon a request that started the book", async () => {
+    const { abandonPlayRequest } = setup();
     await flush();
     await flush();
 
-    playback.setState({ libraryItemId: "book-1", episodeId: null });
+    expect(abandonPlayRequest).not.toHaveBeenCalled();
+  });
+
+  it("abandons the request when the start throws or the load fails", async () => {
+    const thrown = setup();
+    thrown.requestStart.mockReset().mockRejectedValue(new Error("offline"));
+    const failed = setup();
+    failed.requestStart.mockReset().mockImplementation(async () => {
+      failed.playback.setState({ libraryItemId: "book-1", episodeId: null, playbackState: "error" });
+      return { status: "accepted", intentId: "intent-2" };
+    });
     await flush();
-    expect(requestStart).toHaveBeenCalledTimes(2);
+    await flush();
+
+    expect(thrown.abandonPlayRequest).toHaveBeenCalledTimes(1);
+    expect(failed.abandonPlayRequest).toHaveBeenCalledTimes(1);
   });
 });

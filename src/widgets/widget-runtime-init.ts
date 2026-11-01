@@ -21,6 +21,7 @@ if (Platform.OS === "ios") {
     startWidgetPlaybackRequests({
       consumePendingPlayRequest: () =>
         native.consumePendingWidgetPlayRequest?.() ?? Promise.resolve(false),
+      abandonPlayRequest: () => native.abandonWidgetPlayRequest?.(),
       addWidgetEventListener: (listener) => {
         const subscription = emitter.addListener(WIDGET_EVENT_NAME, listener);
         return () => subscription.remove();

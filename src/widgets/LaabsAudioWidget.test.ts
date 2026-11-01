@@ -138,15 +138,9 @@ const activeSnapshot = (state: "playing" | "paused" = "playing") => ({
 });
 
 describe("LAABS audio widget registration", () => {
-  it("publishes an initial empty timeline when the app opens", () => {
-    expect(mockUpdateSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({
-        version: 1,
-        status: "empty",
-      }),
-    );
-    // Native widget props reject null, so empty fields are omitted.
-    expect(JSON.stringify(mockUpdateSnapshot.mock.calls[0][0])).not.toContain("null");
+  it("does not overwrite the stored timeline when the module loads", () => {
+    // A cold launch from the widget loads this module headless; the last book must stay.
+    expect(mockUpdateSnapshot).not.toHaveBeenCalled();
   });
 
   it("renders the empty state with a container background when props are missing", () => {

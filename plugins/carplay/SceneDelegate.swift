@@ -61,7 +61,7 @@ final class LAABSReactRuntime: NSObject {
       endWidgetPlayTask()
     }
     widgetPlayObserver = NotificationCenter.default.addObserver(
-      forName: Notification.Name("LAABSAudioPlaybackDidStart"),
+      forName: Notification.Name("LAABSWidgetPlayRequestDidEnd"),
       object: nil,
       queue: .main
     ) { _ in

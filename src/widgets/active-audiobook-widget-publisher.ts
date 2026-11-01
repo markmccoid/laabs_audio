@@ -119,12 +119,16 @@ export const createActiveAudiobookWidgetSnapshot = (
       artworkUri,
       detailUrl: (options.createDetailUrl ?? createSharedBookLink)(libraryItemId),
       playback: {
-        // Show what was asked for while the engine catches up (ready, buffering
-        // after a widget Play tap); publishing "paused" there undoes the widget's
-        // optimistic flip until audio actually starts.
+        // Show what was asked for while the engine catches up (ready after a
+        // widget Play tap); publishing "paused" there undoes the widget's
+        // optimistic flip until audio actually starts. A paused engine wins: an
+        // interruption (another app took audio) keeps the request "playing" so
+        // it can resume, and iOS may never end that interruption.
         state:
-          playback.requestedPlaybackState ??
-          (playback.playbackState === "playing" ? "playing" : "paused"),
+          playback.playbackState === "paused"
+            ? "paused"
+            : playback.requestedPlaybackState ??
+              (playback.playbackState === "playing" ? "playing" : "paused"),
         positionMs: playback.positionMs,
         durationMs: playback.durationMs,
         rate: playback.rate,
@@ -177,13 +181,13 @@ export const startActiveAudiobookWidgetPublisher = (
       return;
     }
     // After a cold launch the store remembers the last book but has no queue
-    // until it is loaded again (idle, then loading). Leave the stored widget
-    // timeline (the last book, or the widget's optimistic Play state) in place
-    // instead of replacing it with the empty state.
+    // until it is loaded again (idle, loading, or error if that load fails).
+    // Leave the stored widget timeline (the last book, or the widget's
+    // optimistic Play state) in place instead of replacing it with the empty state.
     if (
       lastPublicationSignature === null &&
       nonEmpty(playbackState.libraryItemId) &&
-      (playbackState.playbackState === "idle" || playbackState.playbackState === "loading")
+      !isWidgetPlaybackState(playbackState.playbackState)
     ) {
       return;
     }

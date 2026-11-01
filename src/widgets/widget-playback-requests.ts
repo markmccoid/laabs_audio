@@ -3,7 +3,6 @@ import type { PlaybackStoreState } from "../player/playback-store";
 import type { PlaybackControlResult } from "../player/player-service";
 
 export const WIDGET_EVENT_NAME = "AudioProWidgetEvent";
-const MAX_START_ATTEMPTS = 5;
 
 type SubscribableStore<T> = {
   getState: () => T;
@@ -14,9 +13,13 @@ type WidgetEvent = { type?: string };
 
 export type WidgetPlaybackRequestOptions = {
   consumePendingPlayRequest: () => Promise<boolean>;
+  /** Shows Play on the widget again and releases the native background task. */
+  abandonPlayRequest: () => void;
   addWidgetEventListener: (listener: (event: WidgetEvent) => void) => () => void;
   requestStart: (libraryItemId: string) => Promise<PlaybackControlResult>;
-  playback: SubscribableStore<Pick<PlaybackStoreState, "libraryItemId" | "episodeId">>;
+  playback: SubscribableStore<
+    Pick<PlaybackStoreState, "libraryItemId" | "episodeId" | "playbackState">
+  >;
   auth: SubscribableStore<Pick<AuthState, "status">>;
 };
 
@@ -26,35 +29,31 @@ export type WidgetPlaybackRequestOptions = {
 // Native stores the request; this consumes it once JS can load the book.
 export const startWidgetPlaybackRequests = ({
   consumePendingPlayRequest,
+  abandonPlayRequest,
   addWidgetEventListener,
   requestStart,
   playback,
   auth,
 }: WidgetPlaybackRequestOptions) => {
   let pendingLibraryItemId: string | null = null;
-  let attempts = 0;
-  let busy = false;
 
-  // Timer-free retries: setTimeout does not fire in a headless background
-  // launch (see carplay-service), so auth hydration and playback store updates
-  // drive the next attempt.
+  // Started once auth hydration settles. setTimeout does not fire in a headless
+  // background launch (see carplay-service), so the auth subscription drives it.
   const tryStart = async () => {
     const libraryItemId = pendingLibraryItemId;
-    if (!libraryItemId || busy) return;
+    if (!libraryItemId) return;
     // Streaming needs the stored session; hydration is still running at bundle load.
     if (auth.getState().status === "hydrating") return;
 
-    busy = true;
-    attempts += 1;
+    pendingLibraryItemId = null;
+    let started = false;
     try {
-      const result = await requestStart(libraryItemId);
-      if (result.status === "ignored" && attempts < MAX_START_ATTEMPTS) return;
-      if (pendingLibraryItemId === libraryItemId) pendingLibraryItemId = null;
+      await requestStart(libraryItemId);
+      started = playback.getState().playbackState !== "error";
     } catch {
-      if (pendingLibraryItemId === libraryItemId) pendingLibraryItemId = null;
-    } finally {
-      busy = false;
+      // Reported below: the widget must not keep showing Pause.
     }
+    if (!started) abandonPlayRequest();
   };
 
   const handlePlayRequest = async () => {
@@ -63,10 +62,12 @@ export const startWidgetPlaybackRequests = ({
 
     const { libraryItemId, episodeId } = playback.getState();
     // The widget only shows audiobooks.
-    if (!libraryItemId || episodeId) return;
+    if (!libraryItemId || episodeId) {
+      abandonPlayRequest();
+      return;
+    }
 
     pendingLibraryItemId = libraryItemId;
-    attempts = 0;
     await tryStart();
   };
 
@@ -74,7 +75,6 @@ export const startWidgetPlaybackRequests = ({
     if (event?.type === "PLAY_REQUEST") void handlePlayRequest();
   });
   const unsubscribeAuth = auth.subscribe(() => void tryStart());
-  const unsubscribePlayback = playback.subscribe(() => void tryStart());
 
   // A cold launch from the widget stored the request before JS existed.
   void handlePlayRequest();
@@ -82,6 +82,5 @@ export const startWidgetPlaybackRequests = ({
   return () => {
     removeWidgetListener();
     unsubscribeAuth();
-    unsubscribePlayback();
   };
 };

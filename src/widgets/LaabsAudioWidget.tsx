@@ -29,11 +29,7 @@ import {
 } from "@expo/ui/swift-ui/modifiers";
 import { createWidget, type WidgetEnvironment } from "expo-widgets";
 
-import {
-  createEmptyAudioWidgetSnapshot,
-  omitNullWidgetProps,
-  type AudioWidgetSnapshot,
-} from "./widget-snapshot";
+import type { AudioWidgetSnapshot } from "./widget-snapshot";
 
 const LaabsAudioWidget = (
   props: AudioWidgetSnapshot | undefined,
@@ -212,13 +208,9 @@ const LaabsAudioWidget = (
   );
 };
 
+// No snapshot is published at module load: this module loads at bundle start,
+// including a headless cold launch from the widget, and an empty snapshot here
+// would replace the last book the widget is showing. The publisher owns it.
 const audioWidget = createWidget<AudioWidgetSnapshot>("LAABSAudioWidget", LaabsAudioWidget);
-
-try {
-  audioWidget.updateSnapshot(omitNullWidgetProps(createEmptyAudioWidgetSnapshot()));
-} catch {
-  // Widget timeline storage can be unavailable in the iOS simulator.
-  // Widget publication must not prevent the app's root route from loading.
-}
 
 export default audioWidget;

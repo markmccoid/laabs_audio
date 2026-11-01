@@ -10,10 +10,10 @@ import WidgetKit
 /// act natively, and JS consumes it once it has loaded the last book.
 enum AudioWidgetBridge {
 	static let pendingPlayKey = "LAABSPendingWidgetPlayRequestAt"
-	/// Posted by AudioPro when playback reaches the playing state. LAABSReactRuntime
-	/// holds a background task until then, so iOS keeps a background-launched app
-	/// alive until audio starts.
-	static let playbackDidStart = Notification.Name("LAABSAudioPlaybackDidStart")
+	/// Posted by AudioPro when playback reaches the playing state, or when JS gives
+	/// up on a widget play request. LAABSReactRuntime holds a background task until
+	/// then, so iOS keeps a background-launched app alive until audio starts.
+	static let playRequestDidEnd = Notification.Name("LAABSWidgetPlayRequestDidEnd")
 
 	private static let widgetKind = "LAABSAudioWidget"
 	private static let timelineKey = "__expo_widgets_LAABSAudioWidget_timeline"
@@ -21,6 +21,10 @@ enum AudioWidgetBridge {
 
 	static func clearPendingPlay() {
 		UserDefaults.standard.removeObject(forKey: pendingPlayKey)
+	}
+
+	static var hasPendingPlay: Bool {
+		UserDefaults.standard.double(forKey: pendingPlayKey) > 0
 	}
 
 	/// Returns true (and clears it) when a recent widget play request is waiting.

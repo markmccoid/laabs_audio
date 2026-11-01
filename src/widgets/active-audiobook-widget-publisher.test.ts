@@ -390,4 +390,44 @@ describe("active audiobook widget publisher", () => {
     expect(updateTimeline).toHaveBeenCalledTimes(1);
     expect(updateTimeline.mock.calls[0][0][0].props.status).toBe("active");
   });
+
+  it("shows Play while an interruption keeps the request playing", () => {
+    const playback = createTestStore(
+      playbackState({ playbackState: "playing", requestedPlaybackState: "playing" }),
+    );
+    const auth = createTestStore(authState());
+    const updateTimeline = jest.fn();
+
+    startActiveAudiobookWidgetPublisher({
+      widget: { updateTimeline },
+      playback,
+      auth,
+      ...snapshotOptions,
+    });
+
+    // Another app took audio: native pauses but keeps the request so it can resume.
+    playback.setState(
+      playbackState({ playbackState: "paused", requestedPlaybackState: "playing" }),
+    );
+    expect(updateTimeline).toHaveBeenCalledTimes(2);
+    expect(updateTimeline.mock.calls[1][0][0].props.media.playback.state).toBe("paused");
+  });
+
+  it("keeps the stored widget book when a cold launch load fails", () => {
+    const playback = createTestStore(
+      playbackState({ playbackState: "idle", queue: [] }),
+    );
+    const auth = createTestStore(authState());
+    const updateTimeline = jest.fn();
+
+    startActiveAudiobookWidgetPublisher({
+      widget: { updateTimeline },
+      playback,
+      auth,
+      ...snapshotOptions,
+    });
+
+    playback.setState(playbackState({ playbackState: "error", queue: [] }));
+    expect(updateTimeline).not.toHaveBeenCalled();
+  });
 });

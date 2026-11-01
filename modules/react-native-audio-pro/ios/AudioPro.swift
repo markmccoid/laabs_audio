@@ -215,8 +215,11 @@ class AudioPro: RCTEventEmitter {
 			object: nil
 		)
 		// Nothing plays yet at module creation. Clear a "playing" widget state
-		// left by a process that stopped without publishing a pause.
-		AudioWidgetBridge.markWidgetPaused()
+		// left by a process that stopped without publishing a pause, unless it is
+		// the optimistic state of the widget Play tap that launched this process.
+		if !AudioWidgetBridge.hasPendingPlay {
+			AudioWidgetBridge.markWidgetPaused()
+		}
 	}
 
     deinit {
@@ -252,6 +255,9 @@ class AudioPro: RCTEventEmitter {
 			return
 		}
 		let hasLoadedTrack = currentTrack != nil || requestedPlayback.targetId != nil
+		// A target id can outlive its player (unload, error teardown); resume() has
+		// nothing to play then, so JS must load the book again.
+		let canResume = currentTrack != nil && player != nil
 
 		switch target {
 		case AudioWidgetPlaybackIntentNotification.pauseTarget:
@@ -263,7 +269,7 @@ class AudioPro: RCTEventEmitter {
 				AudioWidgetBridge.markWidgetPaused()
 			}
 		case AudioWidgetPlaybackIntentNotification.playTarget:
-			if hasLoadedTrack {
+			if canResume {
 				AudioWidgetBridge.clearPendingPlay()
 				resume()
 			} else {
@@ -272,7 +278,7 @@ class AudioPro: RCTEventEmitter {
 				sendEvent(withName: WIDGET_EVENT_NAME, body: ["type": "PLAY_REQUEST"])
 			}
 		case AudioWidgetPlaybackIntentNotification.toggleTarget:
-			guard hasLoadedTrack else { return }
+			guard canResume else { return }
 			AudioWidgetBridge.clearPendingPlay()
 			if requestedPlayback.playing {
 				pause()
@@ -281,6 +287,16 @@ class AudioPro: RCTEventEmitter {
 			}
 		default:
 			break
+		}
+	}
+
+	/// JS could not start the book for a widget play request: show Play again and
+	/// release the background task held for it.
+	@objc(abandonWidgetPlayRequest)
+	func abandonWidgetPlayRequest() {
+		runOnMain {
+			AudioWidgetBridge.markWidgetPaused()
+			NotificationCenter.default.post(name: AudioWidgetBridge.playRequestDidEnd, object: nil)
 		}
 	}
 
@@ -464,6 +480,9 @@ class AudioPro: RCTEventEmitter {
                 self.stopTimer()
                 self.sendPausedStateEvent()
                 self.updateNowPlayingInfo(rate: 0, playbackState: .paused)
+                // JS may not run again before iOS suspends the app (another app now
+                // owns audio), so the widget must not keep claiming "playing".
+                AudioWidgetBridge.markWidgetPaused()
             case .ended:
                 guard self.interruptionActive else { return }
                 self.interruptionActive = false
@@ -1616,7 +1635,7 @@ class AudioPro: RCTEventEmitter {
         if state == STATE_PLAYING { startProgressTimer() } else { stopTimer() }
         if state == STATE_PLAYING {
             AudioWidgetBridge.clearPendingPlay()
-            NotificationCenter.default.post(name: AudioWidgetBridge.playbackDidStart, object: nil)
+            NotificationCenter.default.post(name: AudioWidgetBridge.playRequestDidEnd, object: nil)
         }
     }
 
