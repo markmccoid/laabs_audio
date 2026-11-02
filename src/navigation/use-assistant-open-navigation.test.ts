@@ -11,6 +11,8 @@ let mockSegments = ["(tabs)", "(home)"];
 let mockParams: { libraryItemId?: string } = {};
 let mockReady = true;
 const mockPush = jest.fn();
+const mockDismissAll = jest.fn();
+let mockPlayingBookId: string | null = null;
 let mockUrlListener: ((event: { url: string }) => void) | null = null;
 let mockWriteOnSubscribe = false;
 const mockListeners = new Map<string, () => void>();
@@ -37,10 +39,16 @@ jest.mock("@/native/assistant", () => ({
   },
 }));
 jest.mock("expo-router", () => ({
-  router: { push: (...args: unknown[]) => mockPush(...args) },
+  router: {
+    push: (...args: unknown[]) => mockPush(...args),
+    dismissAll: () => mockDismissAll(),
+  },
   useSegments: () => mockSegments,
   useGlobalSearchParams: () => mockParams,
   useRootNavigationState: () => (mockReady ? { key: "root" } : undefined),
+}));
+jest.mock("@/player/playback-store", () => ({
+  playbackStore: { getState: () => ({ libraryItemId: mockPlayingBookId }) },
 }));
 jest.mock("expo-linking", () => ({
   addEventListener: (
@@ -87,6 +95,7 @@ describe("Assistant Open delivery", () => {
     mockSegments = ["(tabs)", "(home)"];
     mockParams = {};
     mockReady = true;
+    mockPlayingBookId = null;
     clearAssistantOpenInFlight();
   });
   afterEach(() => {
@@ -143,6 +152,24 @@ describe("Assistant Open delivery", () => {
     expect(peekAssistantOpenInFlight()).toBe("book-1");
     showBook("book-1");
     expect(peekAssistantOpenInFlight()).toBeNull();
+  });
+
+  it("leaves the main player up for a link to the playing book", () => {
+    mockSegments = ["main-player"];
+    mockPlayingBookId = "book-1";
+    mount();
+    act(() => mockUrlListener?.({ url: "laabsaudio:///book-1" }));
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockDismissAll).not.toHaveBeenCalled();
+  });
+
+  it("closes the main player before opening another book from a link", () => {
+    mockSegments = ["main-player"];
+    mockPlayingBookId = "book-1";
+    mount();
+    act(() => mockUrlListener?.({ url: "laabsaudio:///book-2" }));
+    expect(mockDismissAll).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledTimes(1);
   });
 
   it("recovers a write made while installing the native listener", () => {

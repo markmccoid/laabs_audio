@@ -8,12 +8,16 @@ import {
 } from "expo-router";
 import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
+import { playbackStore } from "@/player/playback-store";
 import {
   clearAssistantOpenInFlight,
   peekAssistantOpenInFlight,
   rememberAssistantOpenInFlight,
 } from "./assistant-open-destination";
 import { extractBookDetailIdFromUrl, getBookDetailHref } from "./book-links";
+
+// Full-screen player routes. A book link must not stack a detail page on them.
+const PLAYER_ROOT_SEGMENTS = new Set(["main-player", "read-along"]);
 
 type UseAssistantOpenNavigationOptions = {
   canNavigate: boolean;
@@ -32,6 +36,7 @@ export const useAssistantOpenNavigation = ({
         ? params.libraryItemId[0]
         : params.libraryItemId
       : undefined;
+  const playerVisible = PLAYER_ROOT_SEGMENTS.has(segments[0] ?? "");
   const navigationReady = Boolean(navigationState?.key) && canNavigate;
   const dispatchedRequestIdRef = useRef<string | null>(null);
 
@@ -82,6 +87,12 @@ export const useAssistantOpenNavigation = ({
         return;
       }
       if (visibleBookId === libraryItemId) return;
+      if (playerVisible) {
+        // The player already shows the playing book (a widget tap): leave it up.
+        if (playbackStore.getState().libraryItemId === libraryItemId) return;
+        // Another book: close the player so its detail opens over the tabs.
+        router.dismissAll();
+      }
       rememberAssistantOpenInFlight(libraryItemId);
       router.push(getBookDetailHref(libraryItemId));
     });
@@ -92,5 +103,5 @@ export const useAssistantOpenNavigation = ({
       appState.remove();
       linking.remove();
     };
-  }, [navigationReady, visibleBookId]);
+  }, [navigationReady, visibleBookId, playerVisible]);
 };
