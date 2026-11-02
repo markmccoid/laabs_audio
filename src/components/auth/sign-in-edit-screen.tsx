@@ -1,4 +1,4 @@
-import { getDefaultSessionLabel } from "@/auth/auth-storage";
+import { authStorage, getDefaultSessionLabel } from "@/auth/auth-storage";
 import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
 import { enterUserSession } from "@/auth/enter-user-session";
 import {
@@ -13,7 +13,7 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { ColorPicker, Host } from "@expo/ui/swift-ui";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -54,8 +54,21 @@ export function SignInEditScreen() {
   const [color, setColor] = useState<string | null>(() => session?.color ?? null);
   const [password, setPassword] = useState("");
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  // Signing out clears the stored password, so only offer "keep current" when one exists.
+  const [hasStoredPassword, setHasStoredPassword] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!sessionKey) return;
+    let cancelled = false;
+    authStorage.getSessionSecrets(sessionKey).then((secrets) => {
+      if (!cancelled) setHasStoredPassword(Boolean(secrets.password));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionKey]);
 
   const handleSave = async () => {
     if (!session || isSaving) return;
@@ -269,7 +282,7 @@ export function SignInEditScreen() {
                 secureTextEntry={!isPasswordVisible}
                 value={password}
                 onChangeText={setPassword}
-                placeholder="Leave blank to keep current password"
+                placeholder={hasStoredPassword ? "Leave blank to keep current password" : "Password"}
                 placeholderTextColor={themeColors.textMuted}
                 selectionColor={themeColors.accent}
                 style={{
