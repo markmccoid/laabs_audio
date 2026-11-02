@@ -15,8 +15,11 @@ export type WidgetPlaybackRequestOptions = {
   consumePendingPlayRequest: () => Promise<boolean>;
   /** Shows Play on the widget again and releases the native background task. */
   abandonPlayRequest: () => void;
+  trace?: (message: string) => void;
   addWidgetEventListener: (listener: (event: WidgetEvent) => void) => () => void;
   requestStart: (libraryItemId: string) => Promise<PlaybackControlResult>;
+  /** Cancels a start native timed out, so it does not play once the app is opened. */
+  cancelStart: () => Promise<unknown>;
   playback: SubscribableStore<
     Pick<PlaybackStoreState, "libraryItemId" | "episodeId" | "playbackState">
   >;
@@ -30,12 +33,16 @@ export type WidgetPlaybackRequestOptions = {
 export const startWidgetPlaybackRequests = ({
   consumePendingPlayRequest,
   abandonPlayRequest,
+  trace = () => {},
   addWidgetEventListener,
   requestStart,
+  cancelStart,
   playback,
   auth,
 }: WidgetPlaybackRequestOptions) => {
   let pendingLibraryItemId: string | null = null;
+  let startInFlight = false;
+  let timedOut = false;
 
   // Started once auth hydration settles. setTimeout does not fire in a headless
   // background launch (see carplay-service), so the auth subscription drives it.
@@ -43,15 +50,25 @@ export const startWidgetPlaybackRequests = ({
     const libraryItemId = pendingLibraryItemId;
     if (!libraryItemId) return;
     // Streaming needs the stored session; hydration is still running at bundle load.
-    if (auth.getState().status === "hydrating") return;
+    if (auth.getState().status === "hydrating") {
+      trace("start waiting for auth hydration");
+      return;
+    }
 
     pendingLibraryItemId = null;
+    startInFlight = true;
+    timedOut = false;
     let started = false;
+    trace("requestStart begin");
     try {
-      await requestStart(libraryItemId);
-      started = playback.getState().playbackState !== "error";
-    } catch {
+      const result = await requestStart(libraryItemId);
+      started = !timedOut && playback.getState().playbackState !== "error";
+      trace(`requestStart resolved status=${result.status} state=${playback.getState().playbackState}`);
+    } catch (error) {
       // Reported below: the widget must not keep showing Pause.
+      trace(`requestStart threw ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`);
+    } finally {
+      startInFlight = false;
     }
     if (!started) abandonPlayRequest();
   };
@@ -71,8 +88,19 @@ export const startWidgetPlaybackRequests = ({
     await tryStart();
   };
 
+  // Native found no audio 20 s after the tap (a hung start, e.g. an unreachable
+  // server; JS timeouts cannot fire in a background launch) and shows Play again.
+  const handleTimeout = () => {
+    pendingLibraryItemId = null;
+    if (!startInFlight) return;
+    timedOut = true;
+    trace("start timed out; requesting pause");
+    void cancelStart().catch(() => {});
+  };
+
   const removeWidgetListener = addWidgetEventListener((event) => {
     if (event?.type === "PLAY_REQUEST") void handlePlayRequest();
+    if (event?.type === "PLAY_TIMEOUT") handleTimeout();
   });
   const unsubscribeAuth = auth.subscribe(() => void tryStart());
 

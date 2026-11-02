@@ -53,11 +53,14 @@ final class LAABSReactRuntime: NSObject {
   /// background-launched app alive until audio starts, so the intent can return at once and the
   /// widget redraws right away instead of after playback begins.
   @objc static func startForWidgetPlayRequest() {
+    trace("runtime start requested (JS already running: \(hasStarted ? "yes" : "no"))")
     startWithoutWindowIfNeeded()
     endWidgetPlayTask()
     widgetPlayGeneration += 1
     let generation = widgetPlayGeneration
     widgetPlayTask = UIApplication.shared.beginBackgroundTask(withName: "LAABSWidgetPlay") {
+      trace("background task expired")
+      markWidgetPaused()
       endWidgetPlayTask()
     }
     widgetPlayObserver = NotificationCenter.default.addObserver(
@@ -65,12 +68,36 @@ final class LAABSReactRuntime: NSObject {
       object: nil,
       queue: .main
     ) { _ in
+      trace("play request ended (playing or abandoned)")
       endWidgetPlayTask()
     }
-    // Background tasks get about 30 s; give up a little earlier if audio never starts.
-    DispatchQueue.main.asyncAfter(deadline: .now() + 25) {
-      if generation == widgetPlayGeneration { endWidgetPlayTask() }
+    // JS timers do not fire in a background launch, so a start that hangs (an unreachable
+    // server) never times out in JS. At 20 s, show Play and tell JS to cancel the start, so it
+    // does not begin playing later when the app is opened; give JS a few seconds to do that
+    // before releasing the background task (about 30 s) and letting iOS suspend the app.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+      guard generation == widgetPlayGeneration, widgetPlayTask != .invalid else { return }
+      trace("no audio after 20 s; cancelling the start")
+      markWidgetPaused()
+      NotificationCenter.default.post(name: Notification.Name("LAABSWidgetPlayRequestTimedOut"), object: nil)
     }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 25) {
+      guard generation == widgetPlayGeneration, widgetPlayTask != .invalid else { return }
+      trace("gave up after 25 s without audio")
+      markWidgetPaused()
+      endWidgetPlayTask()
+    }
+  }
+
+  /// AudioWidgetBridge lives in react-native-audio-pro; reach it by its ObjC name.
+  private static let widgetBridge = NSClassFromString("LAABSAudioWidgetBridge") as? NSObject.Type
+
+  private static func trace(_ message: String) {
+    _ = widgetBridge?.perform(NSSelectorFromString("trace:"), with: message)
+  }
+
+  private static func markWidgetPaused() {
+    _ = widgetBridge?.perform(NSSelectorFromString("markWidgetPaused"))
   }
 
   private static func endWidgetPlayTask() {

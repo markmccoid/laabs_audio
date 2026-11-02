@@ -34,6 +34,7 @@ const setup = ({
     .fn()
     .mockResolvedValue({ status: "accepted", intentId: "intent-1" });
   const abandonPlayRequest = jest.fn();
+  const cancelStart = jest.fn().mockResolvedValue(undefined);
   const playback = createStore({ libraryItemId, episodeId, playbackState: "idle" as PlaybackState });
   const auth = createStore({ status: authStatus });
 
@@ -47,6 +48,7 @@ const setup = ({
       };
     },
     requestStart,
+    cancelStart,
     playback,
     auth,
   });
@@ -54,6 +56,7 @@ const setup = ({
   return {
     consumePendingPlayRequest,
     abandonPlayRequest,
+    cancelStart,
     requestStart,
     playback,
     auth,
@@ -122,5 +125,31 @@ describe("widget playback requests", () => {
 
     expect(thrown.abandonPlayRequest).toHaveBeenCalledTimes(1);
     expect(failed.abandonPlayRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels a start native timed out and does not treat it as started", async () => {
+    const { requestStart, cancelStart, abandonPlayRequest, emit } = setup();
+    let finishStart: (value: unknown) => void = () => {};
+    requestStart.mockReset().mockReturnValue(new Promise((resolve) => (finishStart = resolve)));
+    await flush();
+
+    emit("PLAY_TIMEOUT");
+    expect(cancelStart).toHaveBeenCalledTimes(1);
+
+    finishStart({ status: "accepted", intentId: "intent-2" });
+    await flush();
+    expect(abandonPlayRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a request still waiting for auth when native times out", async () => {
+    const { requestStart, cancelStart, auth, emit } = setup({ authStatus: "hydrating" });
+    await flush();
+
+    emit("PLAY_TIMEOUT");
+    auth.setState({ status: "authenticated" });
+    await flush();
+
+    expect(requestStart).not.toHaveBeenCalled();
+    expect(cancelStart).not.toHaveBeenCalled();
   });
 });

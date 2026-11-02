@@ -201,6 +201,12 @@ class AudioPro: RCTEventEmitter {
 			name: AudioWidgetPlaybackIntentNotification.name,
 			object: nil
 		)
+		NotificationCenter.default.addObserver(
+			self,
+			selector: #selector(handleWidgetPlayRequestTimedOut),
+			name: AudioWidgetBridge.playRequestTimedOut,
+			object: nil
+		)
 		// Pin the emitter's internal listener count: RCTEventEmitter.sendEvent
 		// drops events entirely while the count is zero, and the count can
 		// transiently hit zero (or reset on a recycled module instance) even
@@ -217,6 +223,7 @@ class AudioPro: RCTEventEmitter {
 		// Nothing plays yet at module creation. Clear a "playing" widget state
 		// left by a process that stopped without publishing a pause, unless it is
 		// the optimistic state of the widget Play tap that launched this process.
+		AudioWidgetBridge.trace("AudioPro init pending=\(AudioWidgetBridge.hasPendingPlay)")
 		if !AudioWidgetBridge.hasPendingPlay {
 			AudioWidgetBridge.markWidgetPaused()
 		}
@@ -236,6 +243,7 @@ class AudioPro: RCTEventEmitter {
 			name: AudioWidgetPlaybackIntentNotification.name,
 			object: nil
 		)
+		NotificationCenter.default.removeObserver(self, name: AudioWidgetBridge.playRequestTimedOut, object: nil)
 		NotificationCenter.default.removeObserver(
 			self,
 			name: UIApplication.willTerminateNotification,
@@ -245,6 +253,12 @@ class AudioPro: RCTEventEmitter {
 
 	@objc private func handleWillTerminate() {
 		AudioWidgetBridge.markWidgetPaused()
+	}
+
+	/// JS cannot time out a hung widget start itself (no timers in a background launch).
+	@objc private func handleWidgetPlayRequestTimedOut() {
+		AudioWidgetBridge.trace("AudioPro forwarding PLAY_TIMEOUT to JS")
+		sendEvent(withName: WIDGET_EVENT_NAME, body: ["type": "PLAY_TIMEOUT"])
 	}
 
 	@objc private func handleAudioWidgetPlaybackIntent(_ notification: Notification) {
@@ -258,6 +272,7 @@ class AudioPro: RCTEventEmitter {
 		// A target id can outlive its player (unload, error teardown); resume() has
 		// nothing to play then, so JS must load the book again.
 		let canResume = currentTrack != nil && player != nil
+		AudioWidgetBridge.trace("AudioPro intent \(target) canResume=\(canResume)")
 
 		switch target {
 		case AudioWidgetPlaybackIntentNotification.pauseTarget:
@@ -294,10 +309,17 @@ class AudioPro: RCTEventEmitter {
 	/// release the background task held for it.
 	@objc(abandonWidgetPlayRequest)
 	func abandonWidgetPlayRequest() {
+		AudioWidgetBridge.trace("JS abandoned the play request")
 		runOnMain {
 			AudioWidgetBridge.markWidgetPaused()
 			NotificationCenter.default.post(name: AudioWidgetBridge.playRequestDidEnd, object: nil)
 		}
+	}
+
+	/// JS side of the `[WidgetStart]` cold-start traces.
+	@objc(widgetTrace:)
+	func widgetTrace(_ message: String) {
+		AudioWidgetBridge.trace("JS \(message)")
 	}
 
 	@objc(consumePendingWidgetPlayRequest:withRejecter:)
@@ -881,6 +903,7 @@ class AudioPro: RCTEventEmitter {
 
 	@objc(play:withOptions:)
     func play(track: NSDictionary, options: NSDictionary) {
+        AudioWidgetBridge.trace("AudioPro play() load start autoPlay=\(options["autoPlay"] ?? "nil")")
         runOnMain {
             self.loadSerial += 1
             let serial = self.loadSerial
@@ -1266,6 +1289,7 @@ class AudioPro: RCTEventEmitter {
             // A Play command is an explicit request to take audio ownership,
             // including when another app is currently playing.
             try AVAudioSession.sharedInstance().setActive(true)
+            AudioWidgetBridge.trace("AudioPro session activated otherAudio=\(otherAudioWasPlaying)")
             listeningWriter.async { [weak self] in
                 self?.listeningLedger?.trace("audio-session-activation", [
                     "loadId": activeLoadId, "otherAudioWasPlaying": otherAudioWasPlaying,
@@ -1275,6 +1299,7 @@ class AudioPro: RCTEventEmitter {
             return true
         } catch {
             let errorCode = (error as NSError).code
+            AudioWidgetBridge.trace("AudioPro session activation FAILED code=\(errorCode)")
             listeningWriter.async { [weak self] in
                 self?.listeningLedger?.trace("audio-session-activation", [
                     "loadId": activeLoadId, "otherAudioWasPlaying": otherAudioWasPlaying,
@@ -1634,6 +1659,7 @@ class AudioPro: RCTEventEmitter {
         updateNowPlayingInfo(rate: state == STATE_PLAYING ? player.rate : 0, playbackState: state == STATE_PLAYING ? .playing : .paused)
         if state == STATE_PLAYING { startProgressTimer() } else { stopTimer() }
         if state == STATE_PLAYING {
+            AudioWidgetBridge.trace("AudioPro playing")
             AudioWidgetBridge.clearPendingPlay()
             NotificationCenter.default.post(name: AudioWidgetBridge.playRequestDidEnd, object: nil)
         }
@@ -2033,6 +2059,7 @@ class AudioPro: RCTEventEmitter {
 	 */
     func onError(_ errorMessage: String) {
         if !Thread.isMainThread { runOnMain { self.onError(errorMessage) }; return }
+        AudioWidgetBridge.trace("AudioPro error: \(errorMessage)")
 		// If we're already in an error state, just log and return
 		if isInErrorState {
 			log("Already in error state, ignoring additional error: \(errorMessage)")

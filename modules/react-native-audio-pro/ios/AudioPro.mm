@@ -85,6 +85,7 @@ RCT_EXTERN_METHOD(carPlayGetStatus:(RCTPromiseResolveBlock)resolve
 RCT_EXTERN_METHOD(consumePendingWidgetPlayRequest:(RCTPromiseResolveBlock)resolve
                   withRejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(abandonWidgetPlayRequest)
+RCT_EXTERN_METHOD(widgetTrace:(NSString *)message)
 
 + (BOOL)requiresMainQueueSetup
 {
