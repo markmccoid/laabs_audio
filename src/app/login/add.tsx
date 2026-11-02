@@ -1,5 +1,5 @@
-import { SignInFormScreen } from "@/components/auth/sign-in-form-screen";
+import { SignInAddScreen } from "@/components/auth/sign-in-edit-screen";
 
 export default function AddSignInRoute() {
-  return <SignInFormScreen />;
+  return <SignInAddScreen />;
 }

@@ -1,72 +1,74 @@
 import { enterUserSession } from "@/auth/enter-user-session";
 import { isConnectionFailureKind } from "@/auth/server-connection";
-import { selectAccessMode, useAuthActions, useAuthStore } from "@/auth/auth-store";
+import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
 import { useApplySessionEntryResolution } from "@/auth/use-apply-session-entry-resolution";
-import { useExplicitLogout } from "@/auth/use-explicit-logout";
-import type { RememberedSessionRecord } from "@/auth/auth-storage";
+import { useConfirmRemoveSignIn } from "@/auth/use-confirm-remove-sign-in";
+import { useConfirmSignOut } from "@/auth/use-confirm-sign-out";
+import { authStorage, type RememberedSessionRecord } from "@/auth/auth-storage";
+import { resolveSessionColor } from "@/auth/session-color";
 import { useThemeColors } from "@/theme/use-app-theme";
-import { MenuView, type MenuAction, type NativeActionEvent } from "@expo/ui/community/menu";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import {
+  Button,
+  HStack,
+  Host,
+  Image,
+  List,
+  ProgressView,
+  Section,
+  Spacer,
+  SwipeActions,
+  Text as SwiftText,
+  VStack,
+} from "@expo/ui/swift-ui";
+import {
+  accessibilityLabel,
+  background,
+  buttonStyle,
+  font,
+  foregroundStyle,
+  labelStyle,
+  listRowBackground,
+  padding,
+  scrollContentBackground,
+  tint,
+} from "@expo/ui/swift-ui/modifiers";
+import {
+  router,
+  Stack,
+  useFocusEffect,
+  useIsFocused,
+  useLocalSearchParams,
+} from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useCallback, useMemo, useState } from "react";
+import { Pressable } from "react-native";
+import { useUniwind } from "uniwind";
 
-type SessionActionId = "restore" | "edit" | "signOut" | "remove";
+const resolveParam = (value?: string | string[]) =>
+  Array.isArray(value) ? value[0] : value;
 
-const resolveParam = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value);
-
-const getMenuActions = (options: {
-  isActive: boolean;
-  hasActiveSession: boolean;
-  disabled: boolean;
-}): MenuAction[] => {
-  const { isActive, hasActiveSession, disabled } = options;
-  if (isActive) {
-    return [
-      { id: "edit", title: "Edit", image: "pencil", attributes: { disabled } },
-      {
-        id: "signOut",
-        title: "Sign Out",
-        image: "rectangle.portrait.and.arrow.right",
-        attributes: { disabled },
-      },
-      {
-        id: "remove",
-        title: "Remove Sign-In",
-        image: "trash",
-        attributes: { destructive: true, disabled },
-      },
-    ];
-  }
-
-  return [
-    {
-      id: "restore",
-      title: hasActiveSession ? "Switch Sign-In" : "Sign In",
-      image: hasActiveSession ? "arrow.triangle.2.circlepath" : "person.crop.circle.badge.checkmark",
-      attributes: { disabled },
-    },
-    { id: "edit", title: "Edit", image: "pencil", attributes: { disabled } },
-    {
-      id: "remove",
-      title: "Remove Sign-In",
-      image: "trash",
-      attributes: { destructive: true, disabled },
-    },
-  ];
-};
+const ACTIVE_COLOR = "#16a34a";
+const READY_COLOR = "#2563eb";
+const ERROR_COLOR = "#dc2626";
+const WARNING_COLOR = "#d97706";
 
 export function SignInListScreen() {
   const themeColors = useThemeColors();
-  const insets = useSafeAreaInsets();
+  const { theme } = useUniwind();
+  const scheme = theme === "dark" ? "dark" : "light";
+  // The same per-sign-in tint the Home screen uses, so a sign-in reads the same in both places.
+  const sessionColor = (session: RememberedSessionRecord) =>
+    resolveSessionColor(session, scheme, themeColors.bg);
+  // This screen stays on the stack under Home after a switch; unmount the native list while it
+  // is covered so SwiftUI is not diffing it as Home loads.
+  const isFocused = useIsFocused();
   const sessions = useAuthStore((state) => state.rememberedSessions);
   const activeSessionKey = useAuthStore((state) => state.activeSessionKey);
   const accessMode = useAuthStore(selectAccessMode);
   // First-run sign-in is reached from the Welcome Choice, so it can go back there.
-  const canLeaveSignIn = accessMode !== "firstRunSignInRequired" || router.canGoBack();
-  const { removeRememberedSession } = useAuthActions();
-  const explicitLogout = useExplicitLogout();
+  const canLeaveSignIn =
+    accessMode !== "firstRunSignInRequired" || router.canGoBack();
+  const confirmSignOut = useConfirmSignOut();
   const applyResolution = useApplySessionEntryResolution();
   const params = useLocalSearchParams<{
     mode?: string;
@@ -74,10 +76,35 @@ export function SignInListScreen() {
   }>();
   const mode = typeof params.mode === "string" ? params.mode : "required";
   const returnToLibraryItemId = resolveParam(params.returnToLibraryItemId);
-  const [pendingSessionKey, setPendingSessionKey] = useState<string | null>(null);
+  const [pendingSessionKey, setPendingSessionKey] = useState<string | null>(
+    null,
+  );
   const [localError, setLocalError] = useState<string | null>(null);
-  const [sessionRowWidth, setSessionRowWidth] = useState<number | null>(null);
-  const hasActiveSession = Boolean(activeSessionKey);
+  // Keyed by session; true when a stored password or token lets it be switched to without re-entry.
+  const [canRestoreBySession, setCanRestoreBySession] = useState<
+    Record<string, boolean>
+  >({});
+
+  // Re-read on focus too, since the edit screen can store a new password and pop back here.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      void Promise.all(
+        sessions.map(async (session) => {
+          const secrets = await authStorage.getSessionSecrets(session.key);
+          return [
+            session.key,
+            Boolean(secrets.password || secrets.refreshToken),
+          ] as const;
+        }),
+      ).then((entries) => {
+        if (!cancelled) setCanRestoreBySession(Object.fromEntries(entries));
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [sessions, activeSessionKey]),
+  );
   const sortedSessions = useMemo(
     () =>
       [...sessions].sort((a, b) => {
@@ -115,7 +142,10 @@ export function SignInListScreen() {
     setLocalError(null);
     setPendingSessionKey(session.key);
     try {
-      const resolution = await enterUserSession({ via: "restore", sessionKey: session.key });
+      const resolution = await enterUserSession({
+        via: "restore",
+        sessionKey: session.key,
+      });
       await applyResolution(resolution, {
         returnToLibraryItemId,
         onError: setLocalError,
@@ -130,268 +160,325 @@ export function SignInListScreen() {
     }
   };
 
-  const confirmRemove = (session: RememberedSessionRecord) => {
-    const isActive = session.key === activeSessionKey;
-    Alert.alert(
-      "Remove Sign-In?",
-      `Remove ${session.label}? Downloaded audio and listening data stay on this device.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              setPendingSessionKey(session.key);
-              try {
-                if (isActive) {
-                  await explicitLogout();
-                }
-                await removeRememberedSession(session.key);
-              } finally {
-                setPendingSessionKey(null);
-              }
-            })();
-          },
-        },
-      ],
-    );
-  };
+  const confirmRemoveSignIn = useConfirmRemoveSignIn();
+  const confirmRemove = (session: RememberedSessionRecord) =>
+    confirmRemoveSignIn(session, {
+      onPendingChange: (pending) =>
+        setPendingSessionKey(pending ? session.key : null),
+    });
 
-  const handleMenuAction = (
-    event: NativeActionEvent,
-    session: RememberedSessionRecord,
-  ) => {
-    const actionId = event.nativeEvent.event as SessionActionId;
-    if (actionId === "restore") {
-      void restoreSession(session);
-      return;
-    }
-    if (actionId === "edit") {
+  const switchTo = (session: RememberedSessionRecord) => {
+    // A signed-out sign-in has nothing to restore with, so go straight to entering a password.
+    if (canRestoreBySession[session.key] === false) {
       openEdit(session);
       return;
     }
-    if (actionId === "signOut") {
-      void explicitLogout();
-      return;
-    }
-    if (actionId === "remove") {
-      confirmRemove(session);
-    }
+    void restoreSession(session);
   };
 
+  const activeSession = sortedSessions.find(
+    (session) => session.key === activeSessionKey,
+  );
+  const otherSessions = sortedSessions.filter(
+    (session) => session.key !== activeSessionKey,
+  );
+
   return (
-    <View style={{ flex: 1, backgroundColor: themeColors.bg }}>
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={{
-          paddingHorizontal: 16,
-          paddingTop: 18,
-          paddingBottom: Math.max(24, insets.bottom + 16),
-          gap: 14,
-        }}
-      >
-        <Stack.Screen
-          options={{
-            headerShown: true,
-            headerTransparent: true,
-            title: "Sign-Ins",
-            headerLeft: () =>
-              canLeaveSignIn ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Back"
-                  onPress={() => router.back()}
-                  hitSlop={12}
-                  style={{ flexDirection: "row", alignItems: "center", marginLeft: -8, padding: 8 }}
-                >
-                  <SymbolView name="chevron.left" tintColor={themeColors.accent} size={24} weight="semibold" />
-                </Pressable>
-              ) : null,
-            headerRight: () => (
+    <>
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: "Sign-Ins",
+          headerLeft: () =>
+            canLeaveSignIn ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Add Sign-In"
-                onPress={openAdd}
+                accessibilityLabel="Back"
+                onPress={() => router.back()}
                 hitSlop={12}
-              >
-                <SymbolView name="plus" tintColor={themeColors.accent} size={24} />
-              </Pressable>
-            ),
-          }}
-        />
-
-        <Text selectable style={{ color: themeColors.textMuted, fontSize: 14 }}>
-          Choose which Audiobookshelf sign-in to use.
-        </Text>
-
-        {localError ? (
-          <Text selectable style={{ color: "#dc2626", fontSize: 14 }}>
-            {localError}
-          </Text>
-        ) : null}
-
-        {sortedSessions.length === 0 ? (
-          <View
-            style={{
-              borderWidth: 1,
-              borderColor: themeColors.border,
-              borderRadius: 14,
-              borderCurve: "continuous",
-              backgroundColor: themeColors.surface,
-              padding: 16,
-              gap: 12,
-            }}
-          >
-            <Text selectable style={{ color: themeColors.text, fontSize: 17, fontWeight: "700" }}>
-              No sign-ins saved
-            </Text>
-            <Text selectable style={{ color: themeColors.textMuted, fontSize: 14, lineHeight: 20 }}>
-              Add a sign-in to connect to Audiobookshelf.
-            </Text>
-            <Pressable
-              onPress={openAdd}
-              style={{
-                borderRadius: 12,
-                borderCurve: "continuous",
-                backgroundColor: themeColors.accent,
-                paddingHorizontal: 14,
-                paddingVertical: 12,
-              }}
-            >
-              <Text
                 style={{
-                  color: themeColors.accentForeground,
-                  fontSize: 16,
-                  fontWeight: "700",
-                  textAlign: "center",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  marginLeft: -8,
+                  padding: 8,
                 }}
               >
-                Add Sign-In
-              </Text>
-            </Pressable>
-          </View>
-        ) : (
-          sortedSessions.map((session) => {
-            const isActive = session.key === activeSessionKey;
-            const isPending = pendingSessionKey === session.key;
-            const actions = getMenuActions({
-              isActive,
-              hasActiveSession,
-              disabled: Boolean(pendingSessionKey),
-            });
-
-            return (
-              <View
-                key={session.key}
-                style={{ width: "100%" }}
-                onLayout={(event) => {
-                  const width = Math.round(event.nativeEvent.layout.width);
-                  setSessionRowWidth((current) =>
-                    current === width ? current : width,
-                  );
-                }}
-              >
-                <MenuView
-                  title={session.label}
-                  actions={actions}
-                  onPressAction={(event) => handleMenuAction(event, session)}
+                <SymbolView
+                  name="chevron.left"
+                  tintColor={themeColors.accent}
+                  size={24}
+                  weight="semibold"
+                />
+              </Pressable>
+            ) : null,
+        }}
+      />
+      {isFocused ? (
+        <Host style={{ flex: 1, backgroundColor: themeColors.bg }}>
+          <List
+            modifiers={[
+              scrollContentBackground("hidden"),
+              background(themeColors.bg),
+              tint(themeColors.accent),
+            ]}
+          >
+            {activeSession ? (
+              <Section modifiers={[listRowBackground(themeColors.surface)]}>
+                {/* Plain and borderless buttons stay separately tappable within one list row. */}
+                <VStack
+                  alignment="leading"
+                  spacing={4}
+                  modifiers={[padding({ vertical: 8 })]}
                 >
-                  <View
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open actions for ${session.label}`}
-                    style={{
-                      width: sessionRowWidth ?? undefined,
-                      borderWidth: 1,
-                      borderColor: isActive ? "#16a34a" : themeColors.border,
-                      borderRadius: 14,
-                      borderCurve: "continuous",
-                      backgroundColor: themeColors.surface,
-                      paddingHorizontal: 16,
-                      paddingVertical: 14,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 12,
-                    }}
-                  >
-                    <View
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        gap: 5,
-                        paddingRight: isActive ? 18 : 0,
-                      }}
+                  <HStack spacing={6}>
+                    <Image
+                      systemName="checkmark.circle.fill"
+                      color={ACTIVE_COLOR}
+                      size={15}
+                    />
+                    <SwiftText
+                      modifiers={[
+                        font({ size: 13, weight: "bold" }),
+                        foregroundStyle(ACTIVE_COLOR),
+                      ]}
                     >
-                      <Text
-                        selectable
-                        style={{
-                          color: themeColors.text,
-                          fontSize: 17,
-                          fontWeight: "700",
-                        }}
-                      >
-                        {session.label}
-                      </Text>
-                      <Text
-                        selectable
-                        style={{ color: themeColors.textMuted, fontSize: 14 }}
-                      >
-                        {session.username}
-                      </Text>
-                      <Text
-                        selectable
-                        numberOfLines={1}
-                        ellipsizeMode="middle"
-                        style={{ color: themeColors.textMuted, fontSize: 13 }}
-                      >
-                        {session.serverUrl}
-                      </Text>
-                      {session.needsAttention ? (
-                        <Text
-                          selectable
-                          style={{ color: "#dc2626", fontSize: 13 }}
+                      SIGNED IN
+                    </SwiftText>
+                    <Spacer />
+                    <HStack spacing={22}>
+                      <Button
+                        label="Sign Out"
+                        systemImage="rectangle.portrait.and.arrow.right"
+                        onPress={() => confirmSignOut(activeSession)}
+                        modifiers={[
+                          buttonStyle("borderless"),
+                          labelStyle("iconOnly"),
+                          font({ size: 20 }),
+                        ]}
+                      />
+                      <Button
+                        label="Remove Sign-In"
+                        systemImage="trash"
+                        role="destructive"
+                        onPress={() => confirmRemove(activeSession)}
+                        modifiers={[
+                          buttonStyle("borderless"),
+                          labelStyle("iconOnly"),
+                          font({ size: 20 }),
+                        ]}
+                      />
+                    </HStack>
+                  </HStack>
+                  <Button
+                    onPress={() => openEdit(activeSession)}
+                    modifiers={[
+                      buttonStyle("plain"),
+                      accessibilityLabel(`Edit ${activeSession.label}`),
+                    ]}
+                  >
+                    <HStack spacing={12} alignment="center">
+                      <VStack alignment="leading" spacing={4}>
+                        <HStack spacing={8}>
+                          <Image
+                            systemName="circle.fill"
+                            color={sessionColor(activeSession)}
+                            size={12}
+                          />
+                          <SwiftText
+                            modifiers={[
+                              font({ size: 26, weight: "bold" }),
+                              foregroundStyle(themeColors.text),
+                            ]}
+                          >
+                            {activeSession.label}
+                          </SwiftText>
+                        </HStack>
+                        <SwiftText
+                          modifiers={[
+                            font({ size: 17 }),
+                            foregroundStyle(themeColors.text),
+                          ]}
                         >
-                          Sign in needs attention
-                        </Text>
-                      ) : null}
-                    </View>
-                    {isPending ? (
-                      <ActivityIndicator color={themeColors.accent} />
-                    ) : null}
+                          {activeSession.username}
+                        </SwiftText>
+                        <SwiftText
+                          modifiers={[
+                            font({ size: 15 }),
+                            foregroundStyle(themeColors.textMuted),
+                          ]}
+                        >
+                          {activeSession.serverUrl}
+                        </SwiftText>
+                        {activeSession.needsAttention ? (
+                          <SwiftText
+                            modifiers={[
+                              font({ size: 15, weight: "semibold" }),
+                              foregroundStyle(ERROR_COLOR),
+                            ]}
+                          >
+                            Sign in needs attention
+                          </SwiftText>
+                        ) : null}
+                      </VStack>
+                      <Spacer />
+                      <Image
+                        systemName="chevron.right"
+                        color={themeColors.textMuted}
+                        size={17}
+                      />
+                    </HStack>
+                  </Button>
+                </VStack>
+              </Section>
+            ) : null}
 
-                    {isActive && !isPending ? (
-                      <View
-                        pointerEvents="none"
-                        style={{
-                          position: "absolute",
-                          top: -9,
-                          right: -9,
-                          width: 28,
-                          height: 28,
-                          borderRadius: 999,
-                          backgroundColor: "#16a34a",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          borderWidth: 2,
-                          borderColor: themeColors.bg,
-                        }}
+            {otherSessions.length > 0 ? (
+              <Section
+                header={
+                  <SwiftText
+                    modifiers={[
+                      font({ size: 20, weight: "bold" }),
+                      foregroundStyle(themeColors.text),
+                    ]}
+                  >
+                    {activeSession ? "Switch To" : "Sign-Ins"}
+                  </SwiftText>
+                }
+                modifiers={[listRowBackground(themeColors.surface)]}
+                footer={
+                  <SwiftText modifiers={[font({ size: 14 })]}>
+                    {localError ??
+                      "Tap to switch. Swipe left to edit or remove."}
+                  </SwiftText>
+                }
+              >
+                {otherSessions.map((session) => {
+                  const canRestore = canRestoreBySession[session.key];
+                  const isSignedOut = canRestore === false;
+                  const isPending = pendingSessionKey === session.key;
+                  return (
+                    <SwipeActions key={session.key}>
+                      <Button
+                        onPress={() => switchTo(session)}
+                        modifiers={[buttonStyle("plain")]}
                       >
-                        <SymbolView
-                          name="checkmark"
-                          tintColor="#fff"
-                          size={15}
-                          weight="bold"
+                        <HStack
+                          spacing={12}
+                          alignment="center"
+                          modifiers={[padding({ vertical: 4 })]}
+                        >
+                          <Image
+                            systemName="circle.fill"
+                            color={sessionColor(session)}
+                            size={12}
+                          />
+                          <VStack alignment="leading" spacing={3}>
+                            <SwiftText
+                              modifiers={[
+                                font({ size: 19, weight: "semibold" }),
+                                foregroundStyle(themeColors.text),
+                              ]}
+                            >
+                              {session.label}
+                            </SwiftText>
+                            <SwiftText
+                              modifiers={[
+                                font({ size: 15, weight: isSignedOut ? "semibold" : "regular" }),
+                                foregroundStyle(
+                                  isSignedOut ? WARNING_COLOR : themeColors.text,
+                                ),
+                              ]}
+                            >
+                              {isSignedOut
+                                ? "Sign in needed"
+                                : session.username}
+                            </SwiftText>
+                            <SwiftText
+                              modifiers={[
+                                font({ size: 14 }),
+                                foregroundStyle(themeColors.textMuted),
+                              ]}
+                            >
+                              {session.serverUrl}
+                            </SwiftText>
+                            {session.needsAttention ? (
+                              <SwiftText
+                                modifiers={[
+                                  font({ size: 14, weight: "semibold" }),
+                                  foregroundStyle(ERROR_COLOR),
+                                ]}
+                              >
+                                Sign in needs attention
+                              </SwiftText>
+                            ) : null}
+                          </VStack>
+                          <Spacer />
+                          {isPending ? (
+                            <ProgressView />
+                          ) : (
+                            <Image
+                              systemName={
+                                isSignedOut
+                                  ? "lock.fill"
+                                  : "arrow.triangle.2.circlepath.circle.fill"
+                              }
+                              color={
+                                isSignedOut
+                                  ? themeColors.textMuted
+                                  : READY_COLOR
+                              }
+                              size={26}
+                            />
+                          )}
+                        </HStack>
+                      </Button>
+                      <SwipeActions.Actions
+                        edge="trailing"
+                        allowsFullSwipe={false}
+                      >
+                        <Button
+                          label="Remove"
+                          systemImage="trash"
+                          role="destructive"
+                          onPress={() => confirmRemove(session)}
                         />
-                      </View>
-                    ) : null}
-                  </View>
-                </MenuView>
-              </View>
-            );
-          })
-        )}
+                        <Button
+                          label="Edit"
+                          systemImage="pencil"
+                          onPress={() => openEdit(session)}
+                          modifiers={[buttonStyle("borderedProminent")]}
+                        />
+                      </SwipeActions.Actions>
+                    </SwipeActions>
+                  );
+                })}
+              </Section>
+            ) : null}
 
-      </ScrollView>
-    </View>
+            <Section
+              modifiers={[listRowBackground(themeColors.surface)]}
+              footer={
+                sortedSessions.length === 0 ? (
+                  <SwiftText modifiers={[font({ size: 14 })]}>
+                    {localError ??
+                      "Add a sign-in to connect to Audiobookshelf."}
+                  </SwiftText>
+                ) : undefined
+              }
+            >
+              <Button
+                label="Add Sign-In"
+                systemImage="plus.circle.fill"
+                onPress={openAdd}
+                modifiers={[
+                  buttonStyle("borderless"),
+                  font({ size: 18, weight: "semibold" }),
+                ]}
+              />
+            </Section>
+          </List>
+        </Host>
+      ) : null}
+    </>
   );
 }
