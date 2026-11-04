@@ -3806,7 +3806,13 @@ class PlayerService {
       positionMs: boundedPosition,
       trackPositionMs,
     });
-    await this.captureNativePosition(options?.progressSyncReason ?? "seek");
+    // A newer seek (e.g. continued scrubbing) supersedes this checkpoint; it
+    // confirms its own displayed position and syncs progress.
+    try { await this.captureNativePosition(options?.progressSyncReason ?? "seek"); }
+    catch (error) {
+      if (error instanceof PlaybackCancelledError) return;
+      throw error;
+    }
     if (options?.confirmDisplayedPosition !== false) {
       displayedListeningPositionStore.getState().actions.confirmUserPositionChange(
         {
