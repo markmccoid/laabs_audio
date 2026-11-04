@@ -81,7 +81,7 @@ Packaging: a TypeScript/Node service with no database. It ships as a Docker imag
 | `companion-client.ts` | `fetch` wrapper with the ABS token: `health`, `getSidecar`, `putSidecar`. |
 | `bookmark-sidecar-store.ts` | Persisted (MMKV) sync state, per Remembered User Session or per user: Companion endpoint and status, last-synced record hashes, deletion markers, dirty items, per-item status (`mismatch`, `paused`), and the backfill flag. |
 | `sidecar-sync.ts` | The engine: `syncItem`, `flushDirtyItems`, `resolveCompanion`, `resolveMismatch`, local change tracking, and backfill. |
-| `use-bookmark-sidecar.ts` | Hooks: pull on Bookmark List open, notice state, and the mismatch actions. |
+| `use-bookmark-sidecar.ts` | Hooks: pull on Bookmark List or book detail open, notice state, and the mismatch actions. |
 | `components/bookmarks/bookmark-sidecar-notice.tsx` | The mismatch notice shown in book and Episode Bookmark Lists. |
 | `components/settings/settings-companion-screen.tsx` | Settings → LAABS Companion. |
 
@@ -108,11 +108,14 @@ The sync engine subscribes to both bookmark stores.
 - A record whose content hash differs from the last-synced hash marks its item dirty.
 - A record that disappears after it had been synced becomes a deletion marker and marks its item dirty.
 - Records applied from a sidecar update the synced hashes *before* they are written, so they never come back as dirty.
+- Changes are tracked even while no Companion is known to answer, so an edit made then is not lost; flushing waits for one.
 
 Dirty items are flushed:
 - about 2 s after the last change
 - when the app returns to the foreground
 - once a Companion becomes available
+
+Another device's edits arrive only by pulling. An item is pulled when its Bookmark List or book detail screen opens, when it loads for playback, and, while it is the playing item, when the app returns to the foreground.
 
 ### Backfill (§Q15)
 The first time a Companion is available for a user, every item with Local Bookmark Records or Episode bookmarks is marked dirty. The usual flush uploads them. Dirty flags are persisted, so an interrupted backfill continues where it stopped.

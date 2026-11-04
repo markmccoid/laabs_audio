@@ -7,7 +7,13 @@ import { bookmarkSidecarStore } from "./bookmark-sidecar-store";
 import { companionClient } from "./companion-client";
 import type { BookmarkSidecarDocument, BookmarkSidecarWrite } from "./sidecar-format";
 import { mergeSidecarRecords } from "./sidecar-merge";
-import { loadSidecarAnyway, pauseSidecarScope, syncBookmarkSidecar } from "./sidecar-sync";
+import { playbackStore } from "@/player/playback-store";
+import {
+  loadSidecarAnyway,
+  pauseSidecarScope,
+  startBookmarkSidecarSync,
+  syncBookmarkSidecar,
+} from "./sidecar-sync";
 
 jest.mock("@/store/mmkv-storage", () => ({
   mmkvStorage: {
@@ -420,3 +426,42 @@ describe("syncBookmarkSidecar", () => {
     expect(companion.writes).toHaveLength(0);
   });
 });
+
+describe("startBookmarkSidecarSync", () => {
+  let stop: () => void;
+  beforeEach(() => {
+    stop = startBookmarkSidecarSync();
+  });
+  afterEach(() => stop());
+
+  it("queues a bookmark edit while no LAABS Companion is known to answer", () => {
+    deviceBooksStore.setState({
+      localBookmarksByUser: { [userKey]: { "bm-local": local({ title: "Edited" }) } },
+    });
+
+    expect(bookmarkSidecarStore.getState().dirtyItemsByUser[userKey]).toHaveProperty(libraryItemId);
+  });
+
+  it("pulls the Bookmark Sidecar of an item when it loads for playback", async () => {
+    const companion = fakeCompanion(remoteDoc());
+
+    playbackStore.setState({ libraryItemId });
+
+    await waitForExpect(() =>
+      expect(localRecords().map((record) => record.id)).toContain("bm-remote"),
+    );
+    expect(companion.writes).toHaveLength(1);
+  });
+});
+
+const waitForExpect = async (assertion: () => void) => {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      assertion();
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  assertion();
+};

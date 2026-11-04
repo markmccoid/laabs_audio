@@ -1,6 +1,8 @@
 import { AbsApiError, absClient } from "@/api/abs-client";
 import { authStore } from "@/auth/auth-store";
 import { episodeBookmarksStore, type EpisodeBookmarkRecord } from "@/podcast/episode-bookmarks-store";
+import { isImportedAudiobookId } from "@/imported/imported-audiobook-identity";
+import { playbackStore } from "@/player/playback-store";
 import { deviceBooksStore, type LocalBookmarkRecord } from "@/store/device-books-store";
 import type { LibraryItem } from "@/types/absTypes";
 import { AppState } from "react-native";
@@ -628,24 +630,17 @@ const scheduleFlush = () => {
   }, FLUSH_DEBOUNCE_MS);
 };
 
-const companionKnownAvailable = () => {
-  const sessionKey = authStore.getState().activeSessionKey;
-  return Boolean(
-    sessionKey &&
-      bookmarkSidecarStore.getState().companionBySession[sessionKey]?.status === "available",
-  );
-};
-
 /**
  * Mark items dirty whose bookmarks differ from what was last synced. Deletions
  * are recorded explicitly by the stores' delete actions, never inferred here,
- * so a cleared store can never turn into server-side deletions.
+ * so a cleared store can never turn into server-side deletions. This runs even
+ * while no LAABS Companion is known to answer, so an edit made then still syncs
+ * once one does; flushing is a no-op until then.
  */
 const trackChanges = (
   userKey: string,
   records: readonly { id: string; libraryItemId: string; sidecar: SidecarBookmarkRecord }[],
 ) => {
-  if (!companionKnownAvailable()) return;
   const synced = bookmarkSidecarStore.getState().syncedByUser[userKey] ?? {};
   const dirty = new Set<string>();
   records.forEach(({ id, libraryItemId, sidecar }) => {
@@ -698,13 +693,27 @@ export const startBookmarkSidecarSync = () => {
     );
   });
 
+  // Another device's edits only arrive by pulling, so the item being listened
+  // to is pulled whenever it loads and whenever the app comes back.
+  const pullPlayingItem = (libraryItemId: string | null) => {
+    if (libraryItemId && !isImportedAudiobookId(libraryItemId)) {
+      void syncBookmarkSidecar(libraryItemId);
+    }
+  };
+  const unsubscribePlayback = playbackStore.subscribe((state, previous) => {
+    if (state.libraryItemId !== previous.libraryItemId) pullPlayingItem(state.libraryItemId);
+  });
+
   const appStateSubscription = AppState.addEventListener("change", (nextState) => {
-    if (nextState === "active") void flushBookmarkSidecars();
+    if (nextState !== "active") return;
+    void flushBookmarkSidecars();
+    pullPlayingItem(playbackStore.getState().libraryItemId);
   });
 
   stopTracking = () => {
     unsubscribeBooks();
     unsubscribeEpisodes();
+    unsubscribePlayback();
     appStateSubscription.remove();
     if (flushTimer) clearTimeout(flushTimer);
     stopTracking = null;

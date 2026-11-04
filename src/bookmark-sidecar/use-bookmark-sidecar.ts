@@ -8,6 +8,13 @@ import {
   syncBookmarkSidecar,
 } from "./sidecar-sync";
 
+/** Pulls an item's Bookmark Sidecar when a screen showing it opens. */
+export const usePullBookmarkSidecar = (libraryItemId: string | null | undefined) => {
+  useEffect(() => {
+    if (libraryItemId) void syncBookmarkSidecar(libraryItemId);
+  }, [libraryItemId]);
+};
+
 /**
  * Pulls an item's Bookmark Sidecar when its Bookmark List opens and exposes
  * the Audio Fingerprint mismatch state for one sync scope (ADR 0046).

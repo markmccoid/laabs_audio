@@ -3,6 +3,7 @@ import { CurrentPodcastScreen } from "@/components/podcast/current-podcast-scree
 import { useActiveLibraryExperience } from "@/auth/active-library-experience";
 import { selectAccessMode, useAuthStore } from "@/auth/auth-store";
 import { isLocalOnlyAccessMode } from "@/auth/local-only-access-mode";
+import { usePullBookmarkSidecar } from "@/bookmark-sidecar/use-bookmark-sidecar";
 import { ImportedAudiobookScreen } from "@/components/imported/imported-audiobook-screen";
 import { isImportedAudiobookId } from "@/imported/imported-audiobook-identity";
 
@@ -14,6 +15,7 @@ type Props = {
 export const LibraryItemScreen = ({ libraryItemId }: Props) => {
   const experience = useActiveLibraryExperience();
   const isLocalOnly = useAuthStore((state) => isLocalOnlyAccessMode(selectAccessMode(state)));
+  usePullBookmarkSidecar(isImportedAudiobookId(libraryItemId) ? null : libraryItemId);
 
   // Imported Audiobooks are shown the same way in every library experience and access mode.
   if (isImportedAudiobookId(libraryItemId)) {
