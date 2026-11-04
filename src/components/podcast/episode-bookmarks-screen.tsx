@@ -1,5 +1,6 @@
 import type { BookmarkViewRecord } from "@/bookmarks/bookmark-contracts";
 import { BookmarkListView } from "@/components/bookmarks/bookmark-list-view";
+import { BookmarkSidecarNotice } from "@/components/bookmarks/bookmark-sidecar-notice";
 import {
   useEpisodeBookmarkActions,
   useEpisodeBookmarks,
@@ -331,6 +332,12 @@ export const EpisodeBookmarksScreen = () => {
     <>
       <Stack.Screen options={{ title: "Bookmarks" }} />
       <BookmarkListView
+        headerAccessory={
+          <BookmarkSidecarNotice
+            libraryItemId={identity.libraryItemId || null}
+            episodeId={identity.episodeId || null}
+          />
+        }
         model={{
           records: viewRecords,
           isExporting,

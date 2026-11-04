@@ -1,6 +1,6 @@
 # Local Episode Bookmarks and Clips
 
-**Status:** accepted (amends the bookmark/clip non-goal in the Podcast reuse inventory)
+**Status:** accepted (amends the bookmark/clip non-goal in the Podcast reuse inventory; amended by ADR-0046, which syncs Episode bookmarks through a Bookmark Sidecar)
 
 LAABS Audio owns Podcast Episode bookmark state locally by full Episode Identity:
 `libraryItemId + episodeId`. Episode bookmarks may be Point Bookmarks or Clip Bookmarks and use the

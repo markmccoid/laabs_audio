@@ -1,6 +1,7 @@
 import { useResolvedListeningOwnerKey } from "@/auth/listening-owner";
 import type { BookmarkViewRecord } from "@/bookmarks/bookmark-contracts";
 import { BookmarkListView } from "@/components/bookmarks/bookmark-list-view";
+import { BookmarkSidecarNotice } from "@/components/bookmarks/bookmark-sidecar-notice";
 import { useGetItemDetails, useGetUserServerState } from "@/hooks/abs-data-hooks";
 import {
   activateBookmarkRelocationUndo,
@@ -438,6 +439,7 @@ export const BookBookmarksSheet = () => {
         }}
       />
       <BookmarkListView
+        headerAccessory={<BookmarkSidecarNotice libraryItemId={libraryItemId} />}
         model={{
           records: (libraryItemId ? bookmarks : []).map(
             (bookmark): BookmarkViewRecord => ({

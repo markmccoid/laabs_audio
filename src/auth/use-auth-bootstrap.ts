@@ -16,6 +16,10 @@ import {
   routeBackgroundProgressIntent,
 } from "../progress/background-progress-routing";
 import { syncPendingEpisodeProgressIntents } from "../podcast/episode-progress-sync-service";
+import {
+  flushBookmarkSidecars,
+  startBookmarkSidecarSync,
+} from "../bookmark-sidecar/sidecar-sync";
 import { replayPendingPodcastPlaylistOperations } from "../podcast/podcast-playlist-sync";
 
 export const useAuthBootstrap = () => {
@@ -81,6 +85,8 @@ export const useAuthBootstrap = () => {
     }
   }, [isOnline, refreshSession, refreshToken, status]);
 
+  useEffect(() => startBookmarkSidecarSync(), []);
+
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
@@ -119,6 +125,7 @@ export const useAuthBootstrap = () => {
       await syncPendingBookmarkDeletes().catch(() => undefined);
       await syncPendingBookmarks().catch(() => undefined);
       await syncPendingPlaylistOps().catch(() => undefined);
+      await flushBookmarkSidecars().catch(() => undefined);
       if (
         activeLibraryMediaType?.trim().toLowerCase() === "podcast" &&
         activeLibraryUserKey &&

@@ -22,6 +22,7 @@ import {
   progressLogStore,
   type ProgressLogSessionKind,
 } from "./progress-log-store";
+import { sidecarStateActions } from "../bookmark-sidecar/bookmark-sidecar-store";
 import type { Bookmark } from "../types/absTypes";
 import type { BookDetailRouteSource } from "../navigation/book-links";
 import { mmkvStorage } from "./mmkv-storage";
@@ -508,6 +509,15 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
     reconcileLocalBookmarksFromServer: (
       userKey: string,
       serverState: UserServerState,
+    ) => void;
+    /**
+     * Write Local Bookmark Records that arrived from a Bookmark Sidecar (ADR 0046).
+     * Never touches Audiobookshelf: new or moved records arrive Unmatched and ADR
+     * 0001 reconciliation links them; removals drop any pending server create.
+     */
+    applySidecarBookmarks: (
+      userKey: string,
+      changes: { upserts: LocalBookmarkRecord[]; removeIds: string[] },
     ) => void;
     queueProgressSync: (
       libraryItemId: string,
@@ -1348,6 +1358,33 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           });
         },
 
+        applySidecarBookmarks: (userKey, { upserts, removeIds }) => {
+          if (!userKey || (!upserts.length && !removeIds.length)) return;
+          set((state) => {
+            const nextRecords = { ...(state.localBookmarksByUser[userKey] ?? {}) };
+            const touchedIds = new Set([...removeIds, ...upserts.map((record) => record.id)]);
+            removeIds.forEach((id) => {
+              delete nextRecords[id];
+            });
+            upserts.forEach((record) => {
+              nextRecords[record.id] = record;
+            });
+            const nextCreates = Object.fromEntries(
+              Object.entries(state.pendingBookmarkCreatesByUser[userKey] ?? {}).filter(
+                ([, pendingCreate]) =>
+                  !pendingCreate.localBookmarkId || !touchedIds.has(pendingCreate.localBookmarkId),
+              ),
+            );
+            return {
+              ...state,
+              localBookmarksByUser: { ...state.localBookmarksByUser, [userKey]: nextRecords },
+              pendingBookmarkCreatesByUser: {
+                ...state.pendingBookmarkCreatesByUser,
+                [userKey]: nextCreates,
+              },
+            };
+          });
+        },
         addBookmark: async (libraryItemId, bookmark, options) => {
           const userKey = resolveUserKey(options?.userKey);
           if (!userKey) return;
@@ -1581,6 +1618,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
           const pendingId = toPendingBookmarkId(libraryItemId, bookmarkTime);
           get().actions.setBookmarkLocalNote(libraryItemId, bookmarkTime, null, { userKey });
           removeBookmarkFromUserServerStateCache(userKey, libraryItemId, bookmarkTime);
+          let removedRecordId: string | null = null;
           set((state) => {
             const recordsForUser = state.localBookmarksByUser[userKey] ?? {};
             const record =
@@ -1591,6 +1629,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
                 normalizeBookmarkSeconds(bookmarkTime),
               );
             if (!record) return state;
+            removedRecordId = record.id;
             const { [record.id]: _removedRecord, ...remainingRecords } = recordsForUser;
             const createsForUser = state.pendingBookmarkCreatesByUser[userKey] ?? {};
             const { [pendingId]: _removedCreate, ...remainingCreates } = createsForUser;
@@ -1606,6 +1645,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               },
             };
           });
+          if (removedRecordId) sidecarStateActions.noteDeleted(userKey, removedRecordId);
 
           const authState = authStore.getState();
           const online = authState.isOnline ?? true;

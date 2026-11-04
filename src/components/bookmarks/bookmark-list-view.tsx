@@ -4,6 +4,7 @@ import { useThemeColors } from "@/theme/use-app-theme";
 import { formatSeconds } from "@/utils/formatUtils";
 import { MenuView, type MenuAction, type NativeActionEvent } from "@expo/ui/community/menu";
 import { SymbolView } from "expo-symbols";
+import type { ReactNode } from "react";
 import { Alert, FlatList, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -59,9 +60,12 @@ const getRecordTimeLabel = (record: BookmarkViewRecord) =>
 export const BookmarkListView = ({
   model,
   actions,
+  headerAccessory = null,
 }: {
   model: BookmarkListModel;
   actions: BookmarkListActions;
+  /** Shown under the header, e.g. the Bookmark Sidecar notice (ADR 0046). */
+  headerAccessory?: ReactNode;
 }) => {
   const themeColors = useThemeColors();
   const insets = useSafeAreaInsets();
@@ -331,6 +335,7 @@ export const BookmarkListView = ({
             </Pressable>
           </View>
         ) : null}
+        {headerAccessory}
       </View>
 
       <FlatList

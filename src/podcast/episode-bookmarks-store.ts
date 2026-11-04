@@ -1,4 +1,5 @@
 import { useAuthStore } from "@/auth/auth-store";
+import { sidecarStateActions } from "@/bookmark-sidecar/bookmark-sidecar-store";
 import {
   episodeIdentityKey,
   isSameEpisodeIdentity,
@@ -51,6 +52,11 @@ type EpisodeBookmarksState = EpisodeBookmarksPersistedState & {
   actions: {
     save: (input: SaveEpisodeBookmarkInput) => EpisodeBookmarkRecord;
     remove: (userId: string, bookmarkId: string) => void;
+    /** Write records that arrived from a Bookmark Sidecar, keeping their timestamps (ADR 0046). */
+    applySidecarRecords: (
+      userId: string,
+      changes: { upserts: EpisodeBookmarkRecord[]; removeIds: string[] },
+    ) => void;
     clearForEpisode: (userId: string, identity: EpisodeIdentity) => void;
   };
 };
@@ -145,7 +151,22 @@ export const episodeBookmarksStore = createStore<EpisodeBookmarksState>()(
           return result.record;
         },
         remove: (userId, bookmarkId) => {
+          const existed = Boolean(get().recordsByUser[userId]?.[bookmarkId]);
           set((state) => removeEpisodeBookmarkRecord(state, userId, bookmarkId));
+          if (existed) sidecarStateActions.noteDeleted(userId, bookmarkId);
+        },
+        applySidecarRecords: (userId, { upserts, removeIds }) => {
+          if (!upserts.length && !removeIds.length) return;
+          set((state) => {
+            const next = { ...(state.recordsByUser[userId] ?? {}) };
+            removeIds.forEach((id) => {
+              delete next[id];
+            });
+            upserts.forEach((record) => {
+              next[record.id] = record;
+            });
+            return { recordsByUser: { ...state.recordsByUser, [userId]: next } };
+          });
         },
         clearForEpisode: (userId, identity) => {
           set((state) => {

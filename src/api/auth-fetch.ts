@@ -251,3 +251,10 @@ export const getAccessTokenExpiry = () => {
   const accessToken = getProvider().getAccessToken();
   return getJwtExpiry(accessToken);
 };
+
+/**
+ * A valid Audiobookshelf access token for services that authenticate through
+ * Audiobookshelf, such as a LAABS Companion (ADR 0046). Refreshes when expired.
+ */
+export const getAuthorizedAccessToken = (forceRefresh = false) =>
+  ensureAccessToken(forceRefresh);

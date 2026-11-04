@@ -15,6 +15,7 @@ type SettingsRowProps = {
     | "/(tabs)/settings/ambient-audio"
     | "/(tabs)/settings/authentication"
     | "/(tabs)/settings/bookshelves"
+    | "/(tabs)/settings/companion"
     | "/(tabs)/settings/progress-logs"
     | "/(tabs)/settings/siri-shortcuts"
     | "/(tabs)/settings/shadow-sqlite"
@@ -199,6 +200,14 @@ export const SettingsHomeScreen = () => {
               subtitle="App-level behavior for images and cover handling"
               icon="gearshape.2"
             />
+            {isAuthenticated ? (
+              <SettingsRow
+                href="/(tabs)/settings/companion"
+                title="LAABS Companion"
+                subtitle="Sync bookmarks and clips to your Audiobookshelf server"
+                icon="externaldrive.connected.to.line.below"
+              />
+            ) : null}
             {Platform.OS === "ios" && isAuthenticated ? (
               <SettingsRow
                 href="/(tabs)/settings/siri-shortcuts"

@@ -415,6 +415,22 @@ _Avoid_: Bookmark attachment, bookmark metadata
 A local bookmark record whose linked server bookmark is not present in the latest server state.
 _Avoid_: Orphaned bookmark
 
+**LAABS Companion**:
+An optional self-hosted service that runs beside an Audiobookshelf Server and keeps LAABS Audio files in Audiobookshelf item folders on a user's behalf. LAABS Audio works fully without one.
+_Avoid_: Sidecar API, bookmark server, companion container
+
+**Bookmark Sidecar**:
+A hidden file in an audiobook's or Podcast's Audiobookshelf item folder, its name starting with a dot, that holds one Audiobookshelf User Identity's Local Bookmark Records for that item. Audiobookshelf ignores it, and it travels with the item folder.
+_Avoid_: Extended bookmarks, bookmark file, sidecar JSON
+
+**Sidecar Adoption**:
+A LAABS Companion taking over a Bookmark Sidecar written for an earlier Audiobookshelf User Identity with the same username, after the Audiobookshelf Server's users were recreated.
+_Avoid_: Migration, re-keying
+
+**Audio Fingerprint**:
+The description of an audiobook's or Episode's audio that a Bookmark Sidecar records to show its Bookmark Positions still point at the same audio. Title, author, and folder location are not part of it.
+_Avoid_: Book fingerprint, book hash
+
 **Bookmark List**:
 A user-facing surface for reviewing saved Bookmarks for the Current Audiobook and choosing bookmark actions.
 _Avoid_: Bookmarks view, bookmark manager

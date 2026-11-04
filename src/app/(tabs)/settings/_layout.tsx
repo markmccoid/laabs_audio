@@ -20,6 +20,10 @@ const SettingLayout = () => {
       <Stack.Screen name="playback" options={{ title: "Playback", headerTransparent: true }} />
       <Stack.Screen name="system" options={{ title: "System", headerTransparent: true }} />
       <Stack.Screen
+        name="companion"
+        options={{ title: "LAABS Companion", headerTransparent: true }}
+      />
+      <Stack.Screen
         name="siri-shortcuts"
         options={{ title: "Siri & Shortcuts", headerTransparent: true }}
       />
