@@ -1,4 +1,5 @@
 import { useResolvedListeningOwnerKey } from "@/auth/listening-owner";
+import { findBookmarkAtStartSecond } from "@/bookmarks/bookmark-contracts";
 import { BookmarkEditorView } from "@/components/bookmarks/bookmark-editor-view";
 import { useGetItemDetails } from "@/hooks/abs-data-hooks";
 import { playerService } from "@/player";
@@ -62,7 +63,7 @@ const areDraftAndBookmarkEqual = (
 
 export const BookBookmarkDetailSheet = () => {
   const draft = useBookAddBookmarkDraft();
-  const { addBookmark } = useDeviceBooksActions();
+  const { addBookmark, deleteBookmark } = useDeviceBooksActions();
   const { libraryItemId: libraryItemIdParam, bookmarkId: bookmarkIdParam } =
     useLocalSearchParams<{
       libraryItemId?: string | string[];
@@ -75,6 +76,9 @@ export const BookBookmarkDetailSheet = () => {
     resolvedUserKey && bookmarkId
       ? state.localBookmarksByUser[resolvedUserKey]?.[bookmarkId]
       : null,
+  );
+  const localBookmarksForUser = useDeviceBooksStore((state) =>
+    resolvedUserKey ? state.localBookmarksByUser[resolvedUserKey] : undefined,
   );
   const downloadInfo = useDeviceBooksStore((state) =>
     libraryItemId ? state.downloadedBookData[libraryItemId] : undefined,
@@ -225,7 +229,7 @@ export const BookBookmarkDetailSheet = () => {
     return () => subscription.remove();
   }, [requestCloseDetail]);
 
-  const handleSave = async () => {
+  const saveDraft = async (replacedBookmark: LocalBookmarkRecord | null) => {
     if (!bookmark || !libraryItemId || !canSave) return;
     const localNote = draft.localNote.trim();
     const payload: Bookmark = {
@@ -238,6 +242,12 @@ export const BookBookmarkDetailSheet = () => {
     setIsSaving(true);
     try {
       await playerService.restoreListeningPositionAfterPreview();
+      if (replacedBookmark) {
+        await deleteBookmark(libraryItemId, replacedBookmark.startTimeSeconds, {
+          userKey: resolvedUserKey,
+          localBookmarkId: replacedBookmark.id,
+        });
+      }
       await addBookmark(libraryItemId, payload, {
         userKey: resolvedUserKey,
         localBookmarkId: bookmark.id,
@@ -253,6 +263,36 @@ export const BookBookmarkDetailSheet = () => {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // Audiobookshelf holds one bookmark per second, and so does the device: moving
+  // a start onto an occupied second replaces that record (ADR 0035).
+  const handleSave = async () => {
+    if (!bookmark || !libraryItemId || !canSave) return;
+    const collidingBookmark = findBookmarkAtStartSecond(
+      Object.values(localBookmarksForUser ?? {}),
+      libraryItemId,
+      draft.positionSeconds,
+      { ignoreBookmarkId: bookmark.id },
+    );
+    if (!collidingBookmark) {
+      await saveDraft(null);
+      return;
+    }
+
+    Keyboard.dismiss();
+    Alert.alert(
+      "A bookmark already starts here",
+      `"${collidingBookmark.title.trim()}" starts at the same second. Replace it?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Replace",
+          style: "destructive",
+          onPress: () => void saveDraft(collidingBookmark),
+        },
+      ],
+    );
   };
 
   const handleExportAudio = async () => {

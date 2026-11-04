@@ -326,6 +326,7 @@ const reconcileItem = async (
 
   // --- Merge, or build a replacement for the confirmed scopes.
   let outgoing: SidecarBookmarkRecord[];
+  let unsentDuplicateIds = new Set<string>();
   if (options.replace) {
     const now = Date.now();
     const replaced = new Set(accepted);
@@ -346,12 +347,23 @@ const reconcileItem = async (
       localAllowed.map((entry) => entry.record),
       remoteAllowedRecords,
     );
+    if (!isPodcast) {
+      const duplicateIds = findSameSecondDuplicates(outgoing);
+      const now = Date.now();
+      outgoing = outgoing.map((record) =>
+        duplicateIds.has(record.id) ? { ...record, updatedAt: now, deletedAt: now } : record,
+      );
+      const remoteIds = new Set(remoteAllowedRecords.map((record) => record.id));
+      unsentDuplicateIds = new Set([...duplicateIds].filter((id) => !remoteIds.has(id)));
+    }
   }
 
   const allowedOutgoing = outgoing.filter(
     (record) => !blocked.has(scopeForOutgoing(record, localScoped, remoteScoped)),
   );
   applyToLocal(userKey, libraryItemId, isPodcast, allowedOutgoing, bookRecords, episodeRecords, episodes);
+  // A duplicate the file never had only needs removing here, not a deletion marker there.
+  const pushRecords = allowedOutgoing.filter((record) => !unsentDuplicateIds.has(record.id));
 
   // --- Push when this device knows something the file does not.
   if (remote && !isSidecarSchemaWritable(remote)) return "readOnly";
@@ -364,7 +376,7 @@ const reconcileItem = async (
   const needsPush =
     options.replace ||
     !remote ||
-    !areSidecarRecordListsEqual(allowedOutgoing, remoteAllowedRecords) ||
+    !areSidecarRecordListsEqual(pushRecords, remoteAllowedRecords) ||
     (!isPodcast && !sameAudioFingerprint(remote.audioFingerprint, currentFingerprint)) ||
     (isPodcast &&
       JSON.stringify(remote.episodeFingerprints ?? {}) !== JSON.stringify(nextEpisodeFingerprints ?? {}));
@@ -378,7 +390,7 @@ const reconcileItem = async (
         item: sidecarItemInfo(item),
         audioFingerprint: currentFingerprint,
         episodeFingerprints: nextEpisodeFingerprints,
-        records: options.replace ? outgoing : allowedOutgoing,
+        records: options.replace ? outgoing : pushRecords,
       },
       options.replace ? "replace" : "merge",
     );
@@ -408,6 +420,35 @@ const reconcileItem = async (
   }
 
   return blocked.size > 0 ? "blocked" : "synced";
+};
+
+/** A clip adds an end time to the Server Bookmark, so it outranks a point; then the older record wins. */
+const outranks = (left: SidecarBookmarkRecord, right: SidecarBookmarkRecord) => {
+  if (left.kind !== right.kind) return left.kind === "clip";
+  if (left.createdAt !== right.createdAt) return left.createdAt < right.createdAt;
+  return left.id < right.id;
+};
+
+/**
+ * Audiobookshelf keys a Server Bookmark by its second, and a Local Bookmark
+ * Record is that bookmark plus an optional end time, so a book holds one record
+ * per second. A bookmark made on another device can reach this one through ADR
+ * 0001 reconciliation as a new point record with its own id, and the per-record
+ * merge then keeps both it and the original from the Bookmark Sidecar. Every
+ * record but the highest-ranked one at a second is a duplicate.
+ */
+export const findSameSecondDuplicates = (records: readonly SidecarBookmarkRecord[]) => {
+  const keepers = new Map<number, SidecarBookmarkRecord>();
+  records
+    .filter((record) => !record.deletedAt)
+    .forEach((record) => {
+      const keeper = keepers.get(record.startTimeSeconds);
+      if (!keeper || outranks(record, keeper)) keepers.set(record.startTimeSeconds, record);
+    });
+  const keeperIds = new Set([...keepers.values()].map((record) => record.id));
+  return new Set(
+    records.filter((record) => !record.deletedAt && !keeperIds.has(record.id)).map((record) => record.id),
+  );
 };
 
 const scopeOfRemote = (

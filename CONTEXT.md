@@ -955,6 +955,7 @@ _Avoid_: Siri response, dialog, snippet
 - The **Bookmark List** shows saved Bookmarks for the Current Audiobook.
 - A saved **Bookmark** is reviewed and edited from **Bookmark Detail**.
 - A **Local Bookmark Record** may be linked to a **Server Bookmark**.
+- An audiobook holds at most one **Local Bookmark Record** per start second, because Audiobookshelf keys a **Server Bookmark** by its second; a Clip Bookmark is that Server Bookmark plus an end time.
 - Every **Bookmark** shown by LAABS Audio is represented as a **Local Bookmark Record**.
 - An **Unmatched Bookmark** remains a **Local Bookmark Record** until the user deletes it or it is linked to a **Server Bookmark** again.
 - An **Unmatched Bookmark** may become matched again when LAABS Audio creates a replacement **Server Bookmark**.

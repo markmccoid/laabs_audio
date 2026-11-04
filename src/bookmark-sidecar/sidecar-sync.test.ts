@@ -175,6 +175,157 @@ describe("syncBookmarkSidecar", () => {
     expect(localRecords()[0].title).toBe("Edited elsewhere");
   });
 
+  it("drops the point an Audiobookshelf echo made before the original clip arrived", async () => {
+    const clip = {
+      id: "bm-clip",
+      kind: "clip" as const,
+      startTimeSeconds: 383,
+      endTimeSeconds: 404,
+      title: "Test One",
+      note: null,
+      createdAt: 1793727914953,
+      updatedAt: 1793727915098,
+      deletedAt: null,
+    };
+    const companion = fakeCompanion(remoteDoc({ records: [clip] }));
+    deviceBooksStore.setState({
+      localBookmarksByUser: {
+        [userKey]: {
+          "bm-echo": local({
+            id: "bm-echo",
+            kind: "point",
+            startTimeSeconds: 383,
+            endTimeSeconds: undefined,
+            title: "Test One",
+            note: null,
+            createdAt: 1793727915098,
+            updatedAt: 1793796320444,
+            serverLink: { status: "matched", timeSeconds: 383, lastMatchedAt: 1793796320444 },
+          }),
+        },
+      },
+    });
+
+    await syncBookmarkSidecar(libraryItemId);
+
+    expect(localRecords().map((record) => record.id)).toEqual(["bm-clip"]);
+    expect(companion.writes).toHaveLength(0);
+    expect(companion.current()?.records).toEqual([clip]);
+  });
+
+  it("deletes an echo point already written to the file", async () => {
+    const companion = fakeCompanion(
+      remoteDoc({
+        records: [
+          {
+            id: "bm-clip",
+            kind: "clip",
+            startTimeSeconds: 396,
+            endTimeSeconds: 426,
+            title: "After",
+            note: null,
+            createdAt: 1793796110203,
+            updatedAt: 1793796110213,
+            deletedAt: null,
+          },
+          {
+            id: "bm-echo",
+            kind: "point",
+            startTimeSeconds: 396,
+            title: "After",
+            note: null,
+            createdAt: 1793796110248,
+            updatedAt: 1793796320444,
+            deletedAt: null,
+          },
+        ],
+      }),
+    );
+    deviceBooksStore.setState({ localBookmarksByUser: { [userKey]: {} } });
+
+    await syncBookmarkSidecar(libraryItemId);
+
+    expect(localRecords().map((record) => record.id)).toEqual(["bm-clip"]);
+    expect(companion.current()?.records).toEqual([
+      expect.objectContaining({ id: "bm-clip", deletedAt: null }),
+      expect.objectContaining({ id: "bm-echo", deletedAt: expect.any(Number) }),
+    ]);
+  });
+
+  it("keeps the older of two points sharing a second, whatever their titles or age", async () => {
+    const companion = fakeCompanion(
+      remoteDoc({
+        records: [
+          {
+            id: "bm-first",
+            kind: "point",
+            startTimeSeconds: 50,
+            title: "Quote",
+            note: null,
+            createdAt: 1_000,
+            updatedAt: 1_000,
+            deletedAt: null,
+          },
+          {
+            id: "bm-second",
+            kind: "point",
+            startTimeSeconds: 50,
+            title: "Renamed elsewhere",
+            note: null,
+            createdAt: 3_600_000,
+            updatedAt: 3_600_000,
+            deletedAt: null,
+          },
+        ],
+      }),
+    );
+    deviceBooksStore.setState({ localBookmarksByUser: { [userKey]: {} } });
+
+    await syncBookmarkSidecar(libraryItemId);
+
+    expect(localRecords().map((record) => record.id)).toEqual(["bm-first"]);
+    expect(companion.current()?.records).toEqual([
+      expect.objectContaining({ id: "bm-first", deletedAt: null }),
+      expect.objectContaining({ id: "bm-second", deletedAt: expect.any(Number) }),
+    ]);
+  });
+
+  it("keeps the older of two clips sharing a second, and a clip over an older point", async () => {
+    const at = (id: string, startTimeSeconds: number, createdAt: number, endTimeSeconds?: number) => ({
+      id,
+      kind: endTimeSeconds ? ("clip" as const) : ("point" as const),
+      startTimeSeconds,
+      ...(endTimeSeconds ? { endTimeSeconds } : {}),
+      title: id,
+      note: null,
+      createdAt,
+      updatedAt: createdAt,
+      deletedAt: null,
+    });
+    const companion = fakeCompanion(
+      remoteDoc({
+        records: [
+          at("bm-sentence", 50, 1_000, 55),
+          at("bm-paragraph", 50, 2_000, 80),
+          at("bm-point", 70, 1_000),
+          at("bm-clip", 70, 2_000, 90),
+        ],
+      }),
+    );
+    deviceBooksStore.setState({ localBookmarksByUser: { [userKey]: {} } });
+
+    await syncBookmarkSidecar(libraryItemId);
+
+    expect(localRecords().map((record) => record.id)).toEqual(["bm-sentence", "bm-clip"]);
+    expect(
+      companion
+        .current()
+        ?.records.filter((record) => record.deletedAt)
+        .map((record) => record.id)
+        .sort(),
+    ).toEqual(["bm-paragraph", "bm-point"]);
+  });
+
   it("uploads a deletion so other devices drop the bookmark", async () => {
     const companion = fakeCompanion(null);
     await syncBookmarkSidecar(libraryItemId);

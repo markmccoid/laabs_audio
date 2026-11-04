@@ -484,21 +484,6 @@ export type DeviceBooksState = DeviceBooksPersistedState & {
         userKey?: string | null;
         localBookmarkId?: string | null;
         endTimeSeconds?: number | null;
-        /**
-         * Always create a new Local Bookmark Record instead of adopting one that
-         * happens to share this start second.
-         *
-         * Record identity is otherwise inferred from `(libraryItemId,
-         * startTimeSeconds)`, which is fine at the player but collides constantly
-         * in Read-Along: clipping one sentence and then clipping that sentence
-         * plus the next four floor to the same second. Callers that mean "another
-         * bookmark here", not "correct the one that is here", pass this (ADR 0035).
-         *
-         * Audiobookshelf keys a Server Bookmark by time, so the duplicate cannot
-         * have its own server bookmark; it settles as an Unmatched Bookmark, which
-         * keeps its Clip Range, title and note per ADR 0001.
-         */
-        forceNewRecord?: boolean;
       },
     ) => Promise<void>;
     deleteBookmark: (
@@ -1396,14 +1381,11 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
               : null;
           const nextKind: LocalBookmarkKind =
             endTimeSeconds !== null && endTimeSeconds > startTimeSeconds ? "clip" : "point";
-          const forceNewRecord = options?.forceNewRecord === true;
           let localBookmarkId = options?.localBookmarkId ?? null;
           const recordsForUserBefore = get().localBookmarksByUser[userKey] ?? {};
           const existingRecordBefore =
             (localBookmarkId ? recordsForUserBefore[localBookmarkId] : null) ??
-            (forceNewRecord
-              ? null
-              : findLocalBookmarkByStartTime(recordsForUserBefore, libraryItemId, startTimeSeconds));
+            findLocalBookmarkByStartTime(recordsForUserBefore, libraryItemId, startTimeSeconds);
           const previousServerTimeSeconds =
             existingRecordBefore?.serverLink.timeSeconds ??
             existingRecordBefore?.startTimeSeconds ??
@@ -1420,9 +1402,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             replacedServerTimeSeconds !== null &&
             existingRecordBefore?.serverLink.status === "matched";
 
-          // Targets the record by start time, so it would write onto the record we
-          // are deliberately not adopting. The new record picks the note up inline.
-          if (options?.localNote !== undefined && !forceNewRecord) {
+          if (options?.localNote !== undefined) {
             get().actions.setBookmarkLocalNote(libraryItemId, bookmark.time, options.localNote, {
               userKey,
             });
@@ -1431,9 +1411,7 @@ export const deviceBooksStore = createStore<DeviceBooksState>()(
             const recordsForUser = state.localBookmarksByUser[userKey] ?? {};
             const existingRecord =
               (localBookmarkId ? recordsForUser[localBookmarkId] : null) ??
-              (forceNewRecord
-                ? null
-                : findLocalBookmarkByStartTime(recordsForUser, libraryItemId, startTimeSeconds));
+              findLocalBookmarkByStartTime(recordsForUser, libraryItemId, startTimeSeconds);
             const id = existingRecord?.id ?? createLocalBookmarkId();
             localBookmarkId = id;
             const localNote =

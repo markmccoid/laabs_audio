@@ -22,9 +22,9 @@ export const BookAddBookmarkSheet = () => {
   const localBookmarksForUser = useDeviceBooksStore((state) =>
     resolvedUserKey ? state.localBookmarksByUser[resolvedUserKey] : undefined,
   );
-  // `addBookmark` adopts whatever record already holds this start second unless
-  // told otherwise, so an occupied second is a fork in the flow, not a detail —
-  // see ADR 0035 and `findBookmarkAtStartSecond`.
+  // Audiobookshelf holds one bookmark per second, and so does the device: saving
+  // onto an occupied second replaces that record — see ADR 0035 and
+  // `findBookmarkAtStartSecond`.
   const collidingBookmark = useMemo(() => {
     if (!draft.libraryItemId) return null;
     return findBookmarkAtStartSecond(
@@ -47,7 +47,7 @@ export const BookAddBookmarkSheet = () => {
     [],
   );
 
-  const saveDraft = async ({ forceNewRecord }: { forceNewRecord: boolean }) => {
+  const saveDraft = async () => {
     if (!draft.libraryItemId || !canSave) return;
     const title = draft.title.trim();
     const localNote = draft.localNote.trim();
@@ -66,10 +66,8 @@ export const BookAddBookmarkSheet = () => {
         userKey: resolvedUserKey,
         localNote: localNote || null,
         endTimeSeconds: isClip ? draft.clipEndSeconds : null,
-        // Replace threads the existing record's identity; Save as new refuses the
-        // start-time match outright.
-        localBookmarkId: forceNewRecord ? null : (collidingBookmark?.id ?? null),
-        forceNewRecord,
+        // Replace threads the existing record's identity.
+        localBookmarkId: collidingBookmark?.id ?? null,
       });
       Keyboard.dismiss();
       toast.success(isClip ? "Clip saved" : "Bookmark added");
@@ -85,24 +83,20 @@ export const BookAddBookmarkSheet = () => {
   const handleSave = async () => {
     if (!draft.libraryItemId || !canSave) return;
     if (!collidingBookmark) {
-      await saveDraft({ forceNewRecord: false });
+      await saveDraft();
       return;
     }
 
     Keyboard.dismiss();
     Alert.alert(
       "A bookmark already starts here",
-      `"${collidingBookmark.title.trim()}" starts at the same second. Replace it, or keep both?`,
+      `"${collidingBookmark.title.trim()}" starts at the same second. Replace it?`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Save as new",
-          onPress: () => void saveDraft({ forceNewRecord: true }),
-        },
-        {
           text: "Replace",
           style: "destructive",
-          onPress: () => void saveDraft({ forceNewRecord: false }),
+          onPress: () => void saveDraft(),
         },
       ],
     );

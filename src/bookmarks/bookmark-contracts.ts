@@ -47,11 +47,13 @@ export const areBookmarkDraftAndRecordEqual = (
 /**
  * The Local Bookmark Record that already occupies a start second, if any.
  *
- * `addBookmark` infers record identity from `(libraryItemId, startTimeSeconds)`,
- * so saving onto an occupied second silently rewrites that record's title, note
- * and range. Read-Along hits this constantly — every selection anchored on the
- * same sentence floors to the same second — so the save flow looks first and
- * asks the user whether they meant Replace or Save as new (ADR 0035).
+ * Audiobookshelf keys a Server Bookmark by its second, so a book holds one
+ * record per second. `addBookmark` infers record identity from
+ * `(libraryItemId, startTimeSeconds)`, so saving onto an occupied second would
+ * silently rewrite that record's title, note and range. Read-Along hits this
+ * constantly — every selection anchored on the same sentence floors to the same
+ * second — so the save flows look first and ask the user to confirm Replace
+ * (ADR 0035).
  *
  * Rounding must match the store's own `normalizeBookmarkSeconds` (floor, clamped
  * at zero) or the check would miss the very collision it exists to catch.
